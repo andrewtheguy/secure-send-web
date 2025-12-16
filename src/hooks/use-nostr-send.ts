@@ -353,10 +353,18 @@ export function useNostrSend(): UseNostrSendReturn {
                 // Check if it's a signal event
                 const signalData = parseSignalingEvent(event)
                 if (signalData && signalData.transferId === transferId) {
-                  const decrypted = await decrypt(key, signalData.encryptedSignal)
-                  const payload = JSON.parse(new TextDecoder().decode(decrypted))
-                  if (payload.type === 'signal' && payload.signal) {
-                    rtc.handleSignal(payload.signal)
+                  try {
+                    const decrypted = await decrypt(key, signalData.encryptedSignal)
+                    const payload = JSON.parse(new TextDecoder().decode(decrypted))
+                    if (payload.type === 'signal' && payload.signal) {
+                      rtc.handleSignal(payload.signal)
+                    }
+                  } catch (err) {
+                    console.error('Failed to process signaling event:', err, {
+                      transferId,
+                      eventId: event.id
+                    })
+                    // Ignore malformed signal and continue
                   }
                 }
               }

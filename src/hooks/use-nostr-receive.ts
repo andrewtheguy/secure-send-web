@@ -6,6 +6,7 @@ import {
   decrypt,
   encrypt,
   MAX_MESSAGE_SIZE,
+  CHUNK_SIZE,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -375,10 +376,15 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 webRTCReceivedBytes += bytes.length
 
                 // Update progress
+                const totalBytes = payload?.fileSize || (payload?.totalChunks || 0) * CHUNK_SIZE
+
                 setState(s => ({
                   ...s,
                   status: 'receiving',
-                  progress: { current: webRTCReceivedBytes, total: payload!.fileSize || payload!.totalChunks * 16384 } // usage estimation
+                  progress: {
+                    current: webRTCReceivedBytes,
+                    total: totalBytes > 0 ? totalBytes : webRTCReceivedBytes // avoid 0 total
+                  }
                 }))
               }
             }
@@ -438,16 +444,24 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               chunks.set(chunk.seq, decryptedChunk)
               chunkFailures.delete(chunk.seq) // Clear any previous failures on success
 
+              const totalBytes = payload?.fileSize || (payload?.totalChunks || 0) * CHUNK_SIZE
+              const currentBytes = chunks.size * CHUNK_SIZE
+              // Clamping current to total for cosmetic correctness if estimation vs actual differs
+              const displayCurrent = totalBytes > 0 && currentBytes > totalBytes ? totalBytes : currentBytes
+
               setState({
                 status: 'receiving',
                 message: `Receiving chunk ${chunks.size}/${totalChunks}...`,
-                progress: { current: chunks.size, total: totalChunks },
-                contentType: payload!.contentType,
+                progress: {
+                  current: displayCurrent,
+                  total: totalBytes
+                },
+                contentType: payload?.contentType,
                 fileMetadata: isFile
                   ? {
-                    fileName: payload!.fileName!,
-                    fileSize: payload!.fileSize!,
-                    mimeType: payload!.mimeType!,
+                    fileName: payload?.fileName!,
+                    fileSize: payload?.fileSize!,
+                    mimeType: payload?.mimeType!,
                   }
                   : undefined,
               })
