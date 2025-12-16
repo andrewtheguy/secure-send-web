@@ -116,12 +116,22 @@ export function parseChunkEvent(event: Event): {
 
   if (!transferId || !seqStr || !totalStr) return null
 
-  return {
-    transferId,
-    seq: parseInt(seqStr, 10),
-    total: parseInt(totalStr, 10),
-    data: base64ToUint8Array(event.content),
+  const seq = parseInt(seqStr, 10)
+  const total = parseInt(totalStr, 10)
+
+  // Validate parsed integers
+  if (!Number.isInteger(seq) || !Number.isInteger(total)) return null
+  if (seq < 0 || total <= 0 || seq >= total) return null
+
+  // Decode base64 content with error handling
+  let data: Uint8Array
+  try {
+    data = base64ToUint8Array(event.content)
+  } catch {
+    return null
   }
+
+  return { transferId, seq, total, data }
 }
 
 /**
@@ -171,16 +181,22 @@ export function parseAckEvent(event: Event): {
 
   if (!senderPubkey || !transferId || !seqStr) return null
 
-  return {
-    senderPubkey,
-    transferId,
-    seq: parseInt(seqStr, 10),
-  }
+  const seq = parseInt(seqStr, 10)
+
+  // Validate: seq must be integer, valid values are -1 (complete), 0 (ready), or > 0 (chunk ack)
+  if (!Number.isInteger(seq) || seq < -1) return null
+
+  return { senderPubkey, transferId, seq }
 }
 
 // Utility functions for base64 encoding/decoding
 export function uint8ArrayToBase64(bytes: Uint8Array): string {
-  const binary = String.fromCharCode(...bytes)
+  let binary = ''
+  const chunkSize = 8192
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize)
+    binary += String.fromCharCode(...chunk)
+  }
   return btoa(binary)
 }
 
