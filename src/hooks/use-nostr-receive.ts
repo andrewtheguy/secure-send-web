@@ -12,6 +12,7 @@ import {
   parsePinExchangeEvent,
   parseChunkEvent,
   createAckEvent,
+  discoverBestRelays,
   type TransferState,
   type PinExchangePayload,
   type ReceivedContent,
@@ -71,9 +72,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       if (cancelledRef.current) return
 
-      // Connect to relays
-      setState({ status: 'connecting', message: 'Connecting to relays...' })
-      const client = createNostrClient()
+      // Discover best relays and connect
+      setState({ status: 'connecting', message: 'Discovering best relays...' })
+      const bestRelays = await discoverBestRelays()
+      if (cancelledRef.current) return
+
+      const client = createNostrClient(bestRelays)
       clientRef.current = client
 
       if (cancelledRef.current) return

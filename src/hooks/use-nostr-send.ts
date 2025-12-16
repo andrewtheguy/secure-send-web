@@ -16,6 +16,7 @@ import {
   createPinExchangeEvent,
   createChunkEvent,
   parseAckEvent,
+  discoverBestRelays,
   type TransferState,
   type PinExchangePayload,
   type ContentType,
@@ -134,9 +135,12 @@ export function useNostrSend(): UseNostrSendReturn {
       const { secretKey, publicKey } = generateEphemeralKeys()
       const transferId = generateTransferId()
 
-      // Connect to relays
-      setState({ status: 'connecting', message: 'Connecting to relays...' })
-      const client = createNostrClient()
+      // Discover best relays and connect
+      setState({ status: 'connecting', message: 'Discovering best relays...' })
+      const bestRelays = await discoverBestRelays()
+      if (cancelledRef.current) return
+
+      const client = createNostrClient(bestRelays)
       clientRef.current = client
 
       if (cancelledRef.current) return
