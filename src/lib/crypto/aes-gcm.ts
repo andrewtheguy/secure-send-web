@@ -1,30 +1,12 @@
 import { AES_NONCE_LENGTH } from './constants'
 
 /**
- * Safely convert Uint8Array to ArrayBuffer
- * Handles views correctly by extracting only the relevant bytes
- */
-function toArrayBuffer(arr: Uint8Array): ArrayBuffer {
-  return arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength) as ArrayBuffer
-}
-
-/**
  * Generate random nonce for AES-GCM
+ * Each encryption MUST use a unique nonce with the same key
  */
 export function generateNonce(): Uint8Array {
   const nonce = new Uint8Array(AES_NONCE_LENGTH)
   crypto.getRandomValues(nonce)
-  return nonce
-}
-
-/**
- * Derive nonce from chunk number (for chunk encryption)
- * Ensures unique nonce per chunk without randomness
- */
-export function deriveChunkNonce(chunkNum: number): Uint8Array {
-  const nonce = new Uint8Array(AES_NONCE_LENGTH)
-  const view = new DataView(nonce.buffer)
-  view.setUint32(0, chunkNum, true) // little-endian
   return nonce
 }
 
@@ -40,9 +22,9 @@ export async function encrypt(
   const iv = nonce ?? generateNonce()
 
   const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: toArrayBuffer(iv) },
+    { name: 'AES-GCM', iv: iv as BufferSource },
     key,
-    toArrayBuffer(plaintext)
+    plaintext as BufferSource
   )
 
   // Combine nonce + ciphertext (tag is appended automatically by Web Crypto)
@@ -58,13 +40,21 @@ export async function encrypt(
  * Input: nonce (12 bytes) || ciphertext || tag (16 bytes)
  */
 export async function decrypt(key: CryptoKey, encrypted: Uint8Array): Promise<Uint8Array> {
+  if (encrypted.length < AES_NONCE_LENGTH) {
+    throw new Error(`Encrypted data too short: expected at least ${AES_NONCE_LENGTH} bytes`)
+  }
+
   const nonce = encrypted.slice(0, AES_NONCE_LENGTH)
   const ciphertext = encrypted.slice(AES_NONCE_LENGTH)
 
+  if (ciphertext.length === 0) {
+    throw new Error('Encrypted data contains no ciphertext')
+  }
+
   const plaintext = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: toArrayBuffer(nonce) },
+    { name: 'AES-GCM', iv: nonce as BufferSource },
     key,
-    toArrayBuffer(ciphertext)
+    ciphertext as BufferSource
   )
 
   return new Uint8Array(plaintext)

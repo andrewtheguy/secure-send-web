@@ -1,14 +1,6 @@
 import { PBKDF2_ITERATIONS, PBKDF2_HASH, SALT_LENGTH, AES_KEY_LENGTH } from './constants'
 
 /**
- * Safely convert Uint8Array to ArrayBuffer
- * Handles views correctly by extracting only the relevant bytes
- */
-function toArrayBuffer(arr: Uint8Array): ArrayBuffer {
-  return arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength) as ArrayBuffer
-}
-
-/**
  * Generate random salt for key derivation
  */
 export function generateSalt(): Uint8Array {
@@ -35,7 +27,7 @@ export async function deriveKeyFromPin(pin: string, salt: Uint8Array): Promise<C
   return crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
-      salt: toArrayBuffer(salt),
+      salt: salt as BufferSource,
       iterations: PBKDF2_ITERATIONS,
       hash: PBKDF2_HASH,
     },

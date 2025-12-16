@@ -6,7 +6,6 @@ import {
   generateSalt,
   deriveKeyFromPin,
   encrypt,
-  deriveChunkNonce,
   CHUNK_SIZE,
   MAX_MESSAGE_SIZE,
 } from '@/lib/crypto'
@@ -203,9 +202,8 @@ export function useNostrSend(): UseNostrSendReturn {
         const end = Math.min(start + CHUNK_SIZE, contentBytes.length)
         const chunkData = contentBytes.slice(start, end)
 
-        // Encrypt chunk with derived nonce
-        const nonce = deriveChunkNonce(i + 1)
-        const encryptedChunk = await encrypt(key, chunkData, nonce)
+        // Encrypt chunk with random nonce (nonce is prepended to ciphertext)
+        const encryptedChunk = await encrypt(key, chunkData)
 
         // Publish chunk event
         const chunkEvent = createChunkEvent(secretKey, transferId, i + 1, totalChunks, encryptedChunk)
