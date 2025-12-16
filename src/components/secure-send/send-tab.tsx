@@ -17,6 +17,7 @@ export function SendTab() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const dragCounterRef = useRef(0)
   const { state, pin, send, cancel } = useNostrSend()
 
   const encoder = new TextEncoder()
@@ -42,11 +43,11 @@ export function SendTab() {
     setSelectedFile(null)
   }
 
-  const handleFileSelect = (file: File | null) => {
+  const handleFileSelect = useCallback((file: File | null) => {
     if (file) {
       setSelectedFile(file)
     }
-  }
+  }, [])
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null
@@ -55,19 +56,34 @@ export function SendTab() {
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current = 0
     setIsDragging(false)
     const file = e.dataTransfer.files?.[0] || null
     handleFileSelect(file)
+  }, [handleFileSelect])
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current++
+    if (dragCounterRef.current === 1) {
+      setIsDragging(true)
+    }
   }, [])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
-    setIsDragging(true)
+    e.stopPropagation()
   }, [])
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault()
-    setIsDragging(false)
+    e.stopPropagation()
+    dragCounterRef.current--
+    if (dragCounterRef.current === 0) {
+      setIsDragging(false)
+    }
   }, [])
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
@@ -112,6 +128,7 @@ export function SendTab() {
               <div
                 onClick={() => fileInputRef.current?.click()}
                 onDrop={handleDrop}
+                onDragEnter={handleDragEnter}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 className={`
