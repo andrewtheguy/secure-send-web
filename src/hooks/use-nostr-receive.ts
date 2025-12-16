@@ -479,17 +479,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             // Decrypt chunk
             try {
               if (chunks.has(chunk.seq)) {
-                // Already have this chunk - handle duplicate
-                if (chunk.seq === lastAckedSeq) {
-                  // We're already ACKing this chunk, don't restart (would reset counter)
-                  console.log(`Already ACKing chunk ${chunk.seq}, ignoring duplicate (preserving retry counter)`)
-                } else if (chunk.seq > lastAckedSeq) {
-                  // Newer chunk that we somehow have - shouldn't happen but update to be safe
-                  console.log(`Duplicate newer chunk ${chunk.seq}, updating ACK from ${lastAckedSeq}`)
+                // Already have this chunk, but only re-ACK if it's not older than current
+                if (chunk.seq >= lastAckedSeq) {
+                  console.log(`Duplicate chunk ${chunk.seq}, re-sending ACK`)
                   await startAckInterval(chunk.seq)
                 } else {
-                  // Older chunk - ignore completely
-                  console.log(`Ignoring old duplicate chunk ${chunk.seq}, already at ${lastAckedSeq}`)
+                  console.log(`Ignoring duplicate chunk ${chunk.seq}, already at ${lastAckedSeq}`)
                 }
                 return
               }
