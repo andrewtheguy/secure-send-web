@@ -7,9 +7,10 @@ import { ChunkProgress } from './chunk-progress'
 interface TransferStatusProps {
   state: TransferState
   mode?: 'send' | 'receive'
+  betweenProgressAndChunks?: React.ReactNode
 }
 
-export function TransferStatus({ state, mode = 'send' }: TransferStatusProps) {
+export function TransferStatus({ state, mode = 'send', betweenProgressAndChunks }: TransferStatusProps) {
   if (state.status === 'idle') return null
 
   const getIcon = () => {
@@ -73,6 +74,8 @@ export function TransferStatus({ state, mode = 'send' }: TransferStatusProps) {
           </p>
         </div>
       )}
+
+      {betweenProgressAndChunks}
 
       {showChunkDetails && (
         <ChunkProgress chunks={state.chunks!} mode={mode} />
