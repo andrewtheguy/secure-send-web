@@ -12,6 +12,7 @@ import {
   parsePinExchangeEvent,
   parseChunkEvent,
   createAckEvent,
+  discoverBackupRelays,
   DEFAULT_RELAYS,
   type TransferState,
   type PinExchangePayload,
@@ -20,6 +21,34 @@ import {
   EVENT_KIND_DATA_TRANSFER,
   type NostrClient,
 } from '@/lib/nostr'
+import type { Event } from 'nostr-tools'
+
+/**
+ * Publish with backup relay fallback.
+ * If primary publish fails, discovers backup relays and retries.
+ */
+async function publishWithBackup(
+  client: NostrClient,
+  event: Event,
+  maxRetries: number = 3
+): Promise<void> {
+  try {
+    await client.publish(event, maxRetries)
+  } catch (err) {
+    // Primary relays failed, try to discover backup relays
+    console.log('Primary relays failed, discovering backup relays...')
+    const currentRelays = client.getRelays()
+    const backupRelays = await discoverBackupRelays(currentRelays, 5)
+
+    if (backupRelays.length === 0) {
+      throw err // No backup relays found, propagate original error
+    }
+
+    // Add backup relays and retry
+    await client.addRelays(backupRelays)
+    await client.publish(event, maxRetries)
+  }
+}
 
 export interface UseNostrReceiveReturn {
   state: TransferState
@@ -153,7 +182,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       // Send ready ACK (seq=0) on seed relays
       const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0)
-      await client.publish(readyAck)
+      await publishWithBackup(client, readyAck)
 
       if (cancelledRef.current) return
 
@@ -172,7 +201,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       if (payload.contentType === 'text' && payload.textMessage && payload.totalChunks <= 1) {
         // Send completion ACK
         const completeAck = createAckEvent(secretKey, senderPubkey, transferId, -1)
-        await client.publish(completeAck)
+        await publishWithBackup(client, completeAck)
 
         setReceivedContent({
           contentType: 'text',
@@ -215,7 +244,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
         // Send ACK immediately
         const ackEvent = createAckEvent(secretKey, senderPubkey!, transferId!, seq)
-        await client.publish(ackEvent)
+        await publishWithBackup(client, ackEvent)
 
         // Keep sending ACK every 2 seconds until stopped
         ackIntervalId = setInterval(async () => {
@@ -361,7 +390,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       // Send completion ACK
       const completeAck = createAckEvent(secretKey, senderPubkey, transferId, -1)
-      await client.publish(completeAck)
+      await publishWithBackup(client, completeAck)
 
       // Set received content based on type
       if (payload.contentType === 'file') {

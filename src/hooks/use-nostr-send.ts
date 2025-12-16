@@ -17,6 +17,7 @@ import {
   createChunkEvent,
   parseAckEvent,
   discoverBestRelays,
+  discoverBackupRelays,
   DEFAULT_RELAYS,
   type TransferState,
   type PinExchangePayload,
@@ -24,12 +25,40 @@ import {
   EVENT_KIND_DATA_TRANSFER,
   type NostrClient,
 } from '@/lib/nostr'
+import type { Event } from 'nostr-tools'
 import { readFileAsBytes } from '@/lib/file-utils'
 
 // Throttling constants
 const THROTTLE_BYTES = 512 * 1024  // 512KB
 const THROTTLE_PAUSE_MS = 2000     // 2 second pause after 512KB
 const RETRY_PAUSE_MS = 500         // 500ms pause after retry
+
+/**
+ * Publish with backup relay fallback.
+ * If primary publish fails, discovers backup relays and retries.
+ */
+async function publishWithBackup(
+  client: NostrClient,
+  event: Event,
+  maxRetries: number = 3
+): Promise<void> {
+  try {
+    await client.publish(event, maxRetries)
+  } catch (err) {
+    // Primary relays failed, try to discover backup relays
+    console.log('Primary relays failed, discovering backup relays...')
+    const currentRelays = client.getRelays()
+    const backupRelays = await discoverBackupRelays(currentRelays, 5)
+
+    if (backupRelays.length === 0) {
+      throw err // No backup relays found, propagate original error
+    }
+
+    // Add backup relays and retry
+    await client.addRelays(backupRelays)
+    await client.publish(event, maxRetries)
+  }
+}
 
 export interface UseNostrSendReturn {
   state: TransferState
@@ -177,7 +206,7 @@ export function useNostrSend(): UseNostrSendReturn {
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
       })
       const pinExchangeEvent = createPinExchangeEvent(secretKey, encryptedPayload, salt, transferId, pinHint)
-      await client.publish(pinExchangeEvent)
+      await publishWithBackup(client, pinExchangeEvent)
 
       if (cancelledRef.current) return
 
@@ -268,7 +297,7 @@ export function useNostrSend(): UseNostrSendReturn {
         while (!ackReceived && retryCount < maxRetries) {
           if (cancelledRef.current) return
 
-          await client.publish(chunkEvent)
+          await publishWithBackup(client, chunkEvent)
 
           setState({
             status: 'transferring',

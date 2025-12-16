@@ -29,6 +29,9 @@ const MIN_MESSAGE_LENGTH = 24 * 1024
 const MAX_RELAYS_TO_PROBE = 30
 const TOP_RELAYS_COUNT = 5
 
+// Cache discovered relay URLs for backup discovery
+let cachedDiscoveredUrls: string[] = []
+
 async function discoverRelaysFromSeeds(seedRelays: string[]): Promise<string[]> {
   const discovered = new Set<string>()
   const pool = new SimplePool()
@@ -120,6 +123,9 @@ export async function discoverBestRelays(
   const allRelays = [...new Set([...seeds, ...discoveredRelays])]
   const relaysToProbe = allRelays.slice(0, MAX_RELAYS_TO_PROBE)
 
+  // Cache all discovered URLs for potential backup discovery later
+  cachedDiscoveredUrls = allRelays
+
   console.log(`Probing ${relaysToProbe.length} relays (${seeds.length} seeds + ${discoveredRelays.length} discovered)`)
 
   // 3. Probe all relays in parallel
@@ -153,4 +159,57 @@ export async function discoverBestRelays(
   }
 
   return validRelays
+}
+
+/**
+ * Discover backup relays when primary relays fail.
+ * Only probes relays not in the exclude list, avoiding extra work until needed.
+ */
+export async function discoverBackupRelays(
+  excludeRelays: string[],
+  count: number = 5
+): Promise<string[]> {
+  const excludeSet = new Set(excludeRelays.map(normalizeRelayUrl))
+
+  // Use cached discovered URLs, excluding already-tried relays
+  let candidates = cachedDiscoveredUrls.filter(url => !excludeSet.has(url))
+
+  // If no cache or exhausted, use DEFAULT_RELAYS as fallback
+  if (candidates.length === 0) {
+    candidates = [...DEFAULT_RELAYS]
+      .map(normalizeRelayUrl)
+      .filter(url => !excludeSet.has(url))
+  }
+
+  if (candidates.length === 0) {
+    console.warn('No backup relay candidates available')
+    return []
+  }
+
+  console.log(`Probing ${candidates.length} backup relay candidates`)
+
+  // Probe candidates in parallel
+  const probeResults = await Promise.all(
+    candidates.slice(0, MAX_RELAYS_TO_PROBE).map(async (url): Promise<RelayInfo | null> => {
+      const info = await fetchRelayInfo(url)
+      if (info && !isRelaySuitable(info)) {
+        return null
+      }
+
+      const latency = await testRelayLatency(url)
+      if (latency === null) return null
+
+      return { url, latency, supported: true }
+    })
+  )
+
+  const backupRelays = probeResults
+    .filter((r): r is RelayInfo => r !== null)
+    .sort((a, b) => a.latency - b.latency)
+    .slice(0, count)
+    .map(r => r.url)
+
+  console.log(`Found ${backupRelays.length} backup relays:`, backupRelays)
+
+  return backupRelays
 }
