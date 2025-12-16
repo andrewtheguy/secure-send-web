@@ -17,7 +17,9 @@ export async function readFileAsBytes(file: File): Promise<Uint8Array> {
  * Trigger a file download in the browser
  */
 export function downloadFile(data: Uint8Array, fileName: string, mimeType: string): void {
-  const blob = new Blob([data.buffer as ArrayBuffer], { type: mimeType })
+  // Safely extract only the relevant bytes from the view
+  const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+  const blob = new Blob([buffer], { type: mimeType })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url

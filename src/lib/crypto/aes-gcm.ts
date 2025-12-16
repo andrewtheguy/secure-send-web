@@ -1,6 +1,14 @@
 import { AES_NONCE_LENGTH } from './constants'
 
 /**
+ * Safely convert Uint8Array to ArrayBuffer
+ * Handles views correctly by extracting only the relevant bytes
+ */
+function toArrayBuffer(arr: Uint8Array): ArrayBuffer {
+  return arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength) as ArrayBuffer
+}
+
+/**
  * Generate random nonce for AES-GCM
  */
 export function generateNonce(): Uint8Array {
@@ -32,9 +40,9 @@ export async function encrypt(
   const iv = nonce ?? generateNonce()
 
   const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: iv.buffer as ArrayBuffer },
+    { name: 'AES-GCM', iv: toArrayBuffer(iv) },
     key,
-    plaintext.buffer as ArrayBuffer
+    toArrayBuffer(plaintext)
   )
 
   // Combine nonce + ciphertext (tag is appended automatically by Web Crypto)
@@ -54,9 +62,9 @@ export async function decrypt(key: CryptoKey, encrypted: Uint8Array): Promise<Ui
   const ciphertext = encrypted.slice(AES_NONCE_LENGTH)
 
   const plaintext = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: nonce.buffer as ArrayBuffer },
+    { name: 'AES-GCM', iv: toArrayBuffer(nonce) },
     key,
-    ciphertext.buffer as ArrayBuffer
+    toArrayBuffer(ciphertext)
   )
 
   return new Uint8Array(plaintext)
