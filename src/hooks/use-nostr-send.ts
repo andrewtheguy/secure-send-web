@@ -607,9 +607,40 @@ async function waitForChunkAck(
   isCancelled: () => boolean,
   timeoutMs: number = 30000
 ): Promise<boolean> {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     let resolved = false
 
+    // First, query for existing ACK in case it was sent before subscription was created
+    try {
+      const existingEvents = await client.query([
+        {
+          kinds: [EVENT_KIND_DATA_TRANSFER],
+          '#t': [transferId],
+          '#p': [senderPubkey],
+          authors: [receiverPubkey],
+          limit: 50, // Check recent ACKs
+        },
+      ])
+
+      for (const event of existingEvents) {
+        const ack = parseAckEvent(event)
+        if (ack && ack.transferId === transferId && ack.seq === expectedSeq) {
+          // Found the ACK in query results
+          resolve(true)
+          return
+        }
+      }
+    } catch (err) {
+      console.error('Failed to query for existing ACK:', err)
+      // Continue to subscription even if query fails
+    }
+
+    if (isCancelled()) {
+      resolve(false)
+      return
+    }
+
+    // ACK not found in query, set up subscription to wait for it
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true
