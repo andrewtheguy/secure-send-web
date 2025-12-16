@@ -238,6 +238,11 @@ export function useNostrSend(): UseNostrSendReturn {
       for (let i = 0; i < totalChunks; i++) {
         if (cancelledRef.current) return
 
+        // Pause every ~1MB (64 chunks) to avoid overwhelming relays
+        if (i > 0 && i % 64 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 3000))
+        }
+
         const p = (async () => {
           if (cancelledRef.current) return
 

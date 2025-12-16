@@ -20,7 +20,7 @@ export const SALT_LENGTH = 16
 export const CHUNK_SIZE = 16 * 1024 // 16KB
 
 // Max message size
-export const MAX_MESSAGE_SIZE = 2048 * 1024 // 2MB
+export const MAX_MESSAGE_SIZE = 10 * 1024 * 1024 // 10MB
 
 // PIN hint length
 export const PIN_HINT_LENGTH = 8 // hex characters
