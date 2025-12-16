@@ -12,6 +12,7 @@ import {
   parsePinExchangeEvent,
   parseChunkEvent,
   createAckEvent,
+  createRetryRequestEvent,
   type TransferState,
   type PinExchangePayload,
   type ReceivedContent,
@@ -190,10 +191,39 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       await new Promise<void>((resolve, reject) => {
         let settled = false
+        let lastActivity = Date.now()
+
+        // Stagnation check interval
+        const checkInterval = setInterval(async () => {
+          if (settled || cancelledRef.current) {
+            clearInterval(checkInterval)
+            return
+          }
+
+          const now = Date.now()
+          // If no activity for 8 seconds and we are missing chunks
+          if (now - lastActivity > 8000 && chunks.size < totalChunks) {
+            // Identify missing chunks
+            const missing: number[] = []
+            for (let i = 0; i < totalChunks; i++) {
+              if (!chunks.has(i)) missing.push(i)
+              if (missing.length >= 50) break // Limit batch size
+            }
+
+            if (missing.length > 0) {
+              setState(prev => ({ ...prev, message: `Requesting ${missing.length} missing chunks...` }))
+              const retryEvent = createRetryRequestEvent(secretKey, senderPubkey!, transferId!, missing)
+              await client.publish(retryEvent)
+              // Reset activity timer to give sender time to respond
+              lastActivity = Date.now()
+            }
+          }
+        }, 2000)
 
         const timeout = setTimeout(() => {
           if (settled) return
           settled = true
+          clearInterval(checkInterval)
           client.unsubscribe(subId)
           // Don't reject if already cancelled to avoid race condition
           if (!cancelledRef.current) {
@@ -210,11 +240,13 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             },
           ],
           async (event) => {
+            lastActivity = Date.now()
             if (settled) return
 
             if (cancelledRef.current) {
               settled = true
               clearTimeout(timeout)
+              clearInterval(checkInterval)
               client.unsubscribe(subId)
               reject(new Error('Cancelled'))
               return
@@ -225,6 +257,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
             // Decrypt chunk
             try {
+              if (chunks.has(chunk.seq)) return // Already have this one
+
               const decryptedChunk = await decrypt(key!, chunk.data)
               chunks.set(chunk.seq, decryptedChunk)
 
@@ -246,17 +280,14 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               if (chunks.size === totalChunks) {
                 settled = true
                 clearTimeout(timeout)
+                clearInterval(checkInterval)
                 client.unsubscribe(subId)
                 resolve()
               }
             } catch (err) {
               if (settled) return
-              settled = true
-              clearTimeout(timeout)
-              client.unsubscribe(subId)
-              if (!cancelledRef.current) {
-                reject(new Error(`Failed to decrypt chunk ${chunk.seq}: ${err instanceof Error ? err.message : 'Unknown error'}`))
-              }
+              // Don't fail immediately on distinct chunk error, just ignore it and let retry handle it
+              console.error(`Failed to decrypt chunk ${chunk.seq}`, err)
             }
           }
         )

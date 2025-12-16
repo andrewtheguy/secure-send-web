@@ -20,6 +20,7 @@ import {
   createPinExchangeEvent,
   createChunkEvent,
   parseAckEvent,
+  parseRetryRequestEvent,
   type TransferState,
   type PinExchangePayload,
   type ContentType,
@@ -218,7 +219,16 @@ export function useNostrSend(): UseNostrSendReturn {
 
       // If content fits in single chunk (text only), we're done
       if (contentType === 'text' && totalChunks <= 1) {
-        await waitForCompletionAck(client, transferId, publicKey, receiverPubkey, () => cancelledRef.current)
+        await waitForCompletionAck(
+          client,
+          transferId,
+          publicKey,
+          receiverPubkey,
+          () => cancelledRef.current,
+          secretKey,
+          key,
+          contentBytes
+        )
         setState({ status: 'complete', message: 'Message sent successfully!', contentType })
         return
       }
@@ -312,8 +322,17 @@ export function useNostrSend(): UseNostrSendReturn {
       // Wait for all remaining
       await Promise.all(executing)
 
-      // Wait for completion ACK
-      await waitForCompletionAck(client, transferId, publicKey, receiverPubkey, () => cancelledRef.current)
+      // Wait for completion ACK or Retry Requests
+      await waitForCompletionAck(
+        client,
+        transferId,
+        publicKey,
+        receiverPubkey,
+        () => cancelledRef.current,
+        secretKey,
+        key,
+        contentBytes
+      )
 
       const successMsg = isFile ? 'File sent successfully!' : 'Message sent successfully!'
       setState({ status: 'complete', message: successMsg, contentType })
@@ -344,7 +363,10 @@ async function waitForCompletionAck(
   transferId: string,
   senderPubkey: string,
   receiverPubkey: string,
-  isCancelled: () => boolean
+  isCancelled: () => boolean,
+  secretKey: Uint8Array,
+  key: CryptoKey,
+  contentBytes: Uint8Array
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -353,7 +375,7 @@ async function waitForCompletionAck(
       if (!isCancelled()) {
         reject(new Error('Timeout waiting for completion'))
       }
-    }, 60000) // 1 minute timeout for completion
+    }, 60 * 60 * 1000) // 1 hour timeout for completion
 
     const subId = client.subscribe(
       [
@@ -361,21 +383,58 @@ async function waitForCompletionAck(
           kinds: [EVENT_KIND_DATA_TRANSFER],
           '#t': [transferId],
           '#p': [senderPubkey],
+          // Listen to events from the receiver (ACKs and Retries)
           authors: [receiverPubkey],
         },
       ],
-      (event) => {
+      async (event) => {
         if (isCancelled()) {
           clearTimeout(timeout)
           client.unsubscribe(subId)
           return
         }
 
+        // Check for completion ACK
         const ack = parseAckEvent(event)
         if (ack && ack.transferId === transferId && ack.seq === -1) {
           clearTimeout(timeout)
           client.unsubscribe(subId)
           resolve()
+          return
+        }
+
+        // Check for Retry Request
+        const retry = parseRetryRequestEvent(event)
+        if (retry && retry.transferId === transferId) {
+          console.log(`Received retry request for ${retry.missingSeqs.length} chunks`)
+
+          // Resend missing chunks
+          for (const seq of retry.missingSeqs) {
+            if (isCancelled()) return
+
+            // Re-encrypt/Send logic
+            // Note: We don't need distinct concurrency control here since it's usually small batches
+            // But we should protect against index out of bounds
+            if (seq < 0 || seq * CHUNK_SIZE >= contentBytes.length) continue
+
+            try {
+              const start = seq * CHUNK_SIZE
+              const end = Math.min(start + CHUNK_SIZE, contentBytes.length)
+              const chunkData = contentBytes.slice(start, end)
+              const encryptedChunk = await encrypt(key, chunkData)
+              /* 
+                 We need to verify if 'createChunkEvent' expects 'total' to be recalculated
+                 but it's constant.
+                 We need totalChunks. We can calculate it.
+              */
+              const totalChunks = Math.ceil(contentBytes.length / CHUNK_SIZE)
+
+              const chunkEvent = createChunkEvent(secretKey, transferId, seq, totalChunks, encryptedChunk)
+              await client.publish(chunkEvent)
+            } catch (err) {
+              console.error(`Failed to resend chunk ${seq}`, err)
+            }
+          }
         }
       }
     )
