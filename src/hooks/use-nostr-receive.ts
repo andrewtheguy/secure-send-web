@@ -178,7 +178,11 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       const totalChunks = payload.totalChunks
 
       await new Promise<void>((resolve, reject) => {
+        let settled = false
+
         const timeout = setTimeout(() => {
+          if (settled) return
+          settled = true
           client.unsubscribe(subId)
           // Don't reject if already cancelled to avoid race condition
           if (!cancelledRef.current) {
@@ -195,7 +199,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             },
           ],
           async (event) => {
+            if (settled) return
+
             if (cancelledRef.current) {
+              settled = true
               clearTimeout(timeout)
               client.unsubscribe(subId)
               reject(new Error('Cancelled'))
@@ -226,12 +233,19 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
               // Check if we have all chunks
               if (chunks.size === totalChunks) {
+                settled = true
                 clearTimeout(timeout)
                 client.unsubscribe(subId)
                 resolve()
               }
             } catch (err) {
-              console.error('Failed to decrypt chunk:', err)
+              if (settled) return
+              settled = true
+              clearTimeout(timeout)
+              client.unsubscribe(subId)
+              if (!cancelledRef.current) {
+                reject(new Error(`Failed to decrypt chunk ${chunk.seq}: ${err instanceof Error ? err.message : 'Unknown error'}`))
+              }
             }
           }
         )
@@ -239,10 +253,18 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       if (cancelledRef.current) return
 
-      // Reassemble content
-      const sortedChunks = Array.from(chunks.entries())
-        .sort((a, b) => a[0] - b[0])
-        .map(([_, data]) => data)
+      // Validate all chunks are present (contiguous 0..totalChunks-1)
+      for (let i = 0; i < totalChunks; i++) {
+        if (!chunks.has(i)) {
+          throw new Error(`Missing chunk ${i} of ${totalChunks}`)
+        }
+      }
+
+      // Reassemble content (chunks are validated to be contiguous 0..totalChunks-1)
+      const sortedChunks: Uint8Array[] = []
+      for (let i = 0; i < totalChunks; i++) {
+        sortedChunks.push(chunks.get(i)!)
+      }
 
       const totalLength = sortedChunks.reduce((sum, chunk) => sum + chunk.length, 0)
       const combined = new Uint8Array(totalLength)
