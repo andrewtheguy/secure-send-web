@@ -4,7 +4,9 @@ import {
   computePinHint,
   deriveKeyFromPin,
   decrypt,
+  encrypt,
   MAX_MESSAGE_SIZE,
+  CHUNK_SIZE,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -20,8 +22,11 @@ import {
   EVENT_KIND_PIN_EXCHANGE,
   EVENT_KIND_DATA_TRANSFER,
   type NostrClient,
+  createSignalingEvent,
+  parseSignalingEvent,
 } from '@/lib/nostr'
 import type { Event } from 'nostr-tools'
+import { WebRTCConnection } from '@/lib/webrtc'
 
 /**
  * Publish with backup relay fallback.
@@ -229,6 +234,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       const chunks: Map<number, Uint8Array> = new Map()
       const totalChunks = payload.totalChunks
 
+      // WebRTC result flags (outer scope)
+      let webRTCSuccess = false
+      let webRTCResult: Uint8Array | null = null
+
       // ACK interval - keeps sending ACK for last received chunk until next arrives
       let lastAckedSeq = -1
       let ackIntervalId: ReturnType<typeof setInterval> | null = null
@@ -269,6 +278,11 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         }
       }
 
+      // WebRTC State
+      let rtc: WebRTCConnection | null = null
+      let webRTCBuffer: Uint8Array[] = []
+      let webRTCReceivedBytes = 0
+
       await new Promise<void>((resolve, reject) => {
         let settled = false
         const chunkFailures: Map<number, number> = new Map() // Track decrypt failures per chunk
@@ -279,10 +293,104 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           settled = true
           stopAckInterval()
           client.unsubscribe(subId)
+          if (rtc) rtc.close()
           if (!cancelledRef.current) {
             reject(new Error('Timeout receiving chunks'))
           }
         }, 10 * 60 * 1000) // 10 minute timeout
+
+        // Initialize WebRTC (lazy init on first signal offer)
+        const initWebRTC = () => {
+          if (rtc) return rtc
+
+          rtc = new WebRTCConnection(
+            { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
+            async (signal) => {
+              // Send Answer/Candidate via Nostr
+              const signalPayload = { type: 'signal', signal }
+              const signalJson = JSON.stringify(signalPayload)
+              const encryptedSignal = await encrypt(key!, new TextEncoder().encode(signalJson))
+              const event = createSignalingEvent(secretKey, senderPubkey!, transferId!, encryptedSignal)
+              await client.publish(event)
+            },
+            () => {
+              console.log('Receiver DataChannel open')
+              setState(s => ({ ...s, message: 'Receiving via P2P...' }))
+            },
+            (data) => {
+              if (typeof data === 'string' && data === 'DONE') {
+                // Transfer complete via WebRTC
+                settled = true
+                clearTimeout(timeout)
+                stopAckInterval()
+                client.unsubscribe(subId)
+                if (rtc) {
+                  rtc.send('DONE_ACK')
+                  rtc.close()
+                }
+
+                // Reconstruct from webRTCBuffer
+                const totalLen = webRTCBuffer.reduce((acc, val) => acc + val.length, 0)
+                const combined = new Uint8Array(totalLen)
+                let offset = 0
+                for (const b of webRTCBuffer) {
+                  combined.set(b, offset)
+                  offset += b.length
+                }
+
+                // Manually populate chunks map for "validation" pass below?
+                // Or just bypass validation loop if webRTC success.
+                // The Promise resolves void, validation loop is AFTER promise.
+
+                // WE NEED TO PASS DATA OUT
+                // Hack: populate the 'chunks' map with a single "full" chunk or modify logic
+                // Actually, the logic AFTER this promise block assumes 'chunks' map is populated.
+                // Let's populate 'chunks' map with pseudo-chunks or just modify the logic after.
+
+                // Better: We can store the final buffer in a variable accessible outside.
+                // But for minimal collision with existing logic:
+                // We can fill logic to return early if we have full buffer.
+
+                // Let's modify the resolve to pass back the buffer if WebRTC used?
+                // The promise signature is Promise<void>.
+                // Let's set a flag "receivedViaWebRTC" and store buffer in "chunks"?
+                // "chunks" is Map<number, Uint8Array>.
+                // If we received via WebRTC, we might have contiguous data.
+                // We can fake it as chunk 0 = full data, and totalChunks = 1?
+                // But payload.totalChunks is fixed.
+
+                // Let's use a workaround:
+                // Store the full data in chunks map as if we received all chunks?
+                // No, that's hard to map back to indices.
+
+                // Best: Set a "successViaWebRTC" flag in outer scope.
+                webRTCSuccess = true // Define this outside
+                webRTCResult = combined // Define this outside
+                resolve()
+                return
+              }
+
+              if (data instanceof ArrayBuffer) {
+                const bytes = new Uint8Array(data)
+                webRTCBuffer.push(bytes)
+                webRTCReceivedBytes += bytes.length
+
+                // Update progress
+                const totalBytes = payload?.fileSize || (payload?.totalChunks || 0) * CHUNK_SIZE
+
+                setState(s => ({
+                  ...s,
+                  status: 'receiving',
+                  progress: {
+                    current: webRTCReceivedBytes,
+                    total: totalBytes > 0 ? totalBytes : webRTCReceivedBytes // avoid 0 total
+                  }
+                }))
+              }
+            }
+          )
+          return rtc
+        }
 
         const subId = client.subscribe(
           [
@@ -300,7 +408,24 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               clearTimeout(timeout)
               stopAckInterval()
               client.unsubscribe(subId)
+              if (rtc) rtc.close()
               reject(new Error('Cancelled'))
+              return
+            }
+
+            // Check for Signal
+            const signalData = parseSignalingEvent(event)
+            if (signalData && signalData.transferId === transferId) {
+              try {
+                const decrypted = await decrypt(key!, signalData.encryptedSignal)
+                const payload = JSON.parse(new TextDecoder().decode(decrypted))
+                if (payload.type === 'signal' && payload.signal) {
+                  const r = initWebRTC()
+                  r.handleSignal(payload.signal)
+                }
+              } catch (e) {
+                console.error("Signal handling error", e)
+              }
               return
             }
 
@@ -319,16 +444,24 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               chunks.set(chunk.seq, decryptedChunk)
               chunkFailures.delete(chunk.seq) // Clear any previous failures on success
 
+              const totalBytes = payload?.fileSize || (payload?.totalChunks || 0) * CHUNK_SIZE
+              const currentBytes = chunks.size * CHUNK_SIZE
+              // Clamping current to total for cosmetic correctness if estimation vs actual differs
+              const displayCurrent = totalBytes > 0 && currentBytes > totalBytes ? totalBytes : currentBytes
+
               setState({
                 status: 'receiving',
                 message: `Receiving chunk ${chunks.size}/${totalChunks}...`,
-                progress: { current: chunks.size, total: totalChunks },
-                contentType: payload!.contentType,
+                progress: {
+                  current: displayCurrent,
+                  total: totalBytes
+                },
+                contentType: payload?.contentType,
                 fileMetadata: isFile
                   ? {
-                    fileName: payload!.fileName!,
-                    fileSize: payload!.fileSize!,
-                    mimeType: payload!.mimeType!,
+                    fileName: payload?.fileName!,
+                    fileSize: payload?.fileSize!,
+                    mimeType: payload?.mimeType!,
                   }
                   : undefined,
               })
@@ -342,6 +475,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 clearTimeout(timeout)
                 stopAckInterval()
                 client.unsubscribe(subId)
+                if (rtc) rtc.close()
                 resolve()
               }
             } catch (err) {
@@ -358,6 +492,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 clearTimeout(timeout)
                 stopAckInterval()
                 client.unsubscribe(subId)
+                if (rtc) rtc.close()
                 reject(new Error(`Failed to decrypt chunk ${chunk.seq} after ${maxFailuresPerChunk} attempts`))
               }
             }
@@ -366,6 +501,43 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       })
 
       if (cancelledRef.current) return
+
+      // If WebRTC success, use that result
+      if (webRTCSuccess && webRTCResult) {
+        // Skip chunk validation and reassembly
+        // Send final ACK via relay just in case (already sent via WebRTC but backup is good)
+        const completeAck = createAckEvent(secretKey, senderPubkey!, transferId!, -1)
+        await publishWithBackup(client, completeAck)
+
+        if (payload.contentType === 'file') {
+          setReceivedContent({
+            contentType: 'file',
+            data: webRTCResult,
+            fileName: payload.fileName!,
+            fileSize: payload.fileSize!,
+            mimeType: payload.mimeType!,
+          })
+          setState({
+            status: 'complete',
+            message: 'File received (P2P)!',
+            contentType: 'file',
+            fileMetadata: {
+              fileName: payload.fileName!,
+              fileSize: payload.fileSize!,
+              mimeType: payload.mimeType!,
+            },
+          })
+        } else {
+          const decoder = new TextDecoder()
+          const message = decoder.decode(webRTCResult)
+          setReceivedContent({
+            contentType: 'text',
+            message,
+          })
+          setState({ status: 'complete', message: 'Message received (P2P)!', contentType: 'text' })
+        }
+        return
+      }
 
       // Validate all chunks are present (contiguous 0..totalChunks-1)
       for (let i = 0; i < totalChunks; i++) {

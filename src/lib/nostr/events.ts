@@ -254,8 +254,61 @@ export function parseRetryRequestEvent(event: Event): {
   }
 }
 
-// Utility functions for base64 encoding/decoding
+// ... (existing exports)
+
+/**
+ * Create Signaling event (kind 24242 with type=signal)
+ */
+export function createSignalingEvent(
+  secretKey: Uint8Array,
+  senderPubkey: string,
+  transferId: string,
+  encryptedSignal: Uint8Array
+): Event {
+  const event = finalizeEvent(
+    {
+      kind: EVENT_KIND_DATA_TRANSFER,
+      content: uint8ArrayToBase64(encryptedSignal),
+      tags: [
+        ['t', transferId],
+        ['p', senderPubkey],
+        ['type', 'signal'],
+      ],
+      created_at: Math.floor(Date.now() / 1000),
+    },
+    secretKey
+  )
+  return event
+}
+
+/**
+ * Parse Signaling event
+ */
+export function parseSignalingEvent(event: Event): {
+  transferId: string
+  senderPubkey: string
+  encryptedSignal: Uint8Array
+} | null {
+  if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null
+
+  const type = event.tags.find((t) => t[0] === 'type')?.[1]
+  if (type !== 'signal') return null
+
+  const transferId = event.tags.find((t) => t[0] === 't')?.[1]
+  const senderPubkey = event.tags.find((t) => t[0] === 'p')?.[1]
+
+  if (!transferId || !senderPubkey) return null
+
+  try {
+    const encryptedSignal = base64ToUint8Array(event.content)
+    return { transferId, senderPubkey, encryptedSignal }
+  } catch {
+    return null
+  }
+}
+
 export function uint8ArrayToBase64(bytes: Uint8Array): string {
+  // ...
   let binary = ''
   const chunkSize = 8192
   for (let i = 0; i < bytes.length; i += chunkSize) {
