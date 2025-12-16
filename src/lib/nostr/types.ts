@@ -41,6 +41,8 @@ export interface PinExchangePayload {
   transferId: string
   senderPubkey: string
   totalChunks: number
+  // Sender's preferred relays for data transfer
+  relays?: string[]
   // For text (single chunk only)
   textMessage?: string
   // For file

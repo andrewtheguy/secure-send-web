@@ -16,18 +16,49 @@ import {
   createPinExchangeEvent,
   createChunkEvent,
   parseAckEvent,
+  discoverBestRelays,
+  discoverBackupRelays,
+  DEFAULT_RELAYS,
   type TransferState,
   type PinExchangePayload,
   type ContentType,
   EVENT_KIND_DATA_TRANSFER,
   type NostrClient,
 } from '@/lib/nostr'
+import type { Event } from 'nostr-tools'
 import { readFileAsBytes } from '@/lib/file-utils'
 
 // Throttling constants
 const THROTTLE_BYTES = 512 * 1024  // 512KB
 const THROTTLE_PAUSE_MS = 2000     // 2 second pause after 512KB
 const RETRY_PAUSE_MS = 500         // 500ms pause after retry
+
+/**
+ * Publish with backup relay fallback.
+ * If primary publish fails, discovers backup relays and retries.
+ */
+async function publishWithBackup(
+  client: NostrClient,
+  event: Event,
+  maxRetries: number = 3
+): Promise<void> {
+  try {
+    await client.publish(event, maxRetries)
+  } catch (err) {
+    // Primary relays failed, try to discover backup relays
+    console.log('Primary relays failed, discovering backup relays...')
+    const currentRelays = client.getRelays()
+    const backupRelays = await discoverBackupRelays(currentRelays, 5)
+
+    if (backupRelays.length === 0) {
+      throw err // No backup relays found, propagate original error
+    }
+
+    // Add backup relays and retry
+    await client.addRelays(backupRelays)
+    await client.publish(event, maxRetries)
+  }
+}
 
 export interface UseNostrSendReturn {
   state: TransferState
@@ -134,9 +165,13 @@ export function useNostrSend(): UseNostrSendReturn {
       const { secretKey, publicKey } = generateEphemeralKeys()
       const transferId = generateTransferId()
 
-      // Connect to relays
-      setState({ status: 'connecting', message: 'Connecting to relays...' })
-      const client = createNostrClient()
+      // Discover best relays for data transfer
+      setState({ status: 'connecting', message: 'Discovering best relays...' })
+      const bestRelays = await discoverBestRelays()
+      if (cancelledRef.current) return
+
+      // Use ALL seed relays for PIN exchange (maximum discoverability)
+      let client = createNostrClient([...DEFAULT_RELAYS])
       clientRef.current = client
 
       if (cancelledRef.current) return
@@ -144,12 +179,13 @@ export function useNostrSend(): UseNostrSendReturn {
       // Calculate chunks
       const totalChunks = Math.ceil(contentBytes.length / CHUNK_SIZE)
 
-      // Create and encrypt PIN exchange payload
+      // Create and encrypt PIN exchange payload (include best relays for data transfer)
       const payload: PinExchangePayload = {
         contentType,
         transferId,
         senderPubkey: publicKey,
         totalChunks,
+        relays: bestRelays, // Sender's preferred relays for data transfer
         // For text, include message if single chunk
         textMessage: contentType === 'text' && totalChunks <= 1 ? (content as string) : undefined,
         // For file, include metadata
@@ -170,9 +206,12 @@ export function useNostrSend(): UseNostrSendReturn {
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
       })
       const pinExchangeEvent = createPinExchangeEvent(secretKey, encryptedPayload, salt, transferId, pinHint)
-      await client.publish(pinExchangeEvent)
+      await publishWithBackup(client, pinExchangeEvent)
 
       if (cancelledRef.current) return
+
+      // Ensure connection is ready before subscribing
+      await client.waitForConnection()
 
       // Wait for receiver ready ACK (seq=0)
       const receiverPubkey = await new Promise<string>((resolve, reject) => {
@@ -220,6 +259,15 @@ export function useNostrSend(): UseNostrSendReturn {
         throw new Error('Session expired. Please start a new transfer.')
       }
 
+      // Switch to best relays for data transfer
+      client.close()
+      client = createNostrClient(bestRelays)
+      clientRef.current = client
+      // Wait for new connections to be ready
+      await client.waitForConnection()
+
+      if (cancelledRef.current) return
+
       // If content fits in single chunk (text only), wait for completion ACK
       if (contentType === 'text' && totalChunks <= 1) {
         await waitForChunkAck(client, transferId, publicKey, receiverPubkey, -1, () => cancelledRef.current)
@@ -249,7 +297,7 @@ export function useNostrSend(): UseNostrSendReturn {
         while (!ackReceived && retryCount < maxRetries) {
           if (cancelledRef.current) return
 
-          await client.publish(chunkEvent)
+          await publishWithBackup(client, chunkEvent)
 
           setState({
             status: 'transferring',
