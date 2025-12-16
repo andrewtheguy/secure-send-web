@@ -12,7 +12,6 @@ import {
   parsePinExchangeEvent,
   parseChunkEvent,
   createAckEvent,
-  createRetryRequestEvent,
   type TransferState,
   type PinExchangePayload,
   type ReceivedContent,
@@ -189,47 +188,53 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       const chunks: Map<number, Uint8Array> = new Map()
       const totalChunks = payload.totalChunks
 
-      await new Promise<void>((resolve, reject) => {
-        let settled = false
-        let lastActivity = Date.now()
+      // ACK interval - keeps sending ACK for last received chunk until next arrives
+      let lastAckedSeq = -1
+      let ackIntervalId: ReturnType<typeof setInterval> | null = null
 
-        // Stagnation check interval
-        const checkInterval = setInterval(async () => {
-          if (settled || cancelledRef.current) {
-            clearInterval(checkInterval)
+      const startAckInterval = async (seq: number) => {
+        // Clear previous interval
+        if (ackIntervalId) {
+          clearInterval(ackIntervalId)
+          ackIntervalId = null
+        }
+
+        lastAckedSeq = seq
+
+        // Send ACK immediately
+        const ackEvent = createAckEvent(secretKey, senderPubkey!, transferId!, seq)
+        await client.publish(ackEvent)
+
+        // Keep sending ACK every 2 seconds until stopped
+        ackIntervalId = setInterval(async () => {
+          if (cancelledRef.current) {
+            if (ackIntervalId) clearInterval(ackIntervalId)
             return
           }
-
-          const now = Date.now()
-          // If no activity for 8 seconds and we are missing chunks
-          if (now - lastActivity > 8000 && chunks.size < totalChunks) {
-            // Identify missing chunks
-            const missing: number[] = []
-            for (let i = 0; i < totalChunks; i++) {
-              if (!chunks.has(i)) missing.push(i)
-              if (missing.length >= 50) break // Limit batch size
-            }
-
-            if (missing.length > 0) {
-              setState(prev => ({ ...prev, message: `Requesting ${missing.length} missing chunks...` }))
-              const retryEvent = createRetryRequestEvent(secretKey, senderPubkey!, transferId!, missing)
-              await client.publish(retryEvent)
-              // Reset activity timer to give sender time to respond
-              lastActivity = Date.now()
-            }
-          }
+          const ackEvent = createAckEvent(secretKey, senderPubkey!, transferId!, lastAckedSeq)
+          await client.publish(ackEvent)
         }, 2000)
+      }
+
+      const stopAckInterval = () => {
+        if (ackIntervalId) {
+          clearInterval(ackIntervalId)
+          ackIntervalId = null
+        }
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        let settled = false
 
         const timeout = setTimeout(() => {
           if (settled) return
           settled = true
-          clearInterval(checkInterval)
+          stopAckInterval()
           client.unsubscribe(subId)
-          // Don't reject if already cancelled to avoid race condition
           if (!cancelledRef.current) {
             reject(new Error('Timeout receiving chunks'))
           }
-        }, 5 * 60 * 1000) // 5 minute timeout
+        }, 10 * 60 * 1000) // 10 minute timeout
 
         const subId = client.subscribe(
           [
@@ -240,13 +245,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             },
           ],
           async (event) => {
-            lastActivity = Date.now()
             if (settled) return
 
             if (cancelledRef.current) {
               settled = true
               clearTimeout(timeout)
-              clearInterval(checkInterval)
+              stopAckInterval()
               client.unsubscribe(subId)
               reject(new Error('Cancelled'))
               return
@@ -257,7 +261,11 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
             // Decrypt chunk
             try {
-              if (chunks.has(chunk.seq)) return // Already have this one
+              if (chunks.has(chunk.seq)) {
+                // Already have this chunk, but still send ACK to confirm
+                await startAckInterval(chunk.seq)
+                return
+              }
 
               const decryptedChunk = await decrypt(key!, chunk.data)
               chunks.set(chunk.seq, decryptedChunk)
@@ -276,17 +284,19 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                   : undefined,
               })
 
+              // Send ACK for this chunk (and keep sending until next arrives)
+              await startAckInterval(chunk.seq)
+
               // Check if we have all chunks
               if (chunks.size === totalChunks) {
                 settled = true
                 clearTimeout(timeout)
-                clearInterval(checkInterval)
+                stopAckInterval()
                 client.unsubscribe(subId)
                 resolve()
               }
             } catch (err) {
               if (settled) return
-              // Don't fail immediately on distinct chunk error, just ignore it and let retry handle it
               console.error(`Failed to decrypt chunk ${chunk.seq}`, err)
             }
           }
