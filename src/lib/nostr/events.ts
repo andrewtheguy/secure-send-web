@@ -14,6 +14,16 @@ export function generateEphemeralKeys(): { secretKey: Uint8Array; publicKey: str
 /**
  * Create PIN exchange event (kind 24243)
  * Contains encrypted payload with transfer metadata
+ *
+ * TTL Behavior:
+ * - Events include an 'expiration' tag set to 1 hour from creation (NIP-40)
+ * - NIP-40 compliant relays MAY auto-delete events after expiration
+ * - Sender enforces TTL by rejecting receiver connections after expiration
+ *   (checked in use-nostr-send.ts after receiving ready ACK)
+ *
+ * Note: Receiver-side expiration checks are not implemented since a modified
+ * client could bypass them. The sender-side check provides hard enforcement
+ * because the sender must be online to respond to the receiver.
  */
 export function createPinExchangeEvent(
   secretKey: Uint8Array,
@@ -22,6 +32,7 @@ export function createPinExchangeEvent(
   transferId: string,
   pinHint: string
 ): Event {
+  // Soft TTL: relays may auto-delete after this timestamp (NIP-40)
   const expiration = Math.floor((Date.now() + TRANSFER_EXPIRATION_MS) / 1000)
 
   const event = finalizeEvent(

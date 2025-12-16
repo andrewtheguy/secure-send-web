@@ -8,6 +8,7 @@ import {
   encrypt,
   CHUNK_SIZE,
   MAX_MESSAGE_SIZE,
+  TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -89,6 +90,7 @@ export function useNostrSend(): UseNostrSendReturn {
       // Generate PIN and derive key
       setState({ status: 'connecting', message: 'Generating secure PIN...' })
       const newPin = generatePin()
+      const sessionStartTime = Date.now() // Track session start for TTL enforcement
       setPin(newPin)
 
       const [pinHint, salt] = await Promise.all([computePinHint(newPin), Promise.resolve(generateSalt())])
@@ -177,6 +179,11 @@ export function useNostrSend(): UseNostrSendReturn {
       })
 
       if (cancelledRef.current) return
+
+      // Enforce TTL: reject if session has expired
+      if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
+        throw new Error('Session expired. Please start a new transfer.')
+      }
 
       // If content fits in single chunk (text only), we're done
       if (contentType === 'text' && totalChunks <= 1) {
