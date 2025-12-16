@@ -6,7 +6,8 @@
       "WebFetch(domain:github.com)",
       "Bash(tree:*)",
       "Bash(cat:*)",
-      "Bash(npx shadcn@latest add tabs progress textarea card input alert -y)"
+      "Bash(npx shadcn@latest add tabs progress textarea card input alert -y)",
+      "Bash(npm run build:*)"
     ]
   }
 }
