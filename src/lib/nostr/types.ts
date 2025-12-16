@@ -91,3 +91,16 @@ export interface ReceivedFile {
 }
 
 export type ReceivedContent = ReceivedText | ReceivedFile
+
+// WebRTC Signaling
+export type SignalingType = 'offer' | 'answer' | 'candidate'
+
+export interface SignalingPayload {
+  type: SignalingType
+  sdp?: string
+  candidate?: RTCIceCandidateInit
+}
+
+export interface WebRTCOptions {
+  relayOnly?: boolean
+}

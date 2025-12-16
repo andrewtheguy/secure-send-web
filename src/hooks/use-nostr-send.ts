@@ -6,6 +6,7 @@ import {
   generateSalt,
   deriveKeyFromPin,
   encrypt,
+  decrypt,
   CHUNK_SIZE,
   MAX_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
@@ -18,15 +19,19 @@ import {
   parseAckEvent,
   discoverBestRelays,
   discoverBackupRelays,
+  createSignalingEvent,
+  parseSignalingEvent,
   DEFAULT_RELAYS,
   type TransferState,
   type PinExchangePayload,
   type ContentType,
   EVENT_KIND_DATA_TRANSFER,
   type NostrClient,
+  type WebRTCOptions,
 } from '@/lib/nostr'
 import type { Event } from 'nostr-tools'
 import { readFileAsBytes } from '@/lib/file-utils'
+import { WebRTCConnection } from '@/lib/webrtc'
 
 // Throttling constants
 const THROTTLE_BYTES = 512 * 1024  // 512KB
@@ -63,7 +68,7 @@ async function publishWithBackup(
 export interface UseNostrSendReturn {
   state: TransferState
   pin: string | null
-  send: (content: string | File) => Promise<void>
+  send: (content: string | File, options?: WebRTCOptions) => Promise<void>
   cancel: () => void
 }
 
@@ -95,7 +100,7 @@ export function useNostrSend(): UseNostrSendReturn {
     setState({ status: 'idle' })
   }, [clearExpirationTimeout])
 
-  const send = useCallback(async (content: string | File) => {
+  const send = useCallback(async (content: string | File, options?: WebRTCOptions) => {
     // Guard against concurrent invocations
     if (sendingRef.current) return
     sendingRef.current = true
@@ -267,6 +272,120 @@ export function useNostrSend(): UseNostrSendReturn {
       await client.waitForConnection()
 
       if (cancelledRef.current) return
+
+      // WebRTC Transfer Logic
+      let webRTCSuccess = false
+      if (!options?.relayOnly) {
+        try {
+          setState({ status: 'connecting', message: 'Attempting P2P connection...' })
+
+          await new Promise<void>((resolve, reject) => {
+            const rtc = new WebRTCConnection(
+              { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
+              async (signal) => {
+                // Send signal via Nostr
+                if (cancelledRef.current) return
+                const signalPayload = {
+                  type: 'signal',
+                  signal
+                }
+                const signalJson = JSON.stringify(signalPayload)
+                const encryptedSignal = await encrypt(key, new TextEncoder().encode(signalJson))
+
+                // Send as data transfer event with specific tag? 
+                // Using existing structure, maybe just send as chunk? No, better use a different structure or rely on implied type.
+                // Let's use a specific "signal" type in tags if possible, or just identifiable payload.
+                // For now, let's wrap it in a way receiver can distinguish.
+                // Actually, let's just use the same channel.
+
+                // Use createSignalingEvent
+                const event = createSignalingEvent(secretKey, publicKey, transferId, encryptedSignal)
+
+                await client.publish(event)
+              },
+              async () => {
+                // DataChannel open
+                console.log('WebRTC connected, sending data...')
+                setState({ status: 'transferring', message: 'Sending via P2P...' })
+
+                try {
+                  // Send file content
+                  // For simplicity, send whole buffer if it fits, or chunk it for progress
+                  const chunkSize = 16384 // 16KB chunks for data channel
+                  for (let i = 0; i < contentBytes.length; i += chunkSize) {
+                    if (cancelledRef.current) throw new Error('Cancelled')
+                    const end = Math.min(i + chunkSize, contentBytes.length)
+                    rtc.send(contentBytes.slice(i, end))
+
+                    // Update progress occasionally
+                    if (i % (chunkSize * 10) === 0) {
+                      setState(s => ({ ...s, progress: { current: i, total: contentBytes.length } }))
+                    }
+                  }
+
+                  // Send "DONE" message or close
+                  rtc.send('DONE')
+                  webRTCSuccess = true
+                  resolve()
+                } catch (err) {
+                  reject(err)
+                }
+              },
+              (data) => {
+                // Handle messages from receiver (e.g. "DONE_ACK")
+                if (data === 'DONE_ACK') {
+                  // remote confirmed receipt
+                }
+              }
+            )
+
+            // Listen for signals from receiver
+            const subId = client.subscribe(
+              [
+                {
+                  kinds: [EVENT_KIND_DATA_TRANSFER],
+                  '#t': [transferId],
+                  '#p': [publicKey],
+                  authors: [receiverPubkey],
+                },
+              ],
+              async (event) => {
+                // Check if it's a signal event
+                const signalData = parseSignalingEvent(event)
+                if (signalData && signalData.transferId === transferId) {
+                  const decrypted = await decrypt(key, signalData.encryptedSignal)
+                  const payload = JSON.parse(new TextDecoder().decode(decrypted))
+                  if (payload.type === 'signal' && payload.signal) {
+                    rtc.handleSignal(payload.signal)
+                  }
+                }
+              }
+            )
+
+            // Initiate
+            rtc.createDataChannel('file-transfer')
+            rtc.createOffer()
+
+            // Timeout for WebRTC setup
+            setTimeout(() => {
+              if (!webRTCSuccess) {
+                rtc.close()
+                client.unsubscribe(subId)
+                reject(new Error('WebRTC timeout'))
+              }
+            }, 10000) // 10 seconds to connect
+
+          })
+        } catch (err) {
+          console.log('WebRTC failed, falling back to relay:', err)
+          // Continue to relay fallback
+        }
+      }
+
+      if (webRTCSuccess) {
+        setState({ status: 'complete', message: 'Sent via P2P!', contentType })
+        return
+      }
 
       // If content fits in single chunk (text only), wait for completion ACK
       if (contentType === 'text' && totalChunks <= 1) {

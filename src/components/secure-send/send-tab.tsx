@@ -14,6 +14,7 @@ type ContentMode = 'text' | 'file'
 export function SendTab() {
   const [mode, setMode] = useState<ContentMode>('text')
   const [message, setMessage] = useState('')
+  const [relayOnly, setRelayOnly] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -31,9 +32,9 @@ export function SendTab() {
 
   const handleSend = () => {
     if (mode === 'text' && canSendText) {
-      send(message)
+      send(message, { relayOnly })
     } else if (mode === 'file' && canSendFile && selectedFile) {
-      send(selectedFile)
+      send(selectedFile, { relayOnly })
     }
   }
 
@@ -185,6 +186,24 @@ export function SendTab() {
               )}
             </div>
           )}
+
+
+
+          <div className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              id="relay-only"
+              checked={relayOnly}
+              onChange={(e) => setRelayOnly(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+            />
+            <label
+              htmlFor="relay-only"
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+            >
+              Use Nostr Relay Only (disable WebRTC)
+            </label>
+          </div>
 
           <Button onClick={handleSend} disabled={!canSend} className="w-full">
             <Send className="mr-2 h-4 w-4" />
