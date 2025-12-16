@@ -265,7 +265,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         lastAckedSeq = seq
 
         // Send ACK immediately
-        console.log(`Sending ACK for chunk ${seq}`)
+        console.log(`Sending ACK for chunk ${seq} (retry counter reset)`)
         const ackEvent = createAckEvent(secretKey, senderPubkey!, transferId!, seq)
         try {
           await publishWithBackup(client, ackEvent)
@@ -275,21 +275,37 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           // Continue - interval will retry
         }
 
-        // Keep sending ACK every 2 seconds until stopped
+        // Keep sending ACK every 2 seconds until stopped (max 50 retries)
+        // These counters are fresh for each chunk (reset when startAckInterval is called)
         let consecutiveFailures = 0
+        let resendCount = 0
+        const maxResends = 50
         ackIntervalId = setInterval(async () => {
           if (cancelledRef.current) {
             if (ackIntervalId) clearInterval(ackIntervalId)
             return
           }
+
+          // Stop after max retries
+          if (resendCount >= maxResends) {
+            console.warn(`⚠️ Stopped resending ACK for chunk ${lastAckedSeq} after ${maxResends} attempts`)
+            if (ackIntervalId) {
+              clearInterval(ackIntervalId)
+              ackIntervalId = null
+            }
+            return
+          }
+
+          resendCount++
+
           try {
             const ackEvent = createAckEvent(secretKey, senderPubkey!, transferId!, lastAckedSeq)
             await publishWithBackup(client, ackEvent)
-            console.log(`✓ ACK resent for chunk ${lastAckedSeq}`)
+            console.log(`✓ ACK resent for chunk ${lastAckedSeq} (${resendCount}/${maxResends})`)
             consecutiveFailures = 0 // Reset on success
           } catch (err) {
             consecutiveFailures++
-            console.error(`✗ Failed to publish ACK for chunk ${lastAckedSeq} (failure ${consecutiveFailures}):`, err)
+            console.error(`✗ Failed to publish ACK for chunk ${lastAckedSeq} (failure ${consecutiveFailures}, attempt ${resendCount}/${maxResends}):`, err)
             // Don't clear interval - transient network issues may resolve
             // But warn if failures persist
             if (consecutiveFailures >= 5) {
@@ -463,8 +479,13 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             // Decrypt chunk
             try {
               if (chunks.has(chunk.seq)) {
-                // Already have this chunk, but still send ACK to confirm
-                await startAckInterval(chunk.seq)
+                // Already have this chunk, but only re-ACK if it's not older than current
+                if (chunk.seq >= lastAckedSeq) {
+                  console.log(`Duplicate chunk ${chunk.seq}, re-sending ACK`)
+                  await startAckInterval(chunk.seq)
+                } else {
+                  console.log(`Ignoring duplicate chunk ${chunk.seq}, already at ${lastAckedSeq}`)
+                }
                 return
               }
 
