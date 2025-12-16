@@ -1,4 +1,4 @@
-import { SimplePool, type Event, type Filter } from 'nostr-tools'
+import { SimplePool, mergeFilters, type Event, type Filter } from 'nostr-tools'
 import { DEFAULT_RELAYS } from './relays'
 
 export class NostrClient {
@@ -29,9 +29,14 @@ export class NostrClient {
     onEose?: () => void
   ): string {
     const subId = crypto.randomUUID()
+    if (filters.length === 0) {
+      throw new Error('subscribe requires at least one filter')
+    }
+    const filter =
+      filters.length === 1 ? filters[0] : mergeFilters(...filters)
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sub = this.pool.subscribeMany(this.relays, filters as any, {
+    const sub = this.pool.subscribeMany(this.relays, filter as any, {
       onevent: onEvent,
       oneose: onEose,
     })
