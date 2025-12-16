@@ -38,10 +38,8 @@ export function TransferStatus({ state }: TransferStatusProps) {
   return (
     <div className="space-y-3">
       <Alert variant={getVariant()}>
-        <div className="flex items-center gap-2">
-          {getIcon()}
-          <AlertDescription>{state.message || state.status}</AlertDescription>
-        </div>
+        {getIcon()}
+        <AlertDescription>{state.message || state.status}</AlertDescription>
       </Alert>
 
       {state.progress && state.progress.total > 1 && (

@@ -254,6 +254,10 @@ export function useNostrSend(): UseNostrSendReturn {
 
         // Pause to avoid overwhelming relays
         if (i > 0 && i % THROTTLE_CHUNK_INTERVAL === 0) {
+          // Wait for all in-flight chunks to complete before pausing
+          await Promise.all(executing)
+          executing.clear()
+
           setState({
             status: 'transferring',
             message: 'Pausing for network stability...',
