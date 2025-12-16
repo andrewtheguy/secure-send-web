@@ -81,7 +81,8 @@ export function useNostrSend(): UseNostrSendReturn {
         mimeType = content.type || 'application/octet-stream'
 
         if (content.size > MAX_MESSAGE_SIZE) {
-          setState({ status: 'error', message: 'File exceeds 512KB limit' })
+          const limitKB = MAX_MESSAGE_SIZE / 1024
+          setState({ status: 'error', message: `File exceeds ${limitKB}KB limit` })
           return
         }
 
@@ -92,7 +93,8 @@ export function useNostrSend(): UseNostrSendReturn {
         contentBytes = encoder.encode(content)
 
         if (contentBytes.length > MAX_MESSAGE_SIZE) {
-          setState({ status: 'error', message: 'Message exceeds 512KB limit' })
+          const limitKB = MAX_MESSAGE_SIZE / 1024
+          setState({ status: 'error', message: `Message exceeds ${limitKB}KB limit` })
           return
         }
       }
@@ -227,31 +229,69 @@ export function useNostrSend(): UseNostrSendReturn {
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
       })
 
+      let completedChunks = 0
+
+      // Concurrency control
+      const CONCURRENCY_LIMIT = 5
+      const executing: Set<Promise<void>> = new Set()
+
       for (let i = 0; i < totalChunks; i++) {
         if (cancelledRef.current) return
 
-        const start = i * CHUNK_SIZE
-        const end = Math.min(start + CHUNK_SIZE, contentBytes.length)
-        const chunkData = contentBytes.slice(start, end)
+        const p = (async () => {
+          if (cancelledRef.current) return
 
-        // Encrypt chunk with random nonce (nonce is prepended to ciphertext)
-        const encryptedChunk = await encrypt(key, chunkData)
+          const start = i * CHUNK_SIZE
+          const end = Math.min(start + CHUNK_SIZE, contentBytes.length)
+          const chunkData = contentBytes.slice(start, end)
 
-        // Publish chunk event (0-indexed sequence numbers)
-        const chunkEvent = createChunkEvent(secretKey, transferId, i, totalChunks, encryptedChunk)
-        await client.publish(chunkEvent)
+          // Encrypt chunk with random nonce (nonce is prepended to ciphertext)
+          const encryptedChunk = await encrypt(key, chunkData)
 
-        setState({
-          status: 'transferring',
-          message: `Sending chunk ${i + 1}/${totalChunks}...`,  // Display is 1-indexed for UX
-          progress: { current: i + 1, total: totalChunks },
-          contentType,
-          fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
-        })
+          if (cancelledRef.current) return
 
-        // Small delay between chunks
-        await new Promise((r) => setTimeout(r, 100))
+          // Publish chunk event (0-indexed sequence numbers)
+          const chunkEvent = createChunkEvent(secretKey, transferId, i, totalChunks, encryptedChunk)
+
+          // Retry logic for reliability
+          let retries = 3
+          while (retries > 0) {
+            try {
+              await client.publish(chunkEvent)
+              break // Success
+            } catch (err) {
+              retries--
+              if (retries === 0) throw err // Propagate error after all retries fail
+              // Exponential backoff: 500ms, 1000ms, 2000ms
+              await new Promise(r => setTimeout(r, 500 * Math.pow(2, 3 - retries)))
+            }
+          }
+
+          if (cancelledRef.current) return
+
+          completedChunks++
+          setState({
+            status: 'transferring',
+            message: `Sending chunk ${completedChunks}/${totalChunks}...`, // Display is 1-indexed for UX
+            progress: { current: completedChunks, total: totalChunks },
+            contentType,
+            fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+          })
+        })()
+
+        // Remove self from executing set when done
+        p.then(() => executing.delete(p))
+
+        executing.add(p)
+
+        // If we reached the limit, wait for one to finish
+        if (executing.size >= CONCURRENCY_LIMIT) {
+          await Promise.race(executing)
+        }
       }
+
+      // Wait for all remaining
+      await Promise.all(executing)
 
       // Wait for completion ACK
       await waitForCompletionAck(client, transferId, publicKey, receiverPubkey, () => cancelledRef.current)
