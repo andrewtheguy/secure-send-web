@@ -217,6 +217,15 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       }
 
       // Receive chunks for larger content or files
+      const chunks: Map<number, Uint8Array> = new Map()
+      const totalChunks = payload.totalChunks
+
+      // Initialize chunk tracking
+      const chunkStates = new Map<number, { seq: number; status: 'pending' | 'receiving' | 'received'; timestamp?: number }>()
+      for (let i = 0; i < totalChunks; i++) {
+        chunkStates.set(i, { seq: i, status: 'pending' })
+      }
+
       setState({
         status: 'receiving',
         message: `Receiving ${itemType}...`,
@@ -229,10 +238,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             mimeType: payload.mimeType!,
           }
           : undefined,
+        chunks: chunkStates,
+        useWebRTC: false,
       })
-
-      const chunks: Map<number, Uint8Array> = new Map()
-      const totalChunks = payload.totalChunks
 
       // WebRTC result flags (outer scope)
       let webRTCSuccess = false
@@ -440,9 +448,15 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 return
               }
 
+              // Mark chunk as receiving
+              chunkStates.set(chunk.seq, { seq: chunk.seq, status: 'receiving', timestamp: Date.now() })
+
               const decryptedChunk = await decrypt(key!, chunk.data)
               chunks.set(chunk.seq, decryptedChunk)
               chunkFailures.delete(chunk.seq) // Clear any previous failures on success
+
+              // Mark chunk as received
+              chunkStates.set(chunk.seq, { seq: chunk.seq, status: 'received', timestamp: Date.now() })
 
               const totalBytes = payload?.fileSize || (payload?.totalChunks || 0) * CHUNK_SIZE
               const currentBytes = chunks.size * CHUNK_SIZE
@@ -464,6 +478,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                     mimeType: payload?.mimeType!,
                   }
                   : undefined,
+                chunks: chunkStates,
               })
 
               // Send ACK for this chunk (and keep sending until next arrives)

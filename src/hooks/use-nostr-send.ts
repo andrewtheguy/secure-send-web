@@ -184,6 +184,14 @@ export function useNostrSend(): UseNostrSendReturn {
       // Calculate chunks
       const totalChunks = Math.ceil(contentBytes.length / CHUNK_SIZE)
 
+      // Initialize chunk tracking for relay mode (multi-chunk transfers)
+      const chunkStates = new Map<number, { seq: number; status: 'pending' | 'sending' | 'sent' | 'acked'; retries?: number; timestamp?: number }>()
+      if (totalChunks > 1) {
+        for (let i = 0; i < totalChunks; i++) {
+          chunkStates.set(i, { seq: i, status: 'pending' })
+        }
+      }
+
       // Create and encrypt PIN exchange payload (include best relays for data transfer)
       const payload: PinExchangePayload = {
         contentType,
@@ -209,6 +217,8 @@ export function useNostrSend(): UseNostrSendReturn {
         message: 'Waiting for receiver...',
         contentType,
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+        chunks: totalChunks > 1 ? chunkStates : undefined,
+        useWebRTC: !options?.relayOnly,
       })
       const pinExchangeEvent = createPinExchangeEvent(secretKey, encryptedPayload, salt, transferId, pinHint)
       await publishWithBackup(client, pinExchangeEvent)
@@ -425,7 +435,13 @@ export function useNostrSend(): UseNostrSendReturn {
         while (!ackReceived && retryCount < maxRetries) {
           if (cancelledRef.current) return
 
+          // Update chunk state to sending
+          chunkStates.set(i, { seq: i, status: 'sending', retries: retryCount, timestamp: Date.now() })
+
           await client.publish(chunkEvent)
+
+          // Update chunk state to sent
+          chunkStates.set(i, { seq: i, status: 'sent', retries: retryCount, timestamp: Date.now() })
 
           setState({
             status: 'transferring',
@@ -435,6 +451,7 @@ export function useNostrSend(): UseNostrSendReturn {
             progress: { current: i + 1, total: totalChunks },
             contentType,
             fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+            chunks: chunkStates,
           })
 
           // Wait for ACK with timeout
@@ -444,6 +461,9 @@ export function useNostrSend(): UseNostrSendReturn {
             retryCount++
             console.log(`No ACK for chunk ${i}, retrying (${retryCount}/${maxRetries})`)
             await new Promise(resolve => setTimeout(resolve, RETRY_PAUSE_MS))
+          } else {
+            // Mark chunk as acked
+            chunkStates.set(i, { seq: i, status: 'acked', retries: retryCount, timestamp: Date.now() })
           }
         }
 
@@ -462,7 +482,13 @@ export function useNostrSend(): UseNostrSendReturn {
             while (!ackReceived && retryCount < maxRetries) {
               if (cancelledRef.current) return
 
+              // Update chunk state to sending
+              chunkStates.set(i, { seq: i, status: 'sending', retries: retryCount, timestamp: Date.now() })
+
               await client.publish(chunkEvent)
+
+              // Update chunk state to sent
+              chunkStates.set(i, { seq: i, status: 'sent', retries: retryCount, timestamp: Date.now() })
 
               setState({
                 status: 'transferring',
@@ -470,6 +496,7 @@ export function useNostrSend(): UseNostrSendReturn {
                 progress: { current: i + 1, total: totalChunks },
                 contentType,
                 fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+                chunks: chunkStates,
               })
 
               ackReceived = await waitForChunkAck(client, transferId, publicKey, receiverPubkey, i, () => cancelledRef.current, 10000)
@@ -478,6 +505,9 @@ export function useNostrSend(): UseNostrSendReturn {
                 retryCount++
                 console.log(`No ACK for chunk ${i} via backup relays, retrying (${retryCount}/${maxRetries})`)
                 await new Promise(resolve => setTimeout(resolve, RETRY_PAUSE_MS))
+              } else {
+                // Mark chunk as acked
+                chunkStates.set(i, { seq: i, status: 'acked', retries: retryCount, timestamp: Date.now() })
               }
             }
           }

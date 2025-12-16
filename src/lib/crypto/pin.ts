@@ -1,7 +1,7 @@
 import { PIN_CHARSET, PIN_LENGTH, PIN_HINT_LENGTH } from './constants'
 
 /**
- * Generate random 8-character PIN from unambiguous charset
+ * Generate random 12-character PIN from unambiguous charset
  * Charset excludes confusing characters: I, O, i, l, o, 0, 1
  * Uses rejection sampling to eliminate modulo bias
  */

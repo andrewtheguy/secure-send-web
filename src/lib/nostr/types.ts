@@ -22,6 +22,16 @@ export interface FileMetadata {
   mimeType: string
 }
 
+// Chunk status for detailed progress tracking
+export type ChunkStatus = 'pending' | 'sending' | 'sent' | 'acked' | 'receiving' | 'received'
+
+export interface ChunkState {
+  seq: number
+  status: ChunkStatus
+  retries?: number
+  timestamp?: number
+}
+
 export interface TransferState {
   status: TransferStatus
   message?: string
@@ -33,6 +43,8 @@ export interface TransferState {
   relaysTotal?: number
   contentType?: ContentType
   fileMetadata?: FileMetadata
+  chunks?: Map<number, ChunkState>
+  useWebRTC?: boolean
 }
 
 // PIN Exchange payload (encrypted in the event)
