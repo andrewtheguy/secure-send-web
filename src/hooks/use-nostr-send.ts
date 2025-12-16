@@ -205,13 +205,13 @@ export function useNostrSend(): UseNostrSendReturn {
         // Encrypt chunk with random nonce (nonce is prepended to ciphertext)
         const encryptedChunk = await encrypt(key, chunkData)
 
-        // Publish chunk event
-        const chunkEvent = createChunkEvent(secretKey, transferId, i + 1, totalChunks, encryptedChunk)
+        // Publish chunk event (0-indexed sequence numbers)
+        const chunkEvent = createChunkEvent(secretKey, transferId, i, totalChunks, encryptedChunk)
         await client.publish(chunkEvent)
 
         setState({
           status: 'transferring',
-          message: `Sending chunk ${i + 1}/${totalChunks}...`,
+          message: `Sending chunk ${i + 1}/${totalChunks}...`,  // Display is 1-indexed for UX
           progress: { current: i + 1, total: totalChunks },
           contentType,
           fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
