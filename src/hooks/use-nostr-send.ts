@@ -81,8 +81,8 @@ export function useNostrSend(): UseNostrSendReturn {
         mimeType = content.type || 'application/octet-stream'
 
         if (content.size > MAX_MESSAGE_SIZE) {
-          const limitMB = MAX_MESSAGE_SIZE / (1024 * 1024)
-          setState({ status: 'error', message: `File exceeds ${limitMB}MB limit` })
+          const limitKB = MAX_MESSAGE_SIZE / 1024
+          setState({ status: 'error', message: `File exceeds ${limitKB}KB limit` })
           return
         }
 
@@ -93,8 +93,8 @@ export function useNostrSend(): UseNostrSendReturn {
         contentBytes = encoder.encode(content)
 
         if (contentBytes.length > MAX_MESSAGE_SIZE) {
-          const limitMB = MAX_MESSAGE_SIZE / (1024 * 1024)
-          setState({ status: 'error', message: `Message exceeds ${limitMB}MB limit` })
+          const limitKB = MAX_MESSAGE_SIZE / 1024
+          setState({ status: 'error', message: `Message exceeds ${limitKB}KB limit` })
           return
         }
       }
