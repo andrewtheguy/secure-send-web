@@ -254,7 +254,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           }
           try {
             const ackEvent = createAckEvent(secretKey, senderPubkey!, transferId!, lastAckedSeq)
-            await client.publish(ackEvent)
+            await publishWithBackup(client, ackEvent)
           } catch (err) {
             console.error('Failed to publish ACK in interval:', err)
             // Don't clear interval - transient network issues may resolve
