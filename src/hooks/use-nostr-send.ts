@@ -18,14 +18,16 @@ import {
   parseAckEvent,
   type TransferState,
   type PinExchangePayload,
+  type ContentType,
   EVENT_KIND_DATA_TRANSFER,
   type NostrClient,
 } from '@/lib/nostr'
+import { readFileAsBytes } from '@/lib/file-utils'
 
 export interface UseNostrSendReturn {
   state: TransferState
   pin: string | null
-  send: (message: string) => Promise<void>
+  send: (content: string | File) => Promise<void>
   cancel: () => void
 }
 
@@ -46,15 +48,38 @@ export function useNostrSend(): UseNostrSendReturn {
     setState({ status: 'idle' })
   }, [])
 
-  const send = useCallback(async (message: string) => {
+  const send = useCallback(async (content: string | File) => {
     cancelledRef.current = false
 
-    // Validate message size
-    const encoder = new TextEncoder()
-    const messageBytes = encoder.encode(message)
-    if (messageBytes.length > MAX_MESSAGE_SIZE) {
-      setState({ status: 'error', message: 'Message exceeds 512KB limit' })
-      return
+    const isFile = content instanceof File
+    const contentType: ContentType = isFile ? 'file' : 'text'
+
+    // Get content bytes
+    let contentBytes: Uint8Array
+    let fileName: string | undefined
+    let fileSize: number | undefined
+    let mimeType: string | undefined
+
+    if (isFile) {
+      fileName = content.name
+      fileSize = content.size
+      mimeType = content.type || 'application/octet-stream'
+
+      if (content.size > MAX_MESSAGE_SIZE) {
+        setState({ status: 'error', message: 'File exceeds 512KB limit' })
+        return
+      }
+
+      setState({ status: 'connecting', message: 'Reading file...' })
+      contentBytes = await readFileAsBytes(content)
+    } else {
+      const encoder = new TextEncoder()
+      contentBytes = encoder.encode(content)
+
+      if (contentBytes.length > MAX_MESSAGE_SIZE) {
+        setState({ status: 'error', message: 'Message exceeds 512KB limit' })
+        return
+      }
     }
 
     try {
@@ -80,21 +105,33 @@ export function useNostrSend(): UseNostrSendReturn {
       if (cancelledRef.current) return
 
       // Calculate chunks
-      const totalChunks = Math.ceil(messageBytes.length / CHUNK_SIZE)
+      const totalChunks = Math.ceil(contentBytes.length / CHUNK_SIZE)
 
       // Create and encrypt PIN exchange payload
       const payload: PinExchangePayload = {
-        message: totalChunks <= 1 ? message : '', // Include message if single chunk
+        contentType,
         transferId,
         senderPubkey: publicKey,
         totalChunks,
+        // For text, include message if single chunk
+        textMessage: contentType === 'text' && totalChunks <= 1 ? (content as string) : undefined,
+        // For file, include metadata
+        fileName: contentType === 'file' ? fileName : undefined,
+        fileSize: contentType === 'file' ? fileSize : undefined,
+        mimeType: contentType === 'file' ? mimeType : undefined,
       }
 
+      const encoder = new TextEncoder()
       const payloadBytes = encoder.encode(JSON.stringify(payload))
       const encryptedPayload = await encrypt(key, payloadBytes)
 
       // Publish PIN exchange event
-      setState({ status: 'waiting_for_receiver', message: 'Waiting for receiver...' })
+      setState({
+        status: 'waiting_for_receiver',
+        message: 'Waiting for receiver...',
+        contentType,
+        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+      })
       const pinExchangeEvent = createPinExchangeEvent(secretKey, encryptedPayload, salt, transferId, pinHint)
       await client.publish(pinExchangeEvent)
 
@@ -135,27 +172,29 @@ export function useNostrSend(): UseNostrSendReturn {
 
       if (cancelledRef.current) return
 
-      // If message fits in single chunk, we're done (it was in the PIN exchange payload)
-      if (totalChunks <= 1) {
-        // Wait for completion ACK
+      // If content fits in single chunk (text only), we're done
+      if (contentType === 'text' && totalChunks <= 1) {
         await waitForCompletionAck(client, transferId, publicKey, receiverPubkey)
-        setState({ status: 'complete', message: 'Message sent successfully!' })
+        setState({ status: 'complete', message: 'Message sent successfully!', contentType })
         return
       }
 
-      // Send chunks for larger messages
+      // Send chunks for larger content or files
+      const itemType = isFile ? 'file' : 'message'
       setState({
         status: 'transferring',
-        message: 'Sending message...',
+        message: `Sending ${itemType}...`,
         progress: { current: 0, total: totalChunks },
+        contentType,
+        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
       })
 
       for (let i = 0; i < totalChunks; i++) {
         if (cancelledRef.current) return
 
         const start = i * CHUNK_SIZE
-        const end = Math.min(start + CHUNK_SIZE, messageBytes.length)
-        const chunkData = messageBytes.slice(start, end)
+        const end = Math.min(start + CHUNK_SIZE, contentBytes.length)
+        const chunkData = contentBytes.slice(start, end)
 
         // Encrypt chunk with derived nonce
         const nonce = deriveChunkNonce(i + 1)
@@ -169,6 +208,8 @@ export function useNostrSend(): UseNostrSendReturn {
           status: 'transferring',
           message: `Sending chunk ${i + 1}/${totalChunks}...`,
           progress: { current: i + 1, total: totalChunks },
+          contentType,
+          fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
         })
 
         // Small delay between chunks
@@ -178,12 +219,13 @@ export function useNostrSend(): UseNostrSendReturn {
       // Wait for completion ACK
       await waitForCompletionAck(client, transferId, publicKey, receiverPubkey)
 
-      setState({ status: 'complete', message: 'Message sent successfully!' })
+      const successMsg = isFile ? 'File sent successfully!' : 'Message sent successfully!'
+      setState({ status: 'complete', message: successMsg, contentType })
     } catch (error) {
       if (!cancelledRef.current) {
         setState({
           status: 'error',
-          message: error instanceof Error ? error.message : 'Failed to send message',
+          message: error instanceof Error ? error.message : 'Failed to send',
         })
       }
     }

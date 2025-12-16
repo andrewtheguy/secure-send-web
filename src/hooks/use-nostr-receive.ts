@@ -13,6 +13,7 @@ import {
   createAckEvent,
   type TransferState,
   type PinExchangePayload,
+  type ReceivedContent,
   EVENT_KIND_PIN_EXCHANGE,
   EVENT_KIND_DATA_TRANSFER,
   type NostrClient,
@@ -20,7 +21,7 @@ import {
 
 export interface UseNostrReceiveReturn {
   state: TransferState
-  receivedMessage: string | null
+  receivedContent: ReceivedContent | null
   receive: (pin: string) => Promise<void>
   cancel: () => void
   reset: () => void
@@ -28,7 +29,7 @@ export interface UseNostrReceiveReturn {
 
 export function useNostrReceive(): UseNostrReceiveReturn {
   const [state, setState] = useState<TransferState>({ status: 'idle' })
-  const [receivedMessage, setReceivedMessage] = useState<string | null>(null)
+  const [receivedContent, setReceivedContent] = useState<ReceivedContent | null>(null)
 
   const clientRef = useRef<NostrClient | null>(null)
   const cancelledRef = useRef(false)
@@ -44,12 +45,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
   const reset = useCallback(() => {
     cancel()
-    setReceivedMessage(null)
+    setReceivedContent(null)
   }, [cancel])
 
   const receive = useCallback(async (pin: string) => {
     cancelledRef.current = false
-    setReceivedMessage(null)
+    setReceivedContent(null)
 
     // Validate PIN
     if (!isValidPin(pin)) {
@@ -128,6 +129,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       if (cancelledRef.current) return
 
+      const isFile = payload.contentType === 'file'
+      const itemType = isFile ? 'file' : 'message'
+
       // Generate receiver keypair
       const { secretKey } = generateEphemeralKeys()
 
@@ -137,22 +141,33 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       if (cancelledRef.current) return
 
-      // If message was in PIN exchange payload (single chunk)
-      if (payload.message && payload.totalChunks <= 1) {
+      // If text message was in PIN exchange payload (single chunk)
+      if (payload.contentType === 'text' && payload.textMessage && payload.totalChunks <= 1) {
         // Send completion ACK
         const completeAck = createAckEvent(secretKey, senderPubkey, transferId, -1)
         await client.publish(completeAck)
 
-        setReceivedMessage(payload.message)
-        setState({ status: 'complete', message: 'Message received!' })
+        setReceivedContent({
+          contentType: 'text',
+          message: payload.textMessage,
+        })
+        setState({ status: 'complete', message: 'Message received!', contentType: 'text' })
         return
       }
 
-      // Receive chunks for larger messages
+      // Receive chunks for larger content or files
       setState({
         status: 'receiving',
-        message: 'Receiving message...',
+        message: `Receiving ${itemType}...`,
         progress: { current: 0, total: payload.totalChunks },
+        contentType: payload.contentType,
+        fileMetadata: isFile
+          ? {
+              fileName: payload.fileName!,
+              fileSize: payload.fileSize!,
+              mimeType: payload.mimeType!,
+            }
+          : undefined,
       })
 
       const chunks: Map<number, Uint8Array> = new Map()
@@ -192,6 +207,14 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 status: 'receiving',
                 message: `Receiving chunk ${chunks.size}/${totalChunks}...`,
                 progress: { current: chunks.size, total: totalChunks },
+                contentType: payload!.contentType,
+                fileMetadata: isFile
+                  ? {
+                      fileName: payload!.fileName!,
+                      fileSize: payload!.fileSize!,
+                      mimeType: payload!.mimeType!,
+                    }
+                  : undefined,
               })
 
               // Check if we have all chunks
@@ -209,7 +232,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       if (cancelledRef.current) return
 
-      // Reassemble message
+      // Reassemble content
       const sortedChunks = Array.from(chunks.entries())
         .sort((a, b) => a[0] - b[0])
         .map(([_, data]) => data)
@@ -222,24 +245,47 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         offset += chunk.length
       }
 
-      const decoder = new TextDecoder()
-      const message = decoder.decode(combined)
-
       // Send completion ACK
       const completeAck = createAckEvent(secretKey, senderPubkey, transferId, -1)
       await client.publish(completeAck)
 
-      setReceivedMessage(message)
-      setState({ status: 'complete', message: 'Message received!' })
+      // Set received content based on type
+      if (payload.contentType === 'file') {
+        setReceivedContent({
+          contentType: 'file',
+          data: combined,
+          fileName: payload.fileName!,
+          fileSize: payload.fileSize!,
+          mimeType: payload.mimeType!,
+        })
+        setState({
+          status: 'complete',
+          message: 'File received!',
+          contentType: 'file',
+          fileMetadata: {
+            fileName: payload.fileName!,
+            fileSize: payload.fileSize!,
+            mimeType: payload.mimeType!,
+          },
+        })
+      } else {
+        const decoder = new TextDecoder()
+        const message = decoder.decode(combined)
+        setReceivedContent({
+          contentType: 'text',
+          message,
+        })
+        setState({ status: 'complete', message: 'Message received!', contentType: 'text' })
+      }
     } catch (error) {
       if (!cancelledRef.current) {
         setState({
           status: 'error',
-          message: error instanceof Error ? error.message : 'Failed to receive message',
+          message: error instanceof Error ? error.message : 'Failed to receive',
         })
       }
     }
   }, [])
 
-  return { state, receivedMessage, receive, cancel, reset }
+  return { state, receivedContent, receive, cancel, reset }
 }

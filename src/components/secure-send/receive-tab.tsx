@@ -1,16 +1,17 @@
 import { useState } from 'react'
-import { Download, X, RotateCcw, Check, Copy } from 'lucide-react'
+import { Download, X, RotateCcw, Check, Copy, FileDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { PinInput } from './pin-input'
 import { TransferStatus } from './transfer-status'
 import { useNostrReceive } from '@/hooks/use-nostr-receive'
 import { PIN_LENGTH } from '@/lib/crypto'
+import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
 
 export function ReceiveTab() {
   const [pin, setPin] = useState('')
   const [copied, setCopied] = useState(false)
-  const { state, receivedMessage, receive, cancel, reset } = useNostrReceive()
+  const { state, receivedContent, receive, cancel, reset } = useNostrReceive()
 
   const canReceive = pin.length === PIN_LENGTH && state.status === 'idle'
 
@@ -27,10 +28,16 @@ export function ReceiveTab() {
   }
 
   const handleCopy = async () => {
-    if (receivedMessage) {
-      await navigator.clipboard.writeText(receivedMessage)
+    if (receivedContent?.contentType === 'text') {
+      await navigator.clipboard.writeText(receivedContent.message)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  const handleDownload = () => {
+    if (receivedContent?.contentType === 'file') {
+      downloadFile(receivedContent.data, receivedContent.fileName, receivedContent.mimeType)
     }
   }
 
@@ -47,14 +54,14 @@ export function ReceiveTab() {
 
           <Button onClick={handleReceive} disabled={!canReceive} className="w-full">
             <Download className="mr-2 h-4 w-4" />
-            Receive Message
+            Receive
           </Button>
         </>
       ) : (
         <>
           <TransferStatus state={state} />
 
-          {state.status === 'complete' && receivedMessage && (
+          {state.status === 'complete' && receivedContent?.contentType === 'text' && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">Received Message</label>
@@ -73,10 +80,31 @@ export function ReceiveTab() {
                 </Button>
               </div>
               <Textarea
-                value={receivedMessage}
+                value={receivedContent.message}
                 readOnly
                 className="min-h-[200px] font-mono bg-muted"
               />
+            </div>
+          )}
+
+          {state.status === 'complete' && receivedContent?.contentType === 'file' && (
+            <div className="space-y-4">
+              <div className="p-6 border rounded-lg bg-muted/50 text-center space-y-3">
+                <FileDown className="h-12 w-12 mx-auto text-muted-foreground" />
+                <div>
+                  <p className="font-medium truncate max-w-[300px] mx-auto">
+                    {receivedContent.fileName}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {formatFileSize(receivedContent.fileSize)} &bull;{' '}
+                    {getMimeTypeDescription(receivedContent.mimeType)}
+                  </p>
+                </div>
+                <Button onClick={handleDownload} className="w-full max-w-[200px]">
+                  <Download className="mr-2 h-4 w-4" />
+                  Download File
+                </Button>
+              </div>
             </div>
           )}
 
