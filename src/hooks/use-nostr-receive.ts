@@ -186,8 +186,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       const { secretKey } = generateEphemeralKeys()
 
       // Send ready ACK (seq=0) on seed relays
+      console.log(`Sending ready ACK (seq=0) for transfer ${transferId}`)
       const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0)
       await publishWithBackup(client, readyAck)
+      console.log(`✓ Ready ACK sent successfully`)
 
       if (cancelledRef.current) return
 
@@ -205,8 +207,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // If text message was in PIN exchange payload (single chunk)
       if (payload.contentType === 'text' && payload.textMessage && payload.totalChunks <= 1) {
         // Send completion ACK
+        console.log(`Sending completion ACK (seq=-1) for single-chunk transfer ${transferId}`)
         const completeAck = createAckEvent(secretKey, senderPubkey, transferId, -1)
         await publishWithBackup(client, completeAck)
+        console.log(`✓ Completion ACK sent successfully`)
 
         setReceivedContent({
           contentType: 'text',
@@ -260,10 +264,18 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         lastAckedSeq = seq
 
         // Send ACK immediately
+        console.log(`Sending ACK for chunk ${seq}`)
         const ackEvent = createAckEvent(secretKey, senderPubkey!, transferId!, seq)
-        await publishWithBackup(client, ackEvent)
+        try {
+          await publishWithBackup(client, ackEvent)
+          console.log(`✓ ACK sent for chunk ${seq}`)
+        } catch (err) {
+          console.error(`✗ Failed to send initial ACK for chunk ${seq}:`, err)
+          // Continue - interval will retry
+        }
 
         // Keep sending ACK every 2 seconds until stopped
+        let consecutiveFailures = 0
         ackIntervalId = setInterval(async () => {
           if (cancelledRef.current) {
             if (ackIntervalId) clearInterval(ackIntervalId)
@@ -272,9 +284,16 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           try {
             const ackEvent = createAckEvent(secretKey, senderPubkey!, transferId!, lastAckedSeq)
             await publishWithBackup(client, ackEvent)
+            console.log(`✓ ACK resent for chunk ${lastAckedSeq}`)
+            consecutiveFailures = 0 // Reset on success
           } catch (err) {
-            console.error('Failed to publish ACK in interval:', err)
+            consecutiveFailures++
+            console.error(`✗ Failed to publish ACK for chunk ${lastAckedSeq} (failure ${consecutiveFailures}):`, err)
             // Don't clear interval - transient network issues may resolve
+            // But warn if failures persist
+            if (consecutiveFailures >= 5) {
+              console.warn(`⚠️ ${consecutiveFailures} consecutive ACK send failures for chunk ${lastAckedSeq}`)
+            }
           }
         }, 2000)
       }
@@ -521,8 +540,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       if (webRTCSuccess && webRTCResult) {
         // Skip chunk validation and reassembly
         // Send final ACK via relay just in case (already sent via WebRTC but backup is good)
+        console.log(`Sending completion ACK (seq=-1) after WebRTC transfer ${transferId}`)
         const completeAck = createAckEvent(secretKey, senderPubkey!, transferId!, -1)
         await publishWithBackup(client, completeAck)
+        console.log(`✓ Completion ACK sent successfully`)
 
         if (payload.contentType === 'file') {
           setReceivedContent({
@@ -576,8 +597,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       }
 
       // Send completion ACK
+      console.log(`Sending completion ACK (seq=-1) after relay transfer ${transferId}`)
       const completeAck = createAckEvent(secretKey, senderPubkey, transferId, -1)
       await publishWithBackup(client, completeAck)
+      console.log(`✓ Completion ACK sent successfully`)
 
       // Set received content based on type
       if (payload.contentType === 'file') {

@@ -440,6 +440,7 @@ export function useNostrSend(): UseNostrSendReturn {
 
           try {
             await client.publish(chunkEvent)
+            console.log(`✓ Chunk ${i} published successfully`)
 
             // Update chunk state to sent
             chunkStates.set(i, { seq: i, status: 'sent', retries: retryCount, timestamp: Date.now() })
@@ -460,10 +461,11 @@ export function useNostrSend(): UseNostrSendReturn {
 
             if (!ackReceived) {
               retryCount++
-              console.log(`No ACK for chunk ${i}, retrying (${retryCount}/${maxRetries})`)
+              console.log(`✗ No ACK for chunk ${i}, retrying (${retryCount}/${maxRetries})`)
               await new Promise(resolve => setTimeout(resolve, RETRY_PAUSE_MS))
             } else {
               // Mark chunk as acked
+              console.log(`✓ ACK received for chunk ${i}`)
               chunkStates.set(i, { seq: i, status: 'acked', retries: retryCount, timestamp: Date.now() })
             }
           } catch (publishError) {
@@ -506,6 +508,7 @@ export function useNostrSend(): UseNostrSendReturn {
 
               try {
                 await client.publish(chunkEvent)
+                console.log(`✓ Chunk ${i} published via backup relays`)
 
                 // Update chunk state to sent
                 chunkStates.set(i, { seq: i, status: 'sent', retries: retryCount, timestamp: Date.now() })
@@ -523,10 +526,11 @@ export function useNostrSend(): UseNostrSendReturn {
 
                 if (!ackReceived) {
                   retryCount++
-                  console.log(`No ACK for chunk ${i} via backup relays, retrying (${retryCount}/${maxRetries})`)
+                  console.log(`✗ No ACK for chunk ${i} via backup relays, retrying (${retryCount}/${maxRetries})`)
                   await new Promise(resolve => setTimeout(resolve, RETRY_PAUSE_MS))
                 } else {
                   // Mark chunk as acked
+                  console.log(`✓ ACK received for chunk ${i} via backup relays`)
                   chunkStates.set(i, { seq: i, status: 'acked', retries: retryCount, timestamp: Date.now() })
                 }
               } catch (publishError) {
