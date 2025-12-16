@@ -38,17 +38,26 @@ export function useNostrSend(): UseNostrSendReturn {
   const clientRef = useRef<NostrClient | null>(null)
   const cancelledRef = useRef(false)
   const sendingRef = useRef(false)
+  const expirationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearExpirationTimeout = useCallback(() => {
+    if (expirationTimeoutRef.current) {
+      clearTimeout(expirationTimeoutRef.current)
+      expirationTimeoutRef.current = null
+    }
+  }, [])
 
   const cancel = useCallback(() => {
     cancelledRef.current = true
     sendingRef.current = false
+    clearExpirationTimeout()
     if (clientRef.current) {
       clientRef.current.close()
       clientRef.current = null
     }
     setPin(null)
     setState({ status: 'idle' })
-  }, [])
+  }, [clearExpirationTimeout])
 
   const send = useCallback(async (content: string | File) => {
     // Guard against concurrent invocations
@@ -92,6 +101,22 @@ export function useNostrSend(): UseNostrSendReturn {
       const newPin = generatePin()
       const sessionStartTime = Date.now() // Track session start for TTL enforcement
       setPin(newPin)
+
+      // Best-effort cleanup: clear PIN state after expiration
+      // Only clears if still waiting for receiver (not actively transferring)
+      clearExpirationTimeout()
+      expirationTimeoutRef.current = setTimeout(() => {
+        // Only clear if we're still in waiting state and not cancelled
+        if (!cancelledRef.current && sendingRef.current) {
+          setPin(null)
+          setState({ status: 'error', message: 'Session expired. Please try again.' })
+          sendingRef.current = false
+          if (clientRef.current) {
+            clientRef.current.close()
+            clientRef.current = null
+          }
+        }
+      }, TRANSFER_EXPIRATION_MS)
 
       const [pinHint, salt] = await Promise.all([computePinHint(newPin), Promise.resolve(generateSalt())])
       const key = await deriveKeyFromPin(newPin, salt)
@@ -243,13 +268,14 @@ export function useNostrSend(): UseNostrSendReturn {
       }
     } finally {
       // Always clean up resources and reset sending flag
+      clearExpirationTimeout()
       sendingRef.current = false
       if (clientRef.current) {
         clientRef.current.close()
         clientRef.current = null
       }
     }
-  }, [])
+  }, [clearExpirationTimeout])
 
   return { state, pin, send, cancel }
 }
