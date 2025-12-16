@@ -38,6 +38,7 @@ export function TransferStatus({ state, mode = 'send' }: TransferStatusProps) {
       : 0
 
   const showChunkDetails = state.chunks && state.chunks.size > 0 && !state.useWebRTC
+  const showRelays = state.currentRelays && state.currentRelays.length > 0 && !state.useWebRTC
 
   return (
     <div className="space-y-3">
@@ -50,6 +51,19 @@ export function TransferStatus({ state, mode = 'send' }: TransferStatusProps) {
           )}
         </AlertDescription>
       </Alert>
+
+      {showRelays && (
+        <div className="text-xs space-y-1">
+          <p className="font-medium text-muted-foreground">Active Relays:</p>
+          <ul className="space-y-0.5 pl-3">
+            {state.currentRelays!.map((relay, idx) => (
+              <li key={idx} className="text-muted-foreground truncate" title={relay}>
+                • {relay.replace('wss://', '')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {state.progress && state.progress.total > 1 && (
         <div className="space-y-1">

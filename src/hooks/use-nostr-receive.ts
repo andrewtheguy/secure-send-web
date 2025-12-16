@@ -244,6 +244,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           : undefined,
         chunks: chunkStates,
         useWebRTC: false,
+        currentRelays: client.getRelays(),
       })
 
       // WebRTC result flags (outer scope)
@@ -498,6 +499,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                   }
                   : undefined,
                 chunks: chunkStates,
+                currentRelays: client.getRelays(),
               })
 
               // Send ACK for this chunk (and keep sending until next arrives)

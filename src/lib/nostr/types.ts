@@ -45,6 +45,7 @@ export interface TransferState {
   fileMetadata?: FileMetadata
   chunks?: Map<number, ChunkState>
   useWebRTC?: boolean
+  currentRelays?: string[] // Current relay URLs being used
 }
 
 // PIN Exchange payload (encrypted in the event)

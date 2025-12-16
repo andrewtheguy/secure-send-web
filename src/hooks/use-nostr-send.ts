@@ -219,6 +219,7 @@ export function useNostrSend(): UseNostrSendReturn {
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
         chunks: totalChunks > 1 ? chunkStates : undefined,
         useWebRTC: !options?.relayOnly,
+        currentRelays: client.getRelays(),
       })
       const pinExchangeEvent = createPinExchangeEvent(secretKey, encryptedPayload, salt, transferId, pinHint)
       await publishWithBackup(client, pinExchangeEvent)
@@ -454,6 +455,7 @@ export function useNostrSend(): UseNostrSendReturn {
               contentType,
               fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
               chunks: chunkStates,
+              currentRelays: client.getRelays(),
             })
 
             // Wait for ACK with timeout
@@ -489,6 +491,7 @@ export function useNostrSend(): UseNostrSendReturn {
             contentType,
             fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
             chunks: chunkStates,
+            currentRelays: client.getRelays(),
           })
 
           const currentRelays = client.getRelays()
@@ -520,6 +523,7 @@ export function useNostrSend(): UseNostrSendReturn {
                   contentType,
                   fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
                   chunks: chunkStates,
+                  currentRelays: client.getRelays(),
                 })
 
                 ackReceived = await waitForChunkAck(client, transferId, publicKey, receiverPubkey, i, () => cancelledRef.current, 10000)
