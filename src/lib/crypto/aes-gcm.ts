@@ -1,4 +1,7 @@
-import { AES_NONCE_LENGTH } from './constants'
+import { AES_NONCE_LENGTH, AES_TAG_LENGTH } from './constants'
+
+// Minimum encrypted data length: nonce + tag (ciphertext can be empty for empty plaintext)
+const MIN_ENCRYPTED_LENGTH = AES_NONCE_LENGTH + AES_TAG_LENGTH
 
 /**
  * Generate random nonce for AES-GCM
@@ -40,16 +43,12 @@ export async function encrypt(
  * Input: nonce (12 bytes) || ciphertext || tag (16 bytes)
  */
 export async function decrypt(key: CryptoKey, encrypted: Uint8Array): Promise<Uint8Array> {
-  if (encrypted.length < AES_NONCE_LENGTH) {
-    throw new Error(`Encrypted data too short: expected at least ${AES_NONCE_LENGTH} bytes`)
+  if (encrypted.length < MIN_ENCRYPTED_LENGTH) {
+    throw new Error(`Encrypted data too short: expected at least ${MIN_ENCRYPTED_LENGTH} bytes (nonce + tag)`)
   }
 
   const nonce = encrypted.slice(0, AES_NONCE_LENGTH)
   const ciphertext = encrypted.slice(AES_NONCE_LENGTH)
-
-  if (ciphertext.length === 0) {
-    throw new Error('Encrypted data contains no ciphertext')
-  }
 
   const plaintext = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: nonce as BufferSource },

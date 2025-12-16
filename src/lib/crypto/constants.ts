@@ -7,9 +7,9 @@ export const PBKDF2_ITERATIONS = 600_000
 export const PBKDF2_HASH = 'SHA-256'
 
 // AES-GCM parameters
-export const AES_KEY_LENGTH = 256
-export const AES_NONCE_LENGTH = 12 // 96 bits
-export const AES_TAG_LENGTH = 128 // bits
+export const AES_KEY_LENGTH = 256 // bits
+export const AES_NONCE_LENGTH = 12 // bytes (96 bits)
+export const AES_TAG_LENGTH = 16 // bytes (128 bits)
 
 // Salt length
 export const SALT_LENGTH = 16
