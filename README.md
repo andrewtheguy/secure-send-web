@@ -2,6 +2,8 @@
 
 A web application for sending encrypted text messages and files using PIN-based encryption. Uses WebRTC for direct P2P connections with automatic fallback to Nostr relays.
 
+**Demo:** [https://secure-send-web.andrewtheguy.com/](https://secure-send-web.andrewtheguy.com/)
+
 ## Features
 
 - **PIN-based encryption**: Content is encrypted with AES-256-GCM using a key derived from a 12-character PIN

@@ -54,10 +54,10 @@ export function PinDisplay({ pin }: PinDisplayProps) {
   }, [pin])
 
   return (
-    <div className="flex flex-col items-center gap-4 p-6 rounded-lg bg-muted">
-      <p className="text-sm text-muted-foreground">Share this PIN with the receiver:</p>
-      <div className="flex items-center gap-3">
-        <code className="text-3xl font-mono font-bold tracking-wider px-4 py-2 bg-background rounded-md border">
+    <div className="flex flex-col items-center gap-2 sm:gap-4 p-4 sm:p-6 rounded-lg bg-muted">
+      <p className="text-sm text-muted-foreground text-center">Share this PIN with the receiver:</p>
+      <div className="flex items-center gap-2 sm:gap-3">
+        <code className="text-xl sm:text-3xl font-mono font-bold tracking-wider px-3 py-1 sm:px-4 sm:py-2 bg-background rounded-md border">
           {pin}
         </code>
         <Button variant="outline" size="icon" onClick={handleCopy}>
