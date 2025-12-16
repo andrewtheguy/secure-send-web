@@ -71,8 +71,8 @@ export function PinDisplay({ pin }: PinDisplayProps) {
         </Button>
       </div>
       <p className="text-xs text-muted-foreground text-center max-w-xs">
-        The receiver will need this PIN to decrypt the message. Share it securely via another channel
-        (voice, chat, etc.)
+        The receiver will need this PIN to decrypt the message. PIN is case sensitive. Share it
+        securely via another channel (voice, chat, etc.)
       </p>
     </div>
   )

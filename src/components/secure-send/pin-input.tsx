@@ -72,7 +72,7 @@ export function PinInput({ value, onChange, disabled }: PinInputProps) {
       />
       <div className="flex justify-between text-xs">
         <span className={error ? 'text-destructive' : 'text-muted-foreground'}>
-          {error || `${value.length}/${PIN_LENGTH} characters`}
+          {error || `${value.length}/${PIN_LENGTH} characters (case sensitive)`}
         </span>
         {isComplete && <span className="text-green-500">PIN ready</span>}
       </div>
