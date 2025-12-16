@@ -94,6 +94,9 @@ async function discoverRelaysFromSeeds(seedRelays: string[]): Promise<string[]> 
   const discovered = new Set<string>()
   const pool = new SimplePool()
 
+  // Check if we're running on HTTPS
+  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+
   try {
     const events = await pool.querySync(seedRelays, {
       kinds: [KIND_NIP65_RELAY_LIST, KIND_NIP66_RELAY_DISCOVERY],
@@ -104,7 +107,11 @@ async function discoverRelaysFromSeeds(seedRelays: string[]): Promise<string[]> 
       for (const tag of event.tags) {
         if ((tag[0] === 'r' || tag[0] === 'd') && tag[1]) {
           const url = normalizeRelayUrl(tag[1])
-          if (url.startsWith('wss://') || url.startsWith('ws://')) {
+          // Only accept secure WebSocket (wss://) when running on HTTPS
+          if (url.startsWith('wss://')) {
+            discovered.add(url)
+          } else if (!isHttps && url.startsWith('ws://')) {
+            // Only allow insecure ws:// when not on HTTPS
             discovered.add(url)
           }
         }
@@ -123,13 +130,23 @@ async function fetchRelayInfo(relayUrl: string): Promise<RelayCapabilities | nul
   const httpUrl = relayUrl.replace('wss://', 'https://').replace('ws://', 'http://')
 
   try {
+    // Create AbortController for timeout (better compatibility than AbortSignal.timeout)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
+
     const response = await fetch(httpUrl, {
       headers: { 'Accept': 'application/nostr+json' },
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS)
+      signal: controller.signal
     })
+
+    clearTimeout(timeoutId)
+
     if (!response.ok) return null
-    return await response.json()
-  } catch {
+
+    const data = await response.json()
+    return data
+  } catch (err) {
+    // Silently return null for failed probes (expected for many relays)
     return null
   }
 }
@@ -148,23 +165,51 @@ async function testRelayLatency(relayUrl: string): Promise<number | null> {
   const start = performance.now()
 
   return new Promise((resolve) => {
+    let ws: WebSocket | null = null
+    let resolved = false
+
     const timeout = setTimeout(() => {
-      ws.close()
-      resolve(null)
+      if (!resolved) {
+        resolved = true
+        if (ws) ws.close()
+        resolve(null)
+      }
     }, PROBE_TIMEOUT_MS)
 
-    const ws = new WebSocket(relayUrl)
+    try {
+      ws = new WebSocket(relayUrl)
 
-    ws.onopen = () => {
-      clearTimeout(timeout)
-      const latency = performance.now() - start
-      ws.close()
-      resolve(latency)
-    }
+      ws.onopen = () => {
+        if (!resolved) {
+          resolved = true
+          clearTimeout(timeout)
+          const latency = performance.now() - start
+          if (ws) ws.close()
+          resolve(latency)
+        }
+      }
 
-    ws.onerror = () => {
-      clearTimeout(timeout)
-      resolve(null)
+      ws.onerror = () => {
+        if (!resolved) {
+          resolved = true
+          clearTimeout(timeout)
+          resolve(null)
+        }
+      }
+
+      ws.onclose = () => {
+        if (!resolved) {
+          resolved = true
+          clearTimeout(timeout)
+          resolve(null)
+        }
+      }
+    } catch (err) {
+      if (!resolved) {
+        resolved = true
+        clearTimeout(timeout)
+        resolve(null)
+      }
     }
   })
 }
@@ -203,15 +248,21 @@ export async function discoverBestRelays(
   // 3. Probe all relays in parallel
   const probeResults = await Promise.all(
     relaysToProbe.map(async (url): Promise<RelayInfo | null> => {
-      const info = await fetchRelayInfo(url)
-      if (info && !isRelaySuitable(info)) {
+      try {
+        const info = await fetchRelayInfo(url)
+        if (info && !isRelaySuitable(info)) {
+          return null
+        }
+
+        const latency = await testRelayLatency(url)
+        if (latency === null) return null
+
+        return { url, latency, supported: true }
+      } catch (err) {
+        // Catch any unexpected errors to prevent Promise.all from failing
+        console.warn(`Probe failed for ${url}:`, err)
         return null
       }
-
-      const latency = await testRelayLatency(url)
-      if (latency === null) return null
-
-      return { url, latency, supported: true }
     })
   )
 
@@ -263,15 +314,21 @@ export async function discoverBackupRelays(
   // Probe candidates in parallel
   const probeResults = await Promise.all(
     candidates.slice(0, MAX_RELAYS_TO_PROBE).map(async (url): Promise<RelayInfo | null> => {
-      const info = await fetchRelayInfo(url)
-      if (info && !isRelaySuitable(info)) {
+      try {
+        const info = await fetchRelayInfo(url)
+        if (info && !isRelaySuitable(info)) {
+          return null
+        }
+
+        const latency = await testRelayLatency(url)
+        if (latency === null) return null
+
+        return { url, latency, supported: true }
+      } catch (err) {
+        // Catch any unexpected errors to prevent Promise.all from failing
+        console.warn(`Backup probe failed for ${url}:`, err)
         return null
       }
-
-      const latency = await testRelayLatency(url)
-      if (latency === null) return null
-
-      return { url, latency, supported: true }
     })
   )
 

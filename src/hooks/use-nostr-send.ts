@@ -438,38 +438,59 @@ export function useNostrSend(): UseNostrSendReturn {
           // Update chunk state to sending
           chunkStates.set(i, { seq: i, status: 'sending', retries: retryCount, timestamp: Date.now() })
 
-          await client.publish(chunkEvent)
+          try {
+            await client.publish(chunkEvent)
+            console.log(`✓ Chunk ${i} published successfully`)
 
-          // Update chunk state to sent
-          chunkStates.set(i, { seq: i, status: 'sent', retries: retryCount, timestamp: Date.now() })
+            // Update chunk state to sent
+            chunkStates.set(i, { seq: i, status: 'sent', retries: retryCount, timestamp: Date.now() })
 
-          setState({
-            status: 'transferring',
-            message: retryCount > 0
-              ? `Resending chunk ${i + 1}/${totalChunks} (attempt ${retryCount + 1})...`
-              : `Sending chunk ${i + 1}/${totalChunks}...`,
-            progress: { current: i + 1, total: totalChunks },
-            contentType,
-            fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
-            chunks: chunkStates,
-          })
+            setState({
+              status: 'transferring',
+              message: retryCount > 0
+                ? `Resending chunk ${i + 1}/${totalChunks} (attempt ${retryCount + 1})...`
+                : `Sending chunk ${i + 1}/${totalChunks}...`,
+              progress: { current: i + 1, total: totalChunks },
+              contentType,
+              fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+              chunks: chunkStates,
+            })
 
-          // Wait for ACK with timeout
-          ackReceived = await waitForChunkAck(client, transferId, publicKey, receiverPubkey, i, () => cancelledRef.current, 10000)
+            // Wait for ACK with timeout
+            ackReceived = await waitForChunkAck(client, transferId, publicKey, receiverPubkey, i, () => cancelledRef.current, 10000)
 
-          if (!ackReceived) {
+            if (!ackReceived) {
+              retryCount++
+              console.log(`✗ No ACK for chunk ${i}, retrying (${retryCount}/${maxRetries})`)
+              await new Promise(resolve => setTimeout(resolve, RETRY_PAUSE_MS))
+            } else {
+              // Mark chunk as acked
+              console.log(`✓ ACK received for chunk ${i}`)
+              chunkStates.set(i, { seq: i, status: 'acked', retries: retryCount, timestamp: Date.now() })
+            }
+          } catch (publishError) {
+            // Publish failed - will trigger backup relay discovery below
+            console.error(`Failed to publish chunk ${i}:`, publishError)
             retryCount++
-            console.log(`No ACK for chunk ${i}, retrying (${retryCount}/${maxRetries})`)
-            await new Promise(resolve => setTimeout(resolve, RETRY_PAUSE_MS))
-          } else {
-            // Mark chunk as acked
-            chunkStates.set(i, { seq: i, status: 'acked', retries: retryCount, timestamp: Date.now() })
+            if (retryCount < maxRetries) {
+              await new Promise(resolve => setTimeout(resolve, RETRY_PAUSE_MS))
+            }
           }
         }
 
         // If still no ACK after 3 attempts, try backup relays
         if (!ackReceived && !usedBackupRelays) {
           console.log(`Chunk ${i} failed after ${maxRetries} attempts, discovering backup relays...`)
+
+          setState({
+            status: 'transferring',
+            message: `Chunk ${i + 1}/${totalChunks} failed, discovering backup relays...`,
+            progress: { current: i + 1, total: totalChunks },
+            contentType,
+            fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+            chunks: chunkStates,
+          })
+
           const currentRelays = client.getRelays()
           const backupRelays = await discoverBackupRelays(currentRelays, 5)
 
@@ -485,29 +506,40 @@ export function useNostrSend(): UseNostrSendReturn {
               // Update chunk state to sending
               chunkStates.set(i, { seq: i, status: 'sending', retries: retryCount, timestamp: Date.now() })
 
-              await client.publish(chunkEvent)
+              try {
+                await client.publish(chunkEvent)
+                console.log(`✓ Chunk ${i} published via backup relays`)
 
-              // Update chunk state to sent
-              chunkStates.set(i, { seq: i, status: 'sent', retries: retryCount, timestamp: Date.now() })
+                // Update chunk state to sent
+                chunkStates.set(i, { seq: i, status: 'sent', retries: retryCount, timestamp: Date.now() })
 
-              setState({
-                status: 'transferring',
-                message: `Resending chunk ${i + 1}/${totalChunks} via backup relays (attempt ${retryCount + 1})...`,
-                progress: { current: i + 1, total: totalChunks },
-                contentType,
-                fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
-                chunks: chunkStates,
-              })
+                setState({
+                  status: 'transferring',
+                  message: `Resending chunk ${i + 1}/${totalChunks} via backup relays (attempt ${retryCount + 1})...`,
+                  progress: { current: i + 1, total: totalChunks },
+                  contentType,
+                  fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+                  chunks: chunkStates,
+                })
 
-              ackReceived = await waitForChunkAck(client, transferId, publicKey, receiverPubkey, i, () => cancelledRef.current, 10000)
+                ackReceived = await waitForChunkAck(client, transferId, publicKey, receiverPubkey, i, () => cancelledRef.current, 10000)
 
-              if (!ackReceived) {
+                if (!ackReceived) {
+                  retryCount++
+                  console.log(`✗ No ACK for chunk ${i} via backup relays, retrying (${retryCount}/${maxRetries})`)
+                  await new Promise(resolve => setTimeout(resolve, RETRY_PAUSE_MS))
+                } else {
+                  // Mark chunk as acked
+                  console.log(`✓ ACK received for chunk ${i} via backup relays`)
+                  chunkStates.set(i, { seq: i, status: 'acked', retries: retryCount, timestamp: Date.now() })
+                }
+              } catch (publishError) {
+                // Publish failed even on backup relays
+                console.error(`Failed to publish chunk ${i} via backup relays:`, publishError)
                 retryCount++
-                console.log(`No ACK for chunk ${i} via backup relays, retrying (${retryCount}/${maxRetries})`)
-                await new Promise(resolve => setTimeout(resolve, RETRY_PAUSE_MS))
-              } else {
-                // Mark chunk as acked
-                chunkStates.set(i, { seq: i, status: 'acked', retries: retryCount, timestamp: Date.now() })
+                if (retryCount < maxRetries) {
+                  await new Promise(resolve => setTimeout(resolve, RETRY_PAUSE_MS))
+                }
               }
             }
           }
@@ -546,10 +578,11 @@ export function useNostrSend(): UseNostrSendReturn {
     } catch (error) {
       if (!cancelledRef.current) {
         setPin(null)
-        setState({
+        setState(prevState => ({
+          ...prevState,
           status: 'error',
           message: error instanceof Error ? error.message : 'Failed to send',
-        })
+        }))
       }
     } finally {
       // Always clean up resources and reset sending flag
@@ -578,9 +611,40 @@ async function waitForChunkAck(
   isCancelled: () => boolean,
   timeoutMs: number = 30000
 ): Promise<boolean> {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     let resolved = false
 
+    // First, query for existing ACK in case it was sent before subscription was created
+    try {
+      const existingEvents = await client.query([
+        {
+          kinds: [EVENT_KIND_DATA_TRANSFER],
+          '#t': [transferId],
+          '#p': [senderPubkey],
+          authors: [receiverPubkey],
+          limit: 50, // Check recent ACKs
+        },
+      ])
+
+      for (const event of existingEvents) {
+        const ack = parseAckEvent(event)
+        if (ack && ack.transferId === transferId && ack.seq === expectedSeq) {
+          // Found the ACK in query results
+          resolve(true)
+          return
+        }
+      }
+    } catch (err) {
+      console.error('Failed to query for existing ACK:', err)
+      // Continue to subscription even if query fails
+    }
+
+    if (isCancelled()) {
+      resolve(false)
+      return
+    }
+
+    // ACK not found in query, set up subscription to wait for it
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true
