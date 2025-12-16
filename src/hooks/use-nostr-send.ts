@@ -292,12 +292,13 @@ export function useNostrSend(): UseNostrSendReturn {
         // Send chunk and wait for ACK, resending if no ACK received
         let ackReceived = false
         let retryCount = 0
-        const maxRetries = 10
+        const maxRetries = 3
+        let usedBackupRelays = false
 
         while (!ackReceived && retryCount < maxRetries) {
           if (cancelledRef.current) return
 
-          await publishWithBackup(client, chunkEvent)
+          await client.publish(chunkEvent)
 
           setState({
             status: 'transferring',
@@ -319,8 +320,44 @@ export function useNostrSend(): UseNostrSendReturn {
           }
         }
 
+        // If still no ACK after 3 attempts, try backup relays
+        if (!ackReceived && !usedBackupRelays) {
+          console.log(`Chunk ${i} failed after ${maxRetries} attempts, discovering backup relays...`)
+          const currentRelays = client.getRelays()
+          const backupRelays = await discoverBackupRelays(currentRelays, 5)
+
+          if (backupRelays.length > 0) {
+            await client.addRelays(backupRelays)
+            usedBackupRelays = true
+            retryCount = 0
+
+            // Retry with backup relays
+            while (!ackReceived && retryCount < maxRetries) {
+              if (cancelledRef.current) return
+
+              await client.publish(chunkEvent)
+
+              setState({
+                status: 'transferring',
+                message: `Resending chunk ${i + 1}/${totalChunks} via backup relays (attempt ${retryCount + 1})...`,
+                progress: { current: i + 1, total: totalChunks },
+                contentType,
+                fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+              })
+
+              ackReceived = await waitForChunkAck(client, transferId, publicKey, receiverPubkey, i, () => cancelledRef.current, 10000)
+
+              if (!ackReceived) {
+                retryCount++
+                console.log(`No ACK for chunk ${i} via backup relays, retrying (${retryCount}/${maxRetries})`)
+                await new Promise(resolve => setTimeout(resolve, RETRY_PAUSE_MS))
+              }
+            }
+          }
+        }
+
         if (!ackReceived) {
-          throw new Error(`Failed to receive ACK for chunk ${i} after ${maxRetries} attempts`)
+          throw new Error(`Failed to receive ACK for chunk ${i} after ${maxRetries} attempts${usedBackupRelays ? ' (including backup relays)' : ''}`)
         }
 
         // Track bytes sent and pause every 512KB
