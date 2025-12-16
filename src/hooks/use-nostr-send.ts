@@ -37,9 +37,11 @@ export function useNostrSend(): UseNostrSendReturn {
 
   const clientRef = useRef<NostrClient | null>(null)
   const cancelledRef = useRef(false)
+  const sendingRef = useRef(false)
 
   const cancel = useCallback(() => {
     cancelledRef.current = true
+    sendingRef.current = false
     if (clientRef.current) {
       clientRef.current.close()
       clientRef.current = null
@@ -49,40 +51,42 @@ export function useNostrSend(): UseNostrSendReturn {
   }, [])
 
   const send = useCallback(async (content: string | File) => {
+    // Guard against concurrent invocations
+    if (sendingRef.current) return
+    sendingRef.current = true
     cancelledRef.current = false
 
     const isFile = content instanceof File
     const contentType: ContentType = isFile ? 'file' : 'text'
 
-    // Get content bytes
-    let contentBytes: Uint8Array
-    let fileName: string | undefined
-    let fileSize: number | undefined
-    let mimeType: string | undefined
-
-    if (isFile) {
-      fileName = content.name
-      fileSize = content.size
-      mimeType = content.type || 'application/octet-stream'
-
-      if (content.size > MAX_MESSAGE_SIZE) {
-        setState({ status: 'error', message: 'File exceeds 512KB limit' })
-        return
-      }
-
-      setState({ status: 'connecting', message: 'Reading file...' })
-      contentBytes = await readFileAsBytes(content)
-    } else {
-      const encoder = new TextEncoder()
-      contentBytes = encoder.encode(content)
-
-      if (contentBytes.length > MAX_MESSAGE_SIZE) {
-        setState({ status: 'error', message: 'Message exceeds 512KB limit' })
-        return
-      }
-    }
-
     try {
+      // Get content bytes
+      let contentBytes: Uint8Array
+      let fileName: string | undefined
+      let fileSize: number | undefined
+      let mimeType: string | undefined
+
+      if (isFile) {
+        fileName = content.name
+        fileSize = content.size
+        mimeType = content.type || 'application/octet-stream'
+
+        if (content.size > MAX_MESSAGE_SIZE) {
+          setState({ status: 'error', message: 'File exceeds 512KB limit' })
+          return
+        }
+
+        setState({ status: 'connecting', message: 'Reading file...' })
+        contentBytes = await readFileAsBytes(content)
+      } else {
+        const encoder = new TextEncoder()
+        contentBytes = encoder.encode(content)
+
+        if (contentBytes.length > MAX_MESSAGE_SIZE) {
+          setState({ status: 'error', message: 'Message exceeds 512KB limit' })
+          return
+        }
+      }
       // Generate PIN and derive key
       setState({ status: 'connecting', message: 'Generating secure PIN...' })
       const newPin = generatePin()
@@ -141,7 +145,10 @@ export function useNostrSend(): UseNostrSendReturn {
       const receiverPubkey = await new Promise<string>((resolve, reject) => {
         const timeout = setTimeout(() => {
           client.unsubscribe(subId)
-          reject(new Error('Timeout waiting for receiver'))
+          // Don't reject if already cancelled to avoid race condition
+          if (!cancelledRef.current) {
+            reject(new Error('Timeout waiting for receiver'))
+          }
         }, 60 * 60 * 1000) // 1 hour timeout
 
         const subId = client.subscribe(
@@ -174,7 +181,7 @@ export function useNostrSend(): UseNostrSendReturn {
 
       // If content fits in single chunk (text only), we're done
       if (contentType === 'text' && totalChunks <= 1) {
-        await waitForCompletionAck(client, transferId, publicKey, receiverPubkey)
+        await waitForCompletionAck(client, transferId, publicKey, receiverPubkey, () => cancelledRef.current)
         setState({ status: 'complete', message: 'Message sent successfully!', contentType })
         return
       }
@@ -217,16 +224,24 @@ export function useNostrSend(): UseNostrSendReturn {
       }
 
       // Wait for completion ACK
-      await waitForCompletionAck(client, transferId, publicKey, receiverPubkey)
+      await waitForCompletionAck(client, transferId, publicKey, receiverPubkey, () => cancelledRef.current)
 
       const successMsg = isFile ? 'File sent successfully!' : 'Message sent successfully!'
       setState({ status: 'complete', message: successMsg, contentType })
     } catch (error) {
       if (!cancelledRef.current) {
+        setPin(null)
         setState({
           status: 'error',
           message: error instanceof Error ? error.message : 'Failed to send',
         })
+      }
+    } finally {
+      // Always clean up resources and reset sending flag
+      sendingRef.current = false
+      if (clientRef.current) {
+        clientRef.current.close()
+        clientRef.current = null
       }
     }
   }, [])
@@ -238,12 +253,16 @@ async function waitForCompletionAck(
   client: NostrClient,
   transferId: string,
   senderPubkey: string,
-  receiverPubkey: string
+  receiverPubkey: string,
+  isCancelled: () => boolean
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       client.unsubscribe(subId)
-      reject(new Error('Timeout waiting for completion'))
+      // Don't reject if already cancelled to avoid race condition
+      if (!isCancelled()) {
+        reject(new Error('Timeout waiting for completion'))
+      }
     }, 60000) // 1 minute timeout for completion
 
     const subId = client.subscribe(
@@ -256,6 +275,12 @@ async function waitForCompletionAck(
         },
       ],
       (event) => {
+        if (isCancelled()) {
+          clearTimeout(timeout)
+          client.unsubscribe(subId)
+          return
+        }
+
         const ack = parseAckEvent(event)
         if (ack && ack.transferId === transferId && ack.seq === -1) {
           clearTimeout(timeout)

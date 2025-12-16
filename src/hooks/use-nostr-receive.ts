@@ -33,9 +33,11 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
   const clientRef = useRef<NostrClient | null>(null)
   const cancelledRef = useRef(false)
+  const receivingRef = useRef(false)
 
   const cancel = useCallback(() => {
     cancelledRef.current = true
+    receivingRef.current = false
     if (clientRef.current) {
       clientRef.current.close()
       clientRef.current = null
@@ -49,16 +51,18 @@ export function useNostrReceive(): UseNostrReceiveReturn {
   }, [cancel])
 
   const receive = useCallback(async (pin: string) => {
+    // Guard against concurrent invocations
+    if (receivingRef.current) return
+    receivingRef.current = true
     cancelledRef.current = false
     setReceivedContent(null)
 
-    // Validate PIN
-    if (!isValidPin(pin)) {
-      setState({ status: 'error', message: 'Invalid PIN format' })
-      return
-    }
-
     try {
+      // Validate PIN
+      if (!isValidPin(pin)) {
+        setState({ status: 'error', message: 'Invalid PIN format' })
+        return
+      }
       // Derive key from PIN
       setState({ status: 'connecting', message: 'Deriving encryption key...' })
 
@@ -176,7 +180,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           client.unsubscribe(subId)
-          reject(new Error('Timeout receiving chunks'))
+          // Don't reject if already cancelled to avoid race condition
+          if (!cancelledRef.current) {
+            reject(new Error('Timeout receiving chunks'))
+          }
         }, 5 * 60 * 1000) // 5 minute timeout
 
         const subId = client.subscribe(
@@ -283,6 +290,13 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           status: 'error',
           message: error instanceof Error ? error.message : 'Failed to receive',
         })
+      }
+    } finally {
+      // Always clean up resources and reset receiving flag
+      receivingRef.current = false
+      if (clientRef.current) {
+        clientRef.current.close()
+        clientRef.current = null
       }
     }
   }, [])
