@@ -24,6 +24,11 @@ import {
 } from '@/lib/nostr'
 import { readFileAsBytes } from '@/lib/file-utils'
 
+// Throttling constants
+const THROTTLE_BYTES = 512 * 1024  // 512KB
+const THROTTLE_PAUSE_MS = 2000     // 2 second pause after 512KB
+const RETRY_PAUSE_MS = 500         // 500ms pause after retry
+
 export interface UseNostrSendReturn {
   state: TransferState
   pin: string | null
@@ -220,6 +225,7 @@ export function useNostrSend(): UseNostrSendReturn {
       }
 
       // Send chunks one by one, waiting for ACK after each
+      let bytesSent = 0
       for (let i = 0; i < totalChunks; i++) {
         if (cancelledRef.current) return
 
@@ -258,11 +264,19 @@ export function useNostrSend(): UseNostrSendReturn {
           if (!ackReceived) {
             retryCount++
             console.log(`No ACK for chunk ${i}, retrying (${retryCount}/${maxRetries})`)
+            await new Promise(resolve => setTimeout(resolve, RETRY_PAUSE_MS))
           }
         }
 
         if (!ackReceived) {
           throw new Error(`Failed to receive ACK for chunk ${i} after ${maxRetries} attempts`)
+        }
+
+        // Track bytes sent and pause every 512KB
+        bytesSent += (end - start)
+        if (bytesSent >= THROTTLE_BYTES) {
+          await new Promise(resolve => setTimeout(resolve, THROTTLE_PAUSE_MS))
+          bytesSent = 0
         }
       }
 
