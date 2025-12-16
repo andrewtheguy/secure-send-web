@@ -27,7 +27,7 @@ const KIND_NIP66_RELAY_DISCOVERY = 30166
 const PROBE_TIMEOUT_MS = 5000
 const MIN_MESSAGE_LENGTH = 24 * 1024
 const MAX_RELAYS_TO_PROBE = 30
-const TOP_RELAYS_COUNT = 3
+const TOP_RELAYS_COUNT = 5
 
 async function discoverRelaysFromSeeds(seedRelays: string[]): Promise<string[]> {
   const discovered = new Set<string>()
