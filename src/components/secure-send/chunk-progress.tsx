@@ -1,4 +1,4 @@
-import { CheckCircle2, Circle, Loader2, Send, AlertCircle } from 'lucide-react'
+import { CheckCircle2, Circle, Loader2, Send } from 'lucide-react'
 import type { ChunkState, ChunkStatus } from '@/lib/nostr/types'
 
 interface ChunkProgressProps {
@@ -14,7 +14,7 @@ function getStatusLabel(status: ChunkStatus, mode: 'send' | 'receive') {
       case 'sending':
         return 'Sending'
       case 'sent':
-        return 'Sent'
+        return 'Sent (waiting for ACK)'
       case 'acked':
         return 'ACKed'
       default:
@@ -23,7 +23,7 @@ function getStatusLabel(status: ChunkStatus, mode: 'send' | 'receive') {
   } else {
     switch (status) {
       case 'pending':
-        return 'Pending'
+        return 'Waiting'
       case 'receiving':
         return 'Receiving'
       case 'received':
@@ -62,98 +62,79 @@ function getStatusColor(status: ChunkStatus, mode: 'send' | 'receive') {
   }
 }
 
+function getStatusIcon(status: ChunkStatus, mode: 'send' | 'receive') {
+  if (mode === 'send') {
+    switch (status) {
+      case 'pending':
+        return <Circle className="h-4 w-4" />
+      case 'sending':
+        return <Loader2 className="h-4 w-4 animate-spin" />
+      case 'sent':
+        return <Send className="h-4 w-4" />
+      case 'acked':
+        return <CheckCircle2 className="h-4 w-4" />
+      default:
+        return <Circle className="h-4 w-4" />
+    }
+  } else {
+    switch (status) {
+      case 'pending':
+        return <Circle className="h-4 w-4" />
+      case 'receiving':
+        return <Loader2 className="h-4 w-4 animate-spin" />
+      case 'received':
+        return <CheckCircle2 className="h-4 w-4" />
+      default:
+        return <Circle className="h-4 w-4" />
+    }
+  }
+}
+
 export function ChunkProgress({ chunks, mode }: ChunkProgressProps) {
   const sortedChunks = Array.from(chunks.values()).sort((a, b) => a.seq - b.seq)
-
-  // Count chunks by status
-  const statusCounts = sortedChunks.reduce((acc, chunk) => {
-    acc[chunk.status] = (acc[chunk.status] || 0) + 1
-    return acc
-  }, {} as Record<ChunkStatus, number>)
-
-  // Calculate summary stats
   const total = sortedChunks.length
-  const completed = mode === 'send'
-    ? (statusCounts.acked || 0)
-    : (statusCounts.received || 0)
-  const inProgress = mode === 'send'
-    ? (statusCounts.sending || 0) + (statusCounts.sent || 0)
-    : (statusCounts.receiving || 0)
+
+  // Find the current active chunk (first non-completed chunk)
+  // For send: first chunk that isn't 'acked'
+  // For receive: first chunk that isn't 'received'
+  const completedStatus = mode === 'send' ? 'acked' : 'received'
+  const activeChunk = sortedChunks.find(c => c.status !== completedStatus)
+
+  // Count completed chunks
+  const completed = sortedChunks.filter(c => c.status === completedStatus).length
+
+  // If no active chunk, show the last chunk (all done)
+  const displayChunk = activeChunk || sortedChunks[sortedChunks.length - 1]
+
+  if (!displayChunk) return null
+
+  // 1-indexed display
+  const displayNumber = displayChunk.seq + 1
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between text-xs">
-        <span className="font-medium">Chunk Details</span>
-        <span className="text-muted-foreground">
-          {completed}/{total} {mode === 'send' ? 'ACKed' : 'Received'}
-          {inProgress > 0 && ` (${inProgress} in progress)`}
-        </span>
+    <div className="space-y-2">
+      {/* Summary line */}
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>Chunk Progress</span>
+        <span>{completed}/{total} {mode === 'send' ? 'ACKed' : 'Received'}</span>
       </div>
 
-      {/* Status Summary */}
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        {mode === 'send' ? (
-          <>
-            <div className="flex items-center gap-1.5">
-              <Circle className="h-3 w-3 text-muted-foreground" />
-              <span>Pending: {statusCounts.pending || 0}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Loader2 className="h-3 w-3 text-blue-500" />
-              <span>Sending: {statusCounts.sending || 0}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Send className="h-3 w-3 text-yellow-500" />
-              <span>Sent: {statusCounts.sent || 0}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <CheckCircle2 className="h-3 w-3 text-green-500" />
-              <span>ACKed: {statusCounts.acked || 0}</span>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center gap-1.5">
-              <Circle className="h-3 w-3 text-muted-foreground" />
-              <span>Pending: {statusCounts.pending || 0}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Loader2 className="h-3 w-3 text-blue-500" />
-              <span>Receiving: {statusCounts.receiving || 0}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <CheckCircle2 className="h-3 w-3 text-green-500" />
-              <span>Received: {statusCounts.received || 0}</span>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Chunk Grid */}
-      <div className="border rounded-lg p-3 bg-muted/30">
-        <div className="grid grid-cols-8 sm:grid-cols-12 md:grid-cols-16 gap-1">
-          {sortedChunks.map((chunk) => (
-            <div
-              key={chunk.seq}
-              className={`
-                flex items-center justify-center
-                h-8 w-8 rounded
-                text-[10px] font-medium
-                ${getStatusColor(chunk.status, mode)}
-                ${chunk.retries && chunk.retries > 0 ? 'ring-2 ring-orange-500' : ''}
-              `}
-              title={`Chunk ${chunk.seq}: ${getStatusLabel(chunk.status, mode)}${chunk.retries ? ` (${chunk.retries} retries)` : ''}`}
-            >
-              {chunk.seq}
-            </div>
-          ))}
-        </div>
-        {sortedChunks.some(c => c.retries && c.retries > 0) && (
-          <div className="flex items-center gap-1.5 mt-2 text-xs text-orange-600 dark:text-orange-400">
-            <AlertCircle className="h-3 w-3" />
-            <span>Orange ring indicates retries</span>
+      {/* Current chunk display */}
+      <div className={`flex items-center gap-3 p-3 rounded-lg ${getStatusColor(displayChunk.status, mode)}`}>
+        {getStatusIcon(displayChunk.status, mode)}
+        <div className="flex-1">
+          <div className="font-medium">
+            Chunk {displayNumber} of {total}
           </div>
-        )}
+          <div className="text-xs opacity-80">
+            {getStatusLabel(displayChunk.status, mode)}
+            {displayChunk.retries && displayChunk.retries > 0 && (
+              <span className="ml-1 text-orange-600 dark:text-orange-400">
+                ({displayChunk.retries} {displayChunk.retries === 1 ? 'retry' : 'retries'})
+              </span>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )

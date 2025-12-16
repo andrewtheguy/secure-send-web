@@ -255,6 +255,59 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       let lastAckedSeq = -1
       let ackIntervalId: ReturnType<typeof setInterval> | null = null
 
+      // Query for missed chunks - checks relays for any chunk events we might have missed
+      const queryMissedChunks = async () => {
+        console.log(`🔍 Querying relays for missed chunks (have ${chunks.size}/${totalChunks})`)
+        try {
+          const events = await client.query([
+            {
+              kinds: [EVENT_KIND_DATA_TRANSFER],
+              '#t': [transferId!],
+              authors: [senderPubkey!],
+              limit: 100,
+            },
+          ])
+
+          let foundMissed = 0
+          for (const event of events) {
+            const chunk = parseChunkEvent(event)
+            if (!chunk || chunk.transferId !== transferId) continue
+            if (chunks.has(chunk.seq)) continue // Already have this chunk
+
+            // Found a missed chunk! Process it
+            console.log(`🔍 Found missed chunk ${chunk.seq} via query`)
+            foundMissed++
+
+            try {
+              // Mark chunk as receiving
+              chunkStates.set(chunk.seq, { seq: chunk.seq, status: 'receiving', timestamp: Date.now() })
+
+              const decryptedChunk = await decrypt(key!, chunk.data)
+              chunks.set(chunk.seq, decryptedChunk)
+
+              // Mark chunk as received
+              chunkStates.set(chunk.seq, { seq: chunk.seq, status: 'received', timestamp: Date.now() })
+
+              // If this is a newer chunk than what we're ACKing, update the ACK
+              if (chunk.seq > lastAckedSeq) {
+                console.log(`🔍 Updating ACK from ${lastAckedSeq} to ${chunk.seq}`)
+                await startAckInterval(chunk.seq)
+              }
+            } catch (err) {
+              console.error(`🔍 Failed to decrypt missed chunk ${chunk.seq}:`, err)
+            }
+          }
+
+          if (foundMissed > 0) {
+            console.log(`🔍 Recovered ${foundMissed} missed chunk(s)`)
+          } else {
+            console.log(`🔍 No missed chunks found in query`)
+          }
+        } catch (err) {
+          console.error(`🔍 Failed to query for missed chunks:`, err)
+        }
+      }
+
       const startAckInterval = async (seq: number) => {
         // Clear previous interval
         if (ackIntervalId) {
@@ -280,6 +333,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         let consecutiveFailures = 0
         let resendCount = 0
         const maxResends = 50
+        const queryInterval = 10 // Query for missed chunks every 10 retries
         ackIntervalId = setInterval(async () => {
           if (cancelledRef.current) {
             if (ackIntervalId) clearInterval(ackIntervalId)
@@ -297,6 +351,11 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           }
 
           resendCount++
+
+          // Query for missed chunks periodically (every 10 retries = 20 seconds)
+          if (resendCount % queryInterval === 0) {
+            await queryMissedChunks()
+          }
 
           try {
             const ackEvent = createAckEvent(secretKey, senderPubkey!, transferId!, lastAckedSeq)
