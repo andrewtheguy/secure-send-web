@@ -162,6 +162,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         client.close()
         client = createNostrClient(payload.relays)
         clientRef.current = client
+        // Wait for new connections to be ready
+        await client.waitForConnection()
       }
 
       if (cancelledRef.current) return

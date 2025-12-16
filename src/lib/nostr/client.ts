@@ -1,21 +1,63 @@
 import { SimplePool, mergeFilters, type Event, type Filter } from 'nostr-tools'
 import { DEFAULT_RELAYS } from './relays'
 
+/** Normalize relay URL by removing trailing slashes */
+function normalizeRelayUrl(url: string): string {
+  return url.replace(/\/+$/, '')
+}
+
 export class NostrClient {
   private pool: SimplePool
   private relays: string[]
   private subscriptions: Map<string, { close: () => void }>
+  private connectionReady: Promise<void>
 
   constructor(relays: string[] = [...DEFAULT_RELAYS]) {
     this.pool = new SimplePool()
-    this.relays = relays
+    // Normalize and dedupe relay URLs
+    this.relays = [...new Set(relays.map(normalizeRelayUrl))]
     this.subscriptions = new Map()
+
+    // Pre-connect to all relays and wait for at least one to be ready
+    this.connectionReady = this.ensureConnected()
+  }
+
+  /**
+   * Wait for at least one relay to be connected
+   * Call this before subscribe() if immediate connectivity is needed
+   */
+  async waitForConnection(): Promise<void> {
+    await this.connectionReady
+  }
+
+  /**
+   * Ensure at least one relay is connected
+   */
+  private async ensureConnected(): Promise<void> {
+    // Give relays time to connect by doing a dummy subscription
+    // This triggers connection establishment in SimplePool
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve(), 3000) // Max 3s wait
+
+      // Subscribe to a filter that won't match anything, just to trigger connection
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sub = this.pool.subscribeMany(this.relays, [{ kinds: [99999], limit: 1 }] as any, {
+        oneose: () => {
+          clearTimeout(timeout)
+          sub.close()
+          resolve()
+        },
+      })
+    })
   }
 
   /**
    * Publish an event to all connected relays with retry
    */
   async publish(event: Event, maxRetries: number = 3): Promise<void> {
+    // Wait for connections to be established
+    await this.connectionReady
+
     let lastError: Error | null = null
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -81,6 +123,9 @@ export class NostrClient {
    * Query for events (one-time fetch)
    */
   async query(filters: Filter[]): Promise<Event[]> {
+    // Wait for connections to be established
+    await this.connectionReady
+
     const results: Event[] = []
     for (const filter of filters) {
       const events = await this.pool.querySync(this.relays, filter)

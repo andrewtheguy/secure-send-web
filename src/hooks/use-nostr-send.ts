@@ -181,6 +181,9 @@ export function useNostrSend(): UseNostrSendReturn {
 
       if (cancelledRef.current) return
 
+      // Ensure connection is ready before subscribing
+      await client.waitForConnection()
+
       // Wait for receiver ready ACK (seq=0)
       const receiverPubkey = await new Promise<string>((resolve, reject) => {
         const timeout = setTimeout(() => {
@@ -231,6 +234,8 @@ export function useNostrSend(): UseNostrSendReturn {
       client.close()
       client = createNostrClient(bestRelays)
       clientRef.current = client
+      // Wait for new connections to be ready
+      await client.waitForConnection()
 
       if (cancelledRef.current) return
 

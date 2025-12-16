@@ -7,6 +7,11 @@ interface RelayInfo {
   supported: boolean
 }
 
+/** Normalize relay URL by removing trailing slashes */
+function normalizeRelayUrl(url: string): string {
+  return url.replace(/\/+$/, '')
+}
+
 interface RelayCapabilities {
   limitation?: {
     max_message_length?: number
@@ -37,7 +42,7 @@ async function discoverRelaysFromSeeds(seedRelays: string[]): Promise<string[]> 
     for (const event of events) {
       for (const tag of event.tags) {
         if ((tag[0] === 'r' || tag[0] === 'd') && tag[1]) {
-          const url = tag[1]
+          const url = normalizeRelayUrl(tag[1])
           if (url.startsWith('wss://') || url.startsWith('ws://')) {
             discovered.add(url)
           }
@@ -106,12 +111,12 @@ async function testRelayLatency(relayUrl: string): Promise<number | null> {
 export async function discoverBestRelays(
   seedRelays: readonly string[] = DEFAULT_RELAYS
 ): Promise<string[]> {
-  const seeds = [...seedRelays]
+  const seeds = [...seedRelays].map(normalizeRelayUrl)
 
   // 1. Discover additional relays from NIP-65/NIP-66 events
   const discoveredRelays = await discoverRelaysFromSeeds(seeds)
 
-  // 2. Combine seed relays with discovered relays (deduped)
+  // 2. Combine seed relays with discovered relays (deduped, normalized)
   const allRelays = [...new Set([...seeds, ...discoveredRelays])]
   const relaysToProbe = allRelays.slice(0, MAX_RELAYS_TO_PROBE)
 
