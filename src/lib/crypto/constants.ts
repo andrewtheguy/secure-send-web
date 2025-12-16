@@ -20,6 +20,13 @@ export const SALT_LENGTH = 16
 export const CHUNK_SIZE = 16 * 1024 // 16KB
 
 // Max message size
+// LIMITATION: This 10MB limit is chosen to balance user convenience with browser memory constraints and
+// relay DoS protection.
+// 1. Relays: We use 16KB chunks, so we don't hit single-payload limits (usually 64KB+).
+//    However, sending 10MB total (640 chunks) requires rate limiting to avoid "flood" rejection.
+// 2. Memory: The entire file is loaded into memory (Uint8Array). 10MB is safe for most modern devices,
+//    but 100MB+ would risk crashing mobile browsers.
+// 3. Validation: Both Sender and Receiver MUST enforce this limit to prevent allocation exhaustion attacks.
 export const MAX_MESSAGE_SIZE = 10 * 1024 * 1024 // 10MB
 
 // PIN hint length

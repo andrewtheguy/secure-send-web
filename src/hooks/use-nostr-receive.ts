@@ -4,6 +4,7 @@ import {
   computePinHint,
   deriveKeyFromPin,
   decrypt,
+  MAX_MESSAGE_SIZE,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -131,6 +132,16 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         return
       }
 
+      // Security check: Enforce MAX_MESSAGE_SIZE to prevent DoS/OOM
+      const expectedSize = payload.fileSize || (payload.textMessage ? payload.textMessage.length : payload.totalChunks * 16384)
+      if (expectedSize > MAX_MESSAGE_SIZE) {
+        setState({
+          status: 'error',
+          message: `Transfer rejected: Size (${Math.round(expectedSize / 1024)}KB) exceeds limit (${MAX_MESSAGE_SIZE / 1024 / 1024}MB)`
+        })
+        return
+      }
+
       if (cancelledRef.current) return
 
       const isFile = payload.contentType === 'file'
@@ -167,10 +178,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         contentType: payload.contentType,
         fileMetadata: isFile
           ? {
-              fileName: payload.fileName!,
-              fileSize: payload.fileSize!,
-              mimeType: payload.mimeType!,
-            }
+            fileName: payload.fileName!,
+            fileSize: payload.fileSize!,
+            mimeType: payload.mimeType!,
+          }
           : undefined,
       })
 
@@ -224,10 +235,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 contentType: payload!.contentType,
                 fileMetadata: isFile
                   ? {
-                      fileName: payload!.fileName!,
-                      fileSize: payload!.fileSize!,
-                      mimeType: payload!.mimeType!,
-                    }
+                    fileName: payload!.fileName!,
+                    fileSize: payload!.fileSize!,
+                    mimeType: payload!.mimeType!,
+                  }
                   : undefined,
               })
 

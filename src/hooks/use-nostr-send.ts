@@ -1,4 +1,8 @@
 import { useState, useCallback, useRef } from 'react'
+
+// Rate limiting configuration
+const THROTTLE_CHUNK_INTERVAL = 64 // ~1MB given 16KB chunks
+const THROTTLE_PAUSE_MS = 3000
 import {
   generatePin,
   computePinHint,
@@ -238,9 +242,19 @@ export function useNostrSend(): UseNostrSendReturn {
       for (let i = 0; i < totalChunks; i++) {
         if (cancelledRef.current) return
 
-        // Pause every ~1MB (64 chunks) to avoid overwhelming relays
-        if (i > 0 && i % 64 === 0) {
-          await new Promise(resolve => setTimeout(resolve, 3000))
+        // Pause to avoid overwhelming relays
+        if (i > 0 && i % THROTTLE_CHUNK_INTERVAL === 0) {
+          setState({
+            status: 'transferring',
+            message: 'Pausing for network stability...',
+            progress: { current: completedChunks, total: totalChunks },
+            contentType,
+            fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+          })
+
+          await new Promise(resolve => setTimeout(resolve, THROTTLE_PAUSE_MS))
+
+          if (cancelledRef.current) return
         }
 
         const p = (async () => {
