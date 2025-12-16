@@ -87,8 +87,7 @@ export function SendTab() {
   }, [])
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
-  const showPinDisplay =
-    pin && (state.status === 'waiting_for_receiver' || state.status === 'transferring')
+  const showPinDisplay = pin && state.status === 'waiting_for_receiver'
 
   return (
     <div className="space-y-4 pt-4">

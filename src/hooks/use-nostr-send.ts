@@ -212,6 +212,9 @@ export function useNostrSend(): UseNostrSendReturn {
 
       if (cancelledRef.current) return
 
+      // Receiver connected - PIN no longer needed
+      setPin(null)
+
       // Enforce TTL: reject if session has expired
       if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
         throw new Error('Session expired. Please start a new transfer.')
