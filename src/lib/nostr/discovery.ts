@@ -28,8 +28,66 @@ const PROBE_TIMEOUT_MS = 5000
 const MIN_MESSAGE_LENGTH = 24 * 1024
 const MAX_RELAYS_TO_PROBE = 30
 const TOP_RELAYS_COUNT = 5
+const CACHE_TTL_MS = 4 * 60 * 60 * 1000 // 4 hours
+const CACHE_KEY_ALL_DISCOVERED = 'nostr_all_discovered'
 
-// Cache discovered relay URLs for backup discovery
+interface CachedRelays {
+  relays: string[]
+  timestamp: number
+}
+
+function getCachedDiscoveredRelays(): string[] | null {
+  try {
+    const cached = sessionStorage.getItem(CACHE_KEY_ALL_DISCOVERED)
+    if (!cached) return null
+
+    const parsed: CachedRelays = JSON.parse(cached)
+    const age = Date.now() - parsed.timestamp
+
+    if (age > CACHE_TTL_MS) {
+      sessionStorage.removeItem(CACHE_KEY_ALL_DISCOVERED)
+      return null
+    }
+
+    return parsed.relays
+  } catch {
+    return null
+  }
+}
+
+function setCachedDiscoveredRelays(relays: string[]): void {
+  try {
+    const data: CachedRelays = {
+      relays,
+      timestamp: Date.now()
+    }
+    sessionStorage.setItem(CACHE_KEY_ALL_DISCOVERED, JSON.stringify(data))
+  } catch {
+    // sessionStorage may be unavailable or full
+  }
+}
+
+/**
+ * Clear the relay discovery cache
+ */
+export function clearRelayCache(): void {
+  try {
+    sessionStorage.removeItem(CACHE_KEY_ALL_DISCOVERED)
+    cachedDiscoveredUrls = []
+    console.log('Relay cache cleared')
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Check if relay cache exists and is valid
+ */
+export function hasRelayCache(): boolean {
+  return getCachedDiscoveredRelays() !== null
+}
+
+// In-memory fallback for backup discovery
 let cachedDiscoveredUrls: string[] = []
 
 async function discoverRelaysFromSeeds(seedRelays: string[]): Promise<string[]> {
@@ -116,17 +174,31 @@ export async function discoverBestRelays(
 ): Promise<string[]> {
   const seeds = [...seedRelays].map(normalizeRelayUrl)
 
-  // 1. Discover additional relays from NIP-65/NIP-66 events
-  const discoveredRelays = await discoverRelaysFromSeeds(seeds)
+  // Check sessionStorage cache first
+  const cached = getCachedDiscoveredRelays()
+  let allRelays: string[]
 
-  // 2. Combine seed relays with discovered relays (deduped, normalized)
-  const allRelays = [...new Set([...seeds, ...discoveredRelays])]
+  if (cached && cached.length > 0) {
+    console.log(`Using ${cached.length} cached discovered relays`)
+    allRelays = cached
+  } else {
+    // 1. Discover additional relays from NIP-65/NIP-66 events
+    const discoveredRelays = await discoverRelaysFromSeeds(seeds)
+
+    // 2. Combine seed relays with discovered relays (deduped, normalized)
+    allRelays = [...new Set([...seeds, ...discoveredRelays])]
+
+    // Cache to sessionStorage (4 hour TTL)
+    setCachedDiscoveredRelays(allRelays)
+    console.log(`Cached ${allRelays.length} discovered relays`)
+  }
+
   const relaysToProbe = allRelays.slice(0, MAX_RELAYS_TO_PROBE)
 
-  // Cache all discovered URLs for potential backup discovery later
+  // Also keep in-memory for backup discovery
   cachedDiscoveredUrls = allRelays
 
-  console.log(`Probing ${relaysToProbe.length} relays (${seeds.length} seeds + ${discoveredRelays.length} discovered)`)
+  console.log(`Probing ${relaysToProbe.length} relays`)
 
   // 3. Probe all relays in parallel
   const probeResults = await Promise.all(
