@@ -609,10 +609,11 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       }
     } catch (error) {
       if (!cancelledRef.current) {
-        setState({
+        setState(prevState => ({
+          ...prevState,
           status: 'error',
           message: error instanceof Error ? error.message : 'Failed to receive',
-        })
+        }))
       }
     } finally {
       // Always clean up resources and reset receiving flag
