@@ -211,8 +211,13 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             if (ackIntervalId) clearInterval(ackIntervalId)
             return
           }
-          const ackEvent = createAckEvent(secretKey, senderPubkey!, transferId!, lastAckedSeq)
-          await client.publish(ackEvent)
+          try {
+            const ackEvent = createAckEvent(secretKey, senderPubkey!, transferId!, lastAckedSeq)
+            await client.publish(ackEvent)
+          } catch (err) {
+            console.error('Failed to publish ACK in interval:', err)
+            // Don't clear interval - transient network issues may resolve
+          }
         }, 2000)
       }
 
@@ -225,6 +230,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       await new Promise<void>((resolve, reject) => {
         let settled = false
+        const chunkFailures: Map<number, number> = new Map() // Track decrypt failures per chunk
+        const maxFailuresPerChunk = 3
 
         const timeout = setTimeout(() => {
           if (settled) return
@@ -269,6 +276,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
               const decryptedChunk = await decrypt(key!, chunk.data)
               chunks.set(chunk.seq, decryptedChunk)
+              chunkFailures.delete(chunk.seq) // Clear any previous failures on success
 
               setState({
                 status: 'receiving',
@@ -297,7 +305,20 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               }
             } catch (err) {
               if (settled) return
-              console.error(`Failed to decrypt chunk ${chunk.seq}`, err)
+
+              // Track failures per chunk
+              const failures = (chunkFailures.get(chunk.seq) || 0) + 1
+              chunkFailures.set(chunk.seq, failures)
+              console.error(`Failed to decrypt chunk ${chunk.seq} (attempt ${failures}/${maxFailuresPerChunk}):`, err)
+
+              // Reject after max failures for same chunk
+              if (failures >= maxFailuresPerChunk) {
+                settled = true
+                clearTimeout(timeout)
+                stopAckInterval()
+                client.unsubscribe(subId)
+                reject(new Error(`Failed to decrypt chunk ${chunk.seq} after ${maxFailuresPerChunk} attempts`))
+              }
             }
           }
         )
