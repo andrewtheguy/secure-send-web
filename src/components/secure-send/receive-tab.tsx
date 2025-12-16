@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Download, X, RotateCcw, Check, Copy, FileDown } from 'lucide-react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Download, X, RotateCcw, Check, Copy, FileDown, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { PinInput } from './pin-input'
@@ -11,7 +11,21 @@ import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file
 export function ReceiveTab() {
   const [pin, setPin] = useState('')
   const [copied, setCopied] = useState(false)
+  const [copyError, setCopyError] = useState(false)
   const { state, receivedContent, receive, cancel, reset } = useNostrReceive()
+
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+      }
+    }
+  }, [])
 
   const canReceive = pin.length === PIN_LENGTH && state.status === 'idle'
 
@@ -25,15 +39,42 @@ export function ReceiveTab() {
     reset()
     setPin('')
     setCopied(false)
+    setCopyError(false)
   }
 
-  const handleCopy = async () => {
-    if (receivedContent?.contentType === 'text') {
-      await navigator.clipboard.writeText(receivedContent.message)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+  const handleCopy = useCallback(async () => {
+    if (receivedContent?.contentType !== 'text') return
+
+    // Clear any existing timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+      timeoutRef.current = null
     }
-  }
+
+    try {
+      await navigator.clipboard.writeText(receivedContent.message)
+      if (!mountedRef.current) return
+
+      setCopyError(false)
+      setCopied(true)
+      timeoutRef.current = setTimeout(() => {
+        if (mountedRef.current) {
+          setCopied(false)
+        }
+      }, 2000)
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err)
+      if (!mountedRef.current) return
+
+      setCopied(false)
+      setCopyError(true)
+      timeoutRef.current = setTimeout(() => {
+        if (mountedRef.current) {
+          setCopyError(false)
+        }
+      }, 2000)
+    }
+  }, [receivedContent])
 
   const handleDownload = () => {
     if (receivedContent?.contentType === 'file') {
@@ -70,6 +111,11 @@ export function ReceiveTab() {
                     <>
                       <Check className="mr-1 h-3 w-3 text-green-500" />
                       Copied
+                    </>
+                  ) : copyError ? (
+                    <>
+                      <AlertCircle className="mr-1 h-3 w-3 text-destructive" />
+                      Failed
                     </>
                   ) : (
                     <>

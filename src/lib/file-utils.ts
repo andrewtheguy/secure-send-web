@@ -17,9 +17,8 @@ export async function readFileAsBytes(file: File): Promise<Uint8Array> {
  * Trigger a file download in the browser
  */
 export function downloadFile(data: Uint8Array, fileName: string, mimeType: string): void {
-  // Safely extract only the relevant bytes from the view
-  const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
-  const blob = new Blob([buffer], { type: mimeType })
+  // Blob constructor accepts Uint8Array directly and respects the view's byte range
+  const blob = new Blob([data as BlobPart], { type: mimeType })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -34,10 +33,16 @@ export function downloadFile(data: Uint8Array, fileName: string, mimeType: strin
  * Format file size in human-readable format
  */
 export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 B'
+  // Guard against zero, negative, or non-finite input
+  if (bytes <= 0 || !Number.isFinite(bytes)) return '0 B'
+
   const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB']
+  const i = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(k)),
+    sizes.length - 1
+  )
+
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
 }
 
