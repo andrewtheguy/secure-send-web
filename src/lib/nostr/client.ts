@@ -13,10 +13,31 @@ export class NostrClient {
   }
 
   /**
-   * Publish an event to all connected relays
+   * Publish an event to all connected relays with retry
    */
-  async publish(event: Event): Promise<void> {
-    await Promise.any(this.pool.publish(this.relays, event))
+  async publish(event: Event, maxRetries: number = 3): Promise<void> {
+    let lastError: Error | null = null
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        await Promise.any(this.pool.publish(this.relays, event))
+        return // Success
+      } catch (err) {
+        lastError = err as Error
+        if (attempt < maxRetries - 1) {
+          // Wait before retry (exponential backoff: 500ms, 1000ms, 2000ms)
+          await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt)))
+        }
+      }
+    }
+
+    // All retries failed
+    console.error(`Failed to publish to any relay after ${maxRetries} attempts:`, {
+      relays: this.relays,
+      eventKind: event.kind,
+      error: lastError?.message,
+    })
+    throw lastError
   }
 
   /**
