@@ -128,7 +128,7 @@ export function ChunkProgress({ chunks, mode }: ChunkProgressProps) {
           </div>
           <div className="text-xs opacity-80">
             {getStatusLabel(displayChunk.status, mode)}
-            {displayChunk.retries && displayChunk.retries > 0 && (
+            {(displayChunk.retries ?? 0) > 0 && (
               <span className="ml-1 text-orange-600 dark:text-orange-400">
                 ({displayChunk.retries} {displayChunk.retries === 1 ? 'retry' : 'retries'})
               </span>
