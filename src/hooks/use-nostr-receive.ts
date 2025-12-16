@@ -12,7 +12,7 @@ import {
   parsePinExchangeEvent,
   parseChunkEvent,
   createAckEvent,
-  discoverBestRelays,
+  DEFAULT_RELAYS,
   type TransferState,
   type PinExchangePayload,
   type ReceivedContent,
@@ -72,12 +72,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       if (cancelledRef.current) return
 
-      // Discover best relays and connect
-      setState({ status: 'connecting', message: 'Discovering best relays...' })
-      const bestRelays = await discoverBestRelays()
-      if (cancelledRef.current) return
-
-      const client = createNostrClient(bestRelays)
+      // Use ALL seed relays for PIN exchange query (maximum discoverability)
+      setState({ status: 'connecting', message: 'Connecting to relays...' })
+      let client = createNostrClient([...DEFAULT_RELAYS])
       clientRef.current = client
 
       if (cancelledRef.current) return
@@ -154,9 +151,18 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Generate receiver keypair
       const { secretKey } = generateEphemeralKeys()
 
-      // Send ready ACK (seq=0)
+      // Send ready ACK (seq=0) on seed relays
       const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0)
       await client.publish(readyAck)
+
+      if (cancelledRef.current) return
+
+      // Switch to sender's preferred relays for data transfer (if provided)
+      if (payload.relays && payload.relays.length > 0) {
+        client.close()
+        client = createNostrClient(payload.relays)
+        clientRef.current = client
+      }
 
       if (cancelledRef.current) return
 

@@ -17,6 +17,7 @@ import {
   createChunkEvent,
   parseAckEvent,
   discoverBestRelays,
+  DEFAULT_RELAYS,
   type TransferState,
   type PinExchangePayload,
   type ContentType,
@@ -135,12 +136,13 @@ export function useNostrSend(): UseNostrSendReturn {
       const { secretKey, publicKey } = generateEphemeralKeys()
       const transferId = generateTransferId()
 
-      // Discover best relays and connect
+      // Discover best relays for data transfer
       setState({ status: 'connecting', message: 'Discovering best relays...' })
       const bestRelays = await discoverBestRelays()
       if (cancelledRef.current) return
 
-      const client = createNostrClient(bestRelays)
+      // Use ALL seed relays for PIN exchange (maximum discoverability)
+      let client = createNostrClient([...DEFAULT_RELAYS])
       clientRef.current = client
 
       if (cancelledRef.current) return
@@ -148,12 +150,13 @@ export function useNostrSend(): UseNostrSendReturn {
       // Calculate chunks
       const totalChunks = Math.ceil(contentBytes.length / CHUNK_SIZE)
 
-      // Create and encrypt PIN exchange payload
+      // Create and encrypt PIN exchange payload (include best relays for data transfer)
       const payload: PinExchangePayload = {
         contentType,
         transferId,
         senderPubkey: publicKey,
         totalChunks,
+        relays: bestRelays, // Sender's preferred relays for data transfer
         // For text, include message if single chunk
         textMessage: contentType === 'text' && totalChunks <= 1 ? (content as string) : undefined,
         // For file, include metadata
@@ -223,6 +226,13 @@ export function useNostrSend(): UseNostrSendReturn {
       if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
         throw new Error('Session expired. Please start a new transfer.')
       }
+
+      // Switch to best relays for data transfer
+      client.close()
+      client = createNostrClient(bestRelays)
+      clientRef.current = client
+
+      if (cancelledRef.current) return
 
       // If content fits in single chunk (text only), wait for completion ACK
       if (contentType === 'text' && totalChunks <= 1) {
