@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Input } from '@/components/ui/input'
 import { PIN_LENGTH, PIN_CHARSET } from '@/lib/crypto'
 
@@ -10,6 +10,19 @@ interface PinInputProps {
 
 export function PinInput({ value, onChange, disabled }: PinInputProps) {
   const [error, setError] = useState<string | null>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+    }
+  }, [])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value
@@ -18,8 +31,19 @@ export function PinInput({ value, onChange, disabled }: PinInputProps) {
     const validChars = [...newValue].filter((char) => PIN_CHARSET.includes(char))
 
     if (validChars.length !== newValue.length && newValue.length > 0) {
+      // Clear any existing timeout before creating a new one
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+
       setError('Invalid character')
-      setTimeout(() => setError(null), 1500)
+      timeoutRef.current = setTimeout(() => {
+        if (mountedRef.current) {
+          setError(null)
+        }
+        timeoutRef.current = null
+      }, 1500)
     }
 
     // Only allow valid characters and limit length
@@ -35,7 +59,7 @@ export function PinInput({ value, onChange, disabled }: PinInputProps) {
         type="text"
         value={value}
         onChange={handleChange}
-        placeholder="Enter 8-character PIN"
+        placeholder={`Enter ${PIN_LENGTH}-character PIN`}
         className={`font-mono text-xl text-center tracking-wider ${
           error ? 'border-destructive' : isComplete ? 'border-green-500' : ''
         }`}
