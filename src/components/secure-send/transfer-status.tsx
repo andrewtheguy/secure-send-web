@@ -2,12 +2,14 @@ import { Loader2, CheckCircle2, XCircle, Radio } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import type { TransferState } from '@/lib/nostr'
+import { ChunkProgress } from './chunk-progress'
 
 interface TransferStatusProps {
   state: TransferState
+  mode?: 'send' | 'receive'
 }
 
-export function TransferStatus({ state }: TransferStatusProps) {
+export function TransferStatus({ state, mode = 'send' }: TransferStatusProps) {
   if (state.status === 'idle') return null
 
   const getIcon = () => {
@@ -35,11 +37,18 @@ export function TransferStatus({ state }: TransferStatusProps) {
       ? (state.progress.current / state.progress.total) * 100
       : 0
 
+  const showChunkDetails = state.chunks && state.chunks.size > 0 && !state.useWebRTC
+
   return (
     <div className="space-y-3">
       <Alert variant={getVariant()}>
         {getIcon()}
-        <AlertDescription>{state.message || state.status}</AlertDescription>
+        <AlertDescription>
+          {state.message || state.status}
+          {state.useWebRTC === false && state.chunks && state.chunks.size > 1 && (
+            <span className="text-xs text-muted-foreground ml-2">(Relay mode)</span>
+          )}
+        </AlertDescription>
       </Alert>
 
       {state.progress && state.progress.total > 1 && (
@@ -49,6 +58,10 @@ export function TransferStatus({ state }: TransferStatusProps) {
             {state.progress.current} / {state.progress.total} chunks
           </p>
         </div>
+      )}
+
+      {showChunkDetails && (
+        <ChunkProgress chunks={state.chunks!} mode={mode} />
       )}
     </div>
   )

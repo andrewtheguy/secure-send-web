@@ -212,7 +212,7 @@ export function SendTab() {
         </>
       ) : (
         <>
-          <TransferStatus state={state} />
+          <TransferStatus state={state} mode="send" />
 
           {showPinDisplay && <PinDisplay pin={pin} />}
 

@@ -16,7 +16,7 @@ export function SecureSend() {
       <CardHeader>
         <CardTitle className="text-2xl">Secure Send</CardTitle>
         <CardDescription>
-          Send encrypted text messages using PIN-based encryption over Nostr relays
+          Send encrypted messages using PIN-based encryption. WebRTC P2P with Nostr relay fallback.
         </CardDescription>
       </CardHeader>
       <CardContent>
