@@ -110,6 +110,7 @@ export class WebRTCConnection {
             }
         } catch (err) {
             console.error('Error handling signal:', err);
+            throw err;
         }
     }
 

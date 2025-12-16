@@ -286,6 +286,7 @@ export function createSignalingEvent(
  */
 export function parseSignalingEvent(event: Event): {
   transferId: string
+  senderPubkey: string
   encryptedSignal: Uint8Array
 } | null {
   if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null
@@ -294,11 +295,13 @@ export function parseSignalingEvent(event: Event): {
   if (type !== 'signal') return null
 
   const transferId = event.tags.find((t) => t[0] === 't')?.[1]
-  if (!transferId) return null
+  const senderPubkey = event.tags.find((t) => t[0] === 'p')?.[1]
+
+  if (!transferId || !senderPubkey) return null
 
   try {
     const encryptedSignal = base64ToUint8Array(event.content)
-    return { transferId, encryptedSignal }
+    return { transferId, senderPubkey, encryptedSignal }
   } catch {
     return null
   }
