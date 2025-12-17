@@ -34,24 +34,6 @@ const UPLOAD_SERVERS: UploadServer[] = [
       throw new Error(json.error || 'Upload failed')
     },
   },
-  {
-    name: 'uguu.se',
-    url: 'https://uguu.se/upload',
-    formField: 'files[]',
-    parseResponse: (text) => {
-      const json = JSON.parse(text)
-      if (json.success && json.files?.[0]?.url) {
-        return json.files[0].url
-      }
-      throw new Error('Upload failed')
-    },
-  },
-  {
-    name: 'x0.at',
-    url: 'https://x0.at/',
-    formField: 'file',
-    parseResponse: (text) => text.trim(), // Returns plain URL
-  },
 ]
 
 // =============================================================================
@@ -67,14 +49,6 @@ const CORS_PROXIES: CorsProxy[] = [
   {
     name: 'corsproxy.io',
     buildUrl: (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  },
-  {
-    name: 'allorigins',
-    buildUrl: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  },
-  {
-    name: 'cors.lol',
-    buildUrl: (url) => `https://api.cors.lol/?url=${encodeURIComponent(url)}`,
   },
   {
     name: 'leverson83',
@@ -95,6 +69,150 @@ let cachedServer: UploadServer | null = null
 export function resetCachedServices(): void {
   cachedProxy = null
   cachedServer = null
+}
+
+// =============================================================================
+// Debug/Testing Functions
+// =============================================================================
+
+interface ServiceTestResult {
+  name: string
+  status: 'ok' | 'failed'
+  latency?: number
+  error?: string
+}
+
+interface TestAllServicesResult {
+  corsProxies: ServiceTestResult[]
+  uploadServers: ServiceTestResult[]
+  summary: {
+    workingProxies: number
+    totalProxies: number
+    workingServers: number
+    totalServers: number
+  }
+}
+
+/**
+ * Test all CORS proxies and upload servers, returning detailed results
+ * Call from browser console: window.testCloudServices()
+ */
+export async function testAllServices(): Promise<TestAllServicesResult> {
+  console.log('%c🔍 Testing Cloud Services...', 'font-size: 14px; font-weight: bold; color: #3b82f6;')
+  console.log('')
+
+  const proxyResults: ServiceTestResult[] = []
+  const serverResults: ServiceTestResult[] = []
+
+  // Test all CORS proxies
+  console.log('%c📡 Testing CORS Proxies:', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
+  for (const proxy of CORS_PROXIES) {
+    const start = Date.now()
+    try {
+      const proxyUrl = proxy.buildUrl(CORS_TEST_URL)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+      const response = await fetch(proxyUrl, { method: 'GET', signal: controller.signal })
+      clearTimeout(timeoutId)
+
+      if (response.ok) {
+        const text = await response.text()
+        if (text.includes('Example Domain')) {
+          const latency = Date.now() - start
+          proxyResults.push({ name: proxy.name, status: 'ok', latency })
+          console.log(`   %c✓ ${proxy.name}%c - ${latency}ms`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
+        } else {
+          proxyResults.push({ name: proxy.name, status: 'failed', error: 'Invalid response content' })
+          console.log(`   %c✗ ${proxy.name}%c - Invalid response`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+        }
+      } else {
+        proxyResults.push({ name: proxy.name, status: 'failed', error: `HTTP ${response.status}` })
+        console.log(`   %c✗ ${proxy.name}%c - HTTP ${response.status}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+      proxyResults.push({ name: proxy.name, status: 'failed', error: errorMsg })
+      console.log(`   %c✗ ${proxy.name}%c - ${errorMsg}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+    }
+  }
+
+  // Find first working proxy for upload tests
+  const workingProxy = CORS_PROXIES.find((p) => proxyResults.find((r) => r.name === p.name && r.status === 'ok'))
+
+  console.log('')
+  console.log('%c📤 Testing Upload Servers:', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
+
+  if (!workingProxy) {
+    console.log('   %c⚠ Skipped - No working CORS proxy available', 'color: #f59e0b;')
+    for (const server of UPLOAD_SERVERS) {
+      serverResults.push({ name: server.name, status: 'failed', error: 'No CORS proxy' })
+    }
+  } else {
+    const testData = crypto.getRandomValues(new Uint8Array(32))
+
+    for (const server of UPLOAD_SERVERS) {
+      const start = Date.now()
+      try {
+        // Upload
+        const uploadUrl = await uploadToServer(server, testData, 'test.bin')
+
+        // Download and verify
+        const proxyUrl = workingProxy.buildUrl(uploadUrl)
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 15000)
+        const response = await fetch(proxyUrl, { signal: controller.signal })
+        clearTimeout(timeoutId)
+
+        if (response.ok) {
+          const downloaded = new Uint8Array(await response.arrayBuffer())
+          if (downloaded.length === testData.length && downloaded.every((b, i) => b === testData[i])) {
+            const latency = Date.now() - start
+            serverResults.push({ name: server.name, status: 'ok', latency })
+            console.log(`   %c✓ ${server.name}%c - ${latency}ms (upload + download verified)`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
+          } else {
+            serverResults.push({ name: server.name, status: 'failed', error: 'Content mismatch' })
+            console.log(`   %c✗ ${server.name}%c - Content mismatch`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+          }
+        } else {
+          serverResults.push({ name: server.name, status: 'failed', error: `Download HTTP ${response.status}` })
+          console.log(`   %c✗ ${server.name}%c - Download failed: HTTP ${response.status}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+        }
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+        serverResults.push({ name: server.name, status: 'failed', error: errorMsg })
+        console.log(`   %c✗ ${server.name}%c - ${errorMsg}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+      }
+    }
+  }
+
+  // Summary
+  const workingProxies = proxyResults.filter((r) => r.status === 'ok').length
+  const workingServers = serverResults.filter((r) => r.status === 'ok').length
+
+  console.log('')
+  console.log('%c📊 Summary:', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
+  console.log(`   CORS Proxies: %c${workingProxies}/${CORS_PROXIES.length} working`, workingProxies > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
+  console.log(`   Upload Servers: %c${workingServers}/${UPLOAD_SERVERS.length} working`, workingServers > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
+  console.log('')
+
+  const result: TestAllServicesResult = {
+    corsProxies: proxyResults,
+    uploadServers: serverResults,
+    summary: {
+      workingProxies,
+      totalProxies: CORS_PROXIES.length,
+      workingServers,
+      totalServers: UPLOAD_SERVERS.length,
+    },
+  }
+
+  return result
+}
+
+// Expose to window for console access
+if (typeof window !== 'undefined') {
+  ;(window as unknown as { testCloudServices: typeof testAllServices }).testCloudServices = testAllServices
 }
 
 // =============================================================================

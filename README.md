@@ -9,7 +9,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 - **PIN-based encryption**: Content is encrypted with AES-256-GCM using a key derived from a 12-character PIN
 - **Text & file transfer**: Send text messages or files up to 10MB
 - **WebRTC P2P**: Direct peer-to-peer connections for fast, efficient data transfer
-- **Cloud fallback**: Falls back to tmpfiles.org if WebRTC connection fails
+- **Cloud fallback**: Falls back to cloud storage (tmpfiles.org) if WebRTC connection fails
 - **End-to-end encryption**: All data is encrypted before upload, only you and the receiver can decrypt
 - **No accounts required**: Ephemeral keypairs are generated for each transfer
 - **Nostr signaling**: Uses Nostr relays for PIN exchange and connection handshake
@@ -77,8 +77,29 @@ The application uses a hybrid transport approach:
 1. **Nostr Signaling**: PIN exchange and WebRTC signaling via Nostr relays
 2. **Data Transfer**:
    - **WebRTC P2P** (default): Direct peer-to-peer connection for fastest transfer
-   - **Cloud Fallback**: If WebRTC fails, encrypted data is uploaded to tmpfiles.org (60 min retention)
+   - **Cloud Fallback**: If WebRTC fails, encrypted data is uploaded to cloud storage with automatic failover
 3. **Encryption**: All data is encrypted client-side before any transfer
+
+### Cloud Storage Redundancy
+
+Upload servers and CORS proxies with automatic failover:
+
+**Upload Servers:**
+- tmpfiles.org
+
+**CORS Proxies (for download):**
+- corsproxy.io
+- cors.leverson83.org
+
+## Debug
+
+Test cloud service availability from browser console:
+
+```javascript
+await window.testCloudServices()
+```
+
+This tests all CORS proxies and upload servers, showing latency and status for each.
 
 ## Roadmap
 
