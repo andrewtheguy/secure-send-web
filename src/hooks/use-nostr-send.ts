@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import {
-  generatePin,
+  generatePinForMethod,
   computePinHint,
   generateTransferId,
   generateSalt,
@@ -137,7 +137,7 @@ export function useNostrSend(): UseNostrSendReturn {
 
       // Generate PIN and derive key
       setState({ status: 'connecting', message: 'Generating secure PIN...' })
-      const newPin = generatePin()
+      const newPin = generatePinForMethod('nostr')
       const sessionStartTime = Date.now()
       setPin(newPin)
 

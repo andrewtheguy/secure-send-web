@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import {
-  generatePin,
+  generatePinForMethod,
   generateSalt,
   deriveKeyFromPin,
   encrypt,
@@ -98,7 +98,7 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
 
       // Generate PIN and derive encryption key
       setState({ status: 'connecting', message: 'Generating secure PIN...' })
-      const newPin = generatePin()
+      const newPin = generatePinForMethod('peerjs')
       const sessionStartTime = Date.now()
       setPin(newPin)
 

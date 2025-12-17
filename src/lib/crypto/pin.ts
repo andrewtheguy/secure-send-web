@@ -1,4 +1,11 @@
-import { PIN_CHARSET, PIN_LENGTH, PIN_CHECKSUM_LENGTH, PIN_HINT_LENGTH } from './constants'
+import {
+  PIN_CHARSET,
+  PIN_LENGTH,
+  PIN_CHECKSUM_LENGTH,
+  PIN_HINT_LENGTH,
+  NOSTR_FIRST_CHARSET,
+  PEERJS_FIRST_CHARSET,
+} from './constants'
 
 /**
  * Compute checksum character using weighted sum
@@ -18,6 +25,7 @@ function computeChecksum(data: string): string {
  * Charset excludes confusing characters: I, O, i, l, o, 0, 1
  * Uses rejection sampling to eliminate modulo bias
  * Last character is a checksum for typo detection
+ * @deprecated Use generatePinForMethod() instead to encode signaling method
  */
 export function generatePin(): string {
   const n = PIN_CHARSET.length
@@ -42,6 +50,73 @@ export function generatePin(): string {
   const data = result.join('')
   const checksum = computeChecksum(data)
   return data + checksum
+}
+
+/**
+ * Generate random character from a charset using rejection sampling
+ */
+function randomCharFromCharset(charset: string): string {
+  const n = charset.length
+  const maxMultiple = Math.floor(256 / n) * n
+  const buffer = new Uint8Array(2)
+
+  while (true) {
+    crypto.getRandomValues(buffer)
+    for (const byte of buffer) {
+      if (byte < maxMultiple) {
+        return charset[byte % n]
+      }
+    }
+  }
+}
+
+/**
+ * Generate PIN with signaling method encoded in first character
+ * - Uppercase first char (A-Z excluding I,O) = Nostr
+ * - Lowercase first char (a-z excluding i,l,o) = PeerJS
+ */
+export function generatePinForMethod(method: 'nostr' | 'peerjs'): string {
+  const firstCharset = method === 'nostr' ? NOSTR_FIRST_CHARSET : PEERJS_FIRST_CHARSET
+  const dataLength = PIN_LENGTH - PIN_CHECKSUM_LENGTH
+
+  // Generate first character from method-specific charset
+  const firstChar = randomCharFromCharset(firstCharset)
+
+  // Generate remaining characters from full charset
+  const n = PIN_CHARSET.length
+  const maxMultiple = Math.floor(256 / n) * n
+  const remainingLength = dataLength - 1
+
+  const result: string[] = [firstChar]
+  const buffer = new Uint8Array(remainingLength * 2)
+
+  while (result.length < dataLength) {
+    crypto.getRandomValues(buffer)
+    for (const byte of buffer) {
+      if (byte < maxMultiple) {
+        result.push(PIN_CHARSET[byte % n])
+        if (result.length === dataLength) break
+      }
+    }
+  }
+
+  const data = result.join('')
+  const checksum = computeChecksum(data)
+  return data + checksum
+}
+
+/**
+ * Detect signaling method from PIN's first character
+ * - Uppercase = Nostr
+ * - Lowercase = PeerJS
+ * - Digits/Symbols = null (reserved for future protocols)
+ */
+export function detectSignalingMethod(pin: string): 'nostr' | 'peerjs' | null {
+  if (!pin || pin.length === 0) return null
+  const firstChar = pin[0]
+  if (NOSTR_FIRST_CHARSET.includes(firstChar)) return 'nostr'
+  if (PEERJS_FIRST_CHARSET.includes(firstChar)) return 'peerjs'
+  return null // Reserved for future protocols
 }
 
 /**

@@ -13,10 +13,10 @@ Secure Send is a browser-based encrypted file and message transfer application. 
 
 ## Signaling Methods
 
-Users must explicitly choose a signaling method. Both sender and receiver must use the same method.
+By default, Nostr is used for signaling. PeerJS is available as an alternative under "Advanced Options" in the UI. Both sender and receiver must use the same method.
 
-| Feature | Nostr | PeerJS |
-|---------|-------|--------|
+| Feature | Nostr (Default) | PeerJS (Advanced) |
+|---------|-----------------|-------------------|
 | Signaling Server | Decentralized relays | Centralized (0.peerjs.com) |
 | Cloud Fallback | Yes (tmpfiles.org) | No |
 | Reliability | Higher (fallback available) | P2P only |
