@@ -260,6 +260,8 @@ export function useNostrSend(): UseNostrSendReturn {
 
       // WebRTC Transfer Logic (optional P2P for faster transfer)
       let webRTCSuccess = false
+      let p2pConnectionEstablished = false // Track if P2P was established (no cloud fallback after this)
+
       if (!options?.relayOnly) {
         try {
           setState({ status: 'connecting', message: 'Attempting P2P connection...' })
@@ -287,6 +289,9 @@ export function useNostrSend(): UseNostrSendReturn {
                   connectionTimeout = null
                 }
 
+                // Mark P2P as established - NO cloud fallback after this point
+                p2pConnectionEstablished = true
+
                 console.log('WebRTC connected, sending data...')
                 setState({
                   status: 'transferring',
@@ -297,12 +302,12 @@ export function useNostrSend(): UseNostrSendReturn {
                 })
 
                 try {
-                  // Send file content in chunks
+                  // Send file content in chunks with backpressure
                   const chunkSize = 16384 // 16KB chunks for data channel
                   for (let i = 0; i < contentBytes.length; i += chunkSize) {
                     if (cancelledRef.current) throw new Error('Cancelled')
                     const end = Math.min(i + chunkSize, contentBytes.length)
-                    rtc.send(contentBytes.slice(i, end))
+                    await rtc.sendWithBackpressure(contentBytes.slice(i, end))
 
                     // Update progress
                     setState(s => ({
@@ -311,7 +316,7 @@ export function useNostrSend(): UseNostrSendReturn {
                     }))
                   }
 
-                  // Send "DONE" message
+                  // Send "DONE" message (small, no backpressure needed)
                   rtc.send('DONE')
                   webRTCSuccess = true
 
@@ -376,13 +381,17 @@ export function useNostrSend(): UseNostrSendReturn {
             }, 15000)
           })
         } catch (err) {
-          console.log('P2P failed, falling back to cloud upload:', err)
-          // P2P failed - fall back to chunked cloud upload
+          // If P2P was established but failed during transfer, abort completely (no cloud fallback)
+          if (p2pConnectionEstablished) {
+            throw new Error(`P2P transfer failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+          }
+          // P2P connection never established - fall back to cloud
+          console.log('P2P connection failed, falling back to cloud upload:', err)
         }
       }
 
-      // Cloud fallback: Only upload to cloud if P2P failed or was disabled
-      if (!webRTCSuccess) {
+      // Cloud fallback: Only if P2P was never established (connection timeout or disabled)
+      if (!webRTCSuccess && !p2pConnectionEstablished) {
         setState({
           status: 'transferring',
           message: 'P2P unavailable, uploading to cloud...',

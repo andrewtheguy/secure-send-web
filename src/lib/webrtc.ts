@@ -136,6 +136,40 @@ export class WebRTCConnection {
         }
     }
 
+    /**
+     * Send data with backpressure support.
+     * Waits for buffer to drain if it exceeds the threshold.
+     */
+    public async sendWithBackpressure(
+        data: ArrayBuffer | ArrayBufferView | string,
+        bufferThreshold: number = 1024 * 1024 // 1MB default threshold
+    ): Promise<void> {
+        if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
+            throw new Error('Data channel not open');
+        }
+
+        // Wait for buffer to drain if it's too full
+        while (this.dataChannel.bufferedAmount > bufferThreshold) {
+            await new Promise<void>((resolve) => {
+                // Use bufferedamountlow event if supported, otherwise poll
+                const checkBuffer = () => {
+                    if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
+                        resolve();
+                        return;
+                    }
+                    if (this.dataChannel.bufferedAmount <= bufferThreshold) {
+                        resolve();
+                    } else {
+                        setTimeout(checkBuffer, 10);
+                    }
+                };
+                setTimeout(checkBuffer, 10);
+            });
+        }
+
+        this.dataChannel.send(data as any);
+    }
+
     public close() {
         if (this.dataChannel) this.dataChannel.close();
         this.pc.close();
