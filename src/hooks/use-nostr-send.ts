@@ -268,7 +268,54 @@ export function useNostrSend(): UseNostrSendReturn {
 
           await new Promise<void>((resolve, reject) => {
             let connectionTimeout: ReturnType<typeof setTimeout> | null = null
+            let offerRetryInterval: ReturnType<typeof setInterval> | null = null
             let signalSubId: string | null = null
+            let answerReceived = false
+            const processedEventIds = new Set<string>()
+
+            // Helper to process signal events (used by both subscription and query)
+            const processSignalEvent = async (event: Event) => {
+              if (processedEventIds.has(event.id)) return
+              processedEventIds.add(event.id)
+
+              const signalData = parseSignalingEvent(event)
+              if (signalData && signalData.transferId === transferId) {
+                try {
+                  const decrypted = await decrypt(key, signalData.encryptedSignal)
+                  const payload = JSON.parse(new TextDecoder().decode(decrypted))
+                  if (payload.type === 'signal' && payload.signal) {
+                    console.log('Received WebRTC signal:', payload.signal.type || 'candidate')
+                    if (payload.signal.type === 'answer') {
+                      answerReceived = true
+                      // Stop retrying offers once we get an answer
+                      if (offerRetryInterval) {
+                        clearInterval(offerRetryInterval)
+                        offerRetryInterval = null
+                      }
+                    }
+                    rtc.handleSignal(payload.signal)
+                  }
+                } catch (err) {
+                  console.error('Failed to process signaling event:', err)
+                }
+              }
+            }
+
+            // Cleanup helper
+            const cleanup = () => {
+              if (connectionTimeout) {
+                clearTimeout(connectionTimeout)
+                connectionTimeout = null
+              }
+              if (offerRetryInterval) {
+                clearInterval(offerRetryInterval)
+                offerRetryInterval = null
+              }
+              if (signalSubId) {
+                client.unsubscribe(signalSubId)
+                signalSubId = null
+              }
+            }
 
             const rtc = new WebRTCConnection(
               { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
@@ -283,11 +330,7 @@ export function useNostrSend(): UseNostrSendReturn {
               },
               async () => {
                 // DataChannel open - P2P connection established!
-                // Clear the connection timeout since P2P is now working
-                if (connectionTimeout) {
-                  clearTimeout(connectionTimeout)
-                  connectionTimeout = null
-                }
+                cleanup()
 
                 // Mark P2P as established - NO cloud fallback after this point
                 p2pConnectionEstablished = true
@@ -319,12 +362,6 @@ export function useNostrSend(): UseNostrSendReturn {
                   // Send "DONE" message (small, no backpressure needed)
                   rtc.send('DONE')
                   webRTCSuccess = true
-
-                  // Clean up subscription
-                  if (signalSubId) {
-                    client.unsubscribe(signalSubId)
-                  }
-
                   resolve()
                 } catch (err) {
                   reject(err)
@@ -348,37 +385,72 @@ export function useNostrSend(): UseNostrSendReturn {
                   authors: [receiverPubkey],
                 },
               ],
-              async (event) => {
-                const signalData = parseSignalingEvent(event)
-                if (signalData && signalData.transferId === transferId) {
-                  try {
-                    const decrypted = await decrypt(key, signalData.encryptedSignal)
-                    const payload = JSON.parse(new TextDecoder().decode(decrypted))
-                    if (payload.type === 'signal' && payload.signal) {
-                      rtc.handleSignal(payload.signal)
-                    }
-                  } catch (err) {
-                    console.error('Failed to process signaling event:', err)
+              processSignalEvent
+            )
+
+            // Query for existing answer events (in case we missed them)
+            const queryForExistingSignals = async () => {
+              try {
+                const existingEvents = await client.query([
+                  {
+                    kinds: [EVENT_KIND_DATA_TRANSFER],
+                    '#t': [transferId],
+                    '#p': [publicKey],
+                    authors: [receiverPubkey],
+                    limit: 50,
+                  },
+                ])
+                if (existingEvents.length > 0) {
+                  console.log(`Found ${existingEvents.length} existing signal events`)
+                  for (const event of existingEvents) {
+                    await processSignalEvent(event)
                   }
                 }
+              } catch (err) {
+                console.error('Failed to query existing signal events:', err)
               }
-            )
+            }
 
             // Initiate WebRTC
             rtc.createDataChannel('file-transfer')
             rtc.createOffer()
 
-            // Timeout only for connection establishment (15s)
+            // Query for existing signals after initial offer
+            queryForExistingSignals()
+
+            // Retry offer every 5 seconds if no answer received
+            // This helps with unreliable relay delivery
+            let retryCount = 0
+            offerRetryInterval = setInterval(async () => {
+              if (answerReceived || webRTCSuccess || cancelledRef.current) {
+                if (offerRetryInterval) {
+                  clearInterval(offerRetryInterval)
+                  offerRetryInterval = null
+                }
+                return
+              }
+
+              retryCount++
+              console.log(`Retrying WebRTC offer (attempt ${retryCount + 1})...`)
+
+              // Query for any signals we might have missed
+              await queryForExistingSignals()
+
+              // Recreate and resend offer
+              if (!answerReceived && !webRTCSuccess) {
+                rtc.createOffer()
+              }
+            }, 5000)
+
+            // Timeout for connection establishment (30s)
             // Once data channel opens, this timeout is cleared
             connectionTimeout = setTimeout(() => {
               if (!webRTCSuccess) {
+                cleanup()
                 rtc.close()
-                if (signalSubId) {
-                  client.unsubscribe(signalSubId)
-                }
                 reject(new Error('WebRTC connection timeout'))
               }
-            }, 15000)
+            }, 30000)
           })
         } catch (err) {
           // If P2P was established but failed during transfer, abort completely (no cloud fallback)

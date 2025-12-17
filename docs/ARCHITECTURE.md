@@ -185,11 +185,13 @@ interface PinExchangePayload {
 
 | Timeout | Duration | Purpose |
 |---------|----------|---------|
-| P2P connection | 15 seconds | Time to establish WebRTC connection (offer/answer/ICE/channel open) |
+| P2P connection | 30 seconds | Time to establish WebRTC connection (offer/answer/ICE/channel open) |
+| P2P offer retry | 5 seconds | Interval to retry WebRTC offer if no answer received |
 | P2P data transfer | Unlimited | Once connected, data transfer has no timeout |
 | Chunk ACK | 60 seconds | Time to download and acknowledge a cloud chunk |
 | Overall transfer | 10 minutes | Maximum time for entire transfer (receiver side) |
 | PIN expiration | 1 hour | Transfer session validity (NIP-40) |
+| Receiver PIN inactivity | 5 minutes | Clears PIN input if no changes made |
 
 ## Security Considerations
 
