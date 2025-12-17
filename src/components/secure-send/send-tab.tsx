@@ -33,7 +33,6 @@ export function SendTab() {
   const [message, setMessage] = useState('')
   const [relayOnly, setRelayOnly] = useState(false)
   const [selectedServer, setSelectedServer] = useState<string | null>(null)
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null)
   const [isCompressing, setIsCompressing] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
@@ -62,24 +61,26 @@ export function SendTab() {
   const encoder = new TextEncoder()
   const messageSize = encoder.encode(message).length
   const isTextOverLimit = messageSize > MAX_MESSAGE_SIZE
-  const isFileOverLimit = selectedFile ? selectedFile.size > MAX_MESSAGE_SIZE : false
-  const folderTotalSize = selectedFiles ? getTotalSize(selectedFiles) : 0
-  const isFolderOverLimit = folderTotalSize > MAX_MESSAGE_SIZE
+  const filesTotalSize = selectedFiles ? getTotalSize(selectedFiles) : 0
+  const isFilesOverLimit = filesTotalSize > MAX_MESSAGE_SIZE
 
   const canSendText = message.trim().length > 0 && !isTextOverLimit && state.status === 'idle'
-  const canSendFile = selectedFile && !isFileOverLimit && state.status === 'idle'
-  const canSendFolder = selectedFiles && selectedFiles.length > 0 && !isFolderOverLimit && state.status === 'idle' && !isCompressing
-  const canSend = mode === 'text' ? canSendText : mode === 'file' ? canSendFile : canSendFolder
+  const canSendFiles = selectedFiles && selectedFiles.length > 0 && !isFilesOverLimit && state.status === 'idle' && !isCompressing
+  const canSend = mode === 'text' ? canSendText : canSendFiles
 
   const handleSend = async () => {
     if (mode === 'text' && canSendText) {
       send(message, { relayOnly })
-    } else if (mode === 'file' && canSendFile && selectedFile) {
-      send(selectedFile, { relayOnly })
-    } else if (mode === 'folder' && canSendFolder && selectedFiles) {
+    } else if (canSendFiles && selectedFiles) {
+      // Single file in file mode: send directly
+      if (mode === 'file' && selectedFiles.length === 1) {
+        send(selectedFiles[0], { relayOnly })
+        return
+      }
+      // Multiple files or folder: compress to ZIP
       setIsCompressing(true)
       try {
-        const archiveName = getFolderName(selectedFiles)
+        const archiveName = mode === 'folder' ? getFolderName(selectedFiles) : 'files'
         const zipFile = await compressFilesToZip(selectedFiles, archiveName)
         setIsCompressing(false)
         send(zipFile, { relayOnly })
@@ -93,27 +94,23 @@ export function SendTab() {
   const handleReset = () => {
     cancel()
     setMessage('')
-    setSelectedFile(null)
     setSelectedFiles(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
     if (folderInputRef.current) folderInputRef.current.value = ''
   }
 
-  const handleFileSelect = useCallback((file: File | null) => {
-    if (file) {
-      setSelectedFile(file)
+  const handleFilesSelect = useCallback((files: FileList | null) => {
+    if (files && files.length > 0) {
+      setSelectedFiles(files)
     }
   }, [])
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null
-    handleFileSelect(file)
+    handleFilesSelect(e.target.files)
   }
 
   const handleFolderInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (files && files.length > 0) {
-      setSelectedFiles(files)
-    }
+    handleFilesSelect(e.target.files)
   }
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -121,9 +118,8 @@ export function SendTab() {
     e.stopPropagation()
     dragCounterRef.current = 0
     setIsDragging(false)
-    const file = e.dataTransfer.files?.[0] || null
-    handleFileSelect(file)
-  }, [handleFileSelect])
+    handleFilesSelect(e.dataTransfer.files)
+  }, [handleFilesSelect])
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -205,16 +201,26 @@ export function SendTab() {
                   flex flex-col items-center justify-center gap-3
                   cursor-pointer transition-colors
                   ${isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 hover:border-muted-foreground/50'}
-                  ${selectedFile ? 'bg-muted/50' : ''}
+                  ${selectedFiles ? 'bg-muted/50' : ''}
                 `}
               >
-                {selectedFile ? (
+                {isCompressing ? (
+                  <>
+                    <Loader2 className="h-10 w-10 text-muted-foreground animate-spin" />
+                    <div className="text-center">
+                      <p className="font-medium">Compressing to ZIP...</p>
+                    </div>
+                  </>
+                ) : selectedFiles ? (
                   <>
                     <FileUp className="h-10 w-10 text-muted-foreground" />
                     <div className="text-center">
-                      <p className="font-medium truncate max-w-[250px]">{selectedFile.name}</p>
+                      <p className="font-medium truncate max-w-[250px]">
+                        {selectedFiles.length === 1 ? selectedFiles[0].name : `${selectedFiles.length} files`}
+                      </p>
                       <p className="text-sm text-muted-foreground">
-                        {formatFileSize(selectedFile.size)}
+                        {selectedFiles.length > 1 && 'Will be compressed to ZIP • '}
+                        {formatFileSize(filesTotalSize)}
                       </p>
                     </div>
                     <Button
@@ -222,7 +228,7 @@ export function SendTab() {
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation()
-                        setSelectedFile(null)
+                        setSelectedFiles(null)
                         if (fileInputRef.current) fileInputRef.current.value = ''
                       }}
                     >
@@ -234,7 +240,7 @@ export function SendTab() {
                   <>
                     <Upload className="h-10 w-10 text-muted-foreground" />
                     <div className="text-center">
-                      <p className="font-medium">Drop file here or click to select</p>
+                      <p className="font-medium">Drop files here or click to select</p>
                       <p className="text-sm text-muted-foreground">
                         Max size: {formatFileSize(MAX_MESSAGE_SIZE)}
                       </p>
@@ -245,12 +251,13 @@ export function SendTab() {
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 onChange={handleFileInputChange}
                 className="hidden"
               />
-              {isFileOverLimit && (
+              {isFilesOverLimit && (
                 <p className="text-xs text-destructive">
-                  File exceeds {formatFileSize(MAX_MESSAGE_SIZE)} limit
+                  Total size exceeds {formatFileSize(MAX_MESSAGE_SIZE)} limit
                 </p>
               )}
             </div>
@@ -283,7 +290,7 @@ export function SendTab() {
                         {getFolderName(selectedFiles)}
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        {selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''} &bull; {formatFileSize(folderTotalSize)}
+                        {selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''} &bull; {formatFileSize(filesTotalSize)}
                       </p>
                     </div>
                     <Button
@@ -319,15 +326,13 @@ export function SendTab() {
                 webkitdirectory=""
                 directory=""
               />
-              {isFolderOverLimit && (
+              {isFilesOverLimit && (
                 <p className="text-xs text-destructive">
                   Total size exceeds {formatFileSize(MAX_MESSAGE_SIZE)} limit
                 </p>
               )}
             </div>
           )}
-
-
 
           {relayOnly && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded">
