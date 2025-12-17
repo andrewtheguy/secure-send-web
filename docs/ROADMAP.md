@@ -10,6 +10,7 @@
 - Chunked cloud uploads (10MB per chunk) with ACK coordination
 - Sequential chunk upload/download to manage memory usage
 - WebRTC backpressure support prevents send queue overflow
+- **Deferred encryption**: File encryption is skipped for P2P, only triggered for cloud fallback
 
 ## Planned Features
 

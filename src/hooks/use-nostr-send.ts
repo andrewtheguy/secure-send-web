@@ -166,23 +166,23 @@ export function useNostrSend(): UseNostrSendReturn {
 
       if (cancelledRef.current) return
 
-      // Encrypt entire content (needed for both P2P and cloud fallback)
-      setState({ status: 'connecting', message: 'Encrypting content...' })
-      const encryptedContent = await encrypt(key, contentBytes)
-
-      if (cancelledRef.current) return
+      // Note: Content encryption is deferred until needed (cloud fallback only)
+      // P2P sends raw content since WebRTC data channel is already secure
 
       // Create Nostr client for signaling
+      setState({ status: 'connecting', message: 'Connecting to relays...' })
       const client = createNostrClient([...DEFAULT_RELAYS])
       clientRef.current = client
 
       // Create PIN exchange payload WITHOUT cloud URL
       // Cloud upload only happens if P2P fails
+      // Estimate totalChunks based on raw size (encryption adds ~28 bytes overhead per chunk)
+      const estimatedEncryptedSize = contentBytes.length + 28
       const payload: PinExchangePayload = {
         contentType,
         transferId,
         senderPubkey: publicKey,
-        totalChunks: Math.ceil(encryptedContent.length / CLOUD_CHUNK_SIZE),
+        totalChunks: Math.ceil(estimatedEncryptedSize / CLOUD_CHUNK_SIZE),
         relays: [...DEFAULT_RELAYS],
         // NO tmpfilesUrl - cloud upload only if P2P fails
         // For file, include metadata
@@ -392,14 +392,24 @@ export function useNostrSend(): UseNostrSendReturn {
 
       // Cloud fallback: Only if P2P was never established (connection timeout or disabled)
       if (!webRTCSuccess && !p2pConnectionEstablished) {
+        // Encrypt content now (deferred from earlier since P2P doesn't need it)
         setState({
           status: 'transferring',
-          message: 'P2P unavailable, uploading to cloud...',
-          progress: { current: 0, total: encryptedContent.length },
+          message: 'Encrypting content for cloud upload...',
           contentType,
           fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
           currentRelays: client.getRelays(),
         })
+
+        const encryptedContent = await encrypt(key, contentBytes)
+
+        if (cancelledRef.current) return
+
+        setState(s => ({
+          ...s,
+          message: 'Uploading to cloud...',
+          progress: { current: 0, total: encryptedContent.length },
+        }))
 
         // Split encrypted content into chunks for upload
         const chunks = splitIntoChunks(encryptedContent, CLOUD_CHUNK_SIZE)

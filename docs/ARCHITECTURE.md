@@ -170,6 +170,8 @@ interface PinExchangePayload {
 
 **Note:** P2P sends raw content because the WebRTC data channel is already a secure, authenticated channel between the two peers. Cloud storage receives encrypted data because it's stored on third-party servers.
 
+**Optimization:** File content encryption is deferred until cloud fallback is triggered. If P2P succeeds, encryption is skipped entirely, saving CPU time and memory for large files.
+
 ## Size Limits
 
 | Limit | Value | Rationale |
