@@ -343,9 +343,6 @@ export async function discoverBackupRelays(
   return backupRelays
 }
 
-// Relay group size for rotation
-export const RELAY_GROUP_SIZE = 5
-
 /**
  * Get the list of discovered relay URLs from cache
  */

@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PinDisplay } from './pin-display'
 import { TransferStatus } from './transfer-status'
 import { useNostrSend } from '@/hooks/use-nostr-send'
-import { MAX_MESSAGE_SIZE, MAX_RELAY_MESSAGE_SIZE } from '@/lib/crypto'
+import { MAX_MESSAGE_SIZE } from '@/lib/crypto'
 import { formatFileSize } from '@/lib/file-utils'
 
 type ContentMode = 'text' | 'file'
@@ -23,9 +23,8 @@ export function SendTab() {
 
   const encoder = new TextEncoder()
   const messageSize = encoder.encode(message).length
-  const sizeLimit = relayOnly ? MAX_RELAY_MESSAGE_SIZE : MAX_MESSAGE_SIZE
-  const isTextOverLimit = messageSize > sizeLimit
-  const isFileOverLimit = selectedFile ? selectedFile.size > sizeLimit : false
+  const isTextOverLimit = messageSize > MAX_MESSAGE_SIZE
+  const isFileOverLimit = selectedFile ? selectedFile.size > MAX_MESSAGE_SIZE : false
 
   const canSendText = message.trim().length > 0 && !isTextOverLimit && state.status === 'idle'
   const canSendFile = selectedFile && !isFileOverLimit && state.status === 'idle'
@@ -119,7 +118,7 @@ export function SendTab() {
               />
               <div className="flex justify-between text-xs">
                 <span className={isTextOverLimit ? 'text-destructive' : 'text-muted-foreground'}>
-                  {formatFileSize(messageSize)} / {formatFileSize(sizeLimit)}
+                  {formatFileSize(messageSize)} / {formatFileSize(MAX_MESSAGE_SIZE)}
                 </span>
                 {isTextOverLimit && <span className="text-destructive">Message too large</span>}
               </div>
@@ -168,7 +167,7 @@ export function SendTab() {
                     <div className="text-center">
                       <p className="font-medium">Drop file here or click to select</p>
                       <p className="text-sm text-muted-foreground">
-                        Max size: {formatFileSize(sizeLimit)}
+                        Max size: {formatFileSize(MAX_MESSAGE_SIZE)}
                       </p>
                     </div>
                   </>
@@ -182,7 +181,7 @@ export function SendTab() {
               />
               {isFileOverLimit && (
                 <p className="text-xs text-destructive">
-                  File exceeds {formatFileSize(sizeLimit)} limit
+                  File exceeds {formatFileSize(MAX_MESSAGE_SIZE)} limit
                 </p>
               )}
             </div>
@@ -202,7 +201,7 @@ export function SendTab() {
               htmlFor="relay-only"
               className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
             >
-              Use Nostr Relay Only (disable WebRTC)
+              Disable WebRTC (use cloud transfer only)
             </label>
           </div>
 

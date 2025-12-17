@@ -8,53 +8,18 @@ function normalizeRelayUrl(url: string): string {
 
 export class NostrClient {
   private pool: SimplePool
-  private relays: string[]  // Current active relay group
-  private allRelays: string[]  // Full pool of relays
-  private groupSize: number
-  private groupIndex: number = 0
+  private relays: string[]
   private subscriptions: Map<string, { close: () => void }>
   private connectionReady: Promise<void>
 
-  constructor(relays: string[] = [...DEFAULT_RELAYS], groupSize: number = 5) {
+  constructor(relays: string[] = [...DEFAULT_RELAYS]) {
     this.pool = new SimplePool()
     // Normalize and dedupe relay URLs
-    this.allRelays = [...new Set(relays.map(normalizeRelayUrl))]
-    this.groupSize = Math.min(groupSize, this.allRelays.length)
-    // Start with first group
-    this.relays = this.getCurrentGroup()
+    this.relays = [...new Set(relays.map(normalizeRelayUrl))]
     this.subscriptions = new Map()
 
     // Pre-connect to all relays and wait for at least one to be ready
     this.connectionReady = this.ensureConnected()
-  }
-
-  /**
-   * Get the current relay group based on groupIndex
-   */
-  private getCurrentGroup(): string[] {
-    const start = this.groupIndex * this.groupSize
-    const group: string[] = []
-    for (let i = 0; i < this.groupSize; i++) {
-      group.push(this.allRelays[(start + i) % this.allRelays.length])
-    }
-    return group
-  }
-
-  /**
-   * Rotate to the next relay group
-   */
-  rotateGroup(): void {
-    const numGroups = Math.ceil(this.allRelays.length / this.groupSize)
-    this.groupIndex = (this.groupIndex + 1) % numGroups
-    this.relays = this.getCurrentGroup()
-  }
-
-  /**
-   * Publish an event and rotate to the next relay group for the next call
-   */
-  async publishAndRotate(event: Event, maxRetries: number = 3): Promise<void> {
-    await this.publish(event, maxRetries)
-    this.rotateGroup()
   }
 
   /**
@@ -185,8 +150,7 @@ export class NostrClient {
       sub.close()
     }
     this.subscriptions.clear()
-    // Close all relays in the pool, not just current group
-    this.pool.close(this.allRelays)
+    this.pool.close(this.relays)
   }
 
   /**
@@ -216,6 +180,6 @@ export class NostrClient {
 /**
  * Create and return a NostrClient instance
  */
-export function createNostrClient(relays?: string[], groupSize?: number): NostrClient {
-  return new NostrClient(relays, groupSize)
+export function createNostrClient(relays?: string[]): NostrClient {
+  return new NostrClient(relays)
 }

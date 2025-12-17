@@ -54,9 +54,11 @@ export interface PinExchangePayload {
   transferId: string
   senderPubkey: string
   totalChunks: number
-  // Sender's preferred relays for data transfer
+  // Sender's preferred relays for signaling
   relays?: string[]
-  // For text (single chunk only)
+  // tmpfiles.org download URL for encrypted data
+  tmpfilesUrl?: string
+  // For text (small inline messages)
   textMessage?: string
   // For file
   fileName?: string
