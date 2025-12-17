@@ -5,8 +5,11 @@
 ### 100MB File Support with P2P-First Architecture
 - Max file size increased from 10MB to 100MB
 - P2P (WebRTC) connections are attempted first - no cloud involvement when successful
-- Cloud fallback only when P2P fails: chunked uploads (10MB per chunk) with ACK coordination
+- **All-or-nothing P2P**: Once P2P connection is established, transfer completes or fails - no cloud fallback mid-transfer
+- Cloud fallback only when P2P connection fails (15s timeout)
+- Chunked cloud uploads (10MB per chunk) with ACK coordination
 - Sequential chunk upload/download to manage memory usage
+- WebRTC backpressure support prevents send queue overflow
 
 ## Planned Features
 

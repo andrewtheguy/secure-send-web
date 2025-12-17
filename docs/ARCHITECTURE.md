@@ -6,7 +6,7 @@ Secure Send is a browser-based encrypted file and message transfer application. 
 
 ## Core Principles
 
-1. **P2P First**: Direct WebRTC connections are preferred. Cloud storage is only used when P2P fails.
+1. **P2P First, All-or-Nothing**: Direct WebRTC connections are preferred. Once P2P is established, it completes or fails - no fallback to cloud mid-transfer. Cloud is only used when P2P connection cannot be established.
 2. **End-to-End Encryption**: All data is encrypted client-side before any transmission.
 3. **No Server Dependencies**: Uses decentralized Nostr relays for signaling and public cloud storage for fallback.
 4. **PIN-Based Security**: A 12-character PIN serves as the shared secret for key derivation.
@@ -29,14 +29,14 @@ Sender                              Receiver
   ✓                                    ✓
 ```
 
-### Cloud Fallback Path (When P2P Fails)
+### Cloud Fallback Path (When P2P Connection Fails)
 ```
 Sender                              Receiver
   │                                    │
   ├─── PIN Exchange (via Nostr) ──────>│
   │<────────── Ready ACK (seq=0) ──────┤
   │                                    │
-  │~~~ P2P attempt fails (timeout) ~~~~│
+  │~~~ P2P connection timeout (15s) ~~~│
   │                                    │
   ├─── Upload Chunk 0 to cloud         │
   ├─── ChunkNotify (chunk 0 URL) ─────>│
@@ -101,11 +101,12 @@ Handles direct peer-to-peer connections using WebRTC data channels.
 - ICE candidate queuing for reliable connection establishment
 - STUN server for NAT traversal (`stun.l.google.com:19302`)
 - 16KB chunked data transfer over data channel
+- Backpressure support (waits for buffer to drain before sending more data)
 - Connection state monitoring
 
 ### Cloud Storage (`src/lib/cloud-storage.ts`)
 
-Fallback storage when P2P is unavailable. Only used if WebRTC fails.
+Fallback storage when P2P connection cannot be established (15s timeout). Not used if P2P connects successfully.
 
 **Features:**
 - Multiple upload servers with automatic failover
@@ -123,9 +124,10 @@ Fallback storage when P2P is unavailable. Only used if WebRTC fails.
 1. Read and encrypt content
 2. Publish PIN exchange (without cloud URL)
 3. Wait for receiver ready ACK
-4. Attempt P2P transfer (15s timeout)
-5. If P2P fails: chunked cloud upload with ACK coordination
-6. Wait for completion ACK
+4. Attempt P2P connection (15s timeout for connection only)
+5. If P2P connects: transfer via data channel (all-or-nothing, no cloud fallback)
+6. If P2P connection fails: chunked cloud upload with ACK coordination
+7. Wait for completion ACK
 
 **`use-nostr-receive.ts`** - Receiver logic:
 1. Validate PIN and find exchange event
@@ -181,9 +183,10 @@ interface PinExchangePayload {
 
 | Timeout | Duration | Purpose |
 |---------|----------|---------|
-| P2P setup | 15 seconds | Time to establish WebRTC connection |
-| Chunk ACK | 60 seconds | Time to download and acknowledge a chunk |
-| Overall transfer | 10 minutes | Maximum time for entire transfer |
+| P2P connection | 15 seconds | Time to establish WebRTC connection (offer/answer/ICE/channel open) |
+| P2P data transfer | Unlimited | Once connected, data transfer has no timeout |
+| Chunk ACK | 60 seconds | Time to download and acknowledge a cloud chunk |
+| Overall transfer | 10 minutes | Maximum time for entire transfer (receiver side) |
 | PIN expiration | 1 hour | Transfer session validity (NIP-40) |
 
 ## Security Considerations
