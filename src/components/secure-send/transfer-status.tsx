@@ -1,4 +1,5 @@
-import { Loader2, CheckCircle2, XCircle, Radio } from 'lucide-react'
+import { useState } from 'react'
+import { Loader2, CheckCircle2, XCircle, Radio, ChevronDown, ChevronRight } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import type { TransferState } from '@/lib/nostr'
@@ -10,6 +11,8 @@ interface TransferStatusProps {
 }
 
 export function TransferStatus({ state, betweenProgressAndChunks }: TransferStatusProps) {
+  const [showDebug, setShowDebug] = useState(false)
+
   if (state.status === 'idle') return null
 
   const getIcon = () => {
@@ -53,14 +56,26 @@ export function TransferStatus({ state, betweenProgressAndChunks }: TransferStat
 
       {showRelays && (
         <div className="text-xs space-y-1">
-          <p className="font-medium text-muted-foreground">Active Relays:</p>
-          <ul className="space-y-0.5 pl-3">
-            {state.currentRelays!.map((relay, idx) => (
-              <li key={idx} className="text-muted-foreground truncate" title={relay}>
-                • {relay.replace('wss://', '')}
-              </li>
-            ))}
-          </ul>
+          <button
+            type="button"
+            onClick={() => setShowDebug(!showDebug)}
+            className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {showDebug ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            <span>Debug info</span>
+          </button>
+          {showDebug && (
+            <div className="pl-4 space-y-1">
+              <p className="font-medium text-muted-foreground">Active Relays:</p>
+              <ul className="space-y-0.5 pl-3">
+                {state.currentRelays!.map((relay, idx) => (
+                  <li key={idx} className="text-muted-foreground truncate" title={relay}>
+                    • {relay.replace('wss://', '')}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
