@@ -2,14 +2,17 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { Download, X, RotateCcw, Check, Copy, FileDown, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { PinInput } from './pin-input'
+import { PinInput, type PinInputRef } from './pin-input'
 import { TransferStatus } from './transfer-status'
 import { useNostrReceive } from '@/hooks/use-nostr-receive'
 import { PIN_LENGTH } from '@/lib/crypto'
 import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
 
 export function ReceiveTab() {
-  const [pin, setPin] = useState('')
+  // Store PIN in ref to avoid React DevTools exposure
+  const pinRef = useRef('')
+  const pinInputRef = useRef<PinInputRef>(null)
+  const [pinLength, setPinLength] = useState(0)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
   const { state, receivedContent, receive, cancel, reset } = useNostrReceive()
@@ -21,26 +24,42 @@ export function ReceiveTab() {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
+      // Clear PIN from memory on unmount
+      pinRef.current = ''
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
       }
     }
   }, [])
 
-  const canReceive = pin.length === PIN_LENGTH && state.status === 'idle'
+  const canReceive = pinLength === PIN_LENGTH && state.status === 'idle'
 
   const handleReceive = () => {
-    if (canReceive) {
+    if (canReceive && pinRef.current) {
+      const pin = pinRef.current
+      // Clear PIN immediately after getting it
+      pinRef.current = ''
+      setPinLength(0)
+      pinInputRef.current?.clear()
+      // Pass PIN to receive function
       receive(pin)
     }
   }
 
   const handleReset = () => {
     reset()
-    setPin('')
+    // Clear PIN from ref and input
+    pinRef.current = ''
+    setPinLength(0)
+    pinInputRef.current?.clear()
     setCopied(false)
     setCopyError(false)
   }
+
+  const handlePinChange = useCallback((value: string) => {
+    pinRef.current = value
+    setPinLength(value.length)
+  }, [])
 
   const handleCopy = useCallback(async () => {
     if (receivedContent?.contentType !== 'text') return
@@ -90,7 +109,7 @@ export function ReceiveTab() {
         <>
           <div className="space-y-2">
             <label className="text-sm font-medium">Enter PIN from sender</label>
-            <PinInput value={pin} onChange={setPin} disabled={isActive} />
+            <PinInput ref={pinInputRef} onPinChange={handlePinChange} disabled={isActive} />
           </div>
 
           <Button onClick={handleReceive} disabled={!canReceive} className="w-full">
