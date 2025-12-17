@@ -9,6 +9,7 @@ import {
   decrypt,
   MAX_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
+  CLOUD_CHUNK_SIZE,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -18,6 +19,7 @@ import {
   discoverBackupRelays,
   createSignalingEvent,
   parseSignalingEvent,
+  createChunkNotifyEvent,
   DEFAULT_RELAYS,
   type TransferState,
   type PinExchangePayload,
@@ -26,7 +28,7 @@ import {
   type NostrClient,
   type WebRTCOptions,
 } from '@/lib/nostr'
-import { uploadToCloud } from '@/lib/cloud-storage'
+import { uploadToCloud, splitIntoChunks } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { readFileAsBytes } from '@/lib/file-utils'
 import { WebRTCConnection } from '@/lib/webrtc'
@@ -164,33 +166,9 @@ export function useNostrSend(): UseNostrSendReturn {
 
       if (cancelledRef.current) return
 
-      // Encrypt entire content
+      // Encrypt entire content (needed for both P2P and cloud fallback)
       setState({ status: 'connecting', message: 'Encrypting content...' })
       const encryptedContent = await encrypt(key, contentBytes)
-
-      if (cancelledRef.current) return
-
-      // Upload encrypted content to cloud storage
-      setState({
-        status: 'transferring',
-        message: 'Uploading encrypted data...',
-        progress: { current: 0, total: encryptedContent.length },
-        contentType,
-        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
-      })
-
-      const uploadResult = await uploadToCloud(
-        encryptedContent,
-        'encrypted.bin',
-        (progress: number) => {
-          const uploaded = Math.round((progress / 100) * encryptedContent.length)
-          setState(s => ({
-            ...s,
-            progress: { current: uploaded, total: encryptedContent.length },
-            message: `Uploading... ${progress}%`,
-          }))
-        }
-      )
 
       if (cancelledRef.current) return
 
@@ -198,14 +176,15 @@ export function useNostrSend(): UseNostrSendReturn {
       const client = createNostrClient([...DEFAULT_RELAYS])
       clientRef.current = client
 
-      // Create PIN exchange payload with cloud storage URL
+      // Create PIN exchange payload WITHOUT cloud URL
+      // Cloud upload only happens if P2P fails
       const payload: PinExchangePayload = {
         contentType,
         transferId,
         senderPubkey: publicKey,
-        totalChunks: 1, // Backwards compat
+        totalChunks: Math.ceil(encryptedContent.length / CLOUD_CHUNK_SIZE),
         relays: [...DEFAULT_RELAYS],
-        tmpfilesUrl: uploadResult.url,
+        // NO tmpfilesUrl - cloud upload only if P2P fails
         // For file, include metadata
         fileName: contentType === 'file' ? fileName : undefined,
         fileSize: contentType === 'file' ? fileSize : undefined,
@@ -369,30 +348,102 @@ export function useNostrSend(): UseNostrSendReturn {
             rtc.createDataChannel('file-transfer')
             rtc.createOffer()
 
-            // Timeout for WebRTC setup
+            // Timeout for WebRTC setup (15s for larger files)
             setTimeout(() => {
               if (!webRTCSuccess) {
                 rtc.close()
                 client.unsubscribe(subId)
                 reject(new Error('WebRTC timeout'))
               }
-            }, 10000) // 10 seconds to connect
+            }, 15000) // 15 seconds to connect
           })
         } catch (err) {
-          console.log('WebRTC failed, receiver will use cloud storage download:', err)
-          // Not a failure - receiver can still download from cloud storage
+          console.log('P2P failed, falling back to cloud upload:', err)
+          // P2P failed - fall back to chunked cloud upload
         }
       }
 
-      // Update status while waiting for completion
+      // Cloud fallback: Only upload to cloud if P2P failed or was disabled
       if (!webRTCSuccess) {
         setState({
           status: 'transferring',
-          message: 'Receiver is downloading...',
+          message: 'P2P unavailable, uploading to cloud...',
+          progress: { current: 0, total: encryptedContent.length },
           contentType,
           fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
           currentRelays: client.getRelays(),
         })
+
+        // Split encrypted content into chunks for upload
+        const chunks = splitIntoChunks(encryptedContent, CLOUD_CHUNK_SIZE)
+        const totalChunks = chunks.length
+        let uploadedBytes = 0
+
+        console.log(`Starting chunked upload: ${totalChunks} chunks of up to ${CLOUD_CHUNK_SIZE / 1024 / 1024}MB each`)
+
+        for (let i = 0; i < chunks.length; i++) {
+          if (cancelledRef.current) return
+
+          const chunk = chunks[i]
+          setState(s => ({
+            ...s,
+            message: `Uploading chunk ${i + 1}/${totalChunks}...`,
+            progress: { current: uploadedBytes, total: encryptedContent.length },
+          }))
+
+          // Upload this chunk
+          const uploadResult = await uploadToCloud(
+            chunk,
+            `encrypted.chunk${i}.bin`,
+            (progress: number) => {
+              const chunkUploaded = Math.round((progress / 100) * chunk.length)
+              setState(s => ({
+                ...s,
+                progress: { current: uploadedBytes + chunkUploaded, total: encryptedContent.length },
+              }))
+            }
+          )
+
+          console.log(`Chunk ${i + 1}/${totalChunks} uploaded to ${uploadResult.url}`)
+
+          // Notify receiver of chunk URL
+          const notifyEvent = createChunkNotifyEvent(
+            secretKey,
+            receiverPubkey,
+            transferId,
+            i,
+            totalChunks,
+            uploadResult.url,
+            chunk.length
+          )
+          await client.publish(notifyEvent)
+          console.log(`Chunk ${i + 1}/${totalChunks} notification sent`)
+
+          // Wait for receiver to ACK this chunk (seq = i + 1, 1-based)
+          setState(s => ({
+            ...s,
+            message: `Waiting for chunk ${i + 1}/${totalChunks} confirmation...`,
+          }))
+
+          const chunkAckReceived = await waitForAck(
+            client,
+            transferId,
+            publicKey,
+            receiverPubkey,
+            i + 1, // chunk ACK uses 1-based indexing (0 is ready)
+            () => cancelledRef.current,
+            60000 // 60s timeout per chunk
+          )
+
+          if (!chunkAckReceived) {
+            throw new Error(`Timeout waiting for chunk ${i + 1} confirmation`)
+          }
+
+          console.log(`Chunk ${i + 1}/${totalChunks} confirmed by receiver`)
+          uploadedBytes += chunk.length
+        }
+
+        console.log('All chunks uploaded and confirmed')
       }
 
       // Wait for completion ACK (seq=-1)

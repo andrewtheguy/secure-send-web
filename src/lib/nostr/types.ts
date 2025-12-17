@@ -56,7 +56,16 @@ export interface PinExchangePayload {
 // ACK payload
 export interface AckData {
   transferId: string
-  seq: number // -1 for final completion ACK, 0 for ready
+  seq: number // -1 for final completion ACK, 0 for ready, N for chunk N ACK (1-based)
+}
+
+// Chunk notification payload (sender -> receiver when cloud fallback)
+export interface ChunkNotifyPayload {
+  transferId: string
+  chunkIndex: number    // 0-based chunk index
+  totalChunks: number   // Total number of chunks
+  chunkUrl: string      // Download URL for this chunk
+  chunkSize: number     // Size of this chunk in bytes
 }
 
 // Transfer metadata

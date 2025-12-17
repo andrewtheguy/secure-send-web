@@ -3,8 +3,8 @@
  * Supports multiple upload servers and CORS proxies with automatic failover
  */
 
-// Limit to 10MB until streaming upload/download is implemented
-export const MAX_CLOUD_SIZE = 10 * 1024 * 1024 // 10MB
+// Max size per cloud chunk (10MB) - larger files are split into multiple chunks
+export const MAX_CLOUD_CHUNK_SIZE = 10 * 1024 * 1024 // 10MB per chunk
 
 // Test URL for CORS proxy validation (stable, small content)
 const CORS_TEST_URL = 'https://httpbingo.org/base64/Y29yc19pc193b3JraW5n'
@@ -423,9 +423,9 @@ export async function uploadToCloud(
   filename: string = 'encrypted.bin',
   onProgress?: (progress: number) => void
 ): Promise<CloudUploadResult> {
-  if (data.length > MAX_CLOUD_SIZE) {
+  if (data.length > MAX_CLOUD_CHUNK_SIZE) {
     throw new Error(
-      `File size (${Math.round(data.length / 1024 / 1024)}MB) exceeds limit (${MAX_CLOUD_SIZE / 1024 / 1024}MB)`
+      `Chunk size (${Math.round(data.length / 1024 / 1024)}MB) exceeds limit (${MAX_CLOUD_CHUNK_SIZE / 1024 / 1024}MB). Use chunked upload for larger files.`
     )
   }
 
@@ -525,4 +525,41 @@ export async function downloadFromCloud(
 
     throw new Error('All CORS proxies failed')
   }
+}
+
+// =============================================================================
+// Chunked Upload/Download Helpers
+// =============================================================================
+
+/**
+ * Split data into chunks for upload
+ * @param data - Data to split
+ * @param chunkSize - Size of each chunk (defaults to MAX_CLOUD_CHUNK_SIZE)
+ * @returns Array of chunks
+ */
+export function splitIntoChunks(
+  data: Uint8Array,
+  chunkSize: number = MAX_CLOUD_CHUNK_SIZE
+): Uint8Array[] {
+  const chunks: Uint8Array[] = []
+  for (let i = 0; i < data.length; i += chunkSize) {
+    chunks.push(data.slice(i, Math.min(i + chunkSize, data.length)))
+  }
+  return chunks
+}
+
+/**
+ * Combine chunks back into single array
+ * @param chunks - Array of chunks to combine
+ * @returns Combined data
+ */
+export function combineChunks(chunks: Uint8Array[]): Uint8Array {
+  const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0)
+  const result = new Uint8Array(totalLength)
+  let offset = 0
+  for (const chunk of chunks) {
+    result.set(chunk, offset)
+    offset += chunk.length
+  }
+  return result
 }

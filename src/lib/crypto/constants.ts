@@ -16,12 +16,14 @@ export const AES_TAG_LENGTH = 16 // bytes (128 bits)
 // Salt length
 export const SALT_LENGTH = 16
 
-// Chunk size for data transfer
+// Chunk size for WebRTC data channel transfer
 export const CHUNK_SIZE = 16 * 1024 // 16KB
 
-// Max message size (limited to 10MB until streaming is implemented)
-// tmpfiles.org supports up to 100MB but current implementation loads all into memory
-export const MAX_MESSAGE_SIZE = 10 * 1024 * 1024 // 10MB
+// Cloud chunk size for chunked uploads (when P2P fails)
+export const CLOUD_CHUNK_SIZE = 10 * 1024 * 1024 // 10MB per cloud chunk
+
+// Max message size (100MB - P2P handles full size, cloud falls back to chunked)
+export const MAX_MESSAGE_SIZE = 100 * 1024 * 1024 // 100MB
 
 // PIN hint length
 export const PIN_HINT_LENGTH = 8 // hex characters

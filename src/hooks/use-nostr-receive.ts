@@ -13,17 +13,19 @@ import {
   parsePinExchangeEvent,
   createAckEvent,
   discoverBackupRelays,
+  parseChunkNotifyEvent,
   DEFAULT_RELAYS,
   type TransferState,
   type PinExchangePayload,
   type ReceivedContent,
+  type ChunkNotifyPayload,
   EVENT_KIND_PIN_EXCHANGE,
   EVENT_KIND_DATA_TRANSFER,
   type NostrClient,
   createSignalingEvent,
   parseSignalingEvent,
 } from '@/lib/nostr'
-import { downloadFromCloud } from '@/lib/cloud-storage'
+import { downloadFromCloud, combineChunks } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { WebRTCConnection } from '@/lib/webrtc'
 
@@ -207,25 +209,28 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         currentRelays: client.getRelays(),
       })
 
-      // WebRTC result flags
+      // Unified listener for both P2P and chunked cloud transfer
+      // P2P is preferred, but if sender can't establish P2P, they'll send chunk notifications
       let webRTCSuccess = false
-      let webRTCResult: Uint8Array | null = null
+      const receivedChunks: Map<number, Uint8Array> = new Map()
+      let expectedTotalChunks = payload.totalChunks || 1
 
-      // Try WebRTC first (if sender initiates)
-      const webRTCPromise = new Promise<void>((resolve, reject) => {
+      const transferResult = await new Promise<{ mode: 'p2p' | 'cloud' | 'inline'; data: Uint8Array }>((resolve, reject) => {
         let rtc: WebRTCConnection | null = null
         let webRTCBuffer: Uint8Array[] = []
         let webRTCReceivedBytes = 0
         let settled = false
+        let cloudTransferStarted = false
 
-        // Timeout for WebRTC - if no offer received in 15s, fall back to cloud storage
-        const timeout = setTimeout(() => {
+        // Overall timeout - 10 minutes for entire transfer
+        const overallTimeout = setTimeout(() => {
           if (!settled) {
             settled = true
             if (rtc) rtc.close()
-            reject(new Error('WebRTC timeout'))
+            client.unsubscribe(subId)
+            reject(new Error('Transfer timeout'))
           }
-        }, 15000)
+        }, 10 * 60 * 1000)
 
         // Initialize WebRTC on first signal offer
         const initWebRTC = () => {
@@ -250,7 +255,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 // Transfer complete via WebRTC
                 if (!settled) {
                   settled = true
-                  clearTimeout(timeout)
+                  clearTimeout(overallTimeout)
                   client.unsubscribe(subId)
                   if (rtc) {
                     rtc.send('DONE_ACK')
@@ -267,8 +272,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                   }
 
                   webRTCSuccess = true
-                  webRTCResult = combined
-                  resolve()
+                  resolve({ mode: 'p2p', data: combined })
                 }
                 return
               }
@@ -294,7 +298,92 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           return rtc
         }
 
-        // Listen for WebRTC signals from sender
+        // Handle chunk notification (cloud fallback)
+        const handleChunkNotify = async (chunkPayload: ChunkNotifyPayload) => {
+          if (settled) return
+
+          // First chunk notification - switch to cloud mode
+          if (!cloudTransferStarted) {
+            cloudTransferStarted = true
+            console.log('Switching to cloud chunk download mode')
+
+            // Close any pending WebRTC connection
+            if (rtc) {
+              rtc.close()
+              rtc = null
+            }
+          }
+
+          expectedTotalChunks = chunkPayload.totalChunks
+
+          setState(s => ({
+            ...s,
+            message: `Downloading chunk ${chunkPayload.chunkIndex + 1}/${chunkPayload.totalChunks}...`,
+            useWebRTC: false,
+          }))
+
+          try {
+            // Download this chunk
+            const baseProgress = Array.from(receivedChunks.values()).reduce((sum, c) => sum + c.length, 0)
+            const chunkData = await downloadFromCloud(
+              chunkPayload.chunkUrl,
+              (loaded) => {
+                setState(s => ({
+                  ...s,
+                  progress: {
+                    current: baseProgress + loaded,
+                    total: payload.fileSize || (chunkPayload.totalChunks * chunkPayload.chunkSize),
+                  },
+                }))
+              }
+            )
+
+            // Validate chunk size
+            if (chunkData.length !== chunkPayload.chunkSize) {
+              console.warn(`Chunk ${chunkPayload.chunkIndex} size mismatch: expected ${chunkPayload.chunkSize}, got ${chunkData.length}`)
+            }
+
+            // Store chunk
+            receivedChunks.set(chunkPayload.chunkIndex, chunkData)
+            console.log(`Chunk ${chunkPayload.chunkIndex + 1}/${chunkPayload.totalChunks} downloaded (${chunkData.length} bytes)`)
+
+            // Send chunk ACK (seq = chunkIndex + 1, 1-based)
+            const chunkAck = createAckEvent(
+              secretKey,
+              senderPubkey!,
+              transferId!,
+              chunkPayload.chunkIndex + 1
+            )
+            await publishWithBackup(client, chunkAck)
+            console.log(`Chunk ${chunkPayload.chunkIndex + 1} ACK sent`)
+
+            // Check if all chunks received
+            if (receivedChunks.size === expectedTotalChunks) {
+              settled = true
+              clearTimeout(overallTimeout)
+              client.unsubscribe(subId)
+
+              // Combine chunks in order
+              const orderedChunks: Uint8Array[] = []
+              for (let i = 0; i < expectedTotalChunks; i++) {
+                const chunk = receivedChunks.get(i)
+                if (!chunk) {
+                  reject(new Error(`Missing chunk ${i}`))
+                  return
+                }
+                orderedChunks.push(chunk)
+              }
+              const combined = combineChunks(orderedChunks)
+              console.log(`All ${expectedTotalChunks} chunks combined (${combined.length} bytes)`)
+              resolve({ mode: 'cloud', data: combined })
+            }
+          } catch (err) {
+            console.error(`Failed to download chunk ${chunkPayload.chunkIndex}:`, err)
+            // Don't reject immediately - sender might resend
+          }
+        }
+
+        // Listen for both WebRTC signals AND chunk notifications from sender
         const subId = client.subscribe(
           [
             {
@@ -306,79 +395,64 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           async (event) => {
             if (settled) return
 
-            const signalData = parseSignalingEvent(event)
-            if (signalData && signalData.transferId === transferId) {
-              try {
-                const decrypted = await decrypt(key!, signalData.encryptedSignal)
-                const payload = JSON.parse(new TextDecoder().decode(decrypted))
-                if (payload.type === 'signal' && payload.signal) {
-                  const r = initWebRTC()
-                  r.handleSignal(payload.signal)
+            // Check for WebRTC signal (only if cloud transfer hasn't started)
+            if (!cloudTransferStarted) {
+              const signalData = parseSignalingEvent(event)
+              if (signalData && signalData.transferId === transferId) {
+                try {
+                  const decrypted = await decrypt(key!, signalData.encryptedSignal)
+                  const signalPayload = JSON.parse(new TextDecoder().decode(decrypted))
+                  if (signalPayload.type === 'signal' && signalPayload.signal) {
+                    const r = initWebRTC()
+                    r.handleSignal(signalPayload.signal)
+                  }
+                } catch (e) {
+                  console.error("Signal handling error", e)
                 }
-              } catch (e) {
-                console.error("Signal handling error", e)
+                return
+              }
+            }
+
+            // Check for chunk notification (cloud fallback)
+            const chunkNotify = parseChunkNotifyEvent(event)
+            if (chunkNotify && chunkNotify.transferId === transferId) {
+              // Avoid processing duplicate chunk notifications
+              if (!receivedChunks.has(chunkNotify.chunkIndex)) {
+                await handleChunkNotify(chunkNotify)
               }
             }
           }
         )
-      })
 
-      // Wait for WebRTC or timeout
-      try {
-        await webRTCPromise
-      } catch (err) {
-        console.log('WebRTC not available, using cloud storage download:', err)
-      }
+        // Handle inline text message (no P2P or cloud needed)
+        if (payload.textMessage) {
+          settled = true
+          clearTimeout(overallTimeout)
+          client.unsubscribe(subId)
+          const encoder = new TextEncoder()
+          resolve({ mode: 'inline', data: encoder.encode(payload.textMessage) })
+        }
+      })
 
       if (cancelledRef.current) return
 
-      // If WebRTC succeeded, use that data
+      // Process received data
       let contentData: Uint8Array
 
-      if (webRTCSuccess && webRTCResult) {
-        contentData = webRTCResult
-        console.log('Received data via WebRTC')
-      } else if (payload.tmpfilesUrl) {
-        // Download from cloud storage
-        setState({
-          status: 'receiving',
-          message: 'Downloading encrypted data...',
-          progress: { current: 0, total: payload.fileSize || 0 },
-          contentType: payload.contentType,
-          fileMetadata: isFile
-            ? {
-              fileName: payload.fileName!,
-              fileSize: payload.fileSize!,
-              mimeType: payload.mimeType!,
-            }
-            : undefined,
-          currentRelays: client.getRelays(),
-        })
-
-        const encryptedData = await downloadFromCloud(
-          payload.tmpfilesUrl,
-          (loaded: number, total: number) => {
-            setState(s => ({
-              ...s,
-              progress: { current: loaded, total: total || payload.fileSize || loaded },
-              message: `Downloading... ${total > 0 ? Math.round((loaded / total) * 100) : 0}%`,
-            }))
-          }
-        )
-
-        if (cancelledRef.current) return
-
-        // Decrypt the downloaded data
+      if (transferResult.mode === 'p2p') {
+        // P2P data is raw content (not encrypted)
+        contentData = transferResult.data
+        webRTCSuccess = true
+        console.log('Received data via P2P')
+      } else if (transferResult.mode === 'cloud') {
+        // Cloud data is encrypted - need to decrypt
         setState(s => ({ ...s, message: 'Decrypting...' }))
-        contentData = await decrypt(key, encryptedData)
+        contentData = await decrypt(key, transferResult.data)
         console.log('Downloaded and decrypted data from cloud storage')
-      } else if (payload.textMessage) {
-        // Inline text message (small messages embedded in payload)
-        const encoder = new TextEncoder()
-        contentData = encoder.encode(payload.textMessage)
-        console.log('Using inline text message from payload')
       } else {
-        throw new Error('No download URL or inline content available')
+        // Inline text message
+        contentData = transferResult.data
+        console.log('Using inline text message from payload')
       }
 
       if (cancelledRef.current) return

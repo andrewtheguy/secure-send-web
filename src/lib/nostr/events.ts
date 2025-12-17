@@ -1,5 +1,5 @@
 import { finalizeEvent, generateSecretKey, getPublicKey, type Event } from 'nostr-tools'
-import { EVENT_KIND_PIN_EXCHANGE, EVENT_KIND_DATA_TRANSFER } from './types'
+import { EVENT_KIND_PIN_EXCHANGE, EVENT_KIND_DATA_TRANSFER, type ChunkNotifyPayload } from './types'
 import { TRANSFER_EXPIRATION_MS } from '../crypto/constants'
 
 /**
@@ -180,6 +180,72 @@ export function parseSignalingEvent(event: Event): {
   try {
     const encryptedSignal = base64ToUint8Array(event.content)
     return { transferId, senderPubkey, encryptedSignal }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Create Chunk Notification event (kind 24242 with type=chunk_notify)
+ * Sent by sender to notify receiver of an uploaded chunk URL (cloud fallback)
+ */
+export function createChunkNotifyEvent(
+  secretKey: Uint8Array,
+  receiverPubkey: string,
+  transferId: string,
+  chunkIndex: number,
+  totalChunks: number,
+  chunkUrl: string,
+  chunkSize: number
+): Event {
+  const payload: ChunkNotifyPayload = {
+    transferId,
+    chunkIndex,
+    totalChunks,
+    chunkUrl,
+    chunkSize,
+  }
+
+  const event = finalizeEvent(
+    {
+      kind: EVENT_KIND_DATA_TRANSFER,
+      content: JSON.stringify(payload),
+      tags: [
+        ['p', receiverPubkey],
+        ['t', transferId],
+        ['type', 'chunk_notify'],
+        ['chunk', chunkIndex.toString()],
+        ['total', totalChunks.toString()],
+      ],
+      created_at: Math.floor(Date.now() / 1000),
+    },
+    secretKey
+  )
+  return event
+}
+
+/**
+ * Parse Chunk Notification event
+ */
+export function parseChunkNotifyEvent(event: Event): ChunkNotifyPayload | null {
+  if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null
+
+  const type = event.tags.find((t) => t[0] === 'type')?.[1]
+  if (type !== 'chunk_notify') return null
+
+  try {
+    const payload = JSON.parse(event.content) as ChunkNotifyPayload
+    // Validate required fields
+    if (
+      typeof payload.transferId !== 'string' ||
+      typeof payload.chunkIndex !== 'number' ||
+      typeof payload.totalChunks !== 'number' ||
+      typeof payload.chunkUrl !== 'string' ||
+      typeof payload.chunkSize !== 'number'
+    ) {
+      return null
+    }
+    return payload
   } catch {
     return null
   }
