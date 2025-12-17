@@ -18,6 +18,7 @@ interface UploadServer {
   name: string
   url: string
   formField: string
+  extraFields?: Record<string, string> // additional form fields
   parseResponse: (text: string) => string // returns download URL
 }
 
@@ -35,6 +36,20 @@ const UPLOAD_SERVERS: UploadServer[] = [
       throw new Error(json.error || 'Upload failed')
     },
   },
+  // litterbox doesn't support CORS for uploads
+  // {
+  //   name: 'litterbox',
+  //   url: 'https://litterbox.catbox.moe/resources/internals/api.php',
+  //   formField: 'fileToUpload',
+  //   extraFields: { reqtype: 'fileupload', time: '72h' },
+  //   parseResponse: (text) => {
+  //     // Returns direct URL on success, error message on failure
+  //     if (text.startsWith('https://')) {
+  //       return text.trim()
+  //     }
+  //     throw new Error(text || 'Upload failed')
+  //   },
+  // },
 ]
 
 // =============================================================================
@@ -278,6 +293,12 @@ function uploadToServer(
     new Uint8Array(buffer).set(data)
     const blob = new Blob([buffer], { type: 'application/octet-stream' })
     const formData = new FormData()
+    // Add extra fields first (some APIs require them before file)
+    if (server.extraFields) {
+      for (const [key, value] of Object.entries(server.extraFields)) {
+        formData.append(key, value)
+      }
+    }
     formData.append(server.formField, blob, filename)
 
     const xhr = new XMLHttpRequest()
