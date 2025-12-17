@@ -7,7 +7,8 @@
 export const MAX_CLOUD_SIZE = 10 * 1024 * 1024 // 10MB
 
 // Test URL for CORS proxy validation (stable, small content)
-const CORS_TEST_URL = 'https://example.com'
+const CORS_TEST_URL = 'https://httpbingo.org/base64/Y29yc19pc193b3JraW5n'
+const CORS_TEST_EXPECTED = 'cors_is_working'
 
 // =============================================================================
 // Upload Server Configuration
@@ -62,6 +63,10 @@ const CORS_PROXIES: CorsProxy[] = [
     name: 'cors-anywhere',
     buildUrl: (url) => `https://cors-anywhere.com/${url}`,
   },
+  // {
+  //   name: 'allorigins',
+  //   buildUrl: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  // },
 ]
 
 // =============================================================================
@@ -126,7 +131,7 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
 
       if (response.ok) {
         const text = await response.text()
-        if (text.includes('Example Domain')) {
+        if (text.includes(CORS_TEST_EXPECTED)) {
           const latency = Date.now() - start
           proxyResults.push({ name: proxy.name, status: 'ok', latency })
           console.log(`   %c✓ ${proxy.name}%c - ${latency}ms`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
@@ -246,8 +251,8 @@ async function findWorkingCorsProxy(): Promise<CorsProxy | null> {
 
       if (response.ok) {
         const text = await response.text()
-        // example.com returns HTML with "Example Domain" in it
-        if (text.includes('Example Domain')) {
+        // httpbingo.org returns the expected test string
+        if (text.includes(CORS_TEST_EXPECTED)) {
           console.log(`CORS proxy ${proxy.name} is working`)
           return proxy
         }
