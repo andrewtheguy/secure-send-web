@@ -97,6 +97,7 @@ export async function uploadToTmpfiles(
 
 /**
  * Download file from tmpfiles.org
+ * Uses CORS proxy to bypass cross-origin restrictions
  *
  * @param url - Direct download URL (https://tmpfiles.org/dl/...)
  * @param onProgress - Optional progress callback (loaded bytes, total bytes)
@@ -106,6 +107,9 @@ export async function downloadFromTmpfiles(
   url: string,
   onProgress?: (loaded: number, total: number) => void
 ): Promise<Uint8Array> {
+  // Use CORS proxy to fetch the encrypted file
+  const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`
+
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.responseType = 'arraybuffer'
@@ -133,7 +137,7 @@ export async function downloadFromTmpfiles(
       reject(new Error('Download cancelled'))
     })
 
-    xhr.open('GET', url)
+    xhr.open('GET', proxyUrl)
     xhr.send()
   })
 }

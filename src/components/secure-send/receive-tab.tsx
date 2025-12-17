@@ -100,7 +100,7 @@ export function ReceiveTab() {
         </>
       ) : (
         <>
-          <TransferStatus state={state} mode="receive" />
+          <TransferStatus state={state} />
 
           {state.status === 'complete' && receivedContent?.contentType === 'text' && (
             <div className="space-y-2">

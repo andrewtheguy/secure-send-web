@@ -22,30 +22,17 @@ export interface FileMetadata {
   mimeType: string
 }
 
-// Chunk status for detailed progress tracking
-export type ChunkStatus = 'pending' | 'sending' | 'sent' | 'acked' | 'receiving' | 'received'
-
-export interface ChunkState {
-  seq: number
-  status: ChunkStatus
-  retries?: number
-  timestamp?: number
-}
-
 export interface TransferState {
   status: TransferStatus
   message?: string
   progress?: {
-    current: number
-    total: number
+    current: number  // bytes transferred
+    total: number    // total bytes
   }
-  relaysConnected?: number
-  relaysTotal?: number
   contentType?: ContentType
   fileMetadata?: FileMetadata
-  chunks?: Map<number, ChunkState>
   useWebRTC?: boolean
-  currentRelays?: string[] // Current relay URLs being used
+  currentRelays?: string[] // Current relay URLs being used (for signaling)
 }
 
 // PIN Exchange payload (encrypted in the event)
@@ -64,14 +51,6 @@ export interface PinExchangePayload {
   fileName?: string
   fileSize?: number
   mimeType?: string
-}
-
-// Data chunk payload
-export interface ChunkData {
-  transferId: string
-  seq: number
-  total: number
-  data: string // base64 encrypted chunk
 }
 
 // ACK payload

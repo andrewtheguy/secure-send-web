@@ -214,7 +214,6 @@ export function SendTab() {
         <>
           <TransferStatus
             state={state}
-            mode="send"
             betweenProgressAndChunks={showPinDisplay ? <PinDisplay pin={pin} /> : undefined}
           />
 

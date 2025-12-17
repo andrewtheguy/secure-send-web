@@ -2,15 +2,14 @@ import { Loader2, CheckCircle2, XCircle, Radio } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import type { TransferState } from '@/lib/nostr'
-import { ChunkProgress } from './chunk-progress'
+import { formatFileSize } from '@/lib/file-utils'
 
 interface TransferStatusProps {
   state: TransferState
-  mode?: 'send' | 'receive'
   betweenProgressAndChunks?: React.ReactNode
 }
 
-export function TransferStatus({ state, mode = 'send', betweenProgressAndChunks }: TransferStatusProps) {
+export function TransferStatus({ state, betweenProgressAndChunks }: TransferStatusProps) {
   if (state.status === 'idle') return null
 
   const getIcon = () => {
@@ -38,7 +37,6 @@ export function TransferStatus({ state, mode = 'send', betweenProgressAndChunks 
       ? (state.progress.current / state.progress.total) * 100
       : 0
 
-  const showChunkDetails = state.chunks && state.chunks.size > 0 && !state.useWebRTC
   const showRelays = state.currentRelays && state.currentRelays.length > 0 && !state.useWebRTC
 
   return (
@@ -47,8 +45,8 @@ export function TransferStatus({ state, mode = 'send', betweenProgressAndChunks 
         {getIcon()}
         <AlertDescription>
           {state.message || state.status}
-          {state.useWebRTC === false && state.chunks && state.chunks.size > 1 && (
-            <span className="text-xs text-muted-foreground ml-2">(Relay mode)</span>
+          {state.useWebRTC && (
+            <span className="text-xs text-muted-foreground ml-2">(P2P)</span>
           )}
         </AlertDescription>
       </Alert>
@@ -66,20 +64,16 @@ export function TransferStatus({ state, mode = 'send', betweenProgressAndChunks 
         </div>
       )}
 
-      {state.progress && state.progress.total > 1 && (
+      {state.progress && state.progress.total > 0 && (
         <div className="space-y-1">
           <Progress value={progressPercent} className="h-2" />
           <p className="text-xs text-muted-foreground text-right">
-            {state.progress.current} / {state.progress.total} chunks
+            {formatFileSize(state.progress.current)} / {formatFileSize(state.progress.total)}
           </p>
         </div>
       )}
 
       {betweenProgressAndChunks}
-
-      {showChunkDetails && (
-        <ChunkProgress chunks={state.chunks!} mode={mode} />
-      )}
     </div>
   )
 }
