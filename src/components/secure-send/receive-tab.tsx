@@ -8,6 +8,8 @@ import { useNostrReceive } from '@/hooks/use-nostr-receive'
 import { PIN_LENGTH } from '@/lib/crypto'
 import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
 
+const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+
 export function ReceiveTab() {
   // Store PIN in ref to avoid React DevTools exposure
   const pinRef = useRef('')
@@ -15,10 +17,39 @@ export function ReceiveTab() {
   const [pinLength, setPinLength] = useState(0)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
+  const [pinExpired, setPinExpired] = useState(false)
   const { state, receivedContent, receive, cancel, reset } = useNostrReceive()
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pinInactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mountedRef = useRef(true)
+
+  // Clear PIN inactivity timeout
+  const clearPinInactivityTimeout = useCallback(() => {
+    if (pinInactivityRef.current) {
+      clearTimeout(pinInactivityRef.current)
+      pinInactivityRef.current = null
+    }
+  }, [])
+
+  // Reset PIN inactivity timeout (called on each PIN change)
+  const resetPinInactivityTimeout = useCallback(() => {
+    clearPinInactivityTimeout()
+    setPinExpired(false)
+
+    // Only set timeout if there's some PIN input
+    if (pinRef.current.length > 0) {
+      pinInactivityRef.current = setTimeout(() => {
+        if (mountedRef.current && pinRef.current.length > 0) {
+          // Clear PIN due to inactivity
+          pinRef.current = ''
+          setPinLength(0)
+          pinInputRef.current?.clear()
+          setPinExpired(true)
+        }
+      }, PIN_INACTIVITY_TIMEOUT_MS)
+    }
+  }, [clearPinInactivityTimeout])
 
   useEffect(() => {
     mountedRef.current = true
@@ -29,18 +60,21 @@ export function ReceiveTab() {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
       }
+      clearPinInactivityTimeout()
     }
-  }, [])
+  }, [clearPinInactivityTimeout])
 
   const canReceive = pinLength === PIN_LENGTH && state.status === 'idle'
 
   const handleReceive = () => {
     if (canReceive && pinRef.current) {
+      clearPinInactivityTimeout()
       const pin = pinRef.current
       // Clear PIN immediately after getting it
       pinRef.current = ''
       setPinLength(0)
       pinInputRef.current?.clear()
+      setPinExpired(false)
       // Pass PIN to receive function
       receive(pin)
     }
@@ -48,18 +82,21 @@ export function ReceiveTab() {
 
   const handleReset = () => {
     reset()
+    clearPinInactivityTimeout()
     // Clear PIN from ref and input
     pinRef.current = ''
     setPinLength(0)
     pinInputRef.current?.clear()
     setCopied(false)
     setCopyError(false)
+    setPinExpired(false)
   }
 
   const handlePinChange = useCallback((value: string) => {
     pinRef.current = value
     setPinLength(value.length)
-  }, [])
+    resetPinInactivityTimeout()
+  }, [resetPinInactivityTimeout])
 
   const handleCopy = useCallback(async () => {
     if (receivedContent?.contentType !== 'text') return
@@ -110,6 +147,11 @@ export function ReceiveTab() {
           <div className="space-y-2">
             <label className="text-sm font-medium">Enter PIN from sender</label>
             <PinInput ref={pinInputRef} onPinChange={handlePinChange} disabled={isActive} />
+            {pinExpired && (
+              <p className="text-xs text-muted-foreground">
+                PIN cleared due to inactivity. Please re-enter.
+              </p>
+            )}
           </div>
 
           <Button onClick={handleReceive} disabled={!canReceive} className="w-full">
