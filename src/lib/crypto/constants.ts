@@ -28,4 +28,4 @@ export const PIN_HINT_LENGTH = 8 // hex characters
 
 // Transfer timeouts
 export const TRANSFER_EXPIRATION_MS = 60 * 60 * 1000 // 1 hour
-export const PIN_DISPLAY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes before PIN expires
+export const PIN_DISPLAY_TIMEOUT_MS = 5 * 60 * 1000 // Duration (ms) the PIN is displayed before it expires (5 minutes)
