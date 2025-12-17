@@ -19,10 +19,9 @@ export const SALT_LENGTH = 16
 // Chunk size for data transfer
 export const CHUNK_SIZE = 16 * 1024 // 16KB
 
-// Max message size (tmpfiles.org limit: 100MB)
-// Data is uploaded to tmpfiles.org and shared via Nostr signaling.
-// Memory: The entire file is loaded into memory (Uint8Array). 100MB is the service limit.
-export const MAX_MESSAGE_SIZE = 100 * 1024 * 1024 // 100MB (tmpfiles.org limit)
+// Max message size (limited to 10MB until streaming is implemented)
+// tmpfiles.org supports up to 100MB but current implementation loads all into memory
+export const MAX_MESSAGE_SIZE = 10 * 1024 * 1024 // 10MB
 
 // PIN hint length
 export const PIN_HINT_LENGTH = 8 // hex characters

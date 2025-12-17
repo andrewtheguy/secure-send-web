@@ -16,5 +16,11 @@ Replace PBKDF2 with Argon2id (via WASM) for stronger resistance to brute-force a
 ### Custom Relay Configuration
 Allow users to specify their own preferred Nostr relays for signaling.
 
+### Streaming Upload/Download
+Current implementation loads entire file into memory, limiting practical size to 10MB.
+- Use chunked/streaming upload to tmpfiles.org
+- Use streaming download with ReadableStream
+- Enable 100MB transfers (tmpfiles.org limit) without memory issues
+
 ### Improved Error Handling
 Better user feedback for network errors, relay failures, and WebRTC connection issues.

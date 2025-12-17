@@ -8,7 +8,9 @@
 
 const TMPFILES_UPLOAD_URL = 'https://tmpfiles.org/api/v1/upload'
 
-export const MAX_TMPFILES_SIZE = 100 * 1024 * 1024 // 100MB
+// Limit to 10MB until streaming upload/download is implemented
+// tmpfiles.org supports up to 100MB but current implementation loads all into memory
+export const MAX_TMPFILES_SIZE = 10 * 1024 * 1024 // 10MB
 
 interface TmpfilesApiResponse {
   status: 'success' | 'error'
