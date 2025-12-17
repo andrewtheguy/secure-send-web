@@ -107,3 +107,6 @@ export interface SignalingPayload {
 export interface WebRTCOptions {
   relayOnly?: boolean
 }
+
+// Signaling method for P2P connection
+export type SignalingMethod = 'nostr' | 'peerjs'

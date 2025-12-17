@@ -2,10 +2,14 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { Download, X, RotateCcw, Check, Copy, FileDown, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { PinInput, type PinInputRef } from './pin-input'
 import { TransferStatus } from './transfer-status'
 import { useNostrReceive } from '@/hooks/use-nostr-receive'
+import { usePeerJSReceive } from '@/hooks/use-peerjs-receive'
 import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
+import type { SignalingMethod } from '@/lib/nostr/types'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -18,7 +22,14 @@ export function ReceiveTab() {
   const [copyError, setCopyError] = useState(false)
   const [pinExpired, setPinExpired] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(0)
-  const { state, receivedContent, receive, cancel, reset } = useNostrReceive()
+  const [signalingMethod, setSignalingMethod] = useState<SignalingMethod>('nostr')
+
+  // Both hooks must be called unconditionally (React rules)
+  const nostrHook = useNostrReceive()
+  const peerJSHook = usePeerJSReceive()
+
+  // Use the appropriate hook based on signaling method
+  const { state, receivedContent, receive, cancel, reset } = signalingMethod === 'nostr' ? nostrHook : peerJSHook
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pinInactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -175,6 +186,32 @@ export function ReceiveTab() {
     <div className="space-y-4 pt-4">
       {state.status === 'idle' ? (
         <>
+          {/* Signaling Method Selection */}
+          <div className="space-y-2 border rounded-lg p-3 bg-muted/30">
+            <Label className="text-sm font-medium">Signaling Method</Label>
+            <RadioGroup
+              value={signalingMethod}
+              onValueChange={(v) => setSignalingMethod(v as SignalingMethod)}
+              className="flex gap-4"
+            >
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="nostr" id="nostr-recv" />
+                <Label htmlFor="nostr-recv" className="text-sm font-normal cursor-pointer">
+                  Nostr
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="peerjs" id="peerjs-recv" />
+                <Label htmlFor="peerjs-recv" className="text-sm font-normal cursor-pointer">
+                  PeerJS
+                </Label>
+              </div>
+            </RadioGroup>
+            <p className="text-xs text-muted-foreground">
+              Must match sender's signaling method
+            </p>
+          </div>
+
           <div className="space-y-2">
             <label className="text-sm font-medium">Enter PIN from sender</label>
             <PinInput ref={pinInputRef} onPinChange={handlePinChange} disabled={isActive} />
