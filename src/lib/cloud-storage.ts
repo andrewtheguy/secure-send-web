@@ -115,10 +115,11 @@ const CORS_PROXIES: CorsProxy[] = [
     buildUrl: (url) => `https://cors-anywhere.com/${url}`,
     supportsPost: true,
   },
-  // {
-  //   name: 'allorigins',
-  //   buildUrl: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  // },
+  {
+    name: 'allorigins',
+    buildUrl: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    supportsPost: false,
+  },
 ]
 
 // =============================================================================
