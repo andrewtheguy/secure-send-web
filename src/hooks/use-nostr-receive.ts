@@ -383,6 +383,44 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           }
         }
 
+        // Track processed event IDs to avoid duplicates
+        const processedEventIds = new Set<string>()
+
+        // Process an event (signal or chunk notification)
+        const processEvent = async (event: Event) => {
+          if (settled) return
+          if (processedEventIds.has(event.id)) return
+          processedEventIds.add(event.id)
+
+          // Check for WebRTC signal (only if cloud transfer hasn't started)
+          if (!cloudTransferStarted) {
+            const signalData = parseSignalingEvent(event)
+            if (signalData && signalData.transferId === transferId) {
+              try {
+                const decrypted = await decrypt(key!, signalData.encryptedSignal)
+                const signalPayload = JSON.parse(new TextDecoder().decode(decrypted))
+                if (signalPayload.type === 'signal' && signalPayload.signal) {
+                  console.log('Received WebRTC signal:', signalPayload.signal.type || 'candidate')
+                  const r = initWebRTC()
+                  r.handleSignal(signalPayload.signal)
+                }
+              } catch (e) {
+                console.error("Signal handling error", e)
+              }
+              return
+            }
+          }
+
+          // Check for chunk notification (cloud fallback)
+          const chunkNotify = parseChunkNotifyEvent(event)
+          if (chunkNotify && chunkNotify.transferId === transferId) {
+            // Avoid processing duplicate chunk notifications
+            if (!receivedChunks.has(chunkNotify.chunkIndex)) {
+              await handleChunkNotify(chunkNotify)
+            }
+          }
+        }
+
         // Listen for both WebRTC signals AND chunk notifications from sender
         const subId = client.subscribe(
           [
@@ -392,37 +430,29 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               authors: [senderPubkey!],
             },
           ],
-          async (event) => {
-            if (settled) return
-
-            // Check for WebRTC signal (only if cloud transfer hasn't started)
-            if (!cloudTransferStarted) {
-              const signalData = parseSignalingEvent(event)
-              if (signalData && signalData.transferId === transferId) {
-                try {
-                  const decrypted = await decrypt(key!, signalData.encryptedSignal)
-                  const signalPayload = JSON.parse(new TextDecoder().decode(decrypted))
-                  if (signalPayload.type === 'signal' && signalPayload.signal) {
-                    const r = initWebRTC()
-                    r.handleSignal(signalPayload.signal)
-                  }
-                } catch (e) {
-                  console.error("Signal handling error", e)
-                }
-                return
-              }
-            }
-
-            // Check for chunk notification (cloud fallback)
-            const chunkNotify = parseChunkNotifyEvent(event)
-            if (chunkNotify && chunkNotify.transferId === transferId) {
-              // Avoid processing duplicate chunk notifications
-              if (!receivedChunks.has(chunkNotify.chunkIndex)) {
-                await handleChunkNotify(chunkNotify)
-              }
-            }
-          }
+          processEvent
         )
+
+        // Query for existing events that may have arrived before subscription
+        // This fixes race condition where sender's offer arrives before receiver subscribes
+        ;(async () => {
+          try {
+            const existingEvents = await client.query([
+              {
+                kinds: [EVENT_KIND_DATA_TRANSFER],
+                '#t': [transferId!],
+                authors: [senderPubkey!],
+                limit: 50,
+              },
+            ])
+            console.log(`Found ${existingEvents.length} existing events for transfer`)
+            for (const event of existingEvents) {
+              await processEvent(event)
+            }
+          } catch (err) {
+            console.error('Failed to query existing events:', err)
+          }
+        })()
 
         // Handle inline text message (no P2P or cloud needed)
         if (payload.textMessage) {
