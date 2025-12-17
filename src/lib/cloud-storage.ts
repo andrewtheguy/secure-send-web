@@ -54,6 +54,14 @@ const CORS_PROXIES: CorsProxy[] = [
     name: 'leverson83',
     buildUrl: (url) => `https://cors.leverson83.org/${url}`,
   },
+  {
+    name: 'codetabs',
+    buildUrl: (url) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`,
+  },
+  {
+    name: 'cors-anywhere',
+    buildUrl: (url) => `https://cors-anywhere.com/${url}`,
+  },
 ]
 
 // =============================================================================
