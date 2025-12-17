@@ -214,7 +214,7 @@ export function SendTab() {
         <>
           <TransferStatus
             state={state}
-            betweenProgressAndChunks={showPinDisplay ? <PinDisplay pin={pin} /> : undefined}
+            betweenProgressAndChunks={showPinDisplay ? <PinDisplay pin={pin} onExpire={cancel} /> : undefined}
           />
 
           <div className="flex gap-2">
