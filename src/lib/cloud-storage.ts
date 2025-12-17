@@ -6,8 +6,11 @@
 // Max size per cloud chunk (10MB) - larger files are split into multiple chunks
 export const MAX_CLOUD_CHUNK_SIZE = 10 * 1024 * 1024 // 10MB per chunk
 
-// Test URL for CORS proxy validation (stable, small content)
-const CORS_TEST_URL = 'https://httpbingo.org/base64/Y29yc19pc193b3JraW5n'
+// Test URLs for CORS proxy validation (stable, small content) with fallback
+const CORS_TEST_URLS = [
+  'https://httpbingo.org/base64/Y29yc19pc193b3JraW5n',
+  'https://httpbin.org/base64/Y29yc19pc193b3JraW5n',
+]
 const CORS_TEST_EXPECTED = 'cors_is_working'
 
 // =============================================================================
@@ -166,36 +169,39 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
   const proxyResults: ServiceTestResult[] = []
   const serverResults: ServiceTestResult[] = []
 
-  // Test all CORS proxies
+  // Test all CORS proxies (try multiple test URLs for redundancy)
   console.log('%c📡 Testing CORS Proxies:', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
   for (const proxy of CORS_PROXIES) {
     const start = Date.now()
-    try {
-      const proxyUrl = proxy.buildUrl(CORS_TEST_URL)
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10000)
+    let success = false
 
-      const response = await fetch(proxyUrl, { method: 'GET', signal: controller.signal })
-      clearTimeout(timeoutId)
+    for (const testUrl of CORS_TEST_URLS) {
+      try {
+        const proxyUrl = proxy.buildUrl(testUrl)
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
 
-      if (response.ok) {
-        const text = await response.text()
-        if (text.includes(CORS_TEST_EXPECTED)) {
-          const latency = Date.now() - start
-          proxyResults.push({ name: proxy.name, status: 'ok', latency })
-          console.log(`   %c✓ ${proxy.name}%c - ${latency}ms`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
-        } else {
-          proxyResults.push({ name: proxy.name, status: 'failed', error: 'Invalid response content' })
-          console.log(`   %c✗ ${proxy.name}%c - Invalid response`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+        const response = await fetch(proxyUrl, { method: 'GET', signal: controller.signal })
+        clearTimeout(timeoutId)
+
+        if (response.ok) {
+          const text = await response.text()
+          if (text.includes(CORS_TEST_EXPECTED)) {
+            const latency = Date.now() - start
+            proxyResults.push({ name: proxy.name, status: 'ok', latency })
+            console.log(`   %c✓ ${proxy.name}%c - ${latency}ms`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
+            success = true
+            break
+          }
         }
-      } else {
-        proxyResults.push({ name: proxy.name, status: 'failed', error: `HTTP ${response.status}` })
-        console.log(`   %c✗ ${proxy.name}%c - HTTP ${response.status}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+      } catch {
+        // Try next test URL
       }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Unknown error'
-      proxyResults.push({ name: proxy.name, status: 'failed', error: errorMsg })
-      console.log(`   %c✗ ${proxy.name}%c - ${errorMsg}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+    }
+
+    if (!success) {
+      proxyResults.push({ name: proxy.name, status: 'failed', error: 'All test URLs failed' })
+      console.log(`   %c✗ ${proxy.name}%c - All test URLs failed`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
     }
   }
 
@@ -305,33 +311,36 @@ if (typeof window !== 'undefined') {
 // =============================================================================
 
 /**
- * Test CORS proxies against a stable URL to find a working one
+ * Test CORS proxies against stable URLs to find a working one
  */
 async function findWorkingCorsProxy(): Promise<CorsProxy | null> {
   for (const proxy of CORS_PROXIES) {
-    try {
-      console.log(`Testing CORS proxy ${proxy.name}...`)
-      const proxyUrl = proxy.buildUrl(CORS_TEST_URL)
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10000) // 10s timeout
+    console.log(`Testing CORS proxy ${proxy.name}...`)
 
-      const response = await fetch(proxyUrl, {
-        method: 'GET',
-        signal: controller.signal,
-      })
-      clearTimeout(timeoutId)
+    for (const testUrl of CORS_TEST_URLS) {
+      try {
+        const proxyUrl = proxy.buildUrl(testUrl)
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
 
-      if (response.ok) {
-        const text = await response.text()
-        // httpbingo.org returns the expected test string
-        if (text.includes(CORS_TEST_EXPECTED)) {
-          console.log(`CORS proxy ${proxy.name} is working`)
-          return proxy
+        const response = await fetch(proxyUrl, {
+          method: 'GET',
+          signal: controller.signal,
+        })
+        clearTimeout(timeoutId)
+
+        if (response.ok) {
+          const text = await response.text()
+          if (text.includes(CORS_TEST_EXPECTED)) {
+            console.log(`CORS proxy ${proxy.name} is working`)
+            return proxy
+          }
         }
+      } catch {
+        // Try next test URL
       }
-    } catch (err) {
-      console.warn(`CORS proxy ${proxy.name} failed test:`, err)
     }
+    console.warn(`CORS proxy ${proxy.name} failed all test URLs`)
   }
   return null
 }
