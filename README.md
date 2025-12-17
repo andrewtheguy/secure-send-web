@@ -84,8 +84,10 @@ Upload servers and CORS proxies with automatic failover:
 
 **Upload Servers:**
 - tmpfiles.org
+- litterbox.catbox.moe (1h expiration, upload via CORS proxy)
 
 **CORS Proxies (for download):**
+- Direct download (for litterbox URLs)
 - corsproxy.io
 - cors.leverson83.org
 
