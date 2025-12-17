@@ -265,6 +265,9 @@ export function useNostrSend(): UseNostrSendReturn {
           setState({ status: 'connecting', message: 'Attempting P2P connection...' })
 
           await new Promise<void>((resolve, reject) => {
+            let connectionTimeout: ReturnType<typeof setTimeout> | null = null
+            let signalSubId: string | null = null
+
             const rtc = new WebRTCConnection(
               { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
               async (signal) => {
@@ -277,7 +280,13 @@ export function useNostrSend(): UseNostrSendReturn {
                 await client.publish(event)
               },
               async () => {
-                // DataChannel open
+                // DataChannel open - P2P connection established!
+                // Clear the connection timeout since P2P is now working
+                if (connectionTimeout) {
+                  clearTimeout(connectionTimeout)
+                  connectionTimeout = null
+                }
+
                 console.log('WebRTC connected, sending data...')
                 setState({
                   status: 'transferring',
@@ -305,6 +314,12 @@ export function useNostrSend(): UseNostrSendReturn {
                   // Send "DONE" message
                   rtc.send('DONE')
                   webRTCSuccess = true
+
+                  // Clean up subscription
+                  if (signalSubId) {
+                    client.unsubscribe(signalSubId)
+                  }
+
                   resolve()
                 } catch (err) {
                   reject(err)
@@ -319,7 +334,7 @@ export function useNostrSend(): UseNostrSendReturn {
             )
 
             // Listen for signals from receiver
-            const subId = client.subscribe(
+            signalSubId = client.subscribe(
               [
                 {
                   kinds: [EVENT_KIND_DATA_TRANSFER],
@@ -348,14 +363,17 @@ export function useNostrSend(): UseNostrSendReturn {
             rtc.createDataChannel('file-transfer')
             rtc.createOffer()
 
-            // Timeout for WebRTC setup (15s for larger files)
-            setTimeout(() => {
+            // Timeout only for connection establishment (15s)
+            // Once data channel opens, this timeout is cleared
+            connectionTimeout = setTimeout(() => {
               if (!webRTCSuccess) {
                 rtc.close()
-                client.unsubscribe(subId)
-                reject(new Error('WebRTC timeout'))
+                if (signalSubId) {
+                  client.unsubscribe(signalSubId)
+                }
+                reject(new Error('WebRTC connection timeout'))
               }
-            }, 15000) // 15 seconds to connect
+            }, 15000)
           })
         } catch (err) {
           console.log('P2P failed, falling back to cloud upload:', err)
