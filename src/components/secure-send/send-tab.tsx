@@ -201,7 +201,7 @@ export function SendTab() {
               htmlFor="relay-only"
               className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
             >
-              Use Nostr Relay Only (disable WebRTC)
+              Disable WebRTC (use cloud transfer only)
             </label>
           </div>
 
@@ -214,7 +214,6 @@ export function SendTab() {
         <>
           <TransferStatus
             state={state}
-            mode="send"
             betweenProgressAndChunks={showPinDisplay ? <PinDisplay pin={pin} /> : undefined}
           />
 

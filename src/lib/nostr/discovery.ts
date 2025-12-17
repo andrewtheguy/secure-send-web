@@ -342,3 +342,35 @@ export async function discoverBackupRelays(
 
   return backupRelays
 }
+
+/**
+ * Get the list of discovered relay URLs from cache
+ */
+export function getDiscoveredRelays(): string[] {
+  return [...cachedDiscoveredUrls]
+}
+
+/**
+ * Get a large relay pool by combining defaults + discovered relays.
+ * Used for relay group rotation to distribute load.
+ */
+export async function getRelayPool(): Promise<string[]> {
+  // Check if we already have discovered relays in memory
+  if (cachedDiscoveredUrls.length === 0) {
+    // Check sessionStorage cache
+    const cached = getCachedDiscoveredRelays()
+    if (cached && cached.length > 0) {
+      cachedDiscoveredUrls = cached
+    } else {
+      // Run discovery
+      const seeds = [...DEFAULT_RELAYS].map(normalizeRelayUrl)
+      const discoveredRelays = await discoverRelaysFromSeeds(seeds)
+      cachedDiscoveredUrls = [...new Set([...seeds, ...discoveredRelays])]
+      setCachedDiscoveredRelays(cachedDiscoveredUrls)
+    }
+  }
+
+  // Return all relays (defaults + discovered, deduplicated)
+  const pool = new Set([...DEFAULT_RELAYS.map(normalizeRelayUrl), ...cachedDiscoveredUrls])
+  return [...pool]
+}

@@ -80,72 +80,6 @@ export function parsePinExchangeEvent(event: Event): {
 }
 
 /**
- * Create data chunk event (kind 24242)
- */
-export function createChunkEvent(
-  secretKey: Uint8Array,
-  transferId: string,
-  seq: number,
-  total: number,
-  encryptedChunk: Uint8Array
-): Event {
-  const event = finalizeEvent(
-    {
-      kind: EVENT_KIND_DATA_TRANSFER,
-      content: uint8ArrayToBase64(encryptedChunk),
-      tags: [
-        ['t', transferId],
-        ['seq', seq.toString()],
-        ['total', total.toString()],
-        ['type', 'chunk'],
-      ],
-      created_at: Math.floor(Date.now() / 1000),
-    },
-    secretKey
-  )
-
-  return event
-}
-
-/**
- * Parse chunk event
- */
-export function parseChunkEvent(event: Event): {
-  transferId: string
-  seq: number
-  total: number
-  data: Uint8Array
-} | null {
-  if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null
-
-  const type = event.tags.find((t) => t[0] === 'type')?.[1]
-  if (type !== 'chunk') return null
-
-  const transferId = event.tags.find((t) => t[0] === 't')?.[1]
-  const seqStr = event.tags.find((t) => t[0] === 'seq')?.[1]
-  const totalStr = event.tags.find((t) => t[0] === 'total')?.[1]
-
-  if (!transferId || !seqStr || !totalStr) return null
-
-  const seq = parseInt(seqStr, 10)
-  const total = parseInt(totalStr, 10)
-
-  // Validate parsed integers
-  if (!Number.isInteger(seq) || !Number.isInteger(total)) return null
-  if (seq < 0 || total <= 0 || seq >= total) return null
-
-  // Decode base64 content with error handling
-  let data: Uint8Array
-  try {
-    data = base64ToUint8Array(event.content)
-  } catch {
-    return null
-  }
-
-  return { transferId, seq, total, data }
-}
-
-/**
  * Create ACK event (kind 24242)
  * seq=0 for ready ACK, seq=-1 for completion ACK
  */
@@ -199,62 +133,6 @@ export function parseAckEvent(event: Event): {
 
   return { senderPubkey, transferId, seq }
 }
-
-/**
- * Create Retry Request event (kind 24242)
- * Content is JSON array of missing chunk sequences
- */
-export function createRetryRequestEvent(
-  secretKey: Uint8Array,
-  senderPubkey: string,
-  transferId: string,
-  missingSeqs: number[]
-): Event {
-  const event = finalizeEvent(
-    {
-      kind: EVENT_KIND_DATA_TRANSFER,
-      content: JSON.stringify(missingSeqs),
-      tags: [
-        ['p', senderPubkey],
-        ['t', transferId],
-        ['type', 'retry'],
-      ],
-      created_at: Math.floor(Date.now() / 1000),
-    },
-    secretKey
-  )
-
-  return event
-}
-
-/**
- * Parse Retry Request event
- */
-export function parseRetryRequestEvent(event: Event): {
-  senderPubkey: string
-  transferId: string
-  missingSeqs: number[]
-} | null {
-  if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null
-
-  const type = event.tags.find((t) => t[0] === 'type')?.[1]
-  if (type !== 'retry') return null
-
-  const senderPubkey = event.tags.find((t) => t[0] === 'p')?.[1]
-  const transferId = event.tags.find((t) => t[0] === 't')?.[1]
-
-  if (!senderPubkey || !transferId) return null
-
-  try {
-    const missingSeqs = JSON.parse(event.content)
-    if (!Array.isArray(missingSeqs)) return null
-    return { senderPubkey, transferId, missingSeqs }
-  } catch {
-    return null
-  }
-}
-
-// ... (existing exports)
 
 /**
  * Create Signaling event (kind 24242 with type=signal)
