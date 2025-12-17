@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback } from 'react'
-import { Send, X, RotateCcw, FileUp, FileText, Upload } from 'lucide-react'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { Send, X, RotateCcw, FileUp, FileText, Upload, Cloud } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -11,6 +11,13 @@ import { formatFileSize } from '@/lib/file-utils'
 
 type ContentMode = 'text' | 'file'
 
+// Declare global for TypeScript
+declare global {
+  interface Window {
+    testCloudTransfer?: (enable: boolean) => void
+  }
+}
+
 export function SendTab() {
   const [mode, setMode] = useState<ContentMode>('file')
   const [message, setMessage] = useState('')
@@ -20,6 +27,17 @@ export function SendTab() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
   const { state, pin, send, cancel } = useNostrSend()
+
+  // Expose console function to enable/disable cloud-only mode for testing
+  useEffect(() => {
+    window.testCloudTransfer = (enable: boolean) => {
+      setRelayOnly(enable)
+      console.log(`Cloud-only transfer mode ${enable ? 'enabled' : 'disabled'}`)
+    }
+    return () => {
+      delete window.testCloudTransfer
+    }
+  }, [])
 
   const encoder = new TextEncoder()
   const messageSize = encoder.encode(message).length
@@ -189,21 +207,12 @@ export function SendTab() {
 
 
 
-          <div className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              id="relay-only"
-              checked={relayOnly}
-              onChange={(e) => setRelayOnly(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-            />
-            <label
-              htmlFor="relay-only"
-              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-            >
-              Disable WebRTC (use cloud transfer only)
-            </label>
-          </div>
+          {relayOnly && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded">
+              <Cloud className="h-3 w-3" />
+              <span>Cloud-only mode (P2P disabled)</span>
+            </div>
+          )}
 
           <Button onClick={handleSend} disabled={!canSend} className="w-full">
             <Send className="mr-2 h-4 w-4" />

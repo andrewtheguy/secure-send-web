@@ -7,7 +7,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 ## Features
 
 - **PIN-based encryption**: Content is encrypted with AES-256-GCM using a key derived from a 12-character PIN
-- **Text & file transfer**: Send text messages or files up to 10MB
+- **Text & file transfer**: Send text messages or files up to 100MB
 - **WebRTC P2P**: Direct peer-to-peer connections for fast, efficient data transfer
 - **Cloud fallback**: Falls back to cloud storage (tmpfiles.org) if WebRTC connection fails
 - **End-to-end encryption**: All data is encrypted before upload, only you and the receiver can decrypt
@@ -19,20 +19,18 @@ A web application for sending encrypted text messages and files using PIN-based 
 ### Sending a Text Message
 
 1. Select the "Text Message" tab
-2. Enter your message (up to 10MB)
-3. (Optional) Check "Disable WebRTC" to force cloud transfer only
-4. Click "Generate PIN & Send"
-5. Share the generated 12-character PIN with the receiver through another channel (voice, chat, etc.)
-6. Wait for the receiver to connect and receive the message
+2. Enter your message (up to 100MB)
+3. Click "Generate PIN & Send"
+4. Share the generated 12-character PIN with the receiver through another channel (voice, chat, etc.)
+5. Wait for the receiver to connect and receive the message
 
 ### Sending a File
 
 1. Select the "File" tab
-2. Drag and drop a file or click to select (max 10MB)
-3. (Optional) Check "Disable WebRTC" to force cloud transfer only
-4. Click "Generate PIN & Send"
-5. Share the generated 12-character PIN with the receiver
-6. Wait for the receiver to connect and receive the file
+2. Drag and drop a file or click to select (max 100MB)
+3. Click "Generate PIN & Send"
+4. Share the generated 12-character PIN with the receiver
+5. Wait for the receiver to connect and receive the file
 
 ### Receiving
 
@@ -93,6 +91,8 @@ Upload servers and CORS proxies with automatic failover:
 
 ## Debug
 
+### Test Cloud Services
+
 Test cloud service availability from browser console:
 
 ```javascript
@@ -101,9 +101,24 @@ await window.testCloudServices()
 
 This tests all CORS proxies and upload servers, showing latency and status for each.
 
-## Roadmap
+### Force Cloud-Only Transfer
 
-See [ROADMAP.md](./ROADMAP.md) for planned features.
+Disable P2P and force cloud transfer for testing:
+
+```javascript
+// Enable cloud-only mode (disable WebRTC P2P)
+testCloudTransfer(true)
+
+// Disable cloud-only mode (back to P2P-first)
+testCloudTransfer(false)
+```
+
+When enabled, a "Cloud-only mode" indicator appears in the UI.
+
+## Documentation
+
+- [Architecture](./docs/ARCHITECTURE.md) - Technical architecture and design decisions
+- [Roadmap](./docs/ROADMAP.md) - Completed and planned features
 
 ## License
 
