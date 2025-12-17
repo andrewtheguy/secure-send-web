@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react'
 import { Input } from '@/components/ui/input'
-import { PIN_LENGTH, PIN_CHARSET } from '@/lib/crypto'
+import { PIN_LENGTH, PIN_CHARSET, isValidPin } from '@/lib/crypto'
 
 interface PinInputProps {
-  onPinChange: (value: string) => void
+  onPinChange: (pin: string, isValid: boolean) => void
   disabled?: boolean
 }
 
@@ -80,11 +80,15 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         inputRef.current.value = filtered
       }
 
-      // Notify parent of change
-      onPinChange(filtered)
+      // Validate checksum when PIN is complete
+      const isPinValid = filtered.length === PIN_LENGTH && isValidPin(filtered)
+
+      // Notify parent of change with validity
+      onPinChange(filtered, isPinValid)
     }
 
     const isComplete = displayLength === PIN_LENGTH
+    const hasChecksumError = isComplete && !isValidPin(pinRef.current)
 
     return (
       <div className="flex flex-col gap-2">
@@ -95,7 +99,11 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
           onChange={handleChange}
           placeholder={`Enter ${PIN_LENGTH}-character PIN`}
           className={`font-mono text-xl text-center tracking-wider ${
-            error ? 'border-destructive' : isComplete ? 'border-green-500' : ''
+            error || hasChecksumError
+              ? 'border-destructive'
+              : isComplete
+                ? 'border-green-500'
+                : ''
           }`}
           maxLength={PIN_LENGTH}
           disabled={disabled}
@@ -105,10 +113,10 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
           spellCheck={false}
         />
         <div className="flex justify-between text-xs">
-          <span className={error ? 'text-destructive' : 'text-muted-foreground'}>
-            {error || `${displayLength}/${PIN_LENGTH} characters (case sensitive)`}
+          <span className={error || hasChecksumError ? 'text-destructive' : 'text-muted-foreground'}>
+            {error || (hasChecksumError ? 'Invalid PIN' : `${displayLength}/${PIN_LENGTH} characters (case sensitive)`)}
           </span>
-          {isComplete && <span className="text-green-500">PIN ready</span>}
+          {isComplete && !hasChecksumError && <span className="text-green-500">PIN ready</span>}
         </div>
       </div>
     )

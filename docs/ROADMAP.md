@@ -1,19 +1,9 @@
 # Roadmap
 
-## Completed Features
-
-### 100MB File Support with P2P-First Architecture
-- Max file size increased from 10MB to 100MB
-- P2P (WebRTC) connections are attempted first - no cloud involvement when successful
-- **All-or-nothing P2P**: Once P2P connection is established, transfer completes or fails - no cloud fallback mid-transfer
-- Cloud fallback only when P2P connection fails (30s timeout)
-- Chunked cloud uploads (10MB per chunk) with ACK coordination
-- Sequential chunk upload/download to manage memory usage
-- WebRTC backpressure support prevents send queue overflow
-- **Deferred encryption**: File encryption is skipped for P2P, only triggered for cloud fallback
-- **Robust P2P signaling**: Offer retry every 5s, query for missed events, handles unreliable relay delivery
-
 ## Planned Features
+
+### explore the viability of using peer.js for WebRTC signaling
+- Evaluate peer.js as an alternative signaling method w/o Nostr relays
 
 ### NIP-65/NIP-66 Relay Discovery
 Implement automatic relay discovery using Nostr relay list events:
@@ -22,9 +12,6 @@ Implement automatic relay discovery using Nostr relay list events:
 - Cache discovered relays in sessionStorage with TTL
 - Select best relays based on latency, availability, and suitability
 - Filter out relays requiring payment or authentication
-
-### Argon2id Key Derivation
-Replace PBKDF2 with Argon2id (via WASM) for stronger resistance to brute-force attacks on the PIN.
 
 ### Custom Relay Configuration
 Allow users to specify their own preferred Nostr relays for signaling.
@@ -37,3 +24,10 @@ Current chunked implementation still loads 10MB chunks into memory.
 
 ### Improved Error Handling
 Better user feedback for network errors, relay failures, and WebRTC connection issues.
+
+## Backlog (Future Considerations)
+- Better website UI/UX
+- Assymetric file encryption
+
+### Argon2id Key Derivation
+Replace PBKDF2 with Argon2id (via WASM) for stronger resistance to brute-force attacks on the PIN.

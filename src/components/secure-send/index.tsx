@@ -85,6 +85,7 @@ export function SecureSend() {
                 <h3 className="font-semibold text-base mb-2">Technical Details</h3>
                 <ul className="space-y-1 text-muted-foreground">
                   <li><span className="text-foreground">Encryption:</span> AES-256-GCM with PBKDF2-SHA256 key derivation (600,000 iterations)</li>
+                  <li><span className="text-foreground">PIN format:</span> 12 characters with built-in checksum for typo detection</li>
                   <li><span className="text-foreground">Max size:</span> 100 MB per transfer</li>
                   <li><span className="text-foreground">PIN expiry:</span> 1 hour</li>
                   <li><span className="text-foreground">Signaling:</span> Nostr protocol for decentralized PIN exchange</li>

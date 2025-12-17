@@ -1,38 +1,61 @@
-import { PIN_CHARSET, PIN_LENGTH, PIN_HINT_LENGTH } from './constants'
+import { PIN_CHARSET, PIN_LENGTH, PIN_CHECKSUM_LENGTH, PIN_HINT_LENGTH } from './constants'
 
 /**
- * Generate random 12-character PIN from unambiguous charset
+ * Compute checksum character using weighted sum
+ * Detects single-character errors and transpositions
+ */
+function computeChecksum(data: string): string {
+  let sum = 0
+  for (let i = 0; i < data.length; i++) {
+    const charIndex = PIN_CHARSET.indexOf(data[i])
+    sum += charIndex * (i + 1) // Weight by position
+  }
+  return PIN_CHARSET[sum % PIN_CHARSET.length]
+}
+
+/**
+ * Generate random PIN with checksum
  * Charset excludes confusing characters: I, O, i, l, o, 0, 1
  * Uses rejection sampling to eliminate modulo bias
+ * Last character is a checksum for typo detection
  */
 export function generatePin(): string {
   const n = PIN_CHARSET.length
   // Largest multiple of n that fits in a byte (0-255)
   const maxMultiple = Math.floor(256 / n) * n
+  const dataLength = PIN_LENGTH - PIN_CHECKSUM_LENGTH
 
   const result: string[] = []
-  const buffer = new Uint8Array(PIN_LENGTH * 2) // Over-allocate for rejections
+  const buffer = new Uint8Array(dataLength * 2) // Over-allocate for rejections
 
-  while (result.length < PIN_LENGTH) {
+  while (result.length < dataLength) {
     crypto.getRandomValues(buffer)
     for (const byte of buffer) {
       // Reject bytes >= maxMultiple to eliminate modulo bias
       if (byte < maxMultiple) {
         result.push(PIN_CHARSET[byte % n])
-        if (result.length === PIN_LENGTH) break
+        if (result.length === dataLength) break
       }
     }
   }
 
-  return result.join('')
+  const data = result.join('')
+  const checksum = computeChecksum(data)
+  return data + checksum
 }
 
 /**
- * Validate PIN format
+ * Validate PIN format and checksum
  */
 export function isValidPin(pin: string): boolean {
   if (pin.length !== PIN_LENGTH) return false
-  return [...pin].every((char) => PIN_CHARSET.includes(char))
+  if (![...pin].every((char) => PIN_CHARSET.includes(char))) return false
+
+  // Verify checksum
+  const data = pin.slice(0, PIN_LENGTH - PIN_CHECKSUM_LENGTH)
+  const expectedChecksum = computeChecksum(data)
+  const actualChecksum = pin.slice(-PIN_CHECKSUM_LENGTH)
+  return expectedChecksum === actualChecksum
 }
 
 /**

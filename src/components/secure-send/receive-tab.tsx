@@ -5,7 +5,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { PinInput, type PinInputRef } from './pin-input'
 import { TransferStatus } from './transfer-status'
 import { useNostrReceive } from '@/hooks/use-nostr-receive'
-import { PIN_LENGTH } from '@/lib/crypto'
 import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
@@ -14,7 +13,7 @@ export function ReceiveTab() {
   // Store PIN in ref to avoid React DevTools exposure
   const pinRef = useRef('')
   const pinInputRef = useRef<PinInputRef>(null)
-  const [pinLength, setPinLength] = useState(0)
+  const [isPinValid, setIsPinValid] = useState(false)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
   const [pinExpired, setPinExpired] = useState(false)
@@ -43,7 +42,7 @@ export function ReceiveTab() {
         if (mountedRef.current && pinRef.current.length > 0) {
           // Clear PIN due to inactivity
           pinRef.current = ''
-          setPinLength(0)
+          setIsPinValid(false)
           pinInputRef.current?.clear()
           setPinExpired(true)
         }
@@ -64,7 +63,7 @@ export function ReceiveTab() {
     }
   }, [clearPinInactivityTimeout])
 
-  const canReceive = pinLength === PIN_LENGTH && state.status === 'idle'
+  const canReceive = isPinValid && state.status === 'idle'
 
   const handleReceive = () => {
     if (canReceive && pinRef.current) {
@@ -72,7 +71,7 @@ export function ReceiveTab() {
       const pin = pinRef.current
       // Clear PIN immediately after getting it
       pinRef.current = ''
-      setPinLength(0)
+      setIsPinValid(false)
       pinInputRef.current?.clear()
       setPinExpired(false)
       // Pass PIN to receive function
@@ -85,16 +84,16 @@ export function ReceiveTab() {
     clearPinInactivityTimeout()
     // Clear PIN from ref and input
     pinRef.current = ''
-    setPinLength(0)
+    setIsPinValid(false)
     pinInputRef.current?.clear()
     setCopied(false)
     setCopyError(false)
     setPinExpired(false)
   }
 
-  const handlePinChange = useCallback((value: string) => {
-    pinRef.current = value
-    setPinLength(value.length)
+  const handlePinChange = useCallback((pin: string, isValid: boolean) => {
+    pinRef.current = pin
+    setIsPinValid(isValid)
     resetPinInactivityTimeout()
   }, [resetPinInactivityTimeout])
 
