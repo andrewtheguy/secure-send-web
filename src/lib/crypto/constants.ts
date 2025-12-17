@@ -5,6 +5,12 @@ export const PIN_CHECKSUM_LENGTH = 1 // Last character is checksum
 // Symbols from iOS 123 layout: - / : ; ( ) $ & @ ? ! . , "
 export const PIN_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789-/:;()$&@?!.,"'
 
+// First character charset split (for signaling method detection)
+// Uppercase = Nostr, Lowercase = PeerJS, Digits/Symbols = Reserved for future
+export const NOSTR_FIRST_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ' // 23 uppercase (excluding I, L, O)
+export const PEERJS_FIRST_CHARSET = 'abcdefghjkmnpqrstuvwxyz' // 23 lowercase (excluding i, l, o)
+// Reserved for future protocols: '23456789-/:;()$&@?!.,"' (23 chars - digits + symbols)
+
 // PBKDF2 parameters (browser-compatible alternative to Argon2id)
 export const PBKDF2_ITERATIONS = 600_000
 export const PBKDF2_HASH = 'SHA-256'

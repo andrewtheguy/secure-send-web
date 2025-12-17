@@ -1,15 +1,19 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, X, RotateCcw, FileUp, FileText, Upload, Cloud, FolderUp, Loader2 } from 'lucide-react'
+import { Send, X, RotateCcw, FileUp, FileText, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { PinDisplay } from './pin-display'
 import { TransferStatus } from './transfer-status'
 import { useNostrSend } from '@/hooks/use-nostr-send'
+import { usePeerJSSend } from '@/hooks/use-peerjs-send'
 import { MAX_MESSAGE_SIZE } from '@/lib/crypto'
 import { formatFileSize } from '@/lib/file-utils'
 import { setCloudServer } from '@/lib/cloud-storage'
 import { compressFilesToZip, getFolderName, getTotalSize, supportsFolderSelection } from '@/lib/folder-utils'
+import type { SignalingMethod } from '@/lib/nostr/types'
 
 type ContentMode = 'text' | 'file' | 'folder'
 
@@ -31,6 +35,8 @@ declare module 'react' {
 export function SendTab() {
   const [mode, setMode] = useState<ContentMode>('file')
   const [message, setMessage] = useState('')
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [signalingMethod, setSignalingMethod] = useState<SignalingMethod>('nostr')
   const [relayOnly, setRelayOnly] = useState(false)
   const [selectedServer, setSelectedServer] = useState<string | null>(null)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
@@ -40,7 +46,13 @@ export function SendTab() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
-  const { state, pin, send, cancel } = useNostrSend()
+
+  // Both hooks must be called unconditionally (React rules)
+  const nostrHook = useNostrSend()
+  const peerJSHook = usePeerJSSend()
+
+  // Use the appropriate hook based on signaling method
+  const { state, pin, send, cancel } = signalingMethod === 'nostr' ? nostrHook : peerJSHook
 
   // Expose console function to enable/disable cloud-only mode for testing
   useEffect(() => {
@@ -73,12 +85,23 @@ export function SendTab() {
   const canSend = mode === 'text' ? canSendText : mode === 'file' ? canSendFiles : canSendFolder
 
   const handleSend = async () => {
+    // PeerJS hook doesn't support relayOnly option
+    const sendOptions = signalingMethod === 'nostr' ? { relayOnly } : undefined
+
     if (mode === 'text' && canSendText) {
-      send(message, { relayOnly })
+      if (signalingMethod === 'nostr') {
+        (send as typeof nostrHook.send)(message, sendOptions)
+      } else {
+        (send as typeof peerJSHook.send)(message)
+      }
     } else if (mode === 'file' && canSendFiles) {
       // Single file: send directly
       if (selectedFiles.length === 1) {
-        send(selectedFiles[0], { relayOnly })
+        if (signalingMethod === 'nostr') {
+          (send as typeof nostrHook.send)(selectedFiles[0], sendOptions)
+        } else {
+          (send as typeof peerJSHook.send)(selectedFiles[0])
+        }
         return
       }
       // Multiple files: compress to ZIP
@@ -89,7 +112,11 @@ export function SendTab() {
         selectedFiles.forEach(f => dataTransfer.items.add(f))
         const zipFile = await compressFilesToZip(dataTransfer.files, 'files')
         setIsCompressing(false)
-        send(zipFile, { relayOnly })
+        if (signalingMethod === 'nostr') {
+          (send as typeof nostrHook.send)(zipFile, sendOptions)
+        } else {
+          (send as typeof peerJSHook.send)(zipFile)
+        }
       } catch (err) {
         setIsCompressing(false)
         console.error('Failed to compress files:', err)
@@ -100,7 +127,11 @@ export function SendTab() {
         const archiveName = getFolderName(folderFiles)
         const zipFile = await compressFilesToZip(folderFiles, archiveName)
         setIsCompressing(false)
-        send(zipFile, { relayOnly })
+        if (signalingMethod === 'nostr') {
+          (send as typeof nostrHook.send)(zipFile, sendOptions)
+        } else {
+          (send as typeof peerJSHook.send)(zipFile)
+        }
       } catch (err) {
         setIsCompressing(false)
         console.error('Failed to compress folder:', err)
@@ -372,7 +403,47 @@ export function SendTab() {
             </div>
           )}
 
-          {relayOnly && (
+          {/* Advanced Options */}
+          <div className="border rounded-lg overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="w-full flex items-center gap-2 p-3 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+            >
+              {showAdvanced ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              Advanced Options
+            </button>
+            {showAdvanced && (
+              <div className="p-3 pt-0 space-y-2 border-t">
+                <Label className="text-sm font-medium">Signaling Method</Label>
+                <RadioGroup
+                  value={signalingMethod}
+                  onValueChange={(v) => setSignalingMethod(v as SignalingMethod)}
+                  className="flex gap-4"
+                >
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="nostr" id="nostr" />
+                    <Label htmlFor="nostr" className="text-sm font-normal cursor-pointer">
+                      Nostr (with cloud fallback)
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="peerjs" id="peerjs" />
+                    <Label htmlFor="peerjs" className="text-sm font-normal cursor-pointer">
+                      PeerJS (P2P only)
+                    </Label>
+                  </div>
+                </RadioGroup>
+                <p className="text-xs text-muted-foreground">
+                  {signalingMethod === 'nostr'
+                    ? 'Uses decentralized Nostr relays. Falls back to cloud if P2P fails.'
+                    : 'Uses PeerJS server for simpler P2P. No cloud fallback - transfer fails if P2P unavailable.'}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {relayOnly && signalingMethod === 'nostr' && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded">
               <Cloud className="h-3 w-3" />
               <span>Cloud-only mode{selectedServer ? `: ${selectedServer}` : ''}</span>

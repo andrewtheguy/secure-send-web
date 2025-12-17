@@ -2,9 +2,6 @@
 
 ## Planned Features
 
-### explore the viability of using peer.js for WebRTC signaling
-- Evaluate peer.js as an alternative signaling method w/o Nostr relays
-
 ### NIP-65/NIP-66 Relay Discovery
 Implement automatic relay discovery using Nostr relay list events:
 - Query seed relays for relay list events (kind 10002 NIP-65, kind 30166 NIP-66)

@@ -5,7 +5,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { PinInput, type PinInputRef } from './pin-input'
 import { TransferStatus } from './transfer-status'
 import { useNostrReceive } from '@/hooks/use-nostr-receive'
+import { usePeerJSReceive } from '@/hooks/use-peerjs-receive'
 import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
+import { detectSignalingMethod } from '@/lib/crypto'
+import type { SignalingMethod } from '@/lib/nostr/types'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -18,7 +21,14 @@ export function ReceiveTab() {
   const [copyError, setCopyError] = useState(false)
   const [pinExpired, setPinExpired] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(0)
-  const { state, receivedContent, receive, cancel, reset } = useNostrReceive()
+  const [detectedMethod, setDetectedMethod] = useState<SignalingMethod>('nostr')
+
+  // Both hooks must be called unconditionally (React rules)
+  const nostrHook = useNostrReceive()
+  const peerJSHook = usePeerJSReceive()
+
+  // Use the appropriate hook based on detected signaling method from PIN
+  const { state, receivedContent, receive, cancel, reset } = detectedMethod === 'nostr' ? nostrHook : peerJSHook
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pinInactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -127,6 +137,14 @@ export function ReceiveTab() {
     pinRef.current = pin
     setIsPinValid(isValid)
     resetPinInactivityTimeout()
+
+    // Auto-detect signaling method from PIN's first character
+    if (pin.length > 0) {
+      const method = detectSignalingMethod(pin)
+      if (method) {
+        setDetectedMethod(method)
+      }
+    }
   }, [resetPinInactivityTimeout])
 
   const handleCopy = useCallback(async () => {

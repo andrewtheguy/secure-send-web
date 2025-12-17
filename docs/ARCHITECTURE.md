@@ -2,18 +2,31 @@
 
 ## Overview
 
-Secure Send is a browser-based encrypted file and message transfer application. It uses PIN-based encryption, Nostr relays for signaling, and supports both direct P2P (WebRTC) and cloud storage fallback for data transfer.
+Secure Send is a browser-based encrypted file and message transfer application. It uses PIN-based encryption, supports two signaling methods (Nostr relays or PeerJS), and enables direct P2P (WebRTC) data transfer with optional cloud fallback (Nostr mode only).
 
 ## Core Principles
 
-1. **P2P First, All-or-Nothing**: Direct WebRTC connections are preferred. Once P2P is established, it completes or fails - no fallback to cloud mid-transfer. Cloud is only used when P2P connection cannot be established.
+1. **P2P First**: Direct WebRTC connections are always preferred for data transfer.
 2. **End-to-End Encryption**: All data is encrypted client-side before any transmission.
-3. **No Server Dependencies**: Uses decentralized Nostr relays for signaling and public cloud storage for fallback.
+3. **Explicit Signaling Choice**: Users choose between Nostr (with cloud fallback) or PeerJS (P2P only).
 4. **PIN-Based Security**: A 12-character PIN serves as the shared secret for key derivation.
+
+## Signaling Methods
+
+By default, Nostr is used for signaling. PeerJS is available as an alternative under "Advanced Options" in the UI. Both sender and receiver must use the same method.
+
+| Feature | Nostr (Default) | PeerJS (Advanced) |
+|---------|-----------------|-------------------|
+| Signaling Server | Decentralized relays | Centralized (0.peerjs.com) |
+| Cloud Fallback | Yes (tmpfiles.org) | No |
+| Reliability | Higher (fallback available) | P2P only |
+| Privacy | Better (no central server) | PeerJS server sees peer IDs |
+| Complexity | More complex | Simpler |
+| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity |
 
 ## Transfer Flow
 
-### P2P Success Path (Preferred)
+### Nostr Mode - P2P Success Path (Preferred)
 ```
 Sender                              Receiver
   │                                    │
@@ -29,7 +42,7 @@ Sender                              Receiver
   ✓                                    ✓
 ```
 
-### Cloud Fallback Path (When P2P Connection Fails)
+### Cloud Fallback Path (Nostr Mode - When P2P Connection Fails)
 ```
 Sender                              Receiver
   │                                    │
@@ -51,6 +64,32 @@ Sender                              Receiver
   │                                    ├─── Combine & decrypt
   │<────────── Complete ACK (seq=-1) ──┤
   ✓                                    ✓
+```
+
+### PeerJS Mode (P2P Only - No Cloud Fallback)
+```
+Sender                              Receiver
+  │                                    │
+  ├─── Create Peer(ss-{pinHint})       │
+  │    on 0.peerjs.com:443             │
+  │                                    │
+  │         (shares PIN out-of-band)   │
+  │                                    │
+  │                   Connect to ──────┤
+  │                   Peer(ss-{pinHint})
+  │                                    │
+  │<════ PeerJS Data Channel Open ════>│
+  │                                    │
+  ├─── Metadata (salt, contentType) ──>│
+  │<────────── Ready ─────────────────┤
+  │                                    │
+  │==== Data Transfer (16KB chunks) ===│
+  │                                    │
+  ├─── Done ──────────────────────────>│
+  │<────────── Done ACK ──────────────┤
+  ✓                                    ✓
+
+If P2P connection fails → Transfer fails (no cloud fallback)
 ```
 
 ## Key Components
@@ -93,6 +132,32 @@ Uses Nostr protocol for decentralized signaling between sender and receiver.
 - `relays.ts`: Default relay configuration
 - `discovery.ts`: Backup relay discovery
 
+### PeerJS Signaling (`src/lib/peerjs-signaling.ts`)
+
+Alternative signaling method using PeerJS cloud server instead of Nostr relays.
+
+**How it works:**
+- Peer ID derived from PIN: `ss-{SHA256(PIN).slice(0, PIN_HINT_LENGTH)}`
+- Both sender and receiver compute same peer ID from PIN
+- Sender creates peer, receiver connects to that peer ID
+- Uses PeerJS cloud server (`0.peerjs.com:443`) for NAT traversal
+- Data channel established directly via PeerJS (wraps WebRTC)
+
+**Message Types:**
+| Type | Direction | Purpose |
+|------|-----------|---------|
+| `metadata` | Sender → Receiver | Transfer info (salt, contentType, fileName, etc.) |
+| `ready` | Receiver → Sender | Acknowledge metadata received |
+| `chunk` | Sender → Receiver | Data chunk (ArrayBuffer) |
+| `done` | Sender → Receiver | Transfer complete |
+| `done_ack` | Receiver → Sender | Acknowledge completion |
+
+**Key Differences from Nostr:**
+- No cloud fallback - P2P only
+- Simpler protocol - no event kinds or tags
+- Centralized signaling server (PeerJS cloud)
+- Metadata exchange happens over data channel (not signaling)
+
 ### WebRTC (`src/lib/webrtc.ts`)
 
 Handles direct peer-to-peer connections using WebRTC data channels.
@@ -120,7 +185,9 @@ Fallback storage when P2P connection cannot be established (15s timeout). Not us
 
 ### React Hooks (`src/hooks/`)
 
-**`use-nostr-send.ts`** - Sender logic:
+**Nostr Mode:**
+
+**`use-nostr-send.ts`** - Sender logic (Nostr):
 1. Read and encrypt content
 2. Publish PIN exchange (without cloud URL)
 3. Wait for receiver ready ACK
@@ -129,13 +196,34 @@ Fallback storage when P2P connection cannot be established (15s timeout). Not us
 6. If P2P connection fails: chunked cloud upload with ACK coordination
 7. Wait for completion ACK
 
-**`use-nostr-receive.ts`** - Receiver logic:
+**`use-nostr-receive.ts`** - Receiver logic (Nostr):
 1. Validate PIN and find exchange event
 2. Send ready ACK
 3. Listen for P2P signals OR chunk notifications
 4. If P2P: receive via data channel
 5. If cloud: download chunks, send ACKs, combine and decrypt
 6. Send completion ACK
+
+**PeerJS Mode:**
+
+**`use-peerjs-send.ts`** - Sender logic (PeerJS):
+1. Generate PIN, derive peer ID and encryption key
+2. Create Peer with derived ID on PeerJS cloud server
+3. Wait for receiver connection (5 min timeout)
+4. Send metadata (with salt) over data channel
+5. Wait for ready acknowledgment
+6. Transfer data in 16KB chunks with backpressure
+7. Wait for done acknowledgment
+8. If connection fails at any point: transfer fails (no cloud fallback)
+
+**`use-peerjs-receive.ts`** - Receiver logic (PeerJS):
+1. Validate PIN, derive peer ID and encryption key
+2. Connect to sender's peer ID via PeerJS
+3. Receive and decrypt metadata
+4. Send ready acknowledgment
+5. Receive data chunks, accumulate
+6. On done: decrypt content, send done acknowledgment
+7. If connection fails: transfer fails (no cloud fallback)
 
 ## Data Encryption
 
@@ -206,22 +294,25 @@ interface PinExchangePayload {
 ```
 src/
 ├── lib/
-│   ├── crypto/          # Cryptographic functions
-│   │   ├── constants.ts # Parameters and limits
-│   │   ├── pin.ts       # PIN generation/validation
-│   │   ├── kdf.ts       # Key derivation
-│   │   └── aes-gcm.ts   # Encryption/decryption
-│   ├── nostr/           # Nostr protocol
-│   │   ├── types.ts     # Type definitions
-│   │   ├── events.ts    # Event creation/parsing
-│   │   ├── client.ts    # Relay client
-│   │   └── relays.ts    # Default relays
-│   ├── webrtc.ts        # WebRTC connection
-│   ├── cloud-storage.ts # Cloud fallback
-│   └── file-utils.ts    # File reading utilities
+│   ├── crypto/              # Cryptographic functions
+│   │   ├── constants.ts     # Parameters and limits
+│   │   ├── pin.ts           # PIN generation/validation
+│   │   ├── kdf.ts           # Key derivation
+│   │   └── aes-gcm.ts       # Encryption/decryption
+│   ├── nostr/               # Nostr protocol (signaling option 1)
+│   │   ├── types.ts         # Type definitions
+│   │   ├── events.ts        # Event creation/parsing
+│   │   ├── client.ts        # Relay client
+│   │   └── relays.ts        # Default relays
+│   ├── peerjs-signaling.ts  # PeerJS wrapper (signaling option 2)
+│   ├── webrtc.ts            # WebRTC connection (Nostr mode)
+│   ├── cloud-storage.ts     # Cloud fallback (Nostr mode only)
+│   └── file-utils.ts        # File reading utilities
 ├── hooks/
-│   ├── use-nostr-send.ts    # Sender hook
-│   └── use-nostr-receive.ts # Receiver hook
-├── components/          # React UI components
-└── pages/               # Page components
+│   ├── use-nostr-send.ts    # Sender hook (Nostr mode)
+│   ├── use-nostr-receive.ts # Receiver hook (Nostr mode)
+│   ├── use-peerjs-send.ts   # Sender hook (PeerJS mode)
+│   └── use-peerjs-receive.ts # Receiver hook (PeerJS mode)
+├── components/              # React UI components
+└── pages/                   # Page components
 ```
