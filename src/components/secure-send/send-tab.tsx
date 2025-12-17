@@ -23,6 +23,7 @@ export function SendTab() {
   const [mode, setMode] = useState<ContentMode>('file')
   const [message, setMessage] = useState('')
   const [relayOnly, setRelayOnly] = useState(false)
+  const [selectedServer, setSelectedServer] = useState<string | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -35,6 +36,9 @@ export function SendTab() {
       setRelayOnly(enable)
       if (enable && server !== undefined) {
         setCloudServer(server)
+        setSelectedServer(server)
+      } else if (!enable) {
+        setSelectedServer(null)
       }
       console.log(`Cloud-only transfer mode ${enable ? 'enabled' : 'disabled'}${enable && server ? ` (server: ${server})` : ''}`)
     }
@@ -214,7 +218,7 @@ export function SendTab() {
           {relayOnly && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded">
               <Cloud className="h-3 w-3" />
-              <span>Cloud-only mode (P2P disabled)</span>
+              <span>Cloud-only mode{selectedServer ? `: ${selectedServer}` : ''}</span>
             </div>
           )}
 

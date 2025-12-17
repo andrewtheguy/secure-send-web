@@ -6,9 +6,16 @@
 // Max size per cloud chunk (10MB) - larger files are split into multiple chunks
 export const MAX_CLOUD_CHUNK_SIZE = 10 * 1024 * 1024 // 10MB per chunk
 
-// Test URL for CORS proxy validation (stable, small content)
-const CORS_TEST_URL = 'https://httpbingo.org/base64/Y29yc19pc193b3JraW5n'
+// Test URLs for CORS proxy validation (stable, small content) with fallback
+const CORS_TEST_URLS = [
+  'https://httpbingo.org/base64/Y29yc19pc193b3JraW5n',
+  'https://httpbin.org/base64/Y29yc19pc193b3JraW5n',
+  'https://postman-echo.com/get?test=cors_is_working',
+]
 const CORS_TEST_EXPECTED = 'cors_is_working'
+
+// POST test URL for discovering CORS proxies that support POST
+const CORS_POST_TEST_URL = 'https://postman-echo.com/post'
 
 // =============================================================================
 // Upload Server Configuration
@@ -21,6 +28,7 @@ interface UploadServer {
   extraFields?: Record<string, string> // additional form fields
   parseResponse: (text: string) => string // returns download URL
   corsDownload?: boolean // if true, downloads support CORS directly (no proxy needed)
+  needsCorsProxy?: boolean // if true, upload needs to go through a CORS proxy
 }
 
 const UPLOAD_SERVERS: UploadServer[] = [
@@ -37,20 +45,47 @@ const UPLOAD_SERVERS: UploadServer[] = [
       throw new Error(json.error || 'Upload failed')
     },
   },
-  // litterbox CORS is unreliable (works from null origin but fails from localhost/domains)
-  // {
-  //   name: 'litterbox',
-  //   url: 'https://litterbox.catbox.moe/resources/internals/api.php',
-  //   formField: 'fileToUpload',
-  //   extraFields: { reqtype: 'fileupload', time: '1h' },
-  //   parseResponse: (text) => {
-  //     if (text.startsWith('https://')) {
-  //       return text.trim()
-  //     }
-  //     throw new Error(text || 'Upload failed')
-  //   },
-  //   corsDownload: true,
-  // },
+  {
+    // litterbox doesn't have CORS headers on upload, but downloads work directly
+    name: 'litterbox',
+    url: 'https://litterbox.catbox.moe/resources/internals/api.php',
+    formField: 'fileToUpload',
+    extraFields: { reqtype: 'fileupload', time: '1h' },
+    parseResponse: (text) => {
+      if (text.startsWith('https://')) {
+        return text.trim()
+      }
+      throw new Error(text || 'Upload failed')
+    },
+    corsDownload: true,
+    needsCorsProxy: true,
+  },
+  {
+    name: 'uguu.se',
+    url: 'https://uguu.se/upload',
+    formField: 'files[]',
+    parseResponse: (text) => {
+      const json = JSON.parse(text)
+      if (json.success && json.files?.[0]?.url) {
+        return json.files[0].url
+      }
+      throw new Error('Upload failed')
+    },
+    needsCorsProxy: true,
+  },
+  {
+    name: 'x0.at',
+    url: 'https://x0.at',
+    formField: 'file',
+    parseResponse: (text) => {
+      const url = text.trim()
+      if (url.startsWith('https://')) {
+        return url
+      }
+      throw new Error(text || 'Upload failed')
+    },
+    needsCorsProxy: true,
+  },
 ]
 
 // =============================================================================
@@ -60,29 +95,35 @@ const UPLOAD_SERVERS: UploadServer[] = [
 interface CorsProxy {
   name: string
   buildUrl: (targetUrl: string) => string
+  supportsPost: boolean
 }
 
 const CORS_PROXIES: CorsProxy[] = [
   {
     name: 'corsproxy.io',
     buildUrl: (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    supportsPost: true,
   },
   {
     name: 'leverson83',
     buildUrl: (url) => `https://cors.leverson83.org/${url}`,
+    supportsPost: true,
   },
   {
     name: 'codetabs',
     buildUrl: (url) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`,
+    supportsPost: false,
   },
   {
     name: 'cors-anywhere',
     buildUrl: (url) => `https://cors-anywhere.com/${url}`,
+    supportsPost: true,
   },
-  // {
-  //   name: 'allorigins',
-  //   buildUrl: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  // },
+  {
+    name: 'allorigins',
+    buildUrl: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    supportsPost: false,
+  },
 ]
 
 // =============================================================================
@@ -109,6 +150,7 @@ interface ServiceTestResult {
   status: 'ok' | 'failed'
   latency?: number
   error?: string
+  supportsPost?: boolean
 }
 
 interface TestAllServicesResult {
@@ -116,6 +158,7 @@ interface TestAllServicesResult {
   uploadServers: ServiceTestResult[]
   summary: {
     workingProxies: number
+    postProxies: number
     totalProxies: number
     workingServers: number
     totalServers: number
@@ -133,36 +176,83 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
   const proxyResults: ServiceTestResult[] = []
   const serverResults: ServiceTestResult[] = []
 
-  // Test all CORS proxies
-  console.log('%c📡 Testing CORS Proxies:', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
+  // Test all CORS proxies (try multiple test URLs for redundancy)
+  console.log('%c📡 Testing CORS Proxies (GET):', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
   for (const proxy of CORS_PROXIES) {
     const start = Date.now()
+    let success = false
+
+    for (const testUrl of CORS_TEST_URLS) {
+      try {
+        const proxyUrl = proxy.buildUrl(testUrl)
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+        const response = await fetch(proxyUrl, { method: 'GET', signal: controller.signal })
+        clearTimeout(timeoutId)
+
+        if (response.ok) {
+          const text = await response.text()
+          if (text.includes(CORS_TEST_EXPECTED)) {
+            const latency = Date.now() - start
+            proxyResults.push({ name: proxy.name, status: 'ok', latency })
+            console.log(`   %c✓ ${proxy.name}%c - ${latency}ms`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
+            success = true
+            break
+          }
+        }
+      } catch {
+        // Try next test URL
+      }
+    }
+
+    if (!success) {
+      proxyResults.push({ name: proxy.name, status: 'failed', error: 'All test URLs failed' })
+      console.log(`   %c✗ ${proxy.name}%c - All test URLs failed`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+    }
+  }
+
+  // Test POST support for working proxies
+  console.log('')
+  console.log('%c📡 Testing CORS Proxies (POST):', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
+  for (const result of proxyResults) {
+    if (result.status !== 'ok') {
+      console.log(`   %c⊘ ${result.name}%c - skipped (GET failed)`, 'color: #6b7280;', 'color: #6b7280;')
+      continue
+    }
+
+    const proxy = CORS_PROXIES.find((p) => p.name === result.name)!
     try {
-      const proxyUrl = proxy.buildUrl(CORS_TEST_URL)
+      const proxyUrl = proxy.buildUrl(CORS_POST_TEST_URL)
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 10000)
 
-      const response = await fetch(proxyUrl, { method: 'GET', signal: controller.signal })
+      const response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ test: 'post_support' }),
+        signal: controller.signal,
+      })
       clearTimeout(timeoutId)
 
       if (response.ok) {
-        const text = await response.text()
-        if (text.includes(CORS_TEST_EXPECTED)) {
-          const latency = Date.now() - start
-          proxyResults.push({ name: proxy.name, status: 'ok', latency })
-          console.log(`   %c✓ ${proxy.name}%c - ${latency}ms`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
+        const json = await response.json()
+        // postman-echo echoes back the data in json.data
+        if (json.data?.test === 'post_support') {
+          result.supportsPost = true
+          console.log(`   %c✓ ${proxy.name}%c - POST supported`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
         } else {
-          proxyResults.push({ name: proxy.name, status: 'failed', error: 'Invalid response content' })
-          console.log(`   %c✗ ${proxy.name}%c - Invalid response`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+          result.supportsPost = false
+          console.log(`   %c✗ ${proxy.name}%c - POST response invalid`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
         }
       } else {
-        proxyResults.push({ name: proxy.name, status: 'failed', error: `HTTP ${response.status}` })
-        console.log(`   %c✗ ${proxy.name}%c - HTTP ${response.status}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+        result.supportsPost = false
+        console.log(`   %c✗ ${proxy.name}%c - POST HTTP ${response.status}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
       }
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Unknown error'
-      proxyResults.push({ name: proxy.name, status: 'failed', error: errorMsg })
-      console.log(`   %c✗ ${proxy.name}%c - ${errorMsg}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+      result.supportsPost = false
+      const errMsg = err instanceof Error ? err.message : 'Unknown error'
+      console.log(`   %c✗ ${proxy.name}%c - POST failed: ${errMsg}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
     }
   }
 
@@ -217,11 +307,13 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
 
   // Summary
   const workingProxies = proxyResults.filter((r) => r.status === 'ok').length
+  const postProxies = proxyResults.filter((r) => r.supportsPost === true).length
   const workingServers = serverResults.filter((r) => r.status === 'ok').length
 
   console.log('')
   console.log('%c📊 Summary:', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
-  console.log(`   CORS Proxies: %c${workingProxies}/${CORS_PROXIES.length} working`, workingProxies > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
+  console.log(`   CORS Proxies (GET): %c${workingProxies}/${CORS_PROXIES.length} working`, workingProxies > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
+  console.log(`   CORS Proxies (POST): %c${postProxies}/${workingProxies} working`, postProxies > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
   console.log(`   Upload Servers: %c${workingServers}/${UPLOAD_SERVERS.length} working`, workingServers > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
   console.log('')
 
@@ -230,6 +322,7 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
     uploadServers: serverResults,
     summary: {
       workingProxies,
+      postProxies,
       totalProxies: CORS_PROXIES.length,
       workingServers,
       totalServers: UPLOAD_SERVERS.length,
@@ -272,41 +365,45 @@ if (typeof window !== 'undefined') {
 // =============================================================================
 
 /**
- * Test CORS proxies against a stable URL to find a working one
+ * Test CORS proxies against stable URLs to find a working one
  */
 async function findWorkingCorsProxy(): Promise<CorsProxy | null> {
   for (const proxy of CORS_PROXIES) {
-    try {
-      console.log(`Testing CORS proxy ${proxy.name}...`)
-      const proxyUrl = proxy.buildUrl(CORS_TEST_URL)
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10000) // 10s timeout
+    console.log(`Testing CORS proxy ${proxy.name}...`)
 
-      const response = await fetch(proxyUrl, {
-        method: 'GET',
-        signal: controller.signal,
-      })
-      clearTimeout(timeoutId)
+    for (const testUrl of CORS_TEST_URLS) {
+      try {
+        const proxyUrl = proxy.buildUrl(testUrl)
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
 
-      if (response.ok) {
-        const text = await response.text()
-        // httpbingo.org returns the expected test string
-        if (text.includes(CORS_TEST_EXPECTED)) {
-          console.log(`CORS proxy ${proxy.name} is working`)
-          return proxy
+        const response = await fetch(proxyUrl, {
+          method: 'GET',
+          signal: controller.signal,
+        })
+        clearTimeout(timeoutId)
+
+        if (response.ok) {
+          const text = await response.text()
+          if (text.includes(CORS_TEST_EXPECTED)) {
+            console.log(`CORS proxy ${proxy.name} is working`)
+            return proxy
+          }
         }
+      } catch {
+        // Try next test URL
       }
-    } catch (err) {
-      console.warn(`CORS proxy ${proxy.name} failed test:`, err)
     }
+    console.warn(`CORS proxy ${proxy.name} failed all test URLs`)
   }
   return null
 }
 
 /**
- * Upload to a specific server (internal helper)
+ * Upload to a specific server with a specific URL (internal helper)
  */
-function uploadToServer(
+function uploadToUrl(
+  url: string,
   server: UploadServer,
   data: Uint8Array,
   filename: string,
@@ -337,8 +434,8 @@ function uploadToServer(
     xhr.addEventListener('load', () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
-          const url = server.parseResponse(xhr.responseText)
-          resolve(url)
+          const result = server.parseResponse(xhr.responseText)
+          resolve(result)
         } catch (err) {
           reject(err)
         }
@@ -355,9 +452,44 @@ function uploadToServer(
       reject(new Error('Upload cancelled'))
     })
 
-    xhr.open('POST', server.url)
+    xhr.open('POST', url)
     xhr.send(formData)
   })
+}
+
+/**
+ * Upload to a specific server with CORS proxy failover (internal helper)
+ */
+async function uploadToServer(
+  server: UploadServer,
+  data: Uint8Array,
+  filename: string,
+  onProgress?: (progress: number) => void
+): Promise<string> {
+  // If server doesn't need CORS proxy, upload directly
+  if (!server.needsCorsProxy) {
+    return uploadToUrl(server.url, server, data, filename, onProgress)
+  }
+
+  // Try each CORS proxy that supports POST
+  const postProxies = CORS_PROXIES.filter((p) => p.supportsPost)
+  const errors: string[] = []
+
+  for (const proxy of postProxies) {
+    const proxyUrl = proxy.buildUrl(server.url)
+    try {
+      console.log(`Trying ${server.name} via ${proxy.name}...`)
+      const result = await uploadToUrl(proxyUrl, server, data, filename, onProgress)
+      console.log(`Upload to ${server.name} via ${proxy.name} succeeded`)
+      return result
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Unknown error'
+      console.warn(`Upload to ${server.name} via ${proxy.name} failed: ${errMsg}`)
+      errors.push(`${proxy.name}: ${errMsg}`)
+    }
+  }
+
+  throw new Error(`All CORS proxies failed for ${server.name}: ${errors.join(', ')}`)
 }
 
 /**
