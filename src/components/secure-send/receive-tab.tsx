@@ -17,18 +17,25 @@ export function ReceiveTab() {
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
   const [pinExpired, setPinExpired] = useState(false)
+  const [timeRemaining, setTimeRemaining] = useState(0)
   const { state, receivedContent, receive, cancel, reset } = useNostrReceive()
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pinInactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const mountedRef = useRef(true)
 
-  // Clear PIN inactivity timeout
+  // Clear PIN inactivity timeout and countdown
   const clearPinInactivityTimeout = useCallback(() => {
     if (pinInactivityRef.current) {
       clearTimeout(pinInactivityRef.current)
       pinInactivityRef.current = null
     }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current)
+      countdownIntervalRef.current = null
+    }
+    setTimeRemaining(0)
   }, [])
 
   // Reset PIN inactivity timeout (called on each PIN change)
@@ -38,6 +45,16 @@ export function ReceiveTab() {
 
     // Only set timeout if there's some PIN input
     if (pinRef.current.length > 0) {
+      // Set initial countdown time
+      setTimeRemaining(Math.floor(PIN_INACTIVITY_TIMEOUT_MS / 1000))
+
+      // Start countdown interval
+      countdownIntervalRef.current = setInterval(() => {
+        if (!mountedRef.current) return
+        setTimeRemaining(prev => Math.max(0, prev - 1))
+      }, 1000)
+
+      // Set expiration timeout
       pinInactivityRef.current = setTimeout(() => {
         if (mountedRef.current && pinRef.current.length > 0) {
           // Clear PIN due to inactivity
@@ -45,6 +62,11 @@ export function ReceiveTab() {
           setIsPinValid(false)
           pinInputRef.current?.clear()
           setPinExpired(true)
+          if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current)
+            countdownIntervalRef.current = null
+          }
+          setTimeRemaining(0)
         }
       }, PIN_INACTIVITY_TIMEOUT_MS)
     }
@@ -59,9 +81,19 @@ export function ReceiveTab() {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
       }
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current)
+      }
       clearPinInactivityTimeout()
     }
   }, [clearPinInactivityTimeout])
+
+  // Format time remaining as MM:SS
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
 
   const canReceive = isPinValid && state.status === 'idle'
 
@@ -146,6 +178,11 @@ export function ReceiveTab() {
           <div className="space-y-2">
             <label className="text-sm font-medium">Enter PIN from sender</label>
             <PinInput ref={pinInputRef} onPinChange={handlePinChange} disabled={isActive} />
+            {timeRemaining > 0 && (
+              <p className="text-xs text-amber-600 font-medium">
+                PIN will be cleared in {formatTime(timeRemaining)}
+              </p>
+            )}
             {pinExpired && (
               <p className="text-xs text-muted-foreground">
                 PIN cleared due to inactivity. Please re-enter.
