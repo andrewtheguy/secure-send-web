@@ -52,6 +52,30 @@ const UPLOAD_SERVERS: UploadServer[] = [
     },
     corsDownload: true,
   },
+  {
+    name: 'uguu.se',
+    url: 'https://corsproxy.io/?https://uguu.se/upload',
+    formField: 'files[]',
+    parseResponse: (text) => {
+      const json = JSON.parse(text)
+      if (json.success && json.files?.[0]?.url) {
+        return json.files[0].url
+      }
+      throw new Error('Upload failed')
+    },
+  },
+  {
+    name: 'x0.at',
+    url: 'https://corsproxy.io/?https://x0.at',
+    formField: 'file',
+    parseResponse: (text) => {
+      const url = text.trim()
+      if (url.startsWith('https://')) {
+        return url
+      }
+      throw new Error(text || 'Upload failed')
+    },
+  },
 ]
 
 // =============================================================================
