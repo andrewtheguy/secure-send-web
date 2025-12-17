@@ -117,13 +117,12 @@ export function SendTab() {
     if (folderInputRef.current) folderInputRef.current.value = ''
   }
 
-  const addFiles = useCallback((files: FileList | null) => {
-    if (files && files.length > 0) {
+  const addFiles = useCallback((files: File[]) => {
+    if (files.length > 0) {
       // Add to existing files, avoiding duplicates by name+size
       setSelectedFiles(prev => {
-        const newFiles = Array.from(files)
         const existingKeys = new Set(prev.map(f => `${f.name}-${f.size}`))
-        const uniqueNew = newFiles.filter(f => !existingKeys.has(`${f.name}-${f.size}`))
+        const uniqueNew = files.filter(f => !existingKeys.has(`${f.name}-${f.size}`))
         return [...prev, ...uniqueNew]
       })
     }
@@ -134,7 +133,9 @@ export function SendTab() {
   }, [])
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    addFiles(e.target.files)
+    // Convert FileList to array BEFORE resetting input (FileList is a live reference)
+    const files = e.target.files ? Array.from(e.target.files) : []
+    addFiles(files)
     // Reset input so same file can be added again if removed
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
@@ -150,7 +151,7 @@ export function SendTab() {
     e.stopPropagation()
     dragCounterRef.current = 0
     setIsDragging(false)
-    addFiles(e.dataTransfer.files)
+    addFiles(Array.from(e.dataTransfer.files))
   }, [addFiles])
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
