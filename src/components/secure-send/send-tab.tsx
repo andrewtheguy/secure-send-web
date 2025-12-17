@@ -188,7 +188,7 @@ export function SendTab() {
             <TabsList className={`grid w-full ${supportsFolderSelection ? 'grid-cols-3' : 'grid-cols-2'}`}>
               <TabsTrigger value="file" className="flex items-center gap-2">
                 <FileUp className="h-4 w-4" />
-                File
+                Files
               </TabsTrigger>
               {supportsFolderSelection && (
                 <TabsTrigger value="folder" className="flex items-center gap-2">
