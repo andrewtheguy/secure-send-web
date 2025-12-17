@@ -295,77 +295,9 @@ export function setCloudServer(serverName?: string | null): void {
   }
 }
 
-/**
- * Test litterbox upload via real form submission (bypasses CORS)
- * Opens result in new window so you can see the returned URL
- * Call from console: testLitterboxForm()
- */
-export function testLitterboxForm(): void {
-  // Create a form that submits to litterbox
-  const form = document.createElement('form')
-  form.method = 'POST'
-  form.action = 'https://litterbox.catbox.moe/resources/internals/api.php'
-  form.enctype = 'multipart/form-data'
-  form.target = '_blank' // Open response in new tab
-
-  // Add reqtype field
-  const reqtypeInput = document.createElement('input')
-  reqtypeInput.type = 'hidden'
-  reqtypeInput.name = 'reqtype'
-  reqtypeInput.value = 'fileupload'
-  form.appendChild(reqtypeInput)
-
-  // Add time field
-  const timeInput = document.createElement('input')
-  timeInput.type = 'hidden'
-  timeInput.name = 'time'
-  timeInput.value = '1h'
-  form.appendChild(timeInput)
-
-  // Add file input
-  const fileInput = document.createElement('input')
-  fileInput.type = 'file'
-  fileInput.name = 'fileToUpload'
-  fileInput.style.display = 'block'
-  fileInput.style.marginBottom = '10px'
-  form.appendChild(fileInput)
-
-  // Add submit button
-  const submitBtn = document.createElement('button')
-  submitBtn.type = 'submit'
-  submitBtn.textContent = 'Upload to Litterbox'
-  form.appendChild(submitBtn)
-
-  // Create modal container
-  const modal = document.createElement('div')
-  modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:99999'
-
-  const box = document.createElement('div')
-  box.style.cssText = 'background:white;padding:20px;border-radius:8px;max-width:400px'
-  box.innerHTML = '<h3 style="margin:0 0 10px">Test Litterbox Form Upload</h3><p style="margin:0 0 10px;color:#666">Select a file and submit. Response opens in new tab.</p>'
-  box.appendChild(form)
-
-  const closeBtn = document.createElement('button')
-  closeBtn.textContent = 'Cancel'
-  closeBtn.style.cssText = 'margin-top:10px;margin-left:10px'
-  closeBtn.onclick = () => modal.remove()
-  box.appendChild(closeBtn)
-
-  modal.appendChild(box)
-  modal.onclick = (e) => { if (e.target === modal) modal.remove() }
-  document.body.appendChild(modal)
-
-  console.log('Form test modal opened. Select a file and submit to test litterbox.')
-}
-
 // Expose to window for console access
 if (typeof window !== 'undefined') {
-  const win = window as unknown as {
-    testCloudServices: typeof testAllServices
-    testLitterboxForm: typeof testLitterboxForm
-  }
-  win.testCloudServices = testAllServices
-  win.testLitterboxForm = testLitterboxForm
+  ;(window as unknown as { testCloudServices: typeof testAllServices }).testCloudServices = testAllServices
 }
 
 // =============================================================================
