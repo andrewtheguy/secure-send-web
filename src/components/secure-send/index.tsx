@@ -1,22 +1,16 @@
-import { Send, Download, RefreshCw } from 'lucide-react'
+import { Send, Download } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { SendTab } from './send-tab'
 import { ReceiveTab } from './receive-tab'
-import { clearRelayCache } from '@/lib/nostr'
 
 export function SecureSend() {
-  const handleClearCache = () => {
-    clearRelayCache()
-  }
-
   return (
     <Card className="w-full max-w-2xl">
       <CardHeader>
         <CardTitle className="text-2xl">Secure Send</CardTitle>
         <CardDescription>
-          Send encrypted messages using PIN-based encryption. WebRTC P2P with Nostr relay fallback.
+          Send encrypted messages and files using PIN-based encryption. WebRTC P2P with cloud fallback.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -39,17 +33,6 @@ export function SecureSend() {
           </TabsContent>
         </Tabs>
       </CardContent>
-      <CardFooter className="justify-end">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleClearCache}
-          className="text-muted-foreground text-xs"
-        >
-          <RefreshCw className="h-3 w-3 mr-1" />
-          Clear relay cache
-        </Button>
-      </CardFooter>
     </Card>
   )
 }
