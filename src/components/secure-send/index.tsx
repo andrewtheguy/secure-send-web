@@ -88,19 +88,20 @@ export function SecureSend() {
                   <li><span className="text-foreground">PIN format:</span> 12 characters with built-in checksum for typo detection</li>
                   <li><span className="text-foreground">Max size:</span> 100 MB per transfer</li>
                   <li><span className="text-foreground">PIN expiry:</span> 1 hour</li>
-                  <li><span className="text-foreground">Signaling:</span> Two options available (must match between sender and receiver)</li>
+                  <li><span className="text-foreground">Signaling:</span> Auto-detected from PIN (uppercase = Nostr, lowercase = PeerJS)</li>
                 </ul>
               </section>
 
               <section>
                 <h3 className="font-semibold text-base mb-2">Signaling Methods</h3>
+                <p className="text-muted-foreground text-sm mb-3">Sender chooses the method in Advanced Options. Receiver auto-detects from PIN format.</p>
                 <div className="space-y-3 text-muted-foreground">
                   <div>
-                    <p className="text-foreground font-medium">Nostr (Recommended)</p>
+                    <p className="text-foreground font-medium">Nostr (Default) — PIN starts with uppercase</p>
                     <p className="text-sm">Uses decentralized Nostr relays for signaling. If P2P connection fails, automatically falls back to encrypted cloud transfer. More reliable but requires multiple relay connections.</p>
                   </div>
                   <div>
-                    <p className="text-foreground font-medium">PeerJS</p>
+                    <p className="text-foreground font-medium">PeerJS — PIN starts with lowercase</p>
                     <p className="text-sm">Uses PeerJS cloud server (0.peerjs.com) for simpler P2P signaling. No cloud fallback - transfer fails if P2P connection cannot be established. Simpler but less reliable behind strict NATs.</p>
                   </div>
                 </div>

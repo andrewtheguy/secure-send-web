@@ -12,7 +12,8 @@ A web application for sending encrypted text messages and files using PIN-based 
 - **Cloud fallback**: Falls back to cloud storage (tmpfiles.org) if WebRTC connection fails
 - **End-to-end encryption**: All data is encrypted before upload, only you and the receiver can decrypt
 - **No accounts required**: Ephemeral keypairs are generated for each transfer
-- **Nostr signaling**: Uses Nostr relays for PIN exchange and connection handshake
+- **Dual signaling methods**: Choose between Nostr relays (with cloud fallback) or PeerJS (simpler P2P)
+- **Auto-detection**: Receiver automatically detects signaling method from PIN format
 
 ## How It Works
 
@@ -34,7 +35,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 
 ### Receiving
 
-1. Enter the PIN shared by the sender
+1. Enter the PIN shared by the sender (signaling method is auto-detected from PIN)
 2. Click "Receive"
 3. For text: View and copy the decrypted message
 4. For files: Click "Download File" to save
@@ -72,11 +73,21 @@ npm run build
 
 The application uses a hybrid transport approach:
 
-1. **Nostr Signaling**: PIN exchange and WebRTC signaling via Nostr relays
+1. **Signaling Methods** (sender chooses in Advanced Options):
+   - **Nostr** (default): PIN exchange and WebRTC signaling via decentralized Nostr relays. Falls back to encrypted cloud transfer if P2P fails.
+   - **PeerJS**: Uses PeerJS cloud server (0.peerjs.com) for simpler signaling. No cloud fallback - P2P only.
 2. **Data Transfer**:
    - **WebRTC P2P** (default): Direct peer-to-peer connection for fastest transfer
-   - **Cloud Fallback**: If WebRTC fails, encrypted data is uploaded to cloud storage with automatic failover
+   - **Cloud Fallback**: If WebRTC fails (Nostr mode only), encrypted data is uploaded to cloud storage with automatic failover
 3. **Encryption**: All data is encrypted client-side before any transfer
+
+### PIN Auto-Detection
+
+The signaling method is encoded in the PIN's first character:
+- **Uppercase letter** (A-Z): Nostr signaling
+- **Lowercase letter** (a-z): PeerJS signaling
+
+Receivers don't need to select a signaling method - it's automatically detected from the PIN.
 
 ### Cloud Storage Redundancy
 
