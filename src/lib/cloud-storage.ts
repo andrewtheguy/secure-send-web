@@ -10,8 +10,12 @@ export const MAX_CLOUD_CHUNK_SIZE = 10 * 1024 * 1024 // 10MB per chunk
 const CORS_TEST_URLS = [
   'https://httpbingo.org/base64/Y29yc19pc193b3JraW5n',
   'https://httpbin.org/base64/Y29yc19pc193b3JraW5n',
+  'https://postman-echo.com/get?test=cors_is_working',
 ]
 const CORS_TEST_EXPECTED = 'cors_is_working'
+
+// POST test URL for discovering CORS proxies that support POST
+const CORS_POST_TEST_URL = 'https://postman-echo.com/post'
 
 // =============================================================================
 // Upload Server Configuration
@@ -146,6 +150,7 @@ interface ServiceTestResult {
   status: 'ok' | 'failed'
   latency?: number
   error?: string
+  supportsPost?: boolean
 }
 
 interface TestAllServicesResult {
@@ -153,6 +158,7 @@ interface TestAllServicesResult {
   uploadServers: ServiceTestResult[]
   summary: {
     workingProxies: number
+    postProxies: number
     totalProxies: number
     workingServers: number
     totalServers: number
@@ -171,7 +177,7 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
   const serverResults: ServiceTestResult[] = []
 
   // Test all CORS proxies (try multiple test URLs for redundancy)
-  console.log('%c📡 Testing CORS Proxies:', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
+  console.log('%c📡 Testing CORS Proxies (GET):', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
   for (const proxy of CORS_PROXIES) {
     const start = Date.now()
     let success = false
@@ -203,6 +209,50 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
     if (!success) {
       proxyResults.push({ name: proxy.name, status: 'failed', error: 'All test URLs failed' })
       console.log(`   %c✗ ${proxy.name}%c - All test URLs failed`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+    }
+  }
+
+  // Test POST support for working proxies
+  console.log('')
+  console.log('%c📡 Testing CORS Proxies (POST):', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
+  for (const result of proxyResults) {
+    if (result.status !== 'ok') {
+      console.log(`   %c⊘ ${result.name}%c - skipped (GET failed)`, 'color: #6b7280;', 'color: #6b7280;')
+      continue
+    }
+
+    const proxy = CORS_PROXIES.find((p) => p.name === result.name)!
+    try {
+      const proxyUrl = proxy.buildUrl(CORS_POST_TEST_URL)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+      const response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ test: 'post_support' }),
+        signal: controller.signal,
+      })
+      clearTimeout(timeoutId)
+
+      if (response.ok) {
+        const json = await response.json()
+        // postman-echo echoes back the data in json.data
+        if (json.data?.test === 'post_support') {
+          result.supportsPost = true
+          console.log(`   %c✓ ${proxy.name}%c - POST supported`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
+        } else {
+          result.supportsPost = false
+          console.log(`   %c✗ ${proxy.name}%c - POST response invalid`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+        }
+      } else {
+        result.supportsPost = false
+        console.log(`   %c✗ ${proxy.name}%c - POST HTTP ${response.status}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+      }
+    } catch (err) {
+      result.supportsPost = false
+      const errMsg = err instanceof Error ? err.message : 'Unknown error'
+      console.log(`   %c✗ ${proxy.name}%c - POST failed: ${errMsg}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
     }
   }
 
@@ -257,11 +307,13 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
 
   // Summary
   const workingProxies = proxyResults.filter((r) => r.status === 'ok').length
+  const postProxies = proxyResults.filter((r) => r.supportsPost === true).length
   const workingServers = serverResults.filter((r) => r.status === 'ok').length
 
   console.log('')
   console.log('%c📊 Summary:', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
-  console.log(`   CORS Proxies: %c${workingProxies}/${CORS_PROXIES.length} working`, workingProxies > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
+  console.log(`   CORS Proxies (GET): %c${workingProxies}/${CORS_PROXIES.length} working`, workingProxies > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
+  console.log(`   CORS Proxies (POST): %c${postProxies}/${workingProxies} working`, postProxies > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
   console.log(`   Upload Servers: %c${workingServers}/${UPLOAD_SERVERS.length} working`, workingServers > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
   console.log('')
 
@@ -270,6 +322,7 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
     uploadServers: serverResults,
     summary: {
       workingProxies,
+      postProxies,
       totalProxies: CORS_PROXIES.length,
       workingServers,
       totalServers: UPLOAD_SERVERS.length,
