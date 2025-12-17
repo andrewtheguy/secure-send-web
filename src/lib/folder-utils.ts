@@ -3,8 +3,8 @@ import { zipSync } from 'fflate'
 /**
  * Check if folder selection is supported by the browser
  */
-export const supportsFolderSelection = typeof HTMLInputElement !== 'undefined' &&
-  'webkitdirectory' in HTMLInputElement.prototype
+export const supportsFolderSelection =
+  typeof HTMLInputElement !== 'undefined' && 'webkitdirectory' in HTMLInputElement.prototype
 
 /**
  * Read files and compress to ZIP

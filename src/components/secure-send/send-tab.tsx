@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, X, RotateCcw, FileUp, FileText, Upload, Cloud, FolderUp, Files, Loader2 } from 'lucide-react'
+import { Send, X, RotateCcw, FileUp, FileText, Upload, Cloud, FolderUp, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -17,6 +17,14 @@ type ContentMode = 'text' | 'file' | 'folder'
 declare global {
   interface Window {
     testCloudTransfer?: (enable: boolean, server?: string | null) => void
+  }
+}
+
+// Extend input element to include webkitdirectory attribute
+declare module 'react' {
+  interface InputHTMLAttributes<T> {
+    webkitdirectory?: string
+    directory?: string
   }
 }
 
@@ -71,7 +79,7 @@ export function SendTab() {
     } else if (mode === 'folder' && canSendFolder && selectedFiles) {
       setIsCompressing(true)
       try {
-        const archiveName = supportsFolderSelection ? getFolderName(selectedFiles) : 'files'
+        const archiveName = getFolderName(selectedFiles)
         const zipFile = await compressFilesToZip(selectedFiles, archiveName)
         setIsCompressing(false)
         send(zipFile, { relayOnly })
@@ -148,24 +156,17 @@ export function SendTab() {
       {state.status === 'idle' ? (
         <>
           <Tabs value={mode} onValueChange={(v) => setMode(v as ContentMode)}>
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className={`grid w-full ${supportsFolderSelection ? 'grid-cols-3' : 'grid-cols-2'}`}>
               <TabsTrigger value="file" className="flex items-center gap-2">
                 <FileUp className="h-4 w-4" />
                 File
               </TabsTrigger>
-              <TabsTrigger value="folder" className="flex items-center gap-2">
-                {supportsFolderSelection ? (
-                  <>
-                    <FolderUp className="h-4 w-4" />
-                    Folder
-                  </>
-                ) : (
-                  <>
-                    <Files className="h-4 w-4" />
-                    Files
-                  </>
-                )}
-              </TabsTrigger>
+              {supportsFolderSelection && (
+                <TabsTrigger value="folder" className="flex items-center gap-2">
+                  <FolderUp className="h-4 w-4" />
+                  Folder
+                </TabsTrigger>
+              )}
               <TabsTrigger value="text" className="flex items-center gap-2">
                 <FileText className="h-4 w-4" />
                 Text
@@ -276,14 +277,10 @@ export function SendTab() {
                   </>
                 ) : selectedFiles ? (
                   <>
-                    {supportsFolderSelection ? (
-                      <FolderUp className="h-10 w-10 text-muted-foreground" />
-                    ) : (
-                      <Files className="h-10 w-10 text-muted-foreground" />
-                    )}
+                    <FolderUp className="h-10 w-10 text-muted-foreground" />
                     <div className="text-center">
                       <p className="font-medium truncate max-w-[250px]">
-                        {supportsFolderSelection ? getFolderName(selectedFiles) : `${selectedFiles.length} files`}
+                        {getFolderName(selectedFiles)}
                       </p>
                       <p className="text-sm text-muted-foreground">
                         {selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''} &bull; {formatFileSize(folderTotalSize)}
@@ -304,15 +301,9 @@ export function SendTab() {
                   </>
                 ) : (
                   <>
-                    {supportsFolderSelection ? (
-                      <FolderUp className="h-10 w-10 text-muted-foreground" />
-                    ) : (
-                      <Files className="h-10 w-10 text-muted-foreground" />
-                    )}
+                    <FolderUp className="h-10 w-10 text-muted-foreground" />
                     <div className="text-center">
-                      <p className="font-medium">
-                        {supportsFolderSelection ? 'Click to select a folder' : 'Click to select files'}
-                      </p>
+                      <p className="font-medium">Click to select a folder</p>
                       <p className="text-sm text-muted-foreground">
                         Will be compressed to ZIP &bull; Max: {formatFileSize(MAX_MESSAGE_SIZE)}
                       </p>
@@ -325,7 +316,8 @@ export function SendTab() {
                 type="file"
                 onChange={handleFolderInputChange}
                 className="hidden"
-                {...(supportsFolderSelection ? { webkitdirectory: '', directory: '' } : { multiple: true })}
+                webkitdirectory=""
+                directory=""
               />
               {isFolderOverLimit && (
                 <p className="text-xs text-destructive">
