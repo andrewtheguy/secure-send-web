@@ -26,7 +26,7 @@ import {
   type NostrClient,
   type WebRTCOptions,
 } from '@/lib/nostr'
-import { uploadToTmpfiles } from '@/lib/tmpfiles'
+import { uploadToCloud } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { readFileAsBytes } from '@/lib/file-utils'
 import { WebRTCConnection } from '@/lib/webrtc'
@@ -170,7 +170,7 @@ export function useNostrSend(): UseNostrSendReturn {
 
       if (cancelledRef.current) return
 
-      // Upload encrypted content to tmpfiles.org
+      // Upload encrypted content to cloud storage
       setState({
         status: 'transferring',
         message: 'Uploading encrypted data...',
@@ -179,10 +179,10 @@ export function useNostrSend(): UseNostrSendReturn {
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
       })
 
-      const uploadResult = await uploadToTmpfiles(
+      const uploadResult = await uploadToCloud(
         encryptedContent,
         'encrypted.bin',
-        (progress) => {
+        (progress: number) => {
           const uploaded = Math.round((progress / 100) * encryptedContent.length)
           setState(s => ({
             ...s,
@@ -198,7 +198,7 @@ export function useNostrSend(): UseNostrSendReturn {
       const client = createNostrClient([...DEFAULT_RELAYS])
       clientRef.current = client
 
-      // Create PIN exchange payload with tmpfiles URL
+      // Create PIN exchange payload with cloud storage URL
       const payload: PinExchangePayload = {
         contentType,
         transferId,
@@ -379,8 +379,8 @@ export function useNostrSend(): UseNostrSendReturn {
             }, 10000) // 10 seconds to connect
           })
         } catch (err) {
-          console.log('WebRTC failed, receiver will use tmpfiles.org download:', err)
-          // Not a failure - receiver can still download from tmpfiles.org
+          console.log('WebRTC failed, receiver will use cloud storage download:', err)
+          // Not a failure - receiver can still download from cloud storage
         }
       }
 

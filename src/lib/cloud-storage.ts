@@ -1,0 +1,376 @@
+/**
+ * Cloud storage with redundancy for encrypted file upload/download
+ * Supports multiple upload servers and CORS proxies with automatic failover
+ */
+
+// Limit to 10MB until streaming upload/download is implemented
+export const MAX_CLOUD_SIZE = 10 * 1024 * 1024 // 10MB
+
+// Test URL for CORS proxy validation (stable, small content)
+const CORS_TEST_URL = 'https://example.com'
+
+// =============================================================================
+// Upload Server Configuration
+// =============================================================================
+
+interface UploadServer {
+  name: string
+  url: string
+  formField: string
+  parseResponse: (text: string) => string // returns download URL
+}
+
+const UPLOAD_SERVERS: UploadServer[] = [
+  {
+    name: 'tmpfiles.org',
+    url: 'https://tmpfiles.org/api/v1/upload',
+    formField: 'file',
+    parseResponse: (text) => {
+      const json = JSON.parse(text)
+      if (json.status === 'success' && json.data?.url) {
+        // Convert to direct download URL
+        return json.data.url.replace('http://tmpfiles.org/', 'https://tmpfiles.org/dl/')
+      }
+      throw new Error(json.error || 'Upload failed')
+    },
+  },
+  {
+    name: 'uguu.se',
+    url: 'https://uguu.se/upload',
+    formField: 'files[]',
+    parseResponse: (text) => {
+      const json = JSON.parse(text)
+      if (json.success && json.files?.[0]?.url) {
+        return json.files[0].url
+      }
+      throw new Error('Upload failed')
+    },
+  },
+  {
+    name: 'x0.at',
+    url: 'https://x0.at/',
+    formField: 'file',
+    parseResponse: (text) => text.trim(), // Returns plain URL
+  },
+]
+
+// =============================================================================
+// CORS Proxy Configuration
+// =============================================================================
+
+interface CorsProxy {
+  name: string
+  buildUrl: (targetUrl: string) => string
+}
+
+const CORS_PROXIES: CorsProxy[] = [
+  {
+    name: 'corsproxy.io',
+    buildUrl: (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  },
+  {
+    name: 'allorigins',
+    buildUrl: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  },
+  {
+    name: 'cors.lol',
+    buildUrl: (url) => `https://api.cors.lol/?url=${encodeURIComponent(url)}`,
+  },
+  {
+    name: 'leverson83',
+    buildUrl: (url) => `https://cors.leverson83.org/${url}`,
+  },
+]
+
+// =============================================================================
+// Cached Working Services
+// =============================================================================
+
+let cachedProxy: CorsProxy | null = null
+let cachedServer: UploadServer | null = null
+
+/**
+ * Reset cached services (useful for testing or forcing re-discovery)
+ */
+export function resetCachedServices(): void {
+  cachedProxy = null
+  cachedServer = null
+}
+
+// =============================================================================
+// Pre-Testing Functions
+// =============================================================================
+
+/**
+ * Test CORS proxies against a stable URL to find a working one
+ */
+async function findWorkingCorsProxy(): Promise<CorsProxy | null> {
+  for (const proxy of CORS_PROXIES) {
+    try {
+      console.log(`Testing CORS proxy ${proxy.name}...`)
+      const proxyUrl = proxy.buildUrl(CORS_TEST_URL)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000) // 10s timeout
+
+      const response = await fetch(proxyUrl, {
+        method: 'GET',
+        signal: controller.signal,
+      })
+      clearTimeout(timeoutId)
+
+      if (response.ok) {
+        const text = await response.text()
+        // example.com returns HTML with "Example Domain" in it
+        if (text.includes('Example Domain')) {
+          console.log(`CORS proxy ${proxy.name} is working`)
+          return proxy
+        }
+      }
+    } catch (err) {
+      console.warn(`CORS proxy ${proxy.name} failed test:`, err)
+    }
+  }
+  return null
+}
+
+/**
+ * Upload to a specific server (internal helper)
+ */
+function uploadToServer(
+  server: UploadServer,
+  data: Uint8Array,
+  filename: string,
+  onProgress?: (progress: number) => void
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const buffer = new ArrayBuffer(data.length)
+    new Uint8Array(buffer).set(data)
+    const blob = new Blob([buffer], { type: 'application/octet-stream' })
+    const formData = new FormData()
+    formData.append(server.formField, blob, filename)
+
+    const xhr = new XMLHttpRequest()
+
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable && onProgress) {
+        const progress = Math.round((event.loaded / event.total) * 100)
+        onProgress(progress)
+      }
+    })
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const url = server.parseResponse(xhr.responseText)
+          resolve(url)
+        } catch (err) {
+          reject(err)
+        }
+      } else {
+        reject(new Error(`Upload failed: HTTP ${xhr.status}`))
+      }
+    })
+
+    xhr.addEventListener('error', () => {
+      reject(new Error('Upload failed: Network error'))
+    })
+
+    xhr.addEventListener('abort', () => {
+      reject(new Error('Upload cancelled'))
+    })
+
+    xhr.open('POST', server.url)
+    xhr.send(formData)
+  })
+}
+
+/**
+ * Test upload servers by uploading a small file and verifying download
+ */
+async function findWorkingUploadServer(workingProxy: CorsProxy): Promise<UploadServer | null> {
+  const testData = crypto.getRandomValues(new Uint8Array(32))
+
+  for (const server of UPLOAD_SERVERS) {
+    try {
+      console.log(`Testing upload server ${server.name}...`)
+
+      // Upload small test file
+      const uploadUrl = await uploadToServer(server, testData, 'test.bin')
+      console.log(`Upload to ${server.name} succeeded, verifying download...`)
+
+      // Verify download works via the working CORS proxy
+      const proxyUrl = workingProxy.buildUrl(uploadUrl)
+      console.log(`Testing download from ${server.name} via ${workingProxy.name}...`)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000) // 15s timeout
+
+      const response = await fetch(proxyUrl, { signal: controller.signal })
+      clearTimeout(timeoutId)
+      console.log(`Download test response: ${response.status} ${response.statusText}`)
+
+      if (response.ok) {
+        const downloaded = new Uint8Array(await response.arrayBuffer())
+        // Verify content matches
+        if (
+          downloaded.length === testData.length &&
+          downloaded.every((b, i) => b === testData[i])
+        ) {
+          console.log(`Upload server ${server.name} is working`)
+          return server
+        } else {
+          console.warn(`Upload server ${server.name} download verification failed: content mismatch`)
+        }
+      }
+    } catch (err) {
+      console.warn(`Upload server ${server.name} failed test:`, err)
+    }
+  }
+  return null
+}
+
+/**
+ * Get working services (with caching)
+ */
+async function getWorkingServices(): Promise<{ proxy: CorsProxy; server: UploadServer }> {
+  if (!cachedProxy) {
+    cachedProxy = await findWorkingCorsProxy()
+    if (!cachedProxy) {
+      throw new Error('No working CORS proxy found')
+    }
+  }
+
+  if (!cachedServer) {
+    cachedServer = await findWorkingUploadServer(cachedProxy)
+    if (!cachedServer) {
+      throw new Error('No working upload server found')
+    }
+  }
+
+  return { proxy: cachedProxy, server: cachedServer }
+}
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+export interface CloudUploadResult {
+  url: string // Direct download URL
+  server: string // Name of server used
+}
+
+/**
+ * Upload encrypted blob to cloud storage
+ *
+ * @param data - Encrypted data as Uint8Array
+ * @param filename - Optional filename (defaults to 'encrypted.bin')
+ * @param onProgress - Optional progress callback (0-100)
+ * @returns Direct download URL and server name
+ */
+export async function uploadToCloud(
+  data: Uint8Array,
+  filename: string = 'encrypted.bin',
+  onProgress?: (progress: number) => void
+): Promise<CloudUploadResult> {
+  if (data.length > MAX_CLOUD_SIZE) {
+    throw new Error(
+      `File size (${Math.round(data.length / 1024 / 1024)}MB) exceeds limit (${MAX_CLOUD_SIZE / 1024 / 1024}MB)`
+    )
+  }
+
+  // Get working services (tests and caches on first use)
+  const { server } = await getWorkingServices()
+
+  // Upload using the cached working server
+  try {
+    console.log(`Uploading to ${server.name}...`)
+    const url = await uploadToServer(server, data, filename, onProgress)
+    console.log(`Upload succeeded via ${server.name}`)
+    return { url, server: server.name }
+  } catch {
+    // If cached server fails, reset cache and try again
+    console.warn(`Cached server ${server.name} failed, retrying with fresh discovery...`)
+    resetCachedServices()
+
+    const { server: newServer } = await getWorkingServices()
+    const url = await uploadToServer(newServer, data, filename, onProgress)
+    console.log(`Upload succeeded via ${newServer.name}`)
+    return { url, server: newServer.name }
+  }
+}
+
+/**
+ * Download file from cloud storage via CORS proxy
+ *
+ * @param url - Direct download URL
+ * @param onProgress - Optional progress callback (loaded bytes, total bytes)
+ * @returns Downloaded data as Uint8Array
+ */
+export async function downloadFromCloud(
+  url: string,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<Uint8Array> {
+  // Get working services (tests and caches on first use)
+  const { proxy } = await getWorkingServices()
+
+  const downloadViaProxy = (proxyToUse: CorsProxy): Promise<Uint8Array> => {
+    return new Promise((resolve, reject) => {
+      const proxyUrl = proxyToUse.buildUrl(url)
+      const xhr = new XMLHttpRequest()
+      xhr.responseType = 'arraybuffer'
+
+      xhr.addEventListener('progress', (event) => {
+        if (onProgress) {
+          onProgress(event.loaded, event.lengthComputable ? event.total : 0)
+        }
+      })
+
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          const data = new Uint8Array(xhr.response)
+          resolve(data)
+        } else {
+          reject(new Error(`Download failed: HTTP ${xhr.status}`))
+        }
+      })
+
+      xhr.addEventListener('error', () => {
+        reject(new Error('Download failed: Network error'))
+      })
+
+      xhr.addEventListener('abort', () => {
+        reject(new Error('Download cancelled'))
+      })
+
+      xhr.open('GET', proxyUrl)
+      xhr.send()
+    })
+  }
+
+  // Try cached proxy first
+  try {
+    console.log(`Downloading via ${proxy.name}...`)
+    const data = await downloadViaProxy(proxy)
+    console.log(`Download succeeded via ${proxy.name}`)
+    return data
+  } catch {
+    // If cached proxy fails, try all proxies
+    console.warn(`Cached proxy ${proxy.name} failed, trying alternatives...`)
+
+    for (const altProxy of CORS_PROXIES) {
+      if (altProxy.name === proxy.name) continue // Skip already tried
+
+      try {
+        console.log(`Trying download via ${altProxy.name}...`)
+        const data = await downloadViaProxy(altProxy)
+        console.log(`Download succeeded via ${altProxy.name}`)
+        // Update cache
+        cachedProxy = altProxy
+        return data
+      } catch (altErr) {
+        console.warn(`Download via ${altProxy.name} failed:`, altErr)
+      }
+    }
+
+    throw new Error('All CORS proxies failed')
+  }
+}
