@@ -12,7 +12,7 @@ import { formatFileSize } from '@/lib/file-utils'
 type ContentMode = 'text' | 'file'
 
 export function SendTab() {
-  const [mode, setMode] = useState<ContentMode>('text')
+  const [mode, setMode] = useState<ContentMode>('file')
   const [message, setMessage] = useState('')
   const [relayOnly, setRelayOnly] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -96,13 +96,13 @@ export function SendTab() {
         <>
           <Tabs value={mode} onValueChange={(v) => setMode(v as ContentMode)}>
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="text" className="flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                Text Message
-              </TabsTrigger>
               <TabsTrigger value="file" className="flex items-center gap-2">
                 <FileUp className="h-4 w-4" />
                 File
+              </TabsTrigger>
+              <TabsTrigger value="text" className="flex items-center gap-2">
+                <FileText className="h-4 w-4" />
+                Text Message
               </TabsTrigger>
             </TabsList>
           </Tabs>
