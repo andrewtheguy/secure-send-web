@@ -8,13 +8,14 @@ import { TransferStatus } from './transfer-status'
 import { useNostrSend } from '@/hooks/use-nostr-send'
 import { MAX_MESSAGE_SIZE } from '@/lib/crypto'
 import { formatFileSize } from '@/lib/file-utils'
+import { setCloudServer } from '@/lib/cloud-storage'
 
 type ContentMode = 'text' | 'file'
 
 // Declare global for TypeScript
 declare global {
   interface Window {
-    testCloudTransfer?: (enable: boolean) => void
+    testCloudTransfer?: (enable: boolean, server?: string | null) => void
   }
 }
 
@@ -30,9 +31,12 @@ export function SendTab() {
 
   // Expose console function to enable/disable cloud-only mode for testing
   useEffect(() => {
-    window.testCloudTransfer = (enable: boolean) => {
+    window.testCloudTransfer = (enable: boolean, server?: string | null) => {
       setRelayOnly(enable)
-      console.log(`Cloud-only transfer mode ${enable ? 'enabled' : 'disabled'}`)
+      if (enable && server !== undefined) {
+        setCloudServer(server)
+      }
+      console.log(`Cloud-only transfer mode ${enable ? 'enabled' : 'disabled'}${enable && server ? ` (server: ${server})` : ''}`)
     }
     return () => {
       delete window.testCloudTransfer

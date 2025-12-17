@@ -20,6 +20,7 @@ interface UploadServer {
   formField: string
   extraFields?: Record<string, string> // additional form fields
   parseResponse: (text: string) => string // returns download URL
+  corsDownload?: boolean // if true, downloads support CORS directly (no proxy needed)
 }
 
 const UPLOAD_SERVERS: UploadServer[] = [
@@ -36,19 +37,19 @@ const UPLOAD_SERVERS: UploadServer[] = [
       throw new Error(json.error || 'Upload failed')
     },
   },
-  // litterbox doesn't support CORS for uploads
+  // litterbox CORS is unreliable (works from null origin but fails from localhost/domains)
   // {
   //   name: 'litterbox',
   //   url: 'https://litterbox.catbox.moe/resources/internals/api.php',
   //   formField: 'fileToUpload',
-  //   extraFields: { reqtype: 'fileupload', time: '72h' },
+  //   extraFields: { reqtype: 'fileupload', time: '1h' },
   //   parseResponse: (text) => {
-  //     // Returns direct URL on success, error message on failure
   //     if (text.startsWith('https://')) {
   //       return text.trim()
   //     }
   //     throw new Error(text || 'Upload failed')
   //   },
+  //   corsDownload: true,
   // },
 ]
 
@@ -236,6 +237,29 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
   }
 
   return result
+}
+
+/**
+ * Force a specific upload server by name (for debugging)
+ * Call from console: setCloudServer('litterbox') or setCloudServer('tmpfiles.org')
+ * Pass null to reset to automatic selection
+ */
+export function setCloudServer(serverName?: string | null): void {
+  if (!serverName) {
+    cachedServer = null
+    console.log('Cloud server reset to automatic')
+    return
+  }
+
+  const server = UPLOAD_SERVERS.find(
+    (s) => s.name.toLowerCase() === serverName.toLowerCase()
+  )
+  if (server) {
+    cachedServer = server
+    console.log(`Cloud server set to: ${server.name}`)
+  } else {
+    console.log(`Unknown server: ${serverName}`)
+  }
 }
 
 // Expose to window for console access
@@ -450,8 +474,62 @@ export async function uploadToCloud(
   }
 }
 
+// URLs from these domains support CORS directly (no proxy needed)
+const CORS_ENABLED_DOMAINS = ['litter.catbox.moe']
+
 /**
- * Download file from cloud storage via CORS proxy
+ * Check if a URL supports CORS directly (no proxy needed)
+ */
+function isCorsEnabledUrl(url: string): boolean {
+  try {
+    const urlObj = new URL(url)
+    return CORS_ENABLED_DOMAINS.some((domain) => urlObj.hostname === domain)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Download file directly (for CORS-enabled URLs)
+ */
+function downloadDirect(
+  url: string,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.responseType = 'arraybuffer'
+
+    xhr.addEventListener('progress', (event) => {
+      if (onProgress) {
+        onProgress(event.loaded, event.lengthComputable ? event.total : 0)
+      }
+    })
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const data = new Uint8Array(xhr.response)
+        resolve(data)
+      } else {
+        reject(new Error(`Download failed: HTTP ${xhr.status}`))
+      }
+    })
+
+    xhr.addEventListener('error', () => {
+      reject(new Error('Download failed: Network error'))
+    })
+
+    xhr.addEventListener('abort', () => {
+      reject(new Error('Download cancelled'))
+    })
+
+    xhr.open('GET', url)
+    xhr.send()
+  })
+}
+
+/**
+ * Download file from cloud storage (direct or via CORS proxy)
  *
  * @param url - Direct download URL
  * @param onProgress - Optional progress callback (loaded bytes, total bytes)
@@ -461,6 +539,19 @@ export async function downloadFromCloud(
   url: string,
   onProgress?: (loaded: number, total: number) => void
 ): Promise<Uint8Array> {
+  // Check if URL supports CORS directly
+  if (isCorsEnabledUrl(url)) {
+    console.log(`Downloading directly (CORS-enabled)...`)
+    try {
+      const data = await downloadDirect(url, onProgress)
+      console.log(`Direct download succeeded`)
+      return data
+    } catch (err) {
+      console.warn(`Direct download failed, falling back to proxy:`, err)
+      // Fall through to proxy-based download
+    }
+  }
+
   // Get working services (tests and caches on first use)
   const { proxy } = await getWorkingServices()
 
