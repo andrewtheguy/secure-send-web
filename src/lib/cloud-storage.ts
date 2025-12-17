@@ -21,6 +21,7 @@ interface UploadServer {
   extraFields?: Record<string, string> // additional form fields
   parseResponse: (text: string) => string // returns download URL
   corsDownload?: boolean // if true, downloads support CORS directly (no proxy needed)
+  needsCorsProxy?: boolean // if true, upload needs to go through a CORS proxy
 }
 
 const UPLOAD_SERVERS: UploadServer[] = [
@@ -38,10 +39,9 @@ const UPLOAD_SERVERS: UploadServer[] = [
     },
   },
   {
-    // litterbox upload proxied through corsproxy.io (litterbox doesn't have CORS headers)
-    // downloads from litter.catbox.moe work directly (CORS enabled on download)
+    // litterbox doesn't have CORS headers on upload, but downloads work directly
     name: 'litterbox',
-    url: 'https://corsproxy.io/?https://litterbox.catbox.moe/resources/internals/api.php',
+    url: 'https://litterbox.catbox.moe/resources/internals/api.php',
     formField: 'fileToUpload',
     extraFields: { reqtype: 'fileupload', time: '1h' },
     parseResponse: (text) => {
@@ -51,10 +51,11 @@ const UPLOAD_SERVERS: UploadServer[] = [
       throw new Error(text || 'Upload failed')
     },
     corsDownload: true,
+    needsCorsProxy: true,
   },
   {
     name: 'uguu.se',
-    url: 'https://corsproxy.io/?https://uguu.se/upload',
+    url: 'https://uguu.se/upload',
     formField: 'files[]',
     parseResponse: (text) => {
       const json = JSON.parse(text)
@@ -63,10 +64,11 @@ const UPLOAD_SERVERS: UploadServer[] = [
       }
       throw new Error('Upload failed')
     },
+    needsCorsProxy: true,
   },
   {
     name: 'x0.at',
-    url: 'https://corsproxy.io/?https://x0.at',
+    url: 'https://x0.at',
     formField: 'file',
     parseResponse: (text) => {
       const url = text.trim()
@@ -75,6 +77,7 @@ const UPLOAD_SERVERS: UploadServer[] = [
       }
       throw new Error(text || 'Upload failed')
     },
+    needsCorsProxy: true,
   },
 ]
 
@@ -85,24 +88,29 @@ const UPLOAD_SERVERS: UploadServer[] = [
 interface CorsProxy {
   name: string
   buildUrl: (targetUrl: string) => string
+  supportsPost: boolean
 }
 
 const CORS_PROXIES: CorsProxy[] = [
   {
     name: 'corsproxy.io',
     buildUrl: (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    supportsPost: true,
   },
   {
     name: 'leverson83',
     buildUrl: (url) => `https://cors.leverson83.org/${url}`,
+    supportsPost: true,
   },
   {
     name: 'codetabs',
     buildUrl: (url) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`,
+    supportsPost: false,
   },
   {
     name: 'cors-anywhere',
     buildUrl: (url) => `https://cors-anywhere.com/${url}`,
+    supportsPost: true,
   },
   // {
   //   name: 'allorigins',
@@ -397,9 +405,10 @@ async function findWorkingCorsProxy(): Promise<CorsProxy | null> {
 }
 
 /**
- * Upload to a specific server (internal helper)
+ * Upload to a specific server with a specific URL (internal helper)
  */
-function uploadToServer(
+function uploadToUrl(
+  url: string,
   server: UploadServer,
   data: Uint8Array,
   filename: string,
@@ -430,8 +439,8 @@ function uploadToServer(
     xhr.addEventListener('load', () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
-          const url = server.parseResponse(xhr.responseText)
-          resolve(url)
+          const result = server.parseResponse(xhr.responseText)
+          resolve(result)
         } catch (err) {
           reject(err)
         }
@@ -448,9 +457,44 @@ function uploadToServer(
       reject(new Error('Upload cancelled'))
     })
 
-    xhr.open('POST', server.url)
+    xhr.open('POST', url)
     xhr.send(formData)
   })
+}
+
+/**
+ * Upload to a specific server with CORS proxy failover (internal helper)
+ */
+async function uploadToServer(
+  server: UploadServer,
+  data: Uint8Array,
+  filename: string,
+  onProgress?: (progress: number) => void
+): Promise<string> {
+  // If server doesn't need CORS proxy, upload directly
+  if (!server.needsCorsProxy) {
+    return uploadToUrl(server.url, server, data, filename, onProgress)
+  }
+
+  // Try each CORS proxy that supports POST
+  const postProxies = CORS_PROXIES.filter((p) => p.supportsPost)
+  const errors: string[] = []
+
+  for (const proxy of postProxies) {
+    const proxyUrl = proxy.buildUrl(server.url)
+    try {
+      console.log(`Trying ${server.name} via ${proxy.name}...`)
+      const result = await uploadToUrl(proxyUrl, server, data, filename, onProgress)
+      console.log(`Upload to ${server.name} via ${proxy.name} succeeded`)
+      return result
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Unknown error'
+      console.warn(`Upload to ${server.name} via ${proxy.name} failed: ${errMsg}`)
+      errors.push(`${proxy.name}: ${errMsg}`)
+    }
+  }
+
+  throw new Error(`All CORS proxies failed for ${server.name}: ${errors.join(', ')}`)
 }
 
 /**
