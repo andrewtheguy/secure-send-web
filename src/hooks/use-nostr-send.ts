@@ -443,38 +443,36 @@ async function waitForAck(
   isCancelled: () => boolean,
   timeoutMs: number = 5 * 60 * 1000 // 5 minute default timeout
 ): Promise<boolean> {
-  return new Promise(async (resolve) => {
+  // First, query for existing ACK in case it was sent before subscription
+  try {
+    const existingEvents = await client.query([
+      {
+        kinds: [EVENT_KIND_DATA_TRANSFER],
+        '#t': [transferId],
+        '#p': [senderPubkey],
+        authors: [receiverPubkey],
+        limit: 50,
+      },
+    ])
+
+    for (const event of existingEvents) {
+      const ack = parseAckEvent(event)
+      if (ack && ack.transferId === transferId && ack.seq === expectedSeq) {
+        return true
+      }
+    }
+  } catch (err) {
+    console.error('Failed to query for existing ACK:', err)
+  }
+
+  if (isCancelled()) {
+    return false
+  }
+
+  // ACK not found, set up subscription to wait for it
+  return new Promise((resolve) => {
     let resolved = false
 
-    // First, query for existing ACK in case it was sent before subscription
-    try {
-      const existingEvents = await client.query([
-        {
-          kinds: [EVENT_KIND_DATA_TRANSFER],
-          '#t': [transferId],
-          '#p': [senderPubkey],
-          authors: [receiverPubkey],
-          limit: 50,
-        },
-      ])
-
-      for (const event of existingEvents) {
-        const ack = parseAckEvent(event)
-        if (ack && ack.transferId === transferId && ack.seq === expectedSeq) {
-          resolve(true)
-          return
-        }
-      }
-    } catch (err) {
-      console.error('Failed to query for existing ACK:', err)
-    }
-
-    if (isCancelled()) {
-      resolve(false)
-      return
-    }
-
-    // ACK not found, set up subscription to wait for it
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true
