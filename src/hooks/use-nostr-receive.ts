@@ -23,7 +23,7 @@ import {
   createSignalingEvent,
   parseSignalingEvent,
 } from '@/lib/nostr'
-import { downloadFromTmpfiles } from '@/lib/tmpfiles'
+import { downloadFromCloud } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { WebRTCConnection } from '@/lib/webrtc'
 
@@ -218,7 +218,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         let webRTCReceivedBytes = 0
         let settled = false
 
-        // Timeout for WebRTC - if no offer received in 15s, fall back to tmpfiles
+        // Timeout for WebRTC - if no offer received in 15s, fall back to cloud storage
         const timeout = setTimeout(() => {
           if (!settled) {
             settled = true
@@ -327,7 +327,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       try {
         await webRTCPromise
       } catch (err) {
-        console.log('WebRTC not available, using tmpfiles.org download:', err)
+        console.log('WebRTC not available, using cloud storage download:', err)
       }
 
       if (cancelledRef.current) return
@@ -339,7 +339,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         contentData = webRTCResult
         console.log('Received data via WebRTC')
       } else if (payload.tmpfilesUrl) {
-        // Download from tmpfiles.org
+        // Download from cloud storage
         setState({
           status: 'receiving',
           message: 'Downloading encrypted data...',
@@ -355,9 +355,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           currentRelays: client.getRelays(),
         })
 
-        const encryptedData = await downloadFromTmpfiles(
+        const encryptedData = await downloadFromCloud(
           payload.tmpfilesUrl,
-          (loaded, total) => {
+          (loaded: number, total: number) => {
             setState(s => ({
               ...s,
               progress: { current: loaded, total: total || payload.fileSize || loaded },
@@ -371,7 +371,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         // Decrypt the downloaded data
         setState(s => ({ ...s, message: 'Decrypting...' }))
         contentData = await decrypt(key, encryptedData)
-        console.log('Downloaded and decrypted data from tmpfiles.org')
+        console.log('Downloaded and decrypted data from cloud storage')
       } else if (payload.textMessage) {
         // Inline text message (small messages embedded in payload)
         const encoder = new TextEncoder()
