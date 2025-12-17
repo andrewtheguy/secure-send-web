@@ -28,6 +28,9 @@ import {
 import type { Event } from 'nostr-tools'
 import { WebRTCConnection } from '@/lib/webrtc'
 
+// ACK delay constant
+const RELAY_ACK_DELAY_MS = 1000 // 1 second delay before sending ACK
+
 /**
  * Publish with backup relay fallback.
  * If primary publish fails, discovers backup relays and retries.
@@ -317,7 +320,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
         lastAckedSeq = seq
 
-        // Send ACK immediately
+        // Sleep 1 second before sending ACK
+        await new Promise(resolve => setTimeout(resolve, RELAY_ACK_DELAY_MS))
+
+        // Send ACK
         console.log(`Sending ACK for chunk ${seq} (retry counter reset)`)
         const ackEvent = createAckEvent(secretKey, senderPubkey!, transferId!, seq)
         try {

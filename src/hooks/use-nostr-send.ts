@@ -9,6 +9,7 @@ import {
   decrypt,
   CHUNK_SIZE,
   MAX_MESSAGE_SIZE,
+  MAX_RELAY_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto'
 import {
@@ -34,8 +35,7 @@ import { readFileAsBytes } from '@/lib/file-utils'
 import { WebRTCConnection } from '@/lib/webrtc'
 
 // Throttling constants
-const THROTTLE_BYTES = 512 * 1024  // 512KB
-const THROTTLE_PAUSE_MS = 2000     // 2 second pause after 512KB
+const RELAY_CHUNK_DELAY_MS = 1000  // 1 second delay between chunk sends
 const RETRY_PAUSE_MS = 500         // 500ms pause after retry
 
 /**
@@ -116,13 +116,16 @@ export function useNostrSend(): UseNostrSendReturn {
       let fileSize: number | undefined
       let mimeType: string | undefined
 
+      // Use smaller limit when relay-only mode is enabled
+      const sizeLimit = options?.relayOnly ? MAX_RELAY_MESSAGE_SIZE : MAX_MESSAGE_SIZE
+
       if (isFile) {
         fileName = content.name
         fileSize = content.size
         mimeType = content.type || 'application/octet-stream'
 
-        if (content.size > MAX_MESSAGE_SIZE) {
-          const limitKB = MAX_MESSAGE_SIZE / 1024
+        if (content.size > sizeLimit) {
+          const limitKB = sizeLimit / 1024
           setState({ status: 'error', message: `File exceeds ${limitKB}KB limit` })
           return
         }
@@ -133,8 +136,8 @@ export function useNostrSend(): UseNostrSendReturn {
         const encoder = new TextEncoder()
         contentBytes = encoder.encode(content)
 
-        if (contentBytes.length > MAX_MESSAGE_SIZE) {
-          const limitKB = MAX_MESSAGE_SIZE / 1024
+        if (contentBytes.length > sizeLimit) {
+          const limitKB = sizeLimit / 1024
           setState({ status: 'error', message: `Message exceeds ${limitKB}KB limit` })
           return
         }
@@ -406,6 +409,11 @@ export function useNostrSend(): UseNostrSendReturn {
         return
       }
 
+      // Fallback to relay mode - enforce 512KB limit
+      if (contentBytes.length > MAX_RELAY_MESSAGE_SIZE) {
+        throw new Error('File exceeds 512KB limit for relay transfer')
+      }
+
       // If content fits in single chunk (text only), wait for completion ACK
       if (contentType === 'text' && totalChunks <= 1) {
         await waitForChunkAck(client, transferId, publicKey, receiverPubkey, -1, () => cancelledRef.current)
@@ -414,7 +422,6 @@ export function useNostrSend(): UseNostrSendReturn {
       }
 
       // Send chunks one by one, waiting for ACK after each
-      let bytesSent = 0
       for (let i = 0; i < totalChunks; i++) {
         if (cancelledRef.current) return
 
@@ -553,11 +560,9 @@ export function useNostrSend(): UseNostrSendReturn {
           throw new Error(`Failed to receive ACK for chunk ${i} after ${maxRetries} attempts${usedBackupRelays ? ' (including backup relays)' : ''}`)
         }
 
-        // Track bytes sent and pause every 512KB
-        bytesSent += (end - start)
-        if (bytesSent >= THROTTLE_BYTES) {
-          await new Promise(resolve => setTimeout(resolve, THROTTLE_PAUSE_MS))
-          bytesSent = 0
+        // Sleep 1 second between chunk sends (except after last chunk)
+        if (i < totalChunks - 1) {
+          await new Promise(resolve => setTimeout(resolve, RELAY_CHUNK_DELAY_MS))
         }
       }
 

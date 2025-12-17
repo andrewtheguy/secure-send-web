@@ -28,6 +28,7 @@ export const CHUNK_SIZE = 16 * 1024 // 16KB
 //    but 100MB+ would risk crashing mobile browsers.
 // 3. Validation: Both Sender and Receiver MUST enforce this limit to prevent allocation exhaustion attacks.
 export const MAX_MESSAGE_SIZE = 10 * 1024 * 1024 // 10MB
+export const MAX_RELAY_MESSAGE_SIZE = 512 * 1024 // 512KB for relay-only mode
 
 // PIN hint length
 export const PIN_HINT_LENGTH = 8 // hex characters
