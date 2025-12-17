@@ -16,6 +16,7 @@ import {
   createAckEvent,
   discoverBackupRelays,
   DEFAULT_RELAYS,
+  RELAY_GROUP_SIZE,
   type TransferState,
   type PinExchangePayload,
   type ReceivedContent,
@@ -29,7 +30,7 @@ import type { Event } from 'nostr-tools'
 import { WebRTCConnection } from '@/lib/webrtc'
 
 // ACK delay constant
-const RELAY_ACK_DELAY_MS = 1000 // 1 second delay before sending ACK
+const RELAY_ACK_DELAY_MS = 500 // 0.5 second delay before sending ACK
 
 /**
  * Publish with backup relay fallback.
@@ -55,6 +56,33 @@ async function publishWithBackup(
     // Add backup relays and retry
     await client.addRelays(backupRelays)
     await client.publish(event, maxRetries)
+  }
+}
+
+/**
+ * Publish with backup relay fallback and rotate to next relay group.
+ * Used for ACK events to distribute load across relay groups.
+ */
+async function publishAndRotateWithBackup(
+  client: NostrClient,
+  event: Event,
+  maxRetries: number = 3
+): Promise<void> {
+  try {
+    await client.publishAndRotate(event, maxRetries)
+  } catch (err) {
+    // Primary relays failed, try to discover backup relays
+    console.log('Primary relays failed, discovering backup relays...')
+    const currentRelays = client.getRelays()
+    const backupRelays = await discoverBackupRelays(currentRelays, 5)
+
+    if (backupRelays.length === 0) {
+      throw err // No backup relays found, propagate original error
+    }
+
+    // Add backup relays and retry
+    await client.addRelays(backupRelays)
+    await client.publishAndRotate(event, maxRetries)
   }
 }
 
@@ -199,7 +227,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Switch to sender's preferred relays for data transfer (if provided)
       if (payload.relays && payload.relays.length > 0) {
         client.close()
-        client = createNostrClient(payload.relays)
+        client = createNostrClient(payload.relays, RELAY_GROUP_SIZE)
         clientRef.current = client
         // Wait for new connections to be ready
         await client.waitForConnection()
@@ -320,14 +348,14 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
         lastAckedSeq = seq
 
-        // Sleep 1 second before sending ACK
+        // Sleep before sending ACK (rate limiting)
         await new Promise(resolve => setTimeout(resolve, RELAY_ACK_DELAY_MS))
 
-        // Send ACK
+        // Send ACK with rotation to distribute load across relay groups
         console.log(`Sending ACK for chunk ${seq} (retry counter reset)`)
         const ackEvent = createAckEvent(secretKey, senderPubkey!, transferId!, seq)
         try {
-          await publishWithBackup(client, ackEvent)
+          await publishAndRotateWithBackup(client, ackEvent)
           console.log(`✓ ACK sent for chunk ${seq}`)
         } catch (err) {
           console.error(`✗ Failed to send initial ACK for chunk ${seq}:`, err)

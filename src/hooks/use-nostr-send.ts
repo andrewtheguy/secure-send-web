@@ -18,11 +18,12 @@ import {
   createPinExchangeEvent,
   createChunkEvent,
   parseAckEvent,
-  discoverBestRelays,
   discoverBackupRelays,
   createSignalingEvent,
   parseSignalingEvent,
   DEFAULT_RELAYS,
+  getRelayPool,
+  RELAY_GROUP_SIZE,
   type TransferState,
   type PinExchangePayload,
   type ContentType,
@@ -35,7 +36,7 @@ import { readFileAsBytes } from '@/lib/file-utils'
 import { WebRTCConnection } from '@/lib/webrtc'
 
 // Throttling constants
-const RELAY_CHUNK_DELAY_MS = 1000  // 1 second delay between chunk sends
+const RELAY_CHUNK_DELAY_MS = 500   // 0.5 second delay between chunk sends
 const RETRY_PAUSE_MS = 500         // 500ms pause after retry
 
 /**
@@ -173,9 +174,9 @@ export function useNostrSend(): UseNostrSendReturn {
       const { secretKey, publicKey } = generateEphemeralKeys()
       const transferId = generateTransferId()
 
-      // Discover best relays for data transfer
-      setState({ status: 'connecting', message: 'Discovering best relays...' })
-      const bestRelays = await discoverBestRelays()
+      // Get relay pool for data transfer (with group rotation)
+      setState({ status: 'connecting', message: 'Discovering relays...' })
+      const relayPool = await getRelayPool()
       if (cancelledRef.current) return
 
       // Use ALL seed relays for PIN exchange (maximum discoverability)
@@ -201,7 +202,7 @@ export function useNostrSend(): UseNostrSendReturn {
         transferId,
         senderPubkey: publicKey,
         totalChunks,
-        relays: bestRelays, // Sender's preferred relays for data transfer
+        relays: relayPool, // Sender's relay pool for data transfer
         // For text, include message if single chunk
         textMessage: contentType === 'text' && totalChunks <= 1 ? (content as string) : undefined,
         // For file, include metadata
@@ -278,9 +279,9 @@ export function useNostrSend(): UseNostrSendReturn {
         throw new Error('Session expired. Please start a new transfer.')
       }
 
-      // Switch to best relays for data transfer
+      // Switch to relay pool for data transfer (with group rotation)
       client.close()
-      client = createNostrClient(bestRelays)
+      client = createNostrClient(relayPool, RELAY_GROUP_SIZE)
       clientRef.current = client
       // Wait for new connections to be ready
       await client.waitForConnection()
@@ -447,8 +448,8 @@ export function useNostrSend(): UseNostrSendReturn {
           chunkStates.set(i, { seq: i, status: 'sending', retries: retryCount, timestamp: Date.now() })
 
           try {
-            await client.publish(chunkEvent)
-            console.log(`✓ Chunk ${i} published successfully`)
+            await client.publishAndRotate(chunkEvent)
+            console.log(`✓ Chunk ${i} published successfully (rotated to next relay group)`)
 
             // Update chunk state to sent
             chunkStates.set(i, { seq: i, status: 'sent', retries: retryCount, timestamp: Date.now() })
@@ -517,8 +518,8 @@ export function useNostrSend(): UseNostrSendReturn {
               chunkStates.set(i, { seq: i, status: 'sending', retries: retryCount, timestamp: Date.now() })
 
               try {
-                await client.publish(chunkEvent)
-                console.log(`✓ Chunk ${i} published via backup relays`)
+                await client.publishAndRotate(chunkEvent)
+                console.log(`✓ Chunk ${i} published via backup relays (rotated to next relay group)`)
 
                 // Update chunk state to sent
                 chunkStates.set(i, { seq: i, status: 'sent', retries: retryCount, timestamp: Date.now() })
