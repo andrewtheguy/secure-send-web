@@ -10,7 +10,7 @@ export function SecureSend() {
       <CardHeader>
         <CardTitle className="text-2xl">Secure Send</CardTitle>
         <CardDescription>
-          Share files, folder, or text snippet securely with end-to-end encryption.
+          Share files, folder, or text snippet securely with end-to-end encryption. Click About for more info.
         </CardDescription>
       </CardHeader>
       <CardContent>
