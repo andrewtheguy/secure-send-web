@@ -1,8 +1,8 @@
 // PIN generation
 export const PIN_LENGTH = 12
 // Charset excludes ambiguous chars (0, 1, I, O, i, l, o) and uses iOS "123" keyboard symbols
-// Symbols from iOS 123 layout: - / : ; ( ) $ & @ ? !
-export const PIN_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789-/:;()$&@?!'
+// Symbols from iOS 123 layout: - / : ; ( ) $ & @ ? ! . , "
+export const PIN_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789-/:;()$&@?!.,"'
 
 // PBKDF2 parameters (browser-compatible alternative to Argon2id)
 export const PBKDF2_ITERATIONS = 600_000
