@@ -107,50 +107,40 @@ function minifyCandidate(candidate: string): string {
 }
 
 /**
- * Expand minified candidate back to full format
- * Handles both v1 (plain text) and v2 (~ prefixed compact) formats
+ * Expand minified candidate back to full format (v2 compact format)
  */
 function expandCandidate(minified: string): string {
-  // Check for v2 compact format
-  if (minified.startsWith('~')) {
-    const parts = minified.slice(1).split('|')
-    const foundation = decodeUint32(parts[0])
-    const component = parts[1]
-    const proto = parts[2] === 'u' ? 'udp' : 'tcp'
-    const priority = decodeUint32(parts[3])
-    const ip = decodeIP(parts[4])
-    const port = decodeUint16(parts[5])
-    const typeChar = parts[6]
-    const typeMap: Record<string, string> = { h: 'host', s: 'srflx', p: 'prflx', r: 'relay' }
-    const type = typeMap[typeChar] || typeChar
+  const parts = minified.slice(1).split('|') // Remove ~ prefix
+  const foundation = decodeUint32(parts[0])
+  const component = parts[1]
+  const proto = parts[2] === 'u' ? 'udp' : 'tcp'
+  const priority = decodeUint32(parts[3])
+  const ip = decodeIP(parts[4])
+  const port = decodeUint16(parts[5])
+  const typeChar = parts[6]
+  const typeMap: Record<string, string> = { h: 'host', s: 'srflx', p: 'prflx', r: 'relay' }
+  const type = typeMap[typeChar] || typeChar
 
-    let result = `candidate:${foundation} ${component} ${proto} ${priority} ${ip} ${port} typ ${type}`
+  let result = `candidate:${foundation} ${component} ${proto} ${priority} ${ip} ${port} typ ${type}`
 
-    // Check for raddr/rport (parts 7 and 8)
-    if (parts[7] && parts[7].match(/^[46]/)) {
-      const raddr = decodeIP(parts[7])
-      const rport = decodeUint16(parts[8])
-      result += ` raddr ${raddr} rport ${rport}`
-      // tcptype would be at index 9
-      if (parts[9]) {
-        const tcptypeMap: Record<string, string> = { a: 'active', p: 'passive', s: 'so' }
-        result += ` tcptype ${tcptypeMap[parts[9]] || parts[9]}`
-      }
-    } else if (parts[7]) {
-      // No raddr, parts[7] is tcptype
+  // Check for raddr/rport (parts 7 and 8)
+  if (parts[7] && parts[7].match(/^[46]/)) {
+    const raddr = decodeIP(parts[7])
+    const rport = decodeUint16(parts[8])
+    result += ` raddr ${raddr} rport ${rport}`
+    // tcptype would be at index 9
+    if (parts[9]) {
       const tcptypeMap: Record<string, string> = { a: 'active', p: 'passive', s: 'so' }
-      result += ` tcptype ${tcptypeMap[parts[7]] || parts[7]}`
+      result += ` tcptype ${tcptypeMap[parts[9]] || parts[9]}`
     }
-
-    result += ' generation 0'
-    return result
+  } else if (parts[7]) {
+    // No raddr, parts[7] is tcptype
+    const tcptypeMap: Record<string, string> = { a: 'active', p: 'passive', s: 'so' }
+    result += ` tcptype ${tcptypeMap[parts[7]] || parts[7]}`
   }
 
-  // v1 format: just add "generation 0" if not present
-  if (!minified.includes(' generation ')) {
-    return minified + ' generation 0'
-  }
-  return minified
+  result += ' generation 0'
+  return result
 }
 
 /**
