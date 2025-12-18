@@ -475,8 +475,7 @@ export function generateAnswerQRData(
 export function parseQRPayload(data: string): QRSignalingPayload | null {
   try {
     return decompressSignalingData(data)
-  } catch (e) {
-    console.error('QR parse error:', e, 'Data preview:', data.substring(0, 50))
+  } catch {
     return null
   }
 }

@@ -20,11 +20,10 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
   )
 
   const handleScan = useCallback((data: string) => {
-    // Data is base64 encoded, parse directly
     const payload = parseQRPayload(data)
     if (!payload) {
-      setError('Invalid QR code data')
-      onError?.('Invalid QR code data')
+      setError('QR scanned but data format is invalid')
+      onError?.('QR scanned but data format is invalid')
       return
     }
 

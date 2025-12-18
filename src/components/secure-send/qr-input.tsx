@@ -39,10 +39,9 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
       return
     }
 
-    // Data is already base64 encoded, parse directly
     const payload = parseQRPayload(trimmed)
     if (!payload) {
-      setError('Invalid QR code data. Make sure you copied the complete text.')
+      setError('Data format is invalid. Make sure you copied the complete text.')
       return
     }
 
