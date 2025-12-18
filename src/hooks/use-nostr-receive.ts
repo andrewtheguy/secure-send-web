@@ -9,6 +9,7 @@ import {
   decryptChunk,
   MAX_MESSAGE_SIZE,
   ENCRYPTION_CHUNK_SIZE,
+  CLOUD_CHUNK_SIZE,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -28,7 +29,7 @@ import {
   createSignalingEvent,
   parseSignalingEvent,
 } from '@/lib/nostr'
-import { downloadFromCloud, combineChunks } from '@/lib/cloud-storage'
+import { downloadFromCloud } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { WebRTCConnection } from '@/lib/webrtc'
 
@@ -215,7 +216,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Unified listener for both P2P and chunked cloud transfer
       // P2P is preferred, but if sender can't establish P2P, they'll send chunk notifications
       let webRTCSuccess = false
-      const receivedChunks: Map<number, Uint8Array> = new Map()
+      // Cloud uses separate tracking since encrypted chunks have different size
+      const receivedCloudChunkIndices: Set<number> = new Set()
+      let cloudBuffer: Uint8Array | null = null
+      let cloudTotalBytes = 0
       let expectedTotalChunks = payload.totalChunks || 1
 
       const transferResult = await new Promise<{ mode: 'p2p' | 'cloud' | 'inline'; data: Uint8Array }>((resolve, reject) => {
@@ -360,6 +364,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               rtc.close()
               rtc = null
             }
+
+            // Pre-allocate buffer for encrypted cloud data
+            // Cloud chunks are encrypted, so we estimate size based on totalChunks * chunkSize
+            // Add some overhead for encryption (28 bytes per original chunk, but cloud encrypts whole content)
+            const estimatedEncryptedSize = chunkPayload.totalChunks * CLOUD_CHUNK_SIZE
+            cloudBuffer = new Uint8Array(estimatedEncryptedSize)
           }
 
           expectedTotalChunks = chunkPayload.totalChunks
@@ -372,14 +382,13 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
           try {
             // Download this chunk
-            const baseProgress = Array.from(receivedChunks.values()).reduce((sum, c) => sum + c.length, 0)
             const chunkData = await downloadFromCloud(
               chunkPayload.chunkUrl,
               (loaded) => {
                 setState(s => ({
                   ...s,
                   progress: {
-                    current: baseProgress + loaded,
+                    current: cloudTotalBytes + loaded,
                     total: payload.fileSize || (chunkPayload.totalChunks * chunkPayload.chunkSize),
                   },
                 }))
@@ -391,8 +400,24 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               console.warn(`Chunk ${chunkPayload.chunkIndex} size mismatch: expected ${chunkPayload.chunkSize}, got ${chunkData.length}`)
             }
 
-            // Store chunk
-            receivedChunks.set(chunkPayload.chunkIndex, chunkData)
+            // Calculate write position based on chunk index and cloud chunk size
+            const writePosition = chunkPayload.chunkIndex * CLOUD_CHUNK_SIZE
+
+            // Ensure buffer is large enough
+            const requiredSize = writePosition + chunkData.length
+            if (!cloudBuffer || cloudBuffer.length < requiredSize) {
+              const newBuffer = new Uint8Array(Math.max(requiredSize, (cloudBuffer?.length || 0) * 2))
+              if (cloudBuffer) {
+                newBuffer.set(cloudBuffer)
+              }
+              cloudBuffer = newBuffer
+            }
+
+            // Write directly to position in buffer - no intermediate storage!
+            cloudBuffer.set(chunkData, writePosition)
+            receivedCloudChunkIndices.add(chunkPayload.chunkIndex)
+            cloudTotalBytes += chunkData.length
+
             console.log(`Chunk ${chunkPayload.chunkIndex + 1}/${chunkPayload.totalChunks} downloaded (${chunkData.length} bytes)`)
 
             // Send chunk ACK (seq = chunkIndex + 1, 1-based)
@@ -406,24 +431,15 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             console.log(`Chunk ${chunkPayload.chunkIndex + 1} ACK sent`)
 
             // Check if all chunks received
-            if (receivedChunks.size === expectedTotalChunks) {
+            if (receivedCloudChunkIndices.size === expectedTotalChunks) {
               settled = true
               clearTimeout(overallTimeout)
               client.unsubscribe(subId)
 
-              // Combine chunks in order
-              const orderedChunks: Uint8Array[] = []
-              for (let i = 0; i < expectedTotalChunks; i++) {
-                const chunk = receivedChunks.get(i)
-                if (!chunk) {
-                  reject(new Error(`Missing chunk ${i}`))
-                  return
-                }
-                orderedChunks.push(chunk)
-              }
-              const combined = combineChunks(orderedChunks)
-              console.log(`All ${expectedTotalChunks} chunks combined (${combined.length} bytes)`)
-              resolve({ mode: 'cloud', data: combined })
+              // Buffer is already assembled - just trim to actual size
+              const result = cloudBuffer.slice(0, cloudTotalBytes)
+              console.log(`All ${expectedTotalChunks} cloud chunks assembled (${cloudTotalBytes} bytes)`)
+              resolve({ mode: 'cloud', data: result })
             }
           } catch (err) {
             console.error(`Failed to download chunk ${chunkPayload.chunkIndex}:`, err)
@@ -463,7 +479,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           const chunkNotify = parseChunkNotifyEvent(event)
           if (chunkNotify && chunkNotify.transferId === transferId) {
             // Avoid processing duplicate chunk notifications
-            if (!receivedChunks.has(chunkNotify.chunkIndex)) {
+            if (!receivedCloudChunkIndices.has(chunkNotify.chunkIndex)) {
               await handleChunkNotify(chunkNotify)
             }
           }
