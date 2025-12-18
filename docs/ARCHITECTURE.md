@@ -121,9 +121,9 @@ Note: QR mode avoids signaling servers. For offline operation, devices must be o
 ```
 
 **QR Code Format:**
-- Payload: `EncryptedSignalingPayload` JSON → gzip compress → binary QR code (8-bit byte mode)
-- Single QR code (~2000 bytes capacity, sufficient for WebRTC signaling)
-- Copy/paste uses encrypted JSON (no encoding)
+- Binary payload: `[0x01 version][salt][encrypted SignalingPayload]`
+- QR: gzip compress binary → binary QR code (8-bit byte mode, ~2000 bytes capacity)
+- Copy/paste: base64 encode binary → text string for clipboard
 
 > **Note:** Prior to PR #15, QR codes used base45 encoding with multi-QR chunking.
 > For the previous implementation, see commit `89d935b3b61ea37c9f98bc85de4d4c78c7be3891`.
@@ -205,27 +205,22 @@ Fully offline signaling method using QR codes for WebRTC offer/answer exchange.
 - Answer encrypted with PIN and sent back via same encoding (QR code or encrypted JSON paste)
 - Both peers establish WebRTC connection using exchanged SDP/ICE candidates
 
-**Payload Structure:**
-```typescript
-interface EncryptedSignalingPayload {
-  v: 1
-  salt: string                   // Base64 salt for PIN KDF
-  payload: string                // Base64 AES-GCM encrypted SignalingPayload
-}
+**Binary Payload Format:**
 ```
+[1 byte: version 0x01][16 bytes: salt][remaining: AES-GCM encrypted SignalingPayload]
+```
+This compact binary format avoids JSON overhead and double base64 encoding.
 
 **Encoding Pipeline:**
-1. `SignalingPayload` object
-2. Encrypt with PIN-derived key → `EncryptedSignalingPayload`
-3. `JSON.stringify()` → JSON string
-4. `pako.gzip()` → compressed bytes (~900-1300 bytes for typical WebRTC signaling)
-5. Binary QR code (8-bit byte mode, ~2000 bytes capacity)
+1. `SignalingPayload` object → JSON string
+2. Encrypt with PIN-derived key (AES-GCM)
+3. Construct binary: `[0x01][salt][encrypted bytes]`
 
-**Input Methods:**
+**Output Methods:**
 | Method | Encoding | Use Case |
 |--------|----------|----------|
-| QR Scan | Binary (gzip) | Camera available |
-| Paste | Encrypted JSON | No camera, text-based exchange |
+| QR Code | Gzip-compressed binary | Camera available, most compact |
+| Copy/Paste | Base64-encoded binary | No camera, text-safe for clipboard |
 
 **Key Features:**
 - No server required - fully air-gapped operation
