@@ -2,11 +2,11 @@ import { useState, useCallback } from 'react'
 import { RefreshCw, AlertCircle, Loader2, Camera } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useQRScanner } from '@/hooks/useQRScanner'
-import { parseBinaryQRPayload, isValidSignalingPayload, type SignalingPayload } from '@/lib/qr-signaling'
+import { parseBinaryQRPayload, isValidEncryptedSignalingPayload, type EncryptedSignalingPayload } from '@/lib/qr-signaling'
 import { isMobileDevice } from '@/lib/utils'
 
 interface QRScannerProps {
-  onScan: (payload: SignalingPayload) => void
+  onScan: (payload: EncryptedSignalingPayload) => void
   expectedType: 'offer' | 'answer'
   onError?: (error: string) => void
   disabled?: boolean
@@ -28,21 +28,15 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
       return
     }
 
-    if (!isValidSignalingPayload(payload)) {
-      setError('Malformed QR payload')
-      onError?.('Malformed QR payload')
-      return
-    }
-
-    if (payload.type !== expectedType) {
-      setError(`Expected ${expectedType} QR code, got ${payload.type}`)
-      onError?.(`Expected ${expectedType} QR code, got ${payload.type}`)
+    if (!isValidEncryptedSignalingPayload(payload)) {
+      setError('Malformed encrypted QR payload')
+      onError?.('Malformed encrypted QR payload')
       return
     }
 
     setError(null)
     onScan(payload)
-  }, [expectedType, onScan, onError])
+  }, [onScan, onError])
 
   const handleError = useCallback((err: string) => {
     setError(err)

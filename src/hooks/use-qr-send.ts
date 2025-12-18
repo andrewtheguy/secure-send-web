@@ -1,16 +1,16 @@
 import { useState, useCallback, useRef } from 'react'
 import {
   generatePinForMethod,
-  generateSalt,
-  deriveKeyFromPin,
-  encrypt,
   MAX_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
 import {
+  decryptSignalingPayload,
+  encryptSignalingPayload,
   generateOfferQRBinary,
   generateClipboardData,
+  type EncryptedSignalingPayload,
   type SignalingPayload,
 } from '@/lib/qr-signaling'
 import type { TransferState, ContentType } from '@/lib/nostr/types'
@@ -37,7 +37,7 @@ export interface UseQRSendReturn {
   state: QRTransferState
   pin: string | null
   send: (content: string | File) => Promise<void>
-  submitAnswer: (answerData: SignalingPayload) => void
+  submitAnswer: (answerData: EncryptedSignalingPayload) => void
   cancel: () => void
 }
 
@@ -56,7 +56,6 @@ export function useQRSend(): UseQRSendReturn {
 
   // Store data needed for answer processing
   const pendingTransferRef = useRef<{
-    key: CryptoKey
     contentBytes: Uint8Array
     contentType: ContentType
     fileName?: string
@@ -66,6 +65,7 @@ export function useQRSend(): UseQRSendReturn {
 
   // Resolve function for answer submission
   const answerResolverRef = useRef<((payload: SignalingPayload) => void) | null>(null)
+  const answerRejectRef = useRef<((error: Error) => void) | null>(null)
 
   const clearExpirationTimeout = useCallback(() => {
     if (expirationTimeoutRef.current) {
@@ -79,6 +79,7 @@ export function useQRSend(): UseQRSendReturn {
     sendingRef.current = false
     clearExpirationTimeout()
     answerResolverRef.current = null
+    answerRejectRef.current = null
     pendingTransferRef.current = null
     if (rtcRef.current) {
       rtcRef.current.close()
@@ -88,11 +89,22 @@ export function useQRSend(): UseQRSendReturn {
     setState({ status: 'idle' })
   }, [clearExpirationTimeout])
 
-  const submitAnswer = useCallback((answerPayload: SignalingPayload) => {
-    if (answerResolverRef.current) {
-      answerResolverRef.current(answerPayload)
-    }
-  }, [])
+  const submitAnswer = useCallback((answerPayload: EncryptedSignalingPayload) => {
+    if (!answerResolverRef.current || !pin) return
+    decryptSignalingPayload(answerPayload, pin).then((decrypted) => {
+      if (!decrypted) {
+        answerRejectRef.current?.(new Error('Invalid PIN or QR response'))
+        answerResolverRef.current = null
+        return
+      }
+      if (decrypted.type !== 'answer') {
+        answerRejectRef.current?.(new Error('Invalid QR response type'))
+        answerResolverRef.current = null
+        return
+      }
+      answerResolverRef.current?.(decrypted)
+    })
+  }, [pin])
 
   const send = useCallback(async (content: string | File) => {
     // Guard against concurrent invocations
@@ -134,7 +146,7 @@ export function useQRSend(): UseQRSendReturn {
         }
       }
 
-      // Generate PIN and derive encryption key
+      // Generate PIN for verification
       setState({ status: 'generating_offer', message: 'Generating secure PIN...' })
       const newPin = generatePinForMethod('qr')
       setPin(newPin)
@@ -155,14 +167,10 @@ export function useQRSend(): UseQRSendReturn {
         }
       }, TRANSFER_EXPIRATION_MS)
 
-      const salt = generateSalt()
-      const key = await deriveKeyFromPin(newPin, salt)
-
       if (cancelledRef.current) return
 
       // Store for later use when answer is received
       pendingTransferRef.current = {
-        key,
         contentBytes,
         contentType,
         fileName,
@@ -226,32 +234,32 @@ export function useQRSend(): UseQRSendReturn {
       if (cancelledRef.current) return
 
       // Generate binary QR data with offer + candidates + metadata
-      const qrBinaryData = generateOfferQRBinary(
+      const qrBinaryData = await generateOfferQRBinary(
         offerSDP!,
         iceCandidates,
-        salt,
         {
           contentType,
           totalBytes: contentBytes.length,
           fileName,
           fileSize,
           mimeType,
-        }
+        },
+        newPin
       )
 
-      // Generate raw JSON for clipboard
-      const payload: SignalingPayload = {
+      // Generate encrypted JSON for clipboard
+      const offerPayload: SignalingPayload = {
         type: 'offer',
         sdp: offerSDP!.sdp || '',
         candidates: iceCandidates.map(c => c.candidate),
-        salt: Array.from(salt),
         contentType,
         totalBytes: contentBytes.length,
         fileName,
         fileSize,
         mimeType,
       }
-      const clipboardJson = generateClipboardData(payload)
+      const encryptedClipboardPayload = await encryptSignalingPayload(offerPayload, newPin)
+      const clipboardJson = generateClipboardData(encryptedClipboardPayload)
 
       // Show QR code and wait for answer
       setState({
@@ -266,6 +274,7 @@ export function useQRSend(): UseQRSendReturn {
       // Wait for answer to be submitted
       const answerPayload = await new Promise<SignalingPayload>((resolve, reject) => {
         answerResolverRef.current = resolve
+        answerRejectRef.current = reject
 
         // Check periodically if cancelled
         const checkInterval = setInterval(() => {
@@ -328,41 +337,28 @@ export function useQRSend(): UseQRSendReturn {
       // Hide PIN now that we're connected
       setPin(null)
 
-      // Encrypt content
-      setState({
-        status: 'transferring',
-        message: 'Encrypting...',
-        progress: { current: 0, total: contentBytes.length },
-        contentType,
-        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
-      })
-
-      const encryptedData = await encrypt(key, contentBytes)
-
-      if (cancelledRef.current) return
-
-      // Send encrypted data
+      // Send data via P2P (WebRTC DTLS provides transport encryption)
       setState({
         status: 'transferring',
         message: 'Sending via P2P...',
-        progress: { current: 0, total: encryptedData.length },
+        progress: { current: 0, total: contentBytes.length },
         contentType,
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
       })
 
       // Send data in chunks
       const chunkSize = 16384 // 16KB chunks
-      for (let i = 0; i < encryptedData.length; i += chunkSize) {
+      for (let i = 0; i < contentBytes.length; i += chunkSize) {
         if (cancelledRef.current) throw new Error('Cancelled')
 
-        const end = Math.min(i + chunkSize, encryptedData.length)
-        const chunk = encryptedData.slice(i, end)
+        const end = Math.min(i + chunkSize, contentBytes.length)
+        const chunk = contentBytes.slice(i, end)
 
         await rtc.sendWithBackpressure(chunk.buffer)
 
         setState(s => ({
           ...s,
-          progress: { current: end, total: encryptedData.length },
+          progress: { current: end, total: contentBytes.length },
         }))
       }
 
@@ -400,6 +396,7 @@ export function useQRSend(): UseQRSendReturn {
       clearExpirationTimeout()
       sendingRef.current = false
       answerResolverRef.current = null
+      answerRejectRef.current = null
       pendingTransferRef.current = null
       if (rtcRef.current) {
         rtcRef.current.close()

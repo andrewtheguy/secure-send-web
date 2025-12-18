@@ -3,11 +3,11 @@ import { ClipboardPaste, AlertCircle, Camera } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { parseJSONPayload, isValidSignalingPayload, type SignalingPayload } from '@/lib/qr-signaling'
+import { parseJSONPayload, isValidEncryptedSignalingPayload, type EncryptedSignalingPayload } from '@/lib/qr-signaling'
 import { QRScanner } from './qr-scanner'
 
 interface QRInputProps {
-  onSubmit: (payload: SignalingPayload) => void
+  onSubmit: (payload: EncryptedSignalingPayload) => void
   expectedType: 'offer' | 'answer'
   label?: string
   disabled?: boolean
@@ -47,13 +47,8 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
       return
     }
 
-    if (!isValidSignalingPayload(payload)) {
-      setError('Malformed payload structure')
-      return
-    }
-
-    if (payload.type !== expectedType) {
-      setError(`Expected ${expectedType} payload, got ${payload.type}`)
+    if (!isValidEncryptedSignalingPayload(payload)) {
+      setError('Malformed encrypted payload')
       return
     }
 
@@ -61,7 +56,7 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
     onSubmit(payload)
   }, [value, expectedType, onSubmit])
 
-  const handleScanSuccess = useCallback((payload: SignalingPayload) => {
+  const handleScanSuccess = useCallback((payload: EncryptedSignalingPayload) => {
     setError(null)
     onSubmit(payload)
   }, [onSubmit])
