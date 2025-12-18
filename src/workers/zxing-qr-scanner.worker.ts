@@ -1,4 +1,5 @@
-import { readBarcodes, type ReaderOptions } from 'zxing-wasm/reader'
+import { prepareZXingModule, readBarcodes, type ReaderOptions } from 'zxing-wasm/reader'
+import zxingWasmUrl from 'zxing-wasm/reader/zxing_reader.wasm?url'
 
 interface ScanMessage {
   type: 'scan'
@@ -12,6 +13,14 @@ interface ScanResult {
   data: (string | Uint8Array)[] | null
   error?: string
 }
+
+const zxingReady = prepareZXingModule({
+  overrides: {
+    locateFile: (path: string, prefix?: string) =>
+      path.endsWith('.wasm') ? zxingWasmUrl : `${prefix ?? ''}${path}`,
+  },
+  fireImmediately: true,
+})
 
 self.onmessage = async (e: MessageEvent<ScanMessage>) => {
   if (e.data.type === 'scan') {
@@ -34,6 +43,7 @@ self.onmessage = async (e: MessageEvent<ScanMessage>) => {
         ...options,
       }
 
+      await zxingReady
       const results = await readBarcodes(imageData, readerOptions)
 
       const detectedData = results.length > 0
