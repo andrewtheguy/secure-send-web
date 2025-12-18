@@ -88,7 +88,7 @@ export function SecureSend() {
                   <li><span className="text-foreground">PIN format:</span> 12 characters with built-in checksum for typo detection</li>
                   <li><span className="text-foreground">Max size:</span> 100 MB per transfer</li>
                   <li><span className="text-foreground">PIN expiry:</span> 1 hour</li>
-                  <li><span className="text-foreground">Signaling:</span> Auto-detected from PIN (uppercase = Nostr, lowercase = PeerJS)</li>
+                  <li><span className="text-foreground">Signaling:</span> Auto-detected from PIN (uppercase = Nostr, lowercase = PeerJS, "2" = QR)</li>
                 </ul>
               </section>
 
@@ -103,6 +103,10 @@ export function SecureSend() {
                   <div>
                     <p className="text-foreground font-medium">PeerJS — PIN starts with lowercase</p>
                     <p className="text-sm">Uses PeerJS cloud server (0.peerjs.com) for simpler P2P signaling. No cloud fallback - transfer fails if P2P connection cannot be established. Simpler but less reliable behind strict NATs.</p>
+                  </div>
+                  <div>
+                    <p className="text-foreground font-medium">QR Code — PIN starts with "2"</p>
+                    <p className="text-sm">Exchange QR codes directly with receiver. Truly serverless - no signaling server required. Both parties must be able to scan each other's screens. P2P only, no fallback.</p>
                   </div>
                 </div>
               </section>

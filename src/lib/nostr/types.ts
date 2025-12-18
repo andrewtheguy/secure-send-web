@@ -14,6 +14,13 @@ export type TransferStatus =
   | 'receiving'
   | 'complete'
   | 'error'
+  // QR-specific states
+  | 'generating_offer'
+  | 'showing_offer_qr'
+  | 'waiting_for_answer'
+  | 'waiting_for_offer'
+  | 'generating_answer'
+  | 'showing_answer_qr'
 
 // File metadata
 export interface FileMetadata {
@@ -109,4 +116,4 @@ export interface WebRTCOptions {
 }
 
 // Signaling method for P2P connection
-export type SignalingMethod = 'nostr' | 'peerjs'
+export type SignalingMethod = 'nostr' | 'peerjs' | 'qr'

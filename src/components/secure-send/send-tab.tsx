@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, X, RotateCcw, FileUp, FileText, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight } from 'lucide-react'
+import { Send, X, RotateCcw, FileUp, FileText, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -7,8 +7,11 @@ import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { PinDisplay } from './pin-display'
 import { TransferStatus } from './transfer-status'
+import { QRDisplay } from './qr-display'
+import { QRInput } from './qr-input'
 import { useNostrSend } from '@/hooks/use-nostr-send'
 import { usePeerJSSend } from '@/hooks/use-peerjs-send'
+import { useQRSend } from '@/hooks/use-qr-send'
 import { MAX_MESSAGE_SIZE } from '@/lib/crypto'
 import { formatFileSize } from '@/lib/file-utils'
 import { setCloudServer } from '@/lib/cloud-storage'
@@ -47,12 +50,18 @@ export function SendTab() {
   const folderInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
 
-  // Both hooks must be called unconditionally (React rules)
+  // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrSend()
   const peerJSHook = usePeerJSSend()
+  const qrHook = useQRSend()
 
   // Use the appropriate hook based on signaling method
-  const { state, pin, send, cancel } = signalingMethod === 'nostr' ? nostrHook : peerJSHook
+  const activeHook = signalingMethod === 'nostr' ? nostrHook : signalingMethod === 'peerjs' ? peerJSHook : qrHook
+  const { state: rawState, pin, send, cancel } = activeHook
+  const submitAnswer = signalingMethod === 'qr' ? qrHook.submitAnswer : undefined
+
+  // Normalize state for QR hook (it has additional status values)
+  const state = rawState as typeof nostrHook.state & { offerQRData?: string }
 
   // Expose console function to enable/disable cloud-only mode for testing
   useEffect(() => {
@@ -85,38 +94,34 @@ export function SendTab() {
   const canSend = mode === 'text' ? canSendText : mode === 'file' ? canSendFiles : canSendFolder
 
   const handleSend = async () => {
-    // PeerJS hook doesn't support relayOnly option
+    // Only Nostr hook supports relayOnly option
     const sendOptions = signalingMethod === 'nostr' ? { relayOnly } : undefined
 
-    if (mode === 'text' && canSendText) {
+    const doSend = (content: string | File) => {
       if (signalingMethod === 'nostr') {
-        (send as typeof nostrHook.send)(message, sendOptions)
+        (send as typeof nostrHook.send)(content, sendOptions)
       } else {
-        (send as typeof peerJSHook.send)(message)
+        // PeerJS and QR hooks have same signature
+        (send as typeof peerJSHook.send)(content)
       }
+    }
+
+    if (mode === 'text' && canSendText) {
+      doSend(message)
     } else if (mode === 'file' && canSendFiles) {
       // Single file: send directly
       if (selectedFiles.length === 1) {
-        if (signalingMethod === 'nostr') {
-          (send as typeof nostrHook.send)(selectedFiles[0], sendOptions)
-        } else {
-          (send as typeof peerJSHook.send)(selectedFiles[0])
-        }
+        doSend(selectedFiles[0])
         return
       }
       // Multiple files: compress to ZIP
       setIsCompressing(true)
       try {
-        // Convert File[] to a fake FileList-like structure for compressFilesToZip
         const dataTransfer = new DataTransfer()
         selectedFiles.forEach(f => dataTransfer.items.add(f))
         const zipFile = await compressFilesToZip(dataTransfer.files, 'files')
         setIsCompressing(false)
-        if (signalingMethod === 'nostr') {
-          (send as typeof nostrHook.send)(zipFile, sendOptions)
-        } else {
-          (send as typeof peerJSHook.send)(zipFile)
-        }
+        doSend(zipFile)
       } catch (err) {
         setIsCompressing(false)
         console.error('Failed to compress files:', err)
@@ -127,11 +132,7 @@ export function SendTab() {
         const archiveName = getFolderName(folderFiles)
         const zipFile = await compressFilesToZip(folderFiles, archiveName)
         setIsCompressing(false)
-        if (signalingMethod === 'nostr') {
-          (send as typeof nostrHook.send)(zipFile, sendOptions)
-        } else {
-          (send as typeof peerJSHook.send)(zipFile)
-        }
+        doSend(zipFile)
       } catch (err) {
         setIsCompressing(false)
         console.error('Failed to compress folder:', err)
@@ -210,6 +211,8 @@ export function SendTab() {
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
   const showPinDisplay = pin && state.status === 'waiting_for_receiver'
+  const showQRDisplay = signalingMethod === 'qr' && state.offerQRData && (state.status === 'showing_offer_qr' || state.status === 'waiting_for_receiver')
+  const showQRInput = signalingMethod === 'qr' && state.status === 'showing_offer_qr'
 
   return (
     <div className="space-y-4 pt-4">
@@ -419,7 +422,7 @@ export function SendTab() {
                 <RadioGroup
                   value={signalingMethod}
                   onValueChange={(v) => setSignalingMethod(v as SignalingMethod)}
-                  className="flex gap-4"
+                  className="flex flex-wrap gap-4"
                 >
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="nostr" id="nostr" />
@@ -433,11 +436,20 @@ export function SendTab() {
                       PeerJS (P2P only)
                     </Label>
                   </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="qr" id="qr" />
+                    <Label htmlFor="qr" className="text-sm font-normal cursor-pointer flex items-center gap-1">
+                      <QrCode className="h-3 w-3" />
+                      QR Code (serverless)
+                    </Label>
+                  </div>
                 </RadioGroup>
                 <p className="text-xs text-muted-foreground">
                   {signalingMethod === 'nostr'
                     ? 'Uses decentralized Nostr relays. Falls back to cloud if P2P fails.'
-                    : 'Uses PeerJS server for simpler P2P. No cloud fallback - transfer fails if P2P unavailable.'}
+                    : signalingMethod === 'peerjs'
+                    ? 'Uses PeerJS server for simpler P2P. No cloud fallback - transfer fails if P2P unavailable.'
+                    : 'Exchange QR codes directly with receiver. No signaling server - truly serverless P2P.'}
                 </p>
               </div>
             )}
@@ -461,6 +473,33 @@ export function SendTab() {
             state={state}
             betweenProgressAndChunks={showPinDisplay ? <PinDisplay pin={pin} onExpire={cancel} /> : undefined}
           />
+
+          {/* QR Code display for sender */}
+          {showQRDisplay && state.offerQRData && (
+            <div className="space-y-4">
+              <QRDisplay
+                data={state.offerQRData}
+                label="Show this QR to receiver"
+              />
+              {pin && (
+                <div className="text-center">
+                  <p className="text-xs text-muted-foreground mb-1">PIN (for receiver)</p>
+                  <code className="text-lg font-mono font-bold tracking-wider">{pin}</code>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* QR Input for receiving answer */}
+          {showQRInput && submitAnswer && (
+            <div className="border-t pt-4">
+              <QRInput
+                expectedType="answer"
+                label="Paste receiver's response QR data"
+                onSubmit={submitAnswer}
+              />
+            </div>
+          )}
 
           <div className="flex gap-2">
             {isActive && (
