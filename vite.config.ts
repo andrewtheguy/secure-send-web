@@ -11,6 +11,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      devOptions: {
+        enabled: false, // Disable PWA in development to avoid caching issues
+      },
       workbox: {
         // Cache all static assets including workers and WASM
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,wasm}'],
