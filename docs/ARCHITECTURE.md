@@ -8,7 +8,7 @@ Secure Send is a browser-based encrypted file and message transfer application. 
 
 1. **P2P First**: Direct WebRTC connections are always preferred for data transfer.
 2. **End-to-End Encryption**: All content (P2P and cloud) is encrypted with AES-256-GCM before transfer. P2P adds DTLS for defense in depth.
-3. **Streaming Encryption**: Content is encrypted/decrypted in 64KB chunks for memory efficiency.
+3. **Streaming Encryption**: Content is encrypted/decrypted in 256KB chunks for memory efficiency.
 4. **Explicit Signaling Choice**: Users choose between Nostr (with cloud fallback), PeerJS (P2P only), or QR (offline).
 5. **PIN-Based Security**: A 12-character PIN serves as the shared secret for key derivation.
 
@@ -37,7 +37,7 @@ Sender                              Receiver
   ├─── WebRTC Offer ──────────────────>│
   │<────────── WebRTC Answer ──────────┤
   │                                    │
-  │= P2P Data Channel (64KB encrypted chunks) =│
+  │= P2P Data Channel (256KB encrypted chunks) =│
   │   [chunkIndex][nonce][ciphertext][tag]    │
   │                                    │
   ├─── DONE:N (total chunk count) ────>│
@@ -140,13 +140,13 @@ Note: QR mode avoids signaling servers. For offline operation, devices must be o
 | `pin.ts` | PIN generation and validation (12-char, mixed charset) |
 | `kdf.ts` | Key derivation using PBKDF2-SHA256 (600,000 iterations) |
 | `aes-gcm.ts` | AES-256-GCM encryption/decryption |
-| `stream-crypto.ts` | Streaming encryption/decryption for P2P (64KB chunks) |
+| `stream-crypto.ts` | Streaming encryption/decryption for P2P (256KB chunks) |
 | `constants.ts` | Crypto parameters, size limits, timeouts |
 
 **Key Parameters:**
 - `MAX_MESSAGE_SIZE`: 100MB (maximum file size)
 - `CLOUD_CHUNK_SIZE`: 10MB (chunk size for cloud uploads)
-- `ENCRYPTION_CHUNK_SIZE`: 64KB (application-level encryption chunk size)
+- `ENCRYPTION_CHUNK_SIZE`: 256KB (application-level encryption chunk size)
 - `CHUNK_SIZE`: 16KB (WebRTC data channel chunk size, handled by WebRTC internally)
 - `PBKDF2_ITERATIONS`: 600,000
 
@@ -361,10 +361,10 @@ interface PinExchangePayload {
 |------|--------------|----------------|
 | PIN Exchange Payload | Encrypted (AES-GCM) | Encrypted (AES-GCM) |
 | WebRTC Signals | Encrypted (AES-GCM) | N/A |
-| File Content | Encrypted (AES-GCM, 64KB chunks) | Encrypted (AES-GCM, whole file) |
+| File Content | Encrypted (AES-GCM, 256KB chunks) | Encrypted (AES-GCM, whole file) |
 
 **Streaming Encryption (P2P):**
-P2P transfers encrypt content in 64KB chunks, each with a unique nonce. This provides:
+P2P transfers encrypt content in 256KB chunks, each with a unique nonce. This provides:
 - **Defense in depth**: AES-GCM on top of WebRTC DTLS
 - **Streaming decryption**: Receiver decrypts each chunk as it arrives
 - **Memory efficiency**: Pre-allocated buffers avoid 2x memory peak during assembly
@@ -376,7 +376,7 @@ P2P transfers encrypt content in 64KB chunks, each with a unique nonce. This pro
 
 **PeerJS note:** PeerJS uses a PIN-derived peer ID for signaling access control; metadata is encrypted with the PIN, while data chunks are sent over the DTLS-secured channel (no extra encryption layer currently).
 
-**Why streaming on-the-fly?** Each 64KB chunk is encrypted and sent immediately, and the receiver decrypts each chunk as it arrives and writes directly to a pre-allocated buffer. This avoids holding both encrypted and decrypted copies in memory.
+**Why streaming on-the-fly?** Each 256KB chunk is encrypted and sent immediately, and the receiver decrypts each chunk as it arrives and writes directly to a pre-allocated buffer. This avoids holding both encrypted and decrypted copies in memory.
 
 ```
          PIN (shared out-of-band)
@@ -422,7 +422,7 @@ P2P transfers encrypt content in 64KB chunks, each with a unique nonce. This pro
 5. **Brute-Force Resistance**: 600K PBKDF2 iterations (planned: Argon2id)
 6. **PIN Role by Mode**:
    - **Nostr/PeerJS/QR**: PIN encrypts signaling, preventing unauthorized P2P connection establishment
-7. **Transport Security**: All Nostr P2P transfers use both AES-256-GCM encryption (64KB chunks) and WebRTC DTLS
+7. **Transport Security**: All Nostr P2P transfers use both AES-256-GCM encryption (256KB chunks) and WebRTC DTLS
 
 ## File Structure
 

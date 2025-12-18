@@ -81,7 +81,7 @@ The application uses a hybrid transport approach:
 2. **Data Transfer**:
    - **WebRTC P2P** (default): Direct peer-to-peer connection for fastest transfer
    - **Cloud Fallback**: If WebRTC fails (Nostr mode only), encrypted data is uploaded to cloud storage with automatic failover
-3. **Encryption**: All transfers (P2P and cloud) use AES-256-GCM encryption with streaming 64KB chunks. P2P also has DTLS encryption at the WebRTC layer for defense in depth.
+3. **Encryption**: All transfers (P2P and cloud) use AES-256-GCM encryption with streaming 256KB chunks. P2P also has DTLS encryption at the WebRTC layer for defense in depth.
 
 ### PIN Auto-Detection
 
