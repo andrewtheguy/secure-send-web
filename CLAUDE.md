@@ -1,2 +1,2 @@
 no backward compatibility
-no base64 encoding for qr codes
+binary encoding for qr codes always
