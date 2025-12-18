@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, X, RotateCcw, FileUp, FileText, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, Zap } from 'lucide-react'
+import { Send, X, RotateCcw, FileUp, FileText, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, Zap, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -49,6 +49,7 @@ export function SendTab() {
   const [folderFiles, setFolderFiles] = useState<FileList | null>(null) // Keep FileList for folder to preserve paths
   const [isCompressing, setIsCompressing] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const [signalingUnavailable, setSignalingUnavailable] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
@@ -104,17 +105,39 @@ export function SendTab() {
       // User forced a specific method via advanced options
       methodToUse = forcedMethod.replace('-only', '') as SignalingMethod
     } else {
-      // Smart mode: test Nostr relay availability first
+      // Smart mode: test Nostr relay availability first, then PeerJS
       setDetectingMethod(true)
+      setSignalingUnavailable(false)
       try {
         const { testRelayAvailability } = await import('@/lib/nostr')
-        const result = await testRelayAvailability()
-        methodToUse = result.available ? 'nostr' : 'peerjs'
-        console.log(`Smart detection: ${result.available ? 'Nostr available' : 'Nostr unavailable, using PeerJS'}`, result)
+        const nostrResult = await testRelayAvailability()
+
+        if (nostrResult.available) {
+          methodToUse = 'nostr'
+          console.log('Smart detection: Nostr available', nostrResult)
+        } else {
+          // Nostr unavailable, test PeerJS
+          console.log('Smart detection: Nostr unavailable, testing PeerJS...', nostrResult)
+          const { testPeerJSAvailability } = await import('@/lib/peerjs-signaling')
+          const peerJSResult = await testPeerJSAvailability()
+
+          if (peerJSResult.available) {
+            methodToUse = 'peerjs'
+            console.log('Smart detection: PeerJS available')
+          } else {
+            // Both unavailable - prompt user
+            console.log('Smart detection: Both Nostr and PeerJS unavailable', peerJSResult)
+            setDetectingMethod(false)
+            setSignalingUnavailable(true)
+            return // Don't auto-fallback to QR, let user decide
+          }
+        }
       } catch (error) {
-        // If test fails, fallback to PeerJS
-        methodToUse = 'peerjs'
-        console.error('Nostr availability test failed, using PeerJS:', error)
+        // If test fails completely, show unavailable prompt
+        console.error('Signaling availability test failed:', error)
+        setDetectingMethod(false)
+        setSignalingUnavailable(true)
+        return
       }
       setDetectingMethod(false)
     }
@@ -176,8 +199,22 @@ export function SendTab() {
     setSelectedFiles([])
     setFolderFiles(null)
     setActiveMethod(null)
+    setSignalingUnavailable(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
     if (folderInputRef.current) folderInputRef.current.value = ''
+  }
+
+  const handleUseManualExchange = () => {
+    setSignalingUnavailable(false)
+    setForcedMethod('qr-only')
+    // Trigger send with a small delay to ensure state is updated
+    setTimeout(() => {
+      handleSend()
+    }, 0)
+  }
+
+  const handleRetrySignaling = () => {
+    setSignalingUnavailable(false)
   }
 
   const addFiles = useCallback((files: File[]) => {
@@ -510,14 +547,37 @@ export function SendTab() {
           {detectingMethod && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded">
               <Loader2 className="h-3 w-3 animate-spin" />
-              <span>Testing Nostr relays...</span>
+              <span>Testing signaling servers...</span>
             </div>
           )}
 
-          <Button onClick={handleSend} disabled={!canSend || detectingMethod} className="w-full">
-            <Send className="mr-2 h-4 w-4" />
-            Generate PIN & Send
-          </Button>
+          {signalingUnavailable ? (
+            <div className="space-y-3 p-4 border border-amber-500/50 bg-amber-500/10 rounded-lg">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-medium text-sm">Signaling Servers Unavailable</p>
+                  <p className="text-xs text-muted-foreground">
+                    Both Nostr relays and PeerJS server are unreachable. You can use Manual Exchange mode which doesn't require internet - exchange signaling via QR code or copy/paste.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={handleUseManualExchange} disabled={!canSend} className="flex-1" size="sm">
+                  <QrCode className="mr-2 h-4 w-4" />
+                  Use Manual Exchange
+                </Button>
+                <Button onClick={handleRetrySignaling} variant="outline" size="sm">
+                  Retry
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button onClick={handleSend} disabled={!canSend || detectingMethod} className="w-full">
+              <Send className="mr-2 h-4 w-4" />
+              Generate PIN & Send
+            </Button>
+          )}
         </>
       ) : (
         <>
