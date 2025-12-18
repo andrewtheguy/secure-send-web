@@ -26,5 +26,11 @@ Better user feedback for network errors, relay failures, and WebRTC connection i
 - Better website UI/UX
 - Assymetric file encryption
 
+### Progressive Web App (PWA)
+Convert to PWA for extended offline functionality:
+- Service worker for caching app assets
+- QR code mode already works offline once loaded; PWA would extend offline period indefinitely
+- Enable "Add to Home Screen" capability
+
 ### Argon2id Key Derivation
 Replace PBKDF2 with Argon2id (via WASM) for stronger resistance to brute-force attacks on the PIN.

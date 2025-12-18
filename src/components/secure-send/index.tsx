@@ -106,7 +106,7 @@ export function SecureSend() {
                   </div>
                   <div>
                     <p className="text-foreground font-medium">QR Code — PIN starts with "2"</p>
-                    <p className="text-sm">Exchange QR codes directly with receiver. Truly serverless - no signaling server required. Both parties must be able to scan each other's screens. P2P only, no fallback.</p>
+                    <p className="text-sm">Exchange QR codes directly with receiver. Truly serverless - no signaling server required. Works offline once the page is loaded - devices must be on the same local network so WebRTC can connect using local IP addresses without STUN. Both parties must exchange QR codes (scan) or copy/paste the encrypted signaling data (too long to type manually). P2P only, no fallback.</p>
                   </div>
                 </div>
               </section>

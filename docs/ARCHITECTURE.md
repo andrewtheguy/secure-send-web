@@ -22,7 +22,7 @@ By default, Nostr is used for signaling. PeerJS and QR are available as alternat
 | Reliability | Higher (fallback available) | P2P only | P2P only |
 | Privacy | Better (no central server) | PeerJS server sees peer IDs | Best (no signaling server) |
 | Complexity | More complex | Simpler | Manual QR exchange |
-| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | Air-gapped, offline-friendly scenarios |
+| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | Air-gapped scenarios, works offline once page is loaded |
 
 ## Transfer Flow
 
@@ -92,7 +92,7 @@ Sender                              Receiver
 If P2P connection fails → Transfer fails (no cloud fallback)
 ```
 
-### QR Mode (Serverless Signaling - STUN Still Used)
+### QR Mode (Serverless Signaling)
 ```
 Sender                              Receiver
   │                                    │
@@ -117,7 +117,7 @@ Sender                              Receiver
 
 If P2P connection fails → Transfer fails (no server fallback)
 
-Note: QR mode avoids signaling servers, but WebRTC still uses STUN servers for NAT traversal.
+Note: QR mode avoids signaling servers. For offline operation, devices must be on the same local network so WebRTC can connect using local/host ICE candidates without STUN.
 ```
 
 **QR Code Format:**
@@ -229,6 +229,7 @@ interface EncryptedSignalingPayload {
 
 **Key Features:**
 - No server required - fully air-gapped operation
+- Works offline once the page is loaded - devices must be on the same local network so WebRTC can connect using local/host ICE candidates without STUN server assistance
 - Binary mode QR codes for efficient byte encoding
 - Single QR code per payload (no chunking needed)
 - Uses `zxing-wasm` for both generation and scanning
