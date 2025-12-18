@@ -72,16 +72,40 @@ npm run build
 
 ## Transport Layer
 
-The application uses a hybrid transport approach:
+The application uses a protocol-agnostic encryption layer with pluggable signaling:
 
-1. **Signaling Methods** (sender chooses in Advanced Options):
-   - **Nostr** (default): PIN exchange and WebRTC signaling via decentralized Nostr relays. Falls back to encrypted cloud transfer if P2P fails.
-   - **PeerJS**: Uses PeerJS cloud server (0.peerjs.com) for simpler signaling. No cloud fallback - P2P only.
-   - **QR Code**: Exchange WebRTC signaling data via QR codes. Works without internet - no signaling server required. Devices must be on the same local network for WebRTC to connect via local IP addresses when offline. Both parties must exchange QR codes (scan) or copy/paste the encrypted signaling data. P2P only, no fallback.
-2. **Data Transfer**:
-   - **WebRTC P2P** (default): Direct peer-to-peer connection for fastest transfer
-   - **Cloud Fallback**: If WebRTC fails (Nostr mode only), encrypted data is uploaded to cloud storage with automatic failover
-3. **Encryption**: All transfers (P2P and cloud) use AES-256-GCM encryption with streaming 256KB chunks. P2P also has DTLS encryption at the WebRTC layer for defense in depth.
+### Unified Transfer Layer
+
+All three signaling methods (Nostr, PeerJS, QR) share a **common encryption middleware** that operates independently of the transport protocol:
+
+1. **Protocol-Agnostic Encryption**: Content is encrypted in 128KB chunks using AES-256-GCM before transmission. This encryption happens regardless of whether the underlying transport (WebRTC DTLS) already provides encryption - defense in depth.
+
+2. **Chunk Format**: Each encrypted chunk contains:
+   ```
+   [4 bytes: chunk index][12 bytes: nonce][ciphertext][16 bytes: auth tag]
+   ```
+
+3. **Memory-Efficient Receiving**: Receivers preallocate a single buffer based on total expected size and write decrypted chunks directly to their calculated positions (`chunkIndex * 128KB`). No intermediate chunk arrays are created - chunks are decrypted and placed directly into the final buffer.
+
+### Signaling Methods
+
+Signaling is decoupled from the transfer layer. The sender chooses the signaling method:
+
+- **Nostr** (default): PIN exchange and WebRTC signaling via decentralized Nostr relays. Falls back to encrypted cloud transfer if P2P fails.
+- **PeerJS**: Uses PeerJS cloud server (0.peerjs.com) for simpler signaling. No cloud fallback - P2P only.
+- **QR Code**: Exchange WebRTC signaling data via QR codes. Works without internet - no signaling server required. Devices must be on the same local network for WebRTC to connect via local IP addresses when offline. Both parties must exchange QR codes (scan) or copy/paste the encrypted signaling data. P2P only, no fallback.
+
+### Data Transfer
+
+- **WebRTC P2P** (default): Direct peer-to-peer connection for fastest transfer
+- **Cloud Fallback**: If WebRTC fails (Nostr mode only), encrypted data is uploaded to cloud storage with automatic failover
+
+### Why Encrypt Over DTLS?
+
+WebRTC provides DTLS encryption at the transport layer, but we add AES-256-GCM encryption for:
+- **Defense in depth**: Multiple encryption layers protect against implementation bugs
+- **Consistent security model**: Same encryption whether using P2P or cloud fallback
+- **Key control**: Encryption key derived from user's PIN, not transport-layer keys
 
 ### PIN Auto-Detection
 
