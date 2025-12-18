@@ -61,7 +61,7 @@ export function SendTab() {
   const submitAnswer = signalingMethod === 'qr' ? qrHook.submitAnswer : undefined
 
   // Normalize state for QR hook (it has additional status values)
-  const state = rawState as typeof nostrHook.state & { offerQRData?: string }
+  const state = rawState as typeof nostrHook.state & { offerQRData?: string[]; clipboardData?: string }
 
   // Expose console function to enable/disable cloud-only mode for testing
   useEffect(() => {
@@ -479,6 +479,7 @@ export function SendTab() {
             <div className="space-y-4">
               <QRDisplay
                 data={state.offerQRData}
+                clipboardData={state.clipboardData}
                 label="Show this QR to receiver"
               />
               {pin && (

@@ -3,12 +3,12 @@ import { ClipboardPaste, AlertCircle, Camera } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { parseQRPayload, isValidQRPayload, type QRSignalingPayload } from '@/lib/qr-signaling'
+import { parseJSONPayload, isValidSignalingPayload, type SignalingPayload } from '@/lib/qr-signaling'
 import { QRScanner } from './qr-scanner'
 import { isMobileDevice } from '@/lib/utils'
 
 interface QRInputProps {
-  onSubmit: (payload: QRSignalingPayload) => void
+  onSubmit: (payload: SignalingPayload) => void
   expectedType: 'offer' | 'answer'
   label?: string
   disabled?: boolean
@@ -32,26 +32,28 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
     }
   }, [])
 
+  // Paste tab handles ONLY raw JSON
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim()
     if (!trimmed) {
-      setError('Please paste QR code data')
+      setError('Please paste JSON data')
       return
     }
 
-    const payload = parseQRPayload(trimmed)
+    // Parse as raw JSON
+    const payload = parseJSONPayload(trimmed)
     if (!payload) {
-      setError('Data format is invalid. Make sure you copied the complete text.')
+      setError('Invalid JSON format. Make sure you copied the complete text.')
       return
     }
 
-    if (!isValidQRPayload(payload)) {
-      setError('Malformed QR payload')
+    if (!isValidSignalingPayload(payload)) {
+      setError('Malformed payload structure')
       return
     }
 
     if (payload.type !== expectedType) {
-      setError(`Expected ${expectedType} QR code, got ${payload.type}`)
+      setError(`Expected ${expectedType} payload, got ${payload.type}`)
       return
     }
 
@@ -59,7 +61,7 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
     onSubmit(payload)
   }, [value, expectedType, onSubmit])
 
-  const handleScanSuccess = useCallback((payload: QRSignalingPayload) => {
+  const handleScanSuccess = useCallback((payload: SignalingPayload) => {
     setError(null)
     onSubmit(payload)
   }, [onSubmit])
@@ -106,7 +108,7 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
                 setValue(e.target.value)
                 setError(null)
               }}
-              placeholder={`Scan the ${expectedType} QR code with your phone, copy the text, and paste it here...`}
+              placeholder={`Paste the ${expectedType} JSON data here...`}
               className="min-h-[100px] font-mono text-xs"
               disabled={disabled}
             />

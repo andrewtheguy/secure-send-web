@@ -1,27 +1,33 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Copy, Check, AlertCircle, Loader2 } from 'lucide-react'
+import { Copy, Check, AlertCircle, Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { MAX_QR_DATA_SIZE } from '@/lib/qr-signaling'
 import { generateQRCode } from '@/lib/qr-utils'
 
 interface QRDisplayProps {
-  data: string
+  data: string[]  // Array of QR chunks (may be single element)
   label?: string
   showCopyButton?: boolean
+  clipboardData?: string  // Raw JSON for copy button (if different from QR data)
 }
 
-export function QRDisplay({ data, label, showCopyButton = true }: QRDisplayProps) {
+export function QRDisplay({ data, label, showCopyButton = true, clipboardData }: QRDisplayProps) {
   const [copied, setCopied] = useState(false)
+  const [currentIndex, setCurrentIndex] = useState(0)
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const dataSize = data.length
-  const isOversize = dataSize > MAX_QR_DATA_SIZE
+  const totalQRs = data.length
+  const currentData = data[currentIndex] || ''
 
-  // Generate QR code when data changes
+  // Reset index when data changes
   useEffect(() => {
-    if (!data) {
+    setCurrentIndex(0)
+  }, [data])
+
+  // Generate QR code when current data changes
+  useEffect(() => {
+    if (!currentData) {
       setQrImageUrl(null)
       return
     }
@@ -29,9 +35,9 @@ export function QRDisplay({ data, label, showCopyButton = true }: QRDisplayProps
     setIsGenerating(true)
     setError(null)
 
-    generateQRCode(data, {
+    generateQRCode(currentData, {
       width: 256,
-      errorCorrectionLevel: isOversize ? 'L' : 'M'
+      errorCorrectionLevel: 'M'
     })
       .then(setQrImageUrl)
       .catch((err) => {
@@ -40,18 +46,27 @@ export function QRDisplay({ data, label, showCopyButton = true }: QRDisplayProps
         setQrImageUrl(null)
       })
       .finally(() => setIsGenerating(false))
-  }, [data, isOversize])
+  }, [currentData])
 
-  // Copy QR data to clipboard (already base64 encoded)
+  // Copy clipboard data (raw JSON) or QR data
   const handleCopy = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(data)
+      const textToCopy = clipboardData || data.join('\n')
+      await navigator.clipboard.writeText(textToCopy)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
       console.error('Failed to copy:', err)
     }
-  }, [data])
+  }, [clipboardData, data])
+
+  const handlePrev = useCallback(() => {
+    setCurrentIndex(i => Math.max(0, i - 1))
+  }, [])
+
+  const handleNext = useCallback(() => {
+    setCurrentIndex(i => Math.min(totalQRs - 1, i + 1))
+  }, [totalQRs])
 
   return (
     <div className="flex flex-col items-center space-y-3">
@@ -70,7 +85,7 @@ export function QRDisplay({ data, label, showCopyButton = true }: QRDisplayProps
         ) : qrImageUrl ? (
           <img
             src={qrImageUrl}
-            alt="QR Code"
+            alt={`QR Code ${currentIndex + 1} of ${totalQRs}`}
             width={256}
             height={256}
             className="block"
@@ -78,12 +93,38 @@ export function QRDisplay({ data, label, showCopyButton = true }: QRDisplayProps
         ) : null}
       </div>
 
+      {/* Navigation for multiple QRs */}
+      {totalQRs > 1 && (
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handlePrev}
+            disabled={currentIndex === 0}
+            className="h-8 w-8"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="text-sm text-muted-foreground min-w-[80px] text-center">
+            QR {currentIndex + 1} of {totalQRs}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleNext}
+            disabled={currentIndex === totalQRs - 1}
+            className="h-8 w-8"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span>{dataSize.toLocaleString()} bytes</span>
-        {isOversize && (
-          <span className="flex items-center text-amber-600">
-            <AlertCircle className="h-3 w-3 mr-1" />
-            May be hard to scan
+        <span>{currentData.length.toLocaleString()} chars</span>
+        {totalQRs > 1 && (
+          <span className="text-amber-600">
+            ({totalQRs} QR codes)
           </span>
         )}
       </div>
@@ -103,7 +144,7 @@ export function QRDisplay({ data, label, showCopyButton = true }: QRDisplayProps
           ) : (
             <>
               <Copy className="h-3 w-3 mr-1" />
-              Copy QR Data
+              Copy Data
             </>
           )}
         </Button>

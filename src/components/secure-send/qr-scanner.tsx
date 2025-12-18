@@ -2,11 +2,11 @@ import { useState, useCallback } from 'react'
 import { RefreshCw, AlertCircle, Loader2, Camera } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useQRScanner } from '@/hooks/useQRScanner'
-import { parseQRPayload, isValidQRPayload, type QRSignalingPayload } from '@/lib/qr-signaling'
+import { parseQRChunk, parseQRPayload, mergeQRChunks, isValidSignalingPayload, type SignalingPayload } from '@/lib/qr-signaling'
 import { isMobileDevice } from '@/lib/utils'
 
 interface QRScannerProps {
-  onScan: (payload: QRSignalingPayload) => void
+  onScan: (payload: SignalingPayload) => void
   expectedType: 'offer' | 'answer'
   onError?: (error: string) => void
   disabled?: boolean
@@ -19,29 +19,82 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
     isMobileDevice() ? 'environment' : 'user'
   )
 
-  const handleScan = useCallback((data: string) => {
-    const payload = parseQRPayload(data)
-    if (!payload) {
-      setError('QR scanned but data format is invalid')
-      onError?.('QR scanned but data format is invalid')
-      return
-    }
+  // Multi-QR chunk collection state
+  const [collectedChunks, setCollectedChunks] = useState<Map<number, string>>(new Map())
+  const [expectedTotal, setExpectedTotal] = useState<number | null>(null)
 
-    if (!isValidQRPayload(payload)) {
-      setError('Malformed QR payload')
-      onError?.('Malformed QR payload')
-      return
-    }
+  const handleScan = useCallback((rawData: string) => {
+    // Try to parse as QR chunk format (X/Y:data$)
+    const chunk = parseQRChunk(rawData)
 
-    if (payload.type !== expectedType) {
-      setError(`Expected ${expectedType} QR code, got ${payload.type}`)
-      onError?.(`Expected ${expectedType} QR code, got ${payload.type}`)
-      return
-    }
+    if (chunk) {
+      // Multi-QR: collect chunk
+      setExpectedTotal(chunk.total)
+      const newChunks = new Map(collectedChunks)
+      newChunks.set(chunk.index, rawData)
+      setCollectedChunks(newChunks)
 
-    setError(null)
-    onScan(payload)
-  }, [expectedType, onScan, onError])
+      // Check if complete
+      if (newChunks.size === chunk.total) {
+        // Merge chunks → decode base45 → decompress → parse JSON
+        const mergedBase45 = mergeQRChunks(Array.from(newChunks.values()))
+        if (!mergedBase45) {
+          setError('Failed to merge QR chunks')
+          onError?.('Failed to merge QR chunks')
+          return
+        }
+
+        const payload = parseQRPayload(mergedBase45)
+        if (!payload) {
+          setError('QR scanned but data format is invalid')
+          onError?.('QR scanned but data format is invalid')
+          return
+        }
+
+        if (!isValidSignalingPayload(payload)) {
+          setError('Malformed QR payload')
+          onError?.('Malformed QR payload')
+          return
+        }
+
+        if (payload.type !== expectedType) {
+          setError(`Expected ${expectedType} QR code, got ${payload.type}`)
+          onError?.(`Expected ${expectedType} QR code, got ${payload.type}`)
+          return
+        }
+
+        // Success - reset state and call onScan
+        setError(null)
+        setCollectedChunks(new Map())
+        setExpectedTotal(null)
+        onScan(payload)
+      }
+    } else {
+      // Not a chunk format - try parsing directly as single QR (legacy support)
+      // This handles the case where the QR might not have the X/Y:data$ format
+      const payload = parseQRPayload(rawData)
+      if (!payload) {
+        setError('QR scanned but data format is invalid')
+        onError?.('QR scanned but data format is invalid')
+        return
+      }
+
+      if (!isValidSignalingPayload(payload)) {
+        setError('Malformed QR payload')
+        onError?.('Malformed QR payload')
+        return
+      }
+
+      if (payload.type !== expectedType) {
+        setError(`Expected ${expectedType} QR code, got ${payload.type}`)
+        onError?.(`Expected ${expectedType} QR code, got ${payload.type}`)
+        return
+      }
+
+      setError(null)
+      onScan(payload)
+    }
+  }, [collectedChunks, expectedType, onScan, onError])
 
   const handleError = useCallback((err: string) => {
     setError(err)
@@ -64,6 +117,12 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
 
   const handleSwitchCamera = useCallback(() => {
     setFacingMode((prev) => prev === 'environment' ? 'user' : 'environment')
+  }, [])
+
+  const handleReset = useCallback(() => {
+    setCollectedChunks(new Map())
+    setExpectedTotal(null)
+    setError(null)
   }, [])
 
   return (
@@ -108,6 +167,33 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
         )}
       </div>
 
+      {/* Multi-QR progress indicator */}
+      {expectedTotal && expectedTotal > 1 && collectedChunks.size < expectedTotal && (
+        <div className="text-center">
+          <p className="text-sm text-muted-foreground">
+            Scanned {collectedChunks.size} of {expectedTotal} QR codes
+          </p>
+          <div className="flex justify-center gap-1 mt-1">
+            {Array.from({ length: expectedTotal }, (_, i) => (
+              <div
+                key={i}
+                className={`w-2 h-2 rounded-full ${
+                  collectedChunks.has(i + 1) ? 'bg-green-500' : 'bg-muted-foreground/30'
+                }`}
+              />
+            ))}
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleReset}
+            className="text-xs mt-2"
+          >
+            Reset
+          </Button>
+        </div>
+      )}
+
       {error && error.includes('denied') && (
         <p className="text-xs text-muted-foreground text-center">
           Please allow camera access in your browser settings and reload the page.
@@ -131,6 +217,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
 
       <p className="text-xs text-muted-foreground text-center">
         Point your camera at the {expectedType} QR code
+        {expectedTotal && expectedTotal > 1 && ' (scan all codes)'}
       </p>
     </div>
   )

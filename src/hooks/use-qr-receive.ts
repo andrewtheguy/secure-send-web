@@ -8,7 +8,8 @@ import {
 import { WebRTCConnection } from '@/lib/webrtc'
 import {
   generateAnswerQRData,
-  type QRSignalingPayload,
+  generateClipboardData,
+  type SignalingPayload,
 } from '@/lib/qr-signaling'
 import type { TransferState, ReceivedContent, ContentType } from '@/lib/nostr/types'
 
@@ -25,14 +26,15 @@ export type QRReceiveStatus =
 
 export interface QRReceiveState extends Omit<TransferState, 'status'> {
   status: QRReceiveStatus
-  answerQRData?: string // QR data to display
+  answerQRData?: string[]  // Array of QR chunks to display
+  clipboardData?: string   // Raw JSON for copy button
 }
 
 export interface UseQRReceiveReturn {
   state: QRReceiveState
   receivedContent: ReceivedContent | null
   receive: (pin: string) => Promise<void>
-  submitOffer: (offerData: QRSignalingPayload) => void
+  submitOffer: (offerData: SignalingPayload) => void
   cancel: () => void
   reset: () => void
 }
@@ -53,7 +55,7 @@ export function useQRReceive(): UseQRReceiveReturn {
   const pinRef = useRef<string | null>(null)
 
   // Resolve function for offer submission
-  const offerResolverRef = useRef<((payload: QRSignalingPayload) => void) | null>(null)
+  const offerResolverRef = useRef<((payload: SignalingPayload) => void) | null>(null)
 
   const cancel = useCallback(() => {
     cancelledRef.current = true
@@ -72,7 +74,7 @@ export function useQRReceive(): UseQRReceiveReturn {
     setReceivedContent(null)
   }, [cancel])
 
-  const submitOffer = useCallback((offerPayload: QRSignalingPayload) => {
+  const submitOffer = useCallback((offerPayload: SignalingPayload) => {
     if (offerResolverRef.current) {
       offerResolverRef.current(offerPayload)
     }
@@ -101,7 +103,7 @@ export function useQRReceive(): UseQRReceiveReturn {
       })
 
       // Wait for offer to be submitted
-      const offerPayload = await new Promise<QRSignalingPayload>((resolve, reject) => {
+      const offerPayload = await new Promise<SignalingPayload>((resolve, reject) => {
         offerResolverRef.current = resolve
 
         // Check periodically if cancelled
@@ -236,11 +238,20 @@ export function useQRReceive(): UseQRReceiveReturn {
       // Generate QR data with answer + candidates
       const qrData = generateAnswerQRData(answerSDP!, iceCandidates)
 
+      // Generate raw JSON for clipboard
+      const answerPayload: SignalingPayload = {
+        type: 'answer',
+        sdp: answerSDP!.sdp || '',
+        candidates: iceCandidates.map(c => c.candidate),
+      }
+      const clipboardJson = generateClipboardData(answerPayload)
+
       // Show QR code and wait for connection
       setState({
         status: 'showing_answer_qr',
         message: 'Show this QR to sender and wait for connection',
         answerQRData: qrData,
+        clipboardData: clipboardJson,
         contentType: contentType as ContentType,
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
       })

@@ -10,7 +10,8 @@ import {
 import { WebRTCConnection } from '@/lib/webrtc'
 import {
   generateOfferQRData,
-  type QRSignalingPayload,
+  generateClipboardData,
+  type SignalingPayload,
 } from '@/lib/qr-signaling'
 import type { TransferState, ContentType } from '@/lib/nostr/types'
 import { readFileAsBytes } from '@/lib/file-utils'
@@ -28,14 +29,15 @@ export type QRTransferStatus =
 
 export interface QRTransferState extends Omit<TransferState, 'status'> {
   status: QRTransferStatus
-  offerQRData?: string // QR data to display
+  offerQRData?: string[]  // Array of QR chunks to display
+  clipboardData?: string  // Raw JSON for copy button
 }
 
 export interface UseQRSendReturn {
   state: QRTransferState
   pin: string | null
   send: (content: string | File) => Promise<void>
-  submitAnswer: (answerData: QRSignalingPayload) => void
+  submitAnswer: (answerData: SignalingPayload) => void
   cancel: () => void
 }
 
@@ -63,7 +65,7 @@ export function useQRSend(): UseQRSendReturn {
   } | null>(null)
 
   // Resolve function for answer submission
-  const answerResolverRef = useRef<((payload: QRSignalingPayload) => void) | null>(null)
+  const answerResolverRef = useRef<((payload: SignalingPayload) => void) | null>(null)
 
   const clearExpirationTimeout = useCallback(() => {
     if (expirationTimeoutRef.current) {
@@ -86,7 +88,7 @@ export function useQRSend(): UseQRSendReturn {
     setState({ status: 'idle' })
   }, [clearExpirationTimeout])
 
-  const submitAnswer = useCallback((answerPayload: QRSignalingPayload) => {
+  const submitAnswer = useCallback((answerPayload: SignalingPayload) => {
     if (answerResolverRef.current) {
       answerResolverRef.current(answerPayload)
     }
@@ -224,7 +226,7 @@ export function useQRSend(): UseQRSendReturn {
       if (cancelledRef.current) return
 
       // Generate QR data with offer + candidates + metadata
-      const qrData = generateOfferQRData(
+      const qrChunks = generateOfferQRData(
         offerSDP!,
         iceCandidates,
         salt,
@@ -237,17 +239,32 @@ export function useQRSend(): UseQRSendReturn {
         }
       )
 
+      // Generate raw JSON for clipboard
+      const payload: SignalingPayload = {
+        type: 'offer',
+        sdp: offerSDP!.sdp || '',
+        candidates: iceCandidates.map(c => c.candidate),
+        salt: Array.from(salt),
+        contentType,
+        totalBytes: contentBytes.length,
+        fileName,
+        fileSize,
+        mimeType,
+      }
+      const clipboardJson = generateClipboardData(payload)
+
       // Show QR code and wait for answer
       setState({
         status: 'showing_offer_qr',
         message: 'Show this QR to receiver, then paste their response below',
-        offerQRData: qrData,
+        offerQRData: qrChunks,
+        clipboardData: clipboardJson,
         contentType,
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
       })
 
       // Wait for answer to be submitted
-      const answerPayload = await new Promise<QRSignalingPayload>((resolve, reject) => {
+      const answerPayload = await new Promise<SignalingPayload>((resolve, reject) => {
         answerResolverRef.current = resolve
 
         // Check periodically if cancelled
