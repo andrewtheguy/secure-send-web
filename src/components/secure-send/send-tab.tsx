@@ -210,7 +210,7 @@ export function SendTab() {
   }, [])
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
-  const showPinDisplay = pin && state.status === 'waiting_for_receiver'
+  const showPinDisplay = pin && (state.status === 'waiting_for_receiver' || state.status === 'showing_offer_qr')
   const showQRDisplay = signalingMethod === 'qr' && state.offerQRData && (state.status === 'showing_offer_qr' || state.status === 'waiting_for_receiver')
   const showQRInput = signalingMethod === 'qr' && state.status === 'showing_offer_qr'
 
@@ -476,19 +476,11 @@ export function SendTab() {
 
           {/* QR Code display for sender */}
           {showQRDisplay && state.offerQRData && (
-            <div className="space-y-4">
-              <QRDisplay
-                data={state.offerQRData}
-                clipboardData={state.clipboardData}
-                label="Show this QR to receiver"
-              />
-              {pin && (
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground mb-1">PIN (for receiver)</p>
-                  <code className="text-lg font-mono font-bold tracking-wider">{pin}</code>
-                </div>
-              )}
-            </div>
+            <QRDisplay
+              data={state.offerQRData}
+              clipboardData={state.clipboardData}
+              label="Show this QR to receiver"
+            />
           )}
 
           {/* QR Input for receiving answer */}
