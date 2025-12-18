@@ -10,7 +10,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 - **Text & file transfer**: Send text messages or files up to 100MB
 - **WebRTC P2P**: Direct peer-to-peer connections for fast, efficient data transfer
 - **Cloud fallback**: Falls back to cloud storage (tmpfiles.org) if WebRTC connection fails
-- **End-to-end encryption**: Cloud fallback data is AES-256-GCM encrypted; P2P data is protected by WebRTC DTLS
+- **End-to-end encryption**: All transfers use AES-256-GCM encryption with unique nonces per chunk, in addition to WebRTC DTLS
 - **No accounts required**: Ephemeral keypairs are generated for each transfer
 - **Multiple signaling methods**: Choose between Nostr relays (with cloud fallback), PeerJS (simpler P2P), or QR codes (serverless)
 - **Auto-detection**: Receiver automatically detects signaling method from PIN format
@@ -81,7 +81,7 @@ The application uses a hybrid transport approach:
 2. **Data Transfer**:
    - **WebRTC P2P** (default): Direct peer-to-peer connection for fastest transfer
    - **Cloud Fallback**: If WebRTC fails (Nostr mode only), encrypted data is uploaded to cloud storage with automatic failover
-3. **Encryption**: Signaling and cloud data are encrypted client-side; P2P data uses WebRTC DTLS. The PIN encrypts the signaling (offer/answer/ICE), so without the PIN a peer cannot complete the handshake, and extra content encryption on top of DTLS is unnecessary for P2P.
+3. **Encryption**: All transfers (P2P and cloud) use AES-256-GCM encryption with streaming 64KB chunks. P2P also has DTLS encryption at the WebRTC layer for defense in depth.
 
 ### PIN Auto-Detection
 
