@@ -2,13 +2,13 @@
 
 ## Overview
 
-Secure Send is a browser-based encrypted file and message transfer application. It uses PIN-based encryption, supports three signaling methods (Nostr relays, PeerJS, or QR codes), and enables direct P2P (WebRTC) data transfer with optional cloud fallback (Nostr mode only).
+Secure Send is a browser-based encrypted file and message transfer application. It uses PIN-based encryption for signaling and cloud transfers, supports three signaling methods (Nostr relays, PeerJS, or QR codes), and enables direct P2P (WebRTC) data transfer with optional cloud fallback (Nostr mode only).
 
 ## Core Principles
 
 1. **P2P First**: Direct WebRTC connections are always preferred for data transfer.
-2. **End-to-End Encryption**: All data is encrypted client-side before any transmission.
-3. **Explicit Signaling Choice**: Users choose between Nostr (with cloud fallback) or PeerJS (P2P only).
+2. **End-to-End Encryption**: Signaling metadata and cloud-stored data are encrypted client-side; P2P content relies on WebRTC DTLS without extra encryption.
+3. **Explicit Signaling Choice**: Users choose between Nostr (with cloud fallback), PeerJS (P2P only), or QR (offline).
 4. **PIN-Based Security**: A 12-character PIN serves as the shared secret for key derivation.
 
 ## Signaling Methods
@@ -97,12 +97,12 @@ If P2P connection fails → Transfer fails (no cloud fallback)
 Sender                              Receiver
   │                                    │
   ├─── Generate PIN, create WebRTC     │
-  │    offer, encrypt content          │
+  │    offer, encrypt signaling payload│
   │                                    │
   ├─── Display Offer QR code ─────────>│ (scan or paste)
-  │    (JSON → gzip → binary QR)       │
+  │    (Encrypted JSON → gzip → QR)    │
   │                                    │
-  │                                    ├─── Decode QR, validate PIN
+  │                                    ├─── Decode QR, decrypt with PIN
   │                                    ├─── Create WebRTC answer
   │                                    │
   │    (scan or paste) <──────────────┤ Display Answer QR code
@@ -119,9 +119,9 @@ If P2P connection fails → Transfer fails (no server fallback)
 ```
 
 **QR Code Format:**
-- Payload: `SignalingPayload` JSON → gzip compress → binary QR code (8-bit byte mode)
+- Payload: `EncryptedSignalingPayload` JSON → gzip compress → binary QR code (8-bit byte mode)
 - Single QR code (~2000 bytes capacity, sufficient for WebRTC signaling)
-- Copy/paste uses raw JSON (no encoding)
+- Copy/paste uses encrypted JSON (no encoding)
 
 > **Note:** Prior to PR #15, QR codes used base45 encoding with multi-QR chunking.
 > For the previous implementation, see commit `89d935b3b61ea37c9f98bc85de4d4c78c7be3891`.
@@ -198,36 +198,32 @@ Fully offline signaling method using QR codes for WebRTC offer/answer exchange.
 
 **How it works:**
 - Sender generates WebRTC offer with ICE candidates
-- Offer payload encoded as: JSON → gzip → binary QR code
-- Receiver scans QR code (or pastes raw JSON), creates answer
-- Answer sent back via same encoding (QR code or raw JSON paste)
+- Offer payload encrypted with PIN, then encoded as: JSON → gzip → binary QR code
+- Receiver scans QR code (or pastes encrypted JSON), decrypts with PIN, creates answer
+- Answer encrypted with PIN and sent back via same encoding (QR code or encrypted JSON paste)
 - Both peers establish WebRTC connection using exchanged SDP/ICE candidates
 
 **Payload Structure:**
 ```typescript
-interface SignalingPayload {
-  type: 'offer' | 'answer'
-  sdp: string                    // WebRTC session description
-  candidates: string[]           // ICE candidates
-  contentType?: 'text' | 'file'  // Content type (offer only)
-  fileName?: string              // File name (offer only, if file)
-  fileSize?: number              // File size (offer only, if file)
-  mimeType?: string              // MIME type (offer only, if file)
-  totalBytes?: number            // Total size in bytes (offer only)
+interface EncryptedSignalingPayload {
+  v: 1
+  salt: string                   // Base64 salt for PIN KDF
+  payload: string                // Base64 AES-GCM encrypted SignalingPayload
 }
 ```
 
 **Encoding Pipeline:**
 1. `SignalingPayload` object
-2. `JSON.stringify()` → JSON string
-3. `pako.gzip()` → compressed bytes (~800-1200 bytes for typical WebRTC signaling)
-4. Binary QR code (8-bit byte mode, ~2000 bytes capacity)
+2. Encrypt with PIN-derived key → `EncryptedSignalingPayload`
+3. `JSON.stringify()` → JSON string
+4. `pako.gzip()` → compressed bytes (~900-1300 bytes for typical WebRTC signaling)
+5. Binary QR code (8-bit byte mode, ~2000 bytes capacity)
 
 **Input Methods:**
 | Method | Encoding | Use Case |
 |--------|----------|----------|
 | QR Scan | Binary (gzip) | Camera available |
-| Paste | Raw JSON | No camera, text-based exchange |
+| Paste | Encrypted JSON | No camera, text-based exchange |
 
 **Key Features:**
 - No server required - fully air-gapped operation
@@ -236,9 +232,8 @@ interface SignalingPayload {
 - Uses `zxing-wasm` for both generation and scanning
 
 **Security Model:**
-QR mode security differs from Nostr/PeerJS modes:
-- **Nostr/PeerJS**: PIN encrypts signaling data sent over public networks, preventing unauthorized connection establishment
-- **QR mode**: Physical QR exchange provides security (only present parties can scan). PIN serves as verification code (both parties confirm the same PIN)
+- **All modes**: PIN encrypts signaling metadata to prevent unauthorized connection establishment
+- **QR mode**: Physical QR exchange adds a presence check, but PIN is still required to decrypt signaling
 - **All modes**: Once WebRTC connection is established, DTLS encrypts all data in transit
 
 ### WebRTC (`src/lib/webrtc.ts`)
@@ -271,7 +266,7 @@ Fallback storage when P2P connection cannot be established (15s timeout). Not us
 **Nostr Mode:**
 
 **`use-nostr-send.ts`** - Sender logic (Nostr):
-1. Read and encrypt content
+1. Read content (encrypt only if cloud fallback is needed)
 2. Publish PIN exchange (without cloud URL)
 3. Wait for receiver ready ACK
 4. Attempt P2P connection (15s timeout for connection only)
@@ -305,34 +300,33 @@ Fallback storage when P2P connection cannot be established (15s timeout). Not us
 3. Receive and decrypt metadata
 4. Send ready acknowledgment
 5. Receive data chunks, accumulate
-6. On done: decrypt content, send done acknowledgment
+6. On done: assemble content, send done acknowledgment
 7. If connection fails: transfer fails (no cloud fallback)
 
 **QR Mode:**
 
 **`use-qr-send.ts`** - Sender logic (QR):
 1. Read content (file or text), validate size
-2. Generate PIN, derive encryption key with salt
+2. Generate PIN
 3. Create WebRTC offer with ICE candidates
 4. Wait for ICE gathering to complete
-5. Encode offer payload: JSON → gzip → binary QR code
-6. Display QR code and raw JSON copy button
+5. Encrypt offer payload with PIN, then encode: JSON → gzip → binary QR code
+6. Display QR code and encrypted JSON copy button
 7. Wait for user to input receiver's answer (scan or paste)
 8. Process answer, establish WebRTC connection
-9. Encrypt and send data via data channel
+9. Send data via data channel (DTLS-secured)
 10. Wait for receiver ACK
 
 **`use-qr-receive.ts`** - Receiver logic (QR):
 1. Validate PIN entered by user
 2. Wait for user to input sender's offer (scan or paste)
-3. Parse offer, extract metadata and salt
-4. Derive encryption key from PIN and salt
-5. Create WebRTC answer with ICE candidates
-6. Encode answer payload: JSON → gzip → binary QR code
-7. Display QR code and raw JSON copy button
+3. Decrypt offer with PIN, extract metadata
+4. Create WebRTC answer with ICE candidates
+5. Encrypt answer payload with PIN, then encode: JSON → gzip → binary QR code
+6. Display QR code and encrypted JSON copy button
 8. Wait for WebRTC connection to establish
-9. Receive encrypted data via data channel
-10. Decrypt and present content
+9. Receive data via data channel (DTLS-secured)
+10. Present content
 
 ## Data Encryption
 
@@ -367,6 +361,8 @@ interface PinExchangePayload {
 
 **Note:** P2P sends raw content because the WebRTC data channel is already a secure, authenticated channel between the two peers. Cloud storage receives encrypted data because it's stored on third-party servers.
 
+**PeerJS note:** PeerJS uses a PIN-derived peer ID for signaling access control; metadata is encrypted with the PIN, while data chunks are sent over the DTLS-secured channel.
+
 **Optimization:** File content encryption is deferred until cloud fallback is triggered. If P2P succeeds, encryption is skipped entirely, saving CPU time and memory for large files.
 
 ## Size Limits
@@ -393,13 +389,12 @@ interface PinExchangePayload {
 ## Security Considerations
 
 1. **Ephemeral Keys**: New keypair generated for each transfer
-2. **Forward Secrecy**: PIN-derived key is unique per transfer (includes random salt) - applies to Nostr/PeerJS modes
+2. **Forward Secrecy**: PIN-derived key is unique per transfer (includes random salt) - applies to Nostr/PeerJS/QR modes
 3. **No Server Trust**: Encrypted data on cloud, relays only see metadata
 4. **PIN Entropy**: ~71 bits with 12-char mixed charset
 5. **Brute-Force Resistance**: 600K PBKDF2 iterations (planned: Argon2id)
 6. **PIN Role by Mode**:
-   - **Nostr/PeerJS**: PIN encrypts signaling, preventing unauthorized P2P connection establishment
-   - **QR**: PIN serves as verification code; security comes from physical QR exchange
+   - **Nostr/PeerJS/QR**: PIN encrypts signaling, preventing unauthorized P2P connection establishment
 7. **Transport Security**: All P2P transfers use WebRTC DTLS encryption regardless of signaling method
 
 ## File Structure

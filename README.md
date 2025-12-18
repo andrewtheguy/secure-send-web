@@ -1,16 +1,16 @@
 # Secure Send
 
-A web application for sending encrypted text messages and files using PIN-based encryption. Uses WebRTC for direct P2P connections with cloud fallback.
+A web application for sending encrypted text messages and files using PIN-based signaling protection and optional cloud encryption. Uses WebRTC for direct P2P connections with cloud fallback.
 
 **Demo:** [https://secure-send-web.andrewtheguy.com/](https://secure-send-web.andrewtheguy.com/)
 
 ## Features
 
-- **PIN-based encryption**: Content is encrypted with AES-256-GCM using a key derived from a 12-character PIN
+- **PIN-based security**: PIN encrypts signaling payloads so only the PIN holder can establish a connection
 - **Text & file transfer**: Send text messages or files up to 100MB
 - **WebRTC P2P**: Direct peer-to-peer connections for fast, efficient data transfer
 - **Cloud fallback**: Falls back to cloud storage (tmpfiles.org) if WebRTC connection fails
-- **End-to-end encryption**: All data is encrypted before upload, only you and the receiver can decrypt
+- **End-to-end encryption**: Cloud fallback data is AES-256-GCM encrypted; P2P data is protected by WebRTC DTLS
 - **No accounts required**: Ephemeral keypairs are generated for each transfer
 - **Multiple signaling methods**: Choose between Nostr relays (with cloud fallback), PeerJS (simpler P2P), or QR codes (serverless)
 - **Auto-detection**: Receiver automatically detects signaling method from PIN format
@@ -47,6 +47,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 - **PIN never transmitted**: Only a hash hint is visible to relays
 - **Ephemeral identities**: New Nostr keypairs generated per transfer
 - **1-hour expiration**: PIN exchange events expire automatically
+- **QR signaling encryption**: QR payloads are encrypted with the PIN before encoding
 
 ## Tech Stack
 
@@ -80,7 +81,7 @@ The application uses a hybrid transport approach:
 2. **Data Transfer**:
    - **WebRTC P2P** (default): Direct peer-to-peer connection for fastest transfer
    - **Cloud Fallback**: If WebRTC fails (Nostr mode only), encrypted data is uploaded to cloud storage with automatic failover
-3. **Encryption**: All data is encrypted client-side before any transfer
+3. **Encryption**: Signaling and cloud data are encrypted client-side; P2P data uses WebRTC DTLS
 
 ### PIN Auto-Detection
 
