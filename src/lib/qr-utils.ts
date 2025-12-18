@@ -1,8 +1,24 @@
 import QRWorker from '@/workers/qrGenerator.worker?worker'
 
-let worker: Worker | null = null
+// Eager-load worker on module import for offline support
+const worker = new QRWorker()
 let requestId = 0
 const pending = new Map<number, { resolve: (url: string) => void; reject: (error: Error) => void }>()
+
+// Set up message handler at module scope
+worker.onmessage = (e: MessageEvent) => {
+  const { id, buffer, type, error } = e.data
+  const resolver = pending.get(id)
+  if (resolver) {
+    if (type === 'success') {
+      const blob = new Blob([buffer], { type: 'image/png' })
+      resolver.resolve(URL.createObjectURL(blob))
+    } else {
+      resolver.reject(new Error(error || 'QR generation failed'))
+    }
+    pending.delete(id)
+  }
+}
 
 /**
  * Generate a QR code image from binary data
@@ -16,42 +32,11 @@ export async function generateBinaryQRCode(
     errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H'
   }
 ): Promise<string> {
-  if (!worker) {
-    worker = new QRWorker()
-    worker.onmessage = (e: MessageEvent) => {
-      const { id, buffer, type, error } = e.data
-      const resolver = pending.get(id)
-      if (resolver) {
-        if (type === 'success') {
-          const blob = new Blob([buffer], { type: 'image/png' })
-          resolver.resolve(URL.createObjectURL(blob))
-        } else {
-          resolver.reject(new Error(error || 'QR generation failed'))
-        }
-        pending.delete(id)
-      }
-    }
-  }
-
   return new Promise((resolve, reject) => {
     const id = requestId++
     pending.set(id, { resolve, reject })
     // Create a copy of the buffer to transfer
     const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
-    worker!.postMessage(
-      { type: 'generate', id, binaryBuffer: buffer, options: options || {} },
-      [buffer]
-    )
+    worker.postMessage({ type: 'generate', id, binaryBuffer: buffer, options: options || {} }, [buffer])
   })
-}
-
-/**
- * Clean up the QR worker when no longer needed
- */
-export function terminateQRWorker(): void {
-  if (worker) {
-    worker.terminate()
-    worker = null
-  }
-  pending.clear()
 }

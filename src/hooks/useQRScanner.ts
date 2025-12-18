@@ -2,6 +2,49 @@ import { useRef, useEffect, useCallback, useState } from 'react'
 import { isMobileDevice } from '@/lib/utils'
 import ZXingWorker from '@/workers/zxing-qr-scanner.worker?worker'
 
+// Eager-load worker on module import for offline support
+const scannerWorker = new ZXingWorker()
+
+// Module-level state for debouncing (shared across hook instances)
+let lastScannedHash = ''
+let lastScanTime = 0
+
+// Current callback reference (updated by active hook instance)
+let currentOnScan: ((data: Uint8Array) => void) | null = null
+let currentDebounceMs = 500
+
+// Set up message handler once at module scope
+scannerWorker.onmessage = (e: MessageEvent) => {
+  if (e.data.type === 'result') {
+    if (e.data.data && Array.isArray(e.data.data) && e.data.data.length > 0) {
+      const scannedData = e.data.data[0] as Uint8Array
+      const now = Date.now()
+
+      // Create hash for debouncing binary data
+      const dataHash = Array.from(scannedData.slice(0, 32)).join(',')
+
+      // Debounce duplicate scans
+      if (currentDebounceMs > 0 && dataHash === lastScannedHash && now - lastScanTime < currentDebounceMs) {
+        return
+      }
+
+      lastScannedHash = dataHash
+      lastScanTime = now
+
+      if (currentOnScan) {
+        currentOnScan(scannedData)
+      }
+    }
+    if (e.data.error) {
+      console.error('Worker decode error:', e.data.error)
+    }
+  }
+}
+
+scannerWorker.onerror = (err) => {
+  console.error('Worker error:', err)
+}
+
 interface UseQRScannerOptions {
   onScan: (data: Uint8Array) => void
   onError?: (error: string) => void
@@ -30,9 +73,7 @@ export function useQRScanner(options: UseQRScannerOptions) {
   const scanLoopRef = useRef<number | null>(null)
   const isScanningRef = useRef<boolean>(false)
   const cameraStreamRef = useRef<MediaStream | null>(null)
-  const workerRef = useRef<Worker | null>(null)
-  const lastScannedRef = useRef<string>('')
-  const lastScanTimeRef = useRef<number>(0)
+  const workerRef = useRef<Worker>(scannerWorker)
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
 
   const enumerateCameras = useCallback(async () => {
@@ -45,44 +86,10 @@ export function useQRScanner(options: UseQRScannerOptions) {
     }
   }, [])
 
-  // Initialize worker
+  // Update module-level callback refs when hook options change
   useEffect(() => {
-    const worker = new ZXingWorker()
-    workerRef.current = worker
-
-    worker.onmessage = (e: MessageEvent) => {
-      if (e.data.type === 'result') {
-        if (e.data.data && Array.isArray(e.data.data) && e.data.data.length > 0) {
-          const scannedData = e.data.data[0] as Uint8Array
-          const now = Date.now()
-
-          // Create hash for debouncing binary data
-          const dataHash = Array.from(scannedData.slice(0, 32)).join(',')
-
-          // Debounce duplicate scans
-          if (debounceMs > 0 && dataHash === lastScannedRef.current && now - lastScanTimeRef.current < debounceMs) {
-            return
-          }
-
-          lastScannedRef.current = dataHash
-          lastScanTimeRef.current = now
-
-          onScan(scannedData)
-        }
-        if (e.data.error) {
-          console.error('Worker decode error:', e.data.error)
-        }
-      }
-    }
-
-    worker.onerror = (err) => {
-      console.error('Worker error:', err)
-    }
-
-    return () => {
-      worker.terminate()
-      workerRef.current = null
-    }
+    currentOnScan = onScan
+    currentDebounceMs = debounceMs
   }, [onScan, debounceMs])
 
   const scanVideoFrame = useCallback(() => {
