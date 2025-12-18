@@ -28,9 +28,9 @@ export const SALT_LENGTH = 16
 export const CHUNK_SIZE = 16 * 1024 // 16KB
 
 // Encryption chunk size for P2P transfers
-// 256KB chunks, each encrypted with unique nonce
-// Larger chunks = less overhead (30 bytes per chunk)
-export const ENCRYPTION_CHUNK_SIZE = 256 * 1024 // 256KB
+// 128KB chunks, each encrypted with unique nonce
+// WebRTC data channel has ~256KB message limit, so 128KB + encryption overhead stays safe
+export const ENCRYPTION_CHUNK_SIZE = 128 * 1024 // 128KB
 
 // Cloud chunk size for chunked uploads (when P2P fails)
 export const CLOUD_CHUNK_SIZE = 10 * 1024 * 1024 // 10MB per cloud chunk

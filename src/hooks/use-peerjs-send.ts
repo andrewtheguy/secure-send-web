@@ -4,8 +4,10 @@ import {
   generateSalt,
   deriveKeyFromPin,
   encrypt,
+  encryptChunk,
   MAX_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
+  ENCRYPTION_CHUNK_SIZE,
 } from '@/lib/crypto'
 import {
   derivePeerId,
@@ -263,15 +265,20 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
       })
 
-      // Send data in chunks
-      const chunkSize = 16384 // 16KB chunks
-      for (let i = 0; i < contentBytes.length; i += chunkSize) {
+      // Send data in encrypted chunks
+      let chunkIndex = 0
+      for (let i = 0; i < contentBytes.length; i += ENCRYPTION_CHUNK_SIZE) {
         if (cancelledRef.current) throw new Error('Cancelled')
 
-        const end = Math.min(i + chunkSize, contentBytes.length)
-        const chunk = contentBytes.slice(i, end)
+        const end = Math.min(i + ENCRYPTION_CHUNK_SIZE, contentBytes.length)
+        const plainChunk = contentBytes.slice(i, end)
 
-        await peerRef.current!.sendWithBackpressure(chunk.buffer)
+        // Encrypt this chunk with chunk index prefix
+        const encryptedChunk = await encryptChunk(key, plainChunk, chunkIndex)
+
+        await peerRef.current!.sendWithBackpressure(encryptedChunk.buffer as ArrayBuffer)
+
+        chunkIndex++
 
         setState(s => ({
           ...s,

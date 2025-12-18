@@ -19,6 +19,7 @@ export interface SignalingPayload {
   fileSize?: number
   mimeType?: string
   totalBytes?: number
+  salt?: number[] // Salt for content encryption key derivation
 }
 
 function uint8ArrayToBase64(bytes: Uint8Array): string {
@@ -110,6 +111,7 @@ export async function generateOfferQRBinary(
     fileName?: string
     fileSize?: number
     mimeType?: string
+    salt?: number[] // Salt for content encryption key derivation
   },
   pin: string
 ): Promise<Uint8Array> {
@@ -122,6 +124,7 @@ export async function generateOfferQRBinary(
     fileName: metadata.fileName,
     fileSize: metadata.fileSize,
     mimeType: metadata.mimeType,
+    salt: metadata.salt,
   }
   return encryptSignalingPayload(payload, pin)
 }

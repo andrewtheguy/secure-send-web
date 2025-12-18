@@ -1,7 +1,11 @@
 import { useState, useCallback, useRef } from 'react'
 import {
   isValidPin,
+  deriveKeyFromPin,
+  parseChunkMessage,
+  decryptChunk,
   MAX_MESSAGE_SIZE,
+  ENCRYPTION_CHUNK_SIZE,
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
 import {
@@ -133,8 +137,16 @@ export function useQRReceive(): UseQRReceiveReturn {
       }
 
       // Extract metadata from offer
-      const { contentType, totalBytes, fileName, fileSize, mimeType } = offerPayload
+      const { contentType, totalBytes, fileName, fileSize, mimeType, salt: saltArray } = offerPayload
       const isFile = contentType === 'file'
+
+      // Derive key from PIN and salt (for decrypting chunks)
+      if (!saltArray) {
+        setState({ status: 'error', message: 'Invalid offer: missing encryption salt' })
+        return
+      }
+      const salt = new Uint8Array(saltArray)
+      const key = await deriveKeyFromPin(pin, salt)
 
       // Security check: Enforce MAX_MESSAGE_SIZE
       if (totalBytes && totalBytes > MAX_MESSAGE_SIZE) {
@@ -186,9 +198,10 @@ export function useQRReceive(): UseQRReceiveReturn {
               }
             }
           } else if (data instanceof ArrayBuffer) {
-            const chunk = new Uint8Array(data)
-            receivedChunks.push(chunk)
-            receivedBytes += chunk.length
+            // Store encrypted chunk for later decryption
+            const encryptedChunk = new Uint8Array(data)
+            receivedChunks.push(encryptedChunk)
+            receivedBytes += encryptedChunk.length
 
             setState(s => ({
               ...s,
@@ -322,14 +335,37 @@ export function useQRReceive(): UseQRReceiveReturn {
       // Send acknowledgment
       rtc.send('ACK')
 
-      // Combine chunks (data is already decrypted via WebRTC DTLS)
-      const totalLength = receivedChunks.reduce((acc, chunk) => acc + chunk.length, 0)
-      const receivedData = new Uint8Array(totalLength)
-      let offset = 0
-      for (const chunk of receivedChunks) {
-        receivedData.set(chunk, offset)
-        offset += chunk.length
+      // Decrypt and reassemble chunks
+      let contentData = new Uint8Array(totalBytes || 0)
+      let totalDecryptedBytes = 0
+
+      for (const encryptedChunk of receivedChunks) {
+        try {
+          // Parse chunk to get index and encrypted data
+          const { chunkIndex, encryptedData } = parseChunkMessage(encryptedChunk)
+          const decryptedChunk = await decryptChunk(key, encryptedData)
+
+          // Calculate write position based on chunk index
+          const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE
+
+          // Ensure buffer is large enough
+          const requiredSize = writePosition + decryptedChunk.length
+          if (contentData.length < requiredSize) {
+            const newBuffer = new Uint8Array(Math.max(requiredSize, contentData.length * 2))
+            newBuffer.set(contentData)
+            contentData = newBuffer
+          }
+
+          // Write to correct position based on chunk index
+          contentData.set(decryptedChunk, writePosition)
+          totalDecryptedBytes += decryptedChunk.length
+        } catch (err) {
+          console.error('Failed to decrypt chunk:', err)
+        }
       }
+
+      // Trim buffer to actual content size
+      const receivedData = contentData.slice(0, totalDecryptedBytes)
 
       // Set received content
       if (contentType === 'file') {
