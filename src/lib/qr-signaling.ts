@@ -122,6 +122,23 @@ function latin1ToBytes(str: string): Uint8Array {
 }
 
 /**
+ * Convert Latin-1 QR data to base64 for clipboard copy/paste
+ * Latin-1 contains non-printable chars that don't survive clipboard
+ */
+export function qrDataToBase64(latin1Data: string): string {
+  const bytes = latin1ToBytes(latin1Data)
+  return btoa(String.fromCharCode(...bytes))
+}
+
+/**
+ * Convert base64 clipboard data back to Latin-1 for parsing
+ */
+export function base64ToQRData(b64Data: string): string {
+  const binary = atob(b64Data)
+  return binary // This is already Latin-1 compatible
+}
+
+/**
  * Convert full payload to minified format
  */
 function minifyPayload(payload: QRSignalingPayload): MinifiedPayload {

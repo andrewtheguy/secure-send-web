@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { Copy, Check, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { MAX_QR_DATA_SIZE } from '@/lib/qr-signaling'
+import { MAX_QR_DATA_SIZE, qrDataToBase64 } from '@/lib/qr-signaling'
 
 interface QRDisplayProps {
   data: string
@@ -13,9 +13,11 @@ interface QRDisplayProps {
 export function QRDisplay({ data, label, showCopyButton = true }: QRDisplayProps) {
   const [copied, setCopied] = useState(false)
 
+  // Convert to base64 for clipboard (Latin-1 has non-printable chars)
   const handleCopy = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(data)
+      const base64Data = qrDataToBase64(data)
+      await navigator.clipboard.writeText(base64Data)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
