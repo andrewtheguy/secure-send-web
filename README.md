@@ -77,7 +77,7 @@ The application uses a hybrid transport approach:
 1. **Signaling Methods** (sender chooses in Advanced Options):
    - **Nostr** (default): PIN exchange and WebRTC signaling via decentralized Nostr relays. Falls back to encrypted cloud transfer if P2P fails.
    - **PeerJS**: Uses PeerJS cloud server (0.peerjs.com) for simpler signaling. No cloud fallback - P2P only.
-   - **QR Code**: Exchange WebRTC signaling data via QR codes. Truly serverless - no signaling server required. Both parties must be able to scan each other's screens. P2P only, no fallback.
+   - **QR Code**: Exchange WebRTC signaling data via QR codes. Serverless signaling (still uses STUN for NAT traversal). Both parties must be able to scan each other's screens. P2P only, no fallback.
 2. **Data Transfer**:
    - **WebRTC P2P** (default): Direct peer-to-peer connection for fastest transfer
    - **Cloud Fallback**: If WebRTC fails (Nostr mode only), encrypted data is uploaded to cloud storage with automatic failover
