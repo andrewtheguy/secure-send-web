@@ -1,4 +1,5 @@
 import pako from 'pako'
+import { base45Encode, base45Decode } from './base45'
 import type { ContentType } from './nostr/types'
 
 /**
@@ -403,21 +404,21 @@ function expandPayload(minified: MinifiedPayload): QRSignalingPayload {
 
 /**
  * Compress signaling payload for QR code
- * Uses minified JSON + gzip compression + base64 encoding
- * Base64 is used for consistency - same format for QR display and clipboard
+ * Uses minified JSON + gzip compression + base45 encoding
+ * Base45 uses only QR alphanumeric characters for ~23% smaller QR codes
  */
 export function compressSignalingData(payload: QRSignalingPayload): string {
   const minified = minifyPayload(payload)
   const json = JSON.stringify(minified)
   const compressed = pako.gzip(json)
-  return uint8ArrayToBase64(compressed)
+  return base45Encode(compressed)
 }
 
 /**
- * Decompress signaling payload from QR code data (base64 encoded)
+ * Decompress signaling payload from QR code data (base45 encoded)
  */
-export function decompressSignalingData(base64Data: string): QRSignalingPayload {
-  const bytes = base64ToUint8Array(base64Data)
+export function decompressSignalingData(base45Data: string): QRSignalingPayload {
+  const bytes = base45Decode(base45Data)
   const decompressed = pako.ungzip(bytes, { to: 'string' })
   const minified = JSON.parse(decompressed) as MinifiedPayload
   return expandPayload(minified)
