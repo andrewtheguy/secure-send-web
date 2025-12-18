@@ -5,9 +5,12 @@ import {
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
 import {
+  decryptSignalingPayload,
   generateAnswerQRBinary,
   generateClipboardData,
+  type EncryptedSignalingPayload,
   type SignalingPayload,
+  encryptSignalingPayload,
 } from '@/lib/qr-signaling'
 import type { TransferState, ReceivedContent, ContentType } from '@/lib/nostr/types'
 
@@ -32,7 +35,7 @@ export interface UseQRReceiveReturn {
   state: QRReceiveState
   receivedContent: ReceivedContent | null
   receive: (pin: string) => Promise<void>
-  submitOffer: (offerData: SignalingPayload) => void
+  submitOffer: (offerData: EncryptedSignalingPayload) => void
   cancel: () => void
   reset: () => void
 }
@@ -54,11 +57,13 @@ export function useQRReceive(): UseQRReceiveReturn {
 
   // Resolve function for offer submission
   const offerResolverRef = useRef<((payload: SignalingPayload) => void) | null>(null)
+  const offerRejectRef = useRef<((error: Error) => void) | null>(null)
 
   const cancel = useCallback(() => {
     cancelledRef.current = true
     receivingRef.current = false
     offerResolverRef.current = null
+    offerRejectRef.current = null
     pinRef.current = null
     if (rtcRef.current) {
       rtcRef.current.close()
@@ -72,10 +77,17 @@ export function useQRReceive(): UseQRReceiveReturn {
     setReceivedContent(null)
   }, [cancel])
 
-  const submitOffer = useCallback((offerPayload: SignalingPayload) => {
-    if (offerResolverRef.current) {
-      offerResolverRef.current(offerPayload)
-    }
+  const submitOffer = useCallback((offerPayload: EncryptedSignalingPayload) => {
+    if (!offerResolverRef.current) return
+    if (!pinRef.current) return
+    decryptSignalingPayload(offerPayload, pinRef.current).then((decrypted) => {
+      if (!decrypted) {
+        offerRejectRef.current?.(new Error('Invalid PIN or QR data'))
+        offerResolverRef.current = null
+        return
+      }
+      offerResolverRef.current?.(decrypted)
+    })
   }, [])
 
   const receive = useCallback(async (pin: string) => {
@@ -103,6 +115,7 @@ export function useQRReceive(): UseQRReceiveReturn {
       // Wait for offer to be submitted
       const offerPayload = await new Promise<SignalingPayload>((resolve, reject) => {
         offerResolverRef.current = resolve
+        offerRejectRef.current = reject
 
         // Check periodically if cancelled
         const checkInterval = setInterval(() => {
@@ -229,7 +242,7 @@ export function useQRReceive(): UseQRReceiveReturn {
       if (cancelledRef.current) return
 
       // Generate binary QR data with answer + candidates
-      const qrBinaryData = generateAnswerQRBinary(answerSDP!, iceCandidates)
+      const qrBinaryData = await generateAnswerQRBinary(answerSDP!, iceCandidates, pin)
 
       // Generate raw JSON for clipboard
       const answerPayload: SignalingPayload = {
@@ -237,7 +250,8 @@ export function useQRReceive(): UseQRReceiveReturn {
         sdp: answerSDP!.sdp || '',
         candidates: iceCandidates.map(c => c.candidate),
       }
-      const clipboardJson = generateClipboardData(answerPayload)
+      const encryptedClipboardPayload = await encryptSignalingPayload(answerPayload, pin)
+      const clipboardJson = generateClipboardData(encryptedClipboardPayload)
 
       // Show QR code and wait for connection
       setState({
@@ -363,6 +377,7 @@ export function useQRReceive(): UseQRReceiveReturn {
     } finally {
       receivingRef.current = false
       offerResolverRef.current = null
+      offerRejectRef.current = null
       pinRef.current = null
       if (rtcRef.current) {
         rtcRef.current.close()

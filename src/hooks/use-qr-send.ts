@@ -6,8 +6,11 @@ import {
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
 import {
+  decryptSignalingPayload,
+  encryptSignalingPayload,
   generateOfferQRBinary,
   generateClipboardData,
+  type EncryptedSignalingPayload,
   type SignalingPayload,
 } from '@/lib/qr-signaling'
 import type { TransferState, ContentType } from '@/lib/nostr/types'
@@ -34,7 +37,7 @@ export interface UseQRSendReturn {
   state: QRTransferState
   pin: string | null
   send: (content: string | File) => Promise<void>
-  submitAnswer: (answerData: SignalingPayload) => void
+  submitAnswer: (answerData: EncryptedSignalingPayload) => void
   cancel: () => void
 }
 
@@ -62,6 +65,7 @@ export function useQRSend(): UseQRSendReturn {
 
   // Resolve function for answer submission
   const answerResolverRef = useRef<((payload: SignalingPayload) => void) | null>(null)
+  const answerRejectRef = useRef<((error: Error) => void) | null>(null)
 
   const clearExpirationTimeout = useCallback(() => {
     if (expirationTimeoutRef.current) {
@@ -75,6 +79,7 @@ export function useQRSend(): UseQRSendReturn {
     sendingRef.current = false
     clearExpirationTimeout()
     answerResolverRef.current = null
+    answerRejectRef.current = null
     pendingTransferRef.current = null
     if (rtcRef.current) {
       rtcRef.current.close()
@@ -84,11 +89,22 @@ export function useQRSend(): UseQRSendReturn {
     setState({ status: 'idle' })
   }, [clearExpirationTimeout])
 
-  const submitAnswer = useCallback((answerPayload: SignalingPayload) => {
-    if (answerResolverRef.current) {
-      answerResolverRef.current(answerPayload)
-    }
-  }, [])
+  const submitAnswer = useCallback((answerPayload: EncryptedSignalingPayload) => {
+    if (!answerResolverRef.current || !pin) return
+    decryptSignalingPayload(answerPayload, pin).then((decrypted) => {
+      if (!decrypted) {
+        answerRejectRef.current?.(new Error('Invalid PIN or QR response'))
+        answerResolverRef.current = null
+        return
+      }
+      if (decrypted.type !== 'answer') {
+        answerRejectRef.current?.(new Error('Invalid QR response type'))
+        answerResolverRef.current = null
+        return
+      }
+      answerResolverRef.current?.(decrypted)
+    })
+  }, [pin])
 
   const send = useCallback(async (content: string | File) => {
     // Guard against concurrent invocations
@@ -218,7 +234,7 @@ export function useQRSend(): UseQRSendReturn {
       if (cancelledRef.current) return
 
       // Generate binary QR data with offer + candidates + metadata
-      const qrBinaryData = generateOfferQRBinary(
+      const qrBinaryData = await generateOfferQRBinary(
         offerSDP!,
         iceCandidates,
         {
@@ -227,11 +243,12 @@ export function useQRSend(): UseQRSendReturn {
           fileName,
           fileSize,
           mimeType,
-        }
+        },
+        newPin
       )
 
-      // Generate raw JSON for clipboard
-      const payload: SignalingPayload = {
+      // Generate encrypted JSON for clipboard
+      const offerPayload: SignalingPayload = {
         type: 'offer',
         sdp: offerSDP!.sdp || '',
         candidates: iceCandidates.map(c => c.candidate),
@@ -241,7 +258,8 @@ export function useQRSend(): UseQRSendReturn {
         fileSize,
         mimeType,
       }
-      const clipboardJson = generateClipboardData(payload)
+      const encryptedClipboardPayload = await encryptSignalingPayload(offerPayload, newPin)
+      const clipboardJson = generateClipboardData(encryptedClipboardPayload)
 
       // Show QR code and wait for answer
       setState({
@@ -256,6 +274,7 @@ export function useQRSend(): UseQRSendReturn {
       // Wait for answer to be submitted
       const answerPayload = await new Promise<SignalingPayload>((resolve, reject) => {
         answerResolverRef.current = resolve
+        answerRejectRef.current = reject
 
         // Check periodically if cancelled
         const checkInterval = setInterval(() => {
@@ -377,6 +396,7 @@ export function useQRSend(): UseQRSendReturn {
       clearExpirationTimeout()
       sendingRef.current = false
       answerResolverRef.current = null
+      answerRejectRef.current = null
       pendingTransferRef.current = null
       if (rtcRef.current) {
         rtcRef.current.close()
