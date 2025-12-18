@@ -18,27 +18,45 @@ export interface QRSignalingPayload {
 }
 
 /**
+ * Encode bytes to ASCII string using Latin-1 (ISO-8859-1)
+ * Each byte maps to a character 0x00-0xFF
+ * More compact than base64 for QR byte mode
+ */
+function bytesToLatin1(bytes: Uint8Array): string {
+  let result = ''
+  for (let i = 0; i < bytes.length; i++) {
+    result += String.fromCharCode(bytes[i])
+  }
+  return result
+}
+
+/**
+ * Decode Latin-1 string back to bytes
+ */
+function latin1ToBytes(str: string): Uint8Array {
+  const bytes = new Uint8Array(str.length)
+  for (let i = 0; i < str.length; i++) {
+    bytes[i] = str.charCodeAt(i)
+  }
+  return bytes
+}
+
+/**
  * Compress signaling payload for QR code
- * Uses gzip compression + base64 encoding
+ * Uses JSON + gzip compression + Latin-1 encoding (more compact than base64)
  */
 export function compressSignalingData(payload: QRSignalingPayload): string {
   const json = JSON.stringify(payload)
   const compressed = pako.gzip(json)
-  // Convert to base64
-  return btoa(String.fromCharCode(...compressed))
+  // Use Latin-1 encoding (1 byte = 1 char) instead of base64 (33% overhead)
+  return bytesToLatin1(compressed)
 }
 
 /**
  * Decompress signaling payload from QR code data
  */
 export function decompressSignalingData(compressed: string): QRSignalingPayload {
-  // Decode base64
-  const binary = atob(compressed)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i)
-  }
-  // Decompress
+  const bytes = latin1ToBytes(compressed)
   const decompressed = pako.ungzip(bytes, { to: 'string' })
   return JSON.parse(decompressed) as QRSignalingPayload
 }
