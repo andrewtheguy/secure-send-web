@@ -5,7 +5,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { parseJSONPayload, isValidSignalingPayload, type SignalingPayload } from '@/lib/qr-signaling'
 import { QRScanner } from './qr-scanner'
-import { isMobileDevice } from '@/lib/utils'
 
 interface QRInputProps {
   onSubmit: (payload: SignalingPayload) => void
@@ -17,9 +16,7 @@ interface QRInputProps {
 export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProps) {
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [inputMode, setInputMode] = useState<'scan' | 'paste'>(
-    isMobileDevice() ? 'scan' : 'paste'
-  )
+  const [inputMode, setInputMode] = useState<'scan' | 'paste'>('paste')
 
   const handlePaste = useCallback(async () => {
     try {
@@ -81,13 +78,13 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
 
       <Tabs value={inputMode} onValueChange={(v) => setInputMode(v as 'scan' | 'paste')}>
         <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="scan" disabled={disabled}>
-            <Camera className="h-4 w-4 mr-2" />
-            Scan
-          </TabsTrigger>
           <TabsTrigger value="paste" disabled={disabled}>
             <ClipboardPaste className="h-4 w-4 mr-2" />
             Paste
+          </TabsTrigger>
+          <TabsTrigger value="scan" disabled={disabled}>
+            <Camera className="h-4 w-4 mr-2" />
+            Scan
           </TabsTrigger>
         </TabsList>
 
