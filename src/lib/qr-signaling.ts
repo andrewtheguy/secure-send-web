@@ -2,6 +2,9 @@ import pako from 'pako'
 import type { ContentType } from './nostr/types'
 import { deriveKeyFromPin, encrypt, decrypt, generateSalt } from './crypto'
 
+// Magic header: "SS01" = Secure Send version 1
+const MAGIC_HEADER = new Uint8Array([0x53, 0x53, 0x30, 0x31])
+
 /**
  * Signaling Payload - method-agnostic format for the pipeline
  * Used by both QR and copy/paste modes
@@ -16,12 +19,6 @@ export interface SignalingPayload {
   fileSize?: number
   mimeType?: string
   totalBytes?: number
-}
-
-export interface EncryptedSignalingPayload {
-  v: 1
-  salt: string
-  payload: string
 }
 
 function uint8ArrayToBase64(bytes: Uint8Array): string {
@@ -43,33 +40,57 @@ function base64ToUint8Array(base64: string): Uint8Array {
   return bytes
 }
 
+/**
+ * Encrypt signaling payload to binary format
+ * Format: [SS01 magic (4 bytes)][salt (16 bytes)][encrypted compressed payload]
+ * Compression is done before encryption (JSON compresses well, encrypted data doesn't)
+ */
 export async function encryptSignalingPayload(
   payload: SignalingPayload,
   pin: string
-): Promise<EncryptedSignalingPayload> {
+): Promise<Uint8Array> {
   const encoder = new TextEncoder()
-  const payloadBytes = encoder.encode(JSON.stringify(payload))
+  const jsonBytes = encoder.encode(JSON.stringify(payload))
+  // Compress before encryption - JSON/SDP compresses well
+  const compressed = pako.deflate(jsonBytes)
   const salt = generateSalt()
   const key = await deriveKeyFromPin(pin, salt)
-  const encrypted = await encrypt(key, payloadBytes)
+  const encrypted = await encrypt(key, compressed)
 
-  return {
-    v: 1,
-    salt: uint8ArrayToBase64(salt),
-    payload: uint8ArrayToBase64(encrypted),
-  }
+  // Build binary: [SS01][salt][encrypted]
+  const result = new Uint8Array(4 + 16 + encrypted.length)
+  result.set(MAGIC_HEADER, 0)
+  result.set(salt, 4)
+  result.set(encrypted, 20)
+  return result
 }
 
+/**
+ * Decrypt binary signaling payload
+ * Expects format: [SS01 magic (4 bytes)][salt (16 bytes)][encrypted compressed payload]
+ * Decompression is done after decryption
+ */
 export async function decryptSignalingPayload(
-  encryptedPayload: EncryptedSignalingPayload,
+  binary: Uint8Array,
   pin: string
 ): Promise<SignalingPayload | null> {
   try {
-    const salt = base64ToUint8Array(encryptedPayload.salt)
-    const encrypted = base64ToUint8Array(encryptedPayload.payload)
+    // Verify magic header "SS01"
+    if (
+      binary[0] !== 0x53 ||
+      binary[1] !== 0x53 ||
+      binary[2] !== 0x30 ||
+      binary[3] !== 0x31
+    ) {
+      throw new Error('Invalid format or unsupported version')
+    }
+    const salt = binary.slice(4, 20)
+    const encrypted = binary.slice(20)
     const key = await deriveKeyFromPin(pin, salt)
-    const plaintext = await decrypt(key, encrypted)
-    const json = new TextDecoder().decode(plaintext)
+    const compressed = await decrypt(key, encrypted)
+    // Decompress after decryption
+    const jsonBytes = pako.inflate(compressed)
+    const json = new TextDecoder().decode(jsonBytes)
     return JSON.parse(json)
   } catch {
     return null
@@ -77,8 +98,8 @@ export async function decryptSignalingPayload(
 }
 
 /**
- * Generate offer as binary data (gzipped JSON)
- * Returns Uint8Array ready for binary QR code encoding
+ * Generate offer as binary data for QR code encoding
+ * Returns Uint8Array ready for binary QR code (no compression - encrypted data doesn't compress)
  */
 export async function generateOfferQRBinary(
   offer: RTCSessionDescriptionInit,
@@ -95,21 +116,19 @@ export async function generateOfferQRBinary(
   const payload: SignalingPayload = {
     type: 'offer',
     sdp: offer.sdp || '',
-    candidates: candidates.map(c => c.candidate),
+    candidates: candidates.map((c) => c.candidate),
     contentType: metadata.contentType,
     totalBytes: metadata.totalBytes,
     fileName: metadata.fileName,
     fileSize: metadata.fileSize,
     mimeType: metadata.mimeType,
   }
-  const encryptedPayload = await encryptSignalingPayload(payload, pin)
-  const json = JSON.stringify(encryptedPayload)
-  return pako.gzip(json)
+  return encryptSignalingPayload(payload, pin)
 }
 
 /**
- * Generate answer as binary data (gzipped JSON)
- * Returns Uint8Array ready for binary QR code encoding
+ * Generate answer as binary data for QR code encoding
+ * Returns Uint8Array ready for binary QR code (no compression - encrypted data doesn't compress)
  */
 export async function generateAnswerQRBinary(
   answer: RTCSessionDescriptionInit,
@@ -119,38 +138,36 @@ export async function generateAnswerQRBinary(
   const payload: SignalingPayload = {
     type: 'answer',
     sdp: answer.sdp || '',
-    candidates: candidates.map(c => c.candidate),
+    candidates: candidates.map((c) => c.candidate),
   }
-  const encryptedPayload = await encryptSignalingPayload(payload, pin)
-  const json = JSON.stringify(encryptedPayload)
-  return pako.gzip(json)
+  return encryptSignalingPayload(payload, pin)
 }
 
 /**
- * Parse binary QR data (gzipped JSON) to EncryptedSignalingPayload
+ * Parse binary QR data
+ * Returns the raw binary payload (pass-through, no decompression needed)
  */
-export function parseBinaryQRPayload(bytes: Uint8Array): EncryptedSignalingPayload | null {
+export function parseBinaryQRPayload(bytes: Uint8Array): Uint8Array {
+  return bytes
+}
+
+/**
+ * Generate base64 string for clipboard (from binary payload)
+ */
+export async function generateClipboardData(
+  payload: SignalingPayload,
+  pin: string
+): Promise<string> {
+  const binary = await encryptSignalingPayload(payload, pin)
+  return uint8ArrayToBase64(binary)
+}
+
+/**
+ * Parse base64 clipboard data to binary payload
+ */
+export function parseClipboardPayload(base64: string): Uint8Array | null {
   try {
-    const json = pako.ungzip(bytes, { to: 'string' })
-    return JSON.parse(json)
-  } catch {
-    return null
-  }
-}
-
-/**
- * Generate raw JSON for clipboard (no encoding)
- */
-export function generateClipboardData(payload: EncryptedSignalingPayload): string {
-  return JSON.stringify(payload)
-}
-
-/**
- * Parse raw JSON to EncryptedSignalingPayload (for paste tab)
- */
-export function parseJSONPayload(json: string): EncryptedSignalingPayload | null {
-  try {
-    return JSON.parse(json)
+    return base64ToUint8Array(base64)
   } catch {
     return null
   }
@@ -168,13 +185,17 @@ export function isValidSignalingPayload(payload: unknown): payload is SignalingP
   return true
 }
 
-export function isValidEncryptedSignalingPayload(payload: unknown): payload is EncryptedSignalingPayload {
-  if (!payload || typeof payload !== 'object') return false
-  const p = payload as Record<string, unknown>
-  if (p.v !== 1) return false
-  if (typeof p.salt !== 'string') return false
-  if (typeof p.payload !== 'string') return false
-  return true
+/**
+ * Validate binary payload has correct magic header
+ */
+export function isValidBinaryPayload(binary: Uint8Array): boolean {
+  return (
+    binary.length > 20 &&
+    binary[0] === 0x53 &&
+    binary[1] === 0x53 &&
+    binary[2] === 0x30 &&
+    binary[3] === 0x31
+  )
 }
 
 /**

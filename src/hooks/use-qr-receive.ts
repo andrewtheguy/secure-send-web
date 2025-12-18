@@ -8,9 +8,7 @@ import {
   decryptSignalingPayload,
   generateAnswerQRBinary,
   generateClipboardData,
-  type EncryptedSignalingPayload,
   type SignalingPayload,
-  encryptSignalingPayload,
 } from '@/lib/qr-signaling'
 import type { TransferState, ReceivedContent, ContentType } from '@/lib/nostr/types'
 
@@ -35,7 +33,7 @@ export interface UseQRReceiveReturn {
   state: QRReceiveState
   receivedContent: ReceivedContent | null
   receive: (pin: string) => Promise<void>
-  submitOffer: (offerData: EncryptedSignalingPayload) => void
+  submitOffer: (offerData: Uint8Array) => void
   cancel: () => void
   reset: () => void
 }
@@ -77,10 +75,10 @@ export function useQRReceive(): UseQRReceiveReturn {
     setReceivedContent(null)
   }, [cancel])
 
-  const submitOffer = useCallback((offerPayload: EncryptedSignalingPayload) => {
+  const submitOffer = useCallback((offerBinary: Uint8Array) => {
     if (!offerResolverRef.current) return
     if (!pinRef.current) return
-    decryptSignalingPayload(offerPayload, pinRef.current).then((decrypted) => {
+    decryptSignalingPayload(offerBinary, pinRef.current).then((decrypted) => {
       if (!decrypted) {
         offerRejectRef.current?.(new Error('Invalid PIN or QR data'))
         offerResolverRef.current = null
@@ -244,21 +242,20 @@ export function useQRReceive(): UseQRReceiveReturn {
       // Generate binary QR data with answer + candidates
       const qrBinaryData = await generateAnswerQRBinary(answerSDP!, iceCandidates, pin)
 
-      // Generate raw JSON for clipboard
+      // Generate base64 clipboard data
       const answerPayload: SignalingPayload = {
         type: 'answer',
         sdp: answerSDP!.sdp || '',
         candidates: iceCandidates.map(c => c.candidate),
       }
-      const encryptedClipboardPayload = await encryptSignalingPayload(answerPayload, pin)
-      const clipboardJson = generateClipboardData(encryptedClipboardPayload)
+      const clipboardBase64 = await generateClipboardData(answerPayload, pin)
 
       // Show QR code and wait for connection
       setState({
         status: 'showing_answer_qr',
         message: 'Show this QR to sender and wait for connection',
         answerQRData: qrBinaryData,
-        clipboardData: clipboardJson,
+        clipboardData: clipboardBase64,
         contentType: contentType as ContentType,
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
       })

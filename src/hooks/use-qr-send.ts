@@ -7,10 +7,8 @@ import {
 import { WebRTCConnection } from '@/lib/webrtc'
 import {
   decryptSignalingPayload,
-  encryptSignalingPayload,
   generateOfferQRBinary,
   generateClipboardData,
-  type EncryptedSignalingPayload,
   type SignalingPayload,
 } from '@/lib/qr-signaling'
 import type { TransferState, ContentType } from '@/lib/nostr/types'
@@ -37,7 +35,7 @@ export interface UseQRSendReturn {
   state: QRTransferState
   pin: string | null
   send: (content: string | File) => Promise<void>
-  submitAnswer: (answerData: EncryptedSignalingPayload) => void
+  submitAnswer: (answerData: Uint8Array) => void
   cancel: () => void
 }
 
@@ -89,9 +87,9 @@ export function useQRSend(): UseQRSendReturn {
     setState({ status: 'idle' })
   }, [clearExpirationTimeout])
 
-  const submitAnswer = useCallback((answerPayload: EncryptedSignalingPayload) => {
+  const submitAnswer = useCallback((answerBinary: Uint8Array) => {
     if (!answerResolverRef.current || !pin) return
-    decryptSignalingPayload(answerPayload, pin).then((decrypted) => {
+    decryptSignalingPayload(answerBinary, pin).then((decrypted) => {
       if (!decrypted) {
         answerRejectRef.current?.(new Error('Invalid PIN or QR response'))
         answerResolverRef.current = null
@@ -247,7 +245,7 @@ export function useQRSend(): UseQRSendReturn {
         newPin
       )
 
-      // Generate encrypted JSON for clipboard
+      // Generate base64 clipboard data
       const offerPayload: SignalingPayload = {
         type: 'offer',
         sdp: offerSDP!.sdp || '',
@@ -258,15 +256,14 @@ export function useQRSend(): UseQRSendReturn {
         fileSize,
         mimeType,
       }
-      const encryptedClipboardPayload = await encryptSignalingPayload(offerPayload, newPin)
-      const clipboardJson = generateClipboardData(encryptedClipboardPayload)
+      const clipboardBase64 = await generateClipboardData(offerPayload, newPin)
 
       // Show QR code and wait for answer
       setState({
         status: 'showing_offer_qr',
         message: 'Show this QR to receiver, then paste their response below',
         offerQRData: qrBinaryData,
-        clipboardData: clipboardJson,
+        clipboardData: clipboardBase64,
         contentType,
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
       })
