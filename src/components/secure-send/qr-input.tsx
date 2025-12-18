@@ -16,7 +16,10 @@ interface QRInputProps {
 export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProps) {
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [inputMode, setInputMode] = useState<'scan' | 'paste'>('paste')
+  // Receiver (offer) defaults to scan, Sender (answer) defaults to paste
+  const [inputMode, setInputMode] = useState<'scan' | 'paste'>(
+    expectedType === 'offer' ? 'scan' : 'paste'
+  )
 
   const handlePaste = useCallback(async () => {
     try {
@@ -78,14 +81,29 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
 
       <Tabs value={inputMode} onValueChange={(v) => setInputMode(v as 'scan' | 'paste')}>
         <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="paste" disabled={disabled}>
-            <ClipboardPaste className="h-4 w-4 mr-2" />
-            Paste
-          </TabsTrigger>
-          <TabsTrigger value="scan" disabled={disabled}>
-            <Camera className="h-4 w-4 mr-2" />
-            Scan
-          </TabsTrigger>
+          {expectedType === 'offer' ? (
+            <>
+              <TabsTrigger value="scan" disabled={disabled}>
+                <Camera className="h-4 w-4 mr-2" />
+                Scan
+              </TabsTrigger>
+              <TabsTrigger value="paste" disabled={disabled}>
+                <ClipboardPaste className="h-4 w-4 mr-2" />
+                Paste
+              </TabsTrigger>
+            </>
+          ) : (
+            <>
+              <TabsTrigger value="paste" disabled={disabled}>
+                <ClipboardPaste className="h-4 w-4 mr-2" />
+                Paste
+              </TabsTrigger>
+              <TabsTrigger value="scan" disabled={disabled}>
+                <Camera className="h-4 w-4 mr-2" />
+                Scan
+              </TabsTrigger>
+            </>
+          )}
         </TabsList>
 
         <TabsContent value="scan" className="mt-3">
