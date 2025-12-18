@@ -42,17 +42,20 @@ function base64ToUint8Array(base64: string): Uint8Array {
 
 /**
  * Encrypt signaling payload to binary format
- * Format: [SS01 magic (4 bytes)][salt (16 bytes)][encrypted payload]
+ * Format: [SS01 magic (4 bytes)][salt (16 bytes)][encrypted compressed payload]
+ * Compression is done before encryption (JSON compresses well, encrypted data doesn't)
  */
 export async function encryptSignalingPayload(
   payload: SignalingPayload,
   pin: string
 ): Promise<Uint8Array> {
   const encoder = new TextEncoder()
-  const payloadBytes = encoder.encode(JSON.stringify(payload))
+  const jsonBytes = encoder.encode(JSON.stringify(payload))
+  // Compress before encryption - JSON/SDP compresses well
+  const compressed = pako.deflate(jsonBytes)
   const salt = generateSalt()
   const key = await deriveKeyFromPin(pin, salt)
-  const encrypted = await encrypt(key, payloadBytes)
+  const encrypted = await encrypt(key, compressed)
 
   // Build binary: [SS01][salt][encrypted]
   const result = new Uint8Array(4 + 16 + encrypted.length)
@@ -64,7 +67,8 @@ export async function encryptSignalingPayload(
 
 /**
  * Decrypt binary signaling payload
- * Expects format: [SS01 magic (4 bytes)][salt (16 bytes)][encrypted payload]
+ * Expects format: [SS01 magic (4 bytes)][salt (16 bytes)][encrypted compressed payload]
+ * Decompression is done after decryption
  */
 export async function decryptSignalingPayload(
   binary: Uint8Array,
@@ -83,8 +87,10 @@ export async function decryptSignalingPayload(
     const salt = binary.slice(4, 20)
     const encrypted = binary.slice(20)
     const key = await deriveKeyFromPin(pin, salt)
-    const plaintext = await decrypt(key, encrypted)
-    const json = new TextDecoder().decode(plaintext)
+    const compressed = await decrypt(key, encrypted)
+    // Decompress after decryption
+    const jsonBytes = pako.inflate(compressed)
+    const json = new TextDecoder().decode(jsonBytes)
     return JSON.parse(json)
   } catch {
     return null
@@ -92,8 +98,8 @@ export async function decryptSignalingPayload(
 }
 
 /**
- * Generate offer as binary data (gzipped binary payload)
- * Returns Uint8Array ready for binary QR code encoding
+ * Generate offer as binary data for QR code encoding
+ * Returns Uint8Array ready for binary QR code (no compression - encrypted data doesn't compress)
  */
 export async function generateOfferQRBinary(
   offer: RTCSessionDescriptionInit,
@@ -117,13 +123,12 @@ export async function generateOfferQRBinary(
     fileSize: metadata.fileSize,
     mimeType: metadata.mimeType,
   }
-  const binary = await encryptSignalingPayload(payload, pin)
-  return pako.gzip(binary)
+  return encryptSignalingPayload(payload, pin)
 }
 
 /**
- * Generate answer as binary data (gzipped binary payload)
- * Returns Uint8Array ready for binary QR code encoding
+ * Generate answer as binary data for QR code encoding
+ * Returns Uint8Array ready for binary QR code (no compression - encrypted data doesn't compress)
  */
 export async function generateAnswerQRBinary(
   answer: RTCSessionDescriptionInit,
@@ -135,20 +140,15 @@ export async function generateAnswerQRBinary(
     sdp: answer.sdp || '',
     candidates: candidates.map((c) => c.candidate),
   }
-  const binary = await encryptSignalingPayload(payload, pin)
-  return pako.gzip(binary)
+  return encryptSignalingPayload(payload, pin)
 }
 
 /**
- * Parse binary QR data (gzipped binary payload)
- * Returns the raw binary payload (ungzipped)
+ * Parse binary QR data
+ * Returns the raw binary payload (pass-through, no decompression needed)
  */
-export function parseBinaryQRPayload(bytes: Uint8Array): Uint8Array | null {
-  try {
-    return pako.ungzip(bytes)
-  } catch {
-    return null
-  }
+export function parseBinaryQRPayload(bytes: Uint8Array): Uint8Array {
+  return bytes
 }
 
 /**

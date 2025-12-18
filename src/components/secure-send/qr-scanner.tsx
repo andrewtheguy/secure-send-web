@@ -20,13 +20,8 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
   )
 
   const handleScan = useCallback((binaryData: Uint8Array) => {
-    // Parse binary QR data (gzipped binary payload)
+    // Parse binary QR data (no decompression needed)
     const binary = parseBinaryQRPayload(binaryData)
-    if (!binary) {
-      setError('QR scanned but data format is invalid')
-      onError?.('QR scanned but data format is invalid')
-      return
-    }
 
     if (!isValidBinaryPayload(binary)) {
       setError('Invalid or unsupported QR payload format')

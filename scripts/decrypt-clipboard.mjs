@@ -6,6 +6,7 @@
  */
 
 import crypto from 'crypto'
+import zlib from 'zlib'
 import { createInterface } from 'readline'
 
 async function readStdin() {
@@ -87,11 +88,17 @@ async function main() {
   console.log('\nDeriving key with PBKDF2 (600k iterations)...')
   const key = await deriveKey(pin, salt)
 
-  // Decrypt
+  // Decrypt and decompress
   try {
-    const plaintext = await decrypt(key, encrypted)
-    const json = plaintext.toString('utf8')
+    const compressed = await decrypt(key, encrypted)
+    console.log('Compressed payload:', compressed.length, 'bytes')
 
+    // Decompress (deflate was used before encryption)
+    const jsonBytes = zlib.inflateSync(compressed)
+    console.log('Decompressed JSON:', jsonBytes.length, 'bytes')
+    console.log('Compression ratio:', (compressed.length / jsonBytes.length * 100).toFixed(1) + '%')
+
+    const json = jsonBytes.toString('utf8')
 
     console.log('\n=== Decrypted Payload Raw ===')
     console.log(json)
