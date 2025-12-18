@@ -25,11 +25,11 @@
     "nostr-tools": "^2.19.3",
     "pako": "^2.1.0",
     "peerjs": "^1.5.5",
-    "qrcode.react": "^4.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "tailwind-merge": "^3.4.0",
-    "tailwindcss": "^4.1.18"
+    "tailwindcss": "^4.1.18",
+    "zxing-wasm": "^2.2.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
