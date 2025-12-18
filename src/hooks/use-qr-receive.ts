@@ -1,8 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import {
   isValidPin,
-  deriveKeyFromPin,
-  decrypt,
   MAX_MESSAGE_SIZE,
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
@@ -124,7 +122,7 @@ export function useQRReceive(): UseQRReceiveReturn {
       }
 
       // Extract metadata from offer
-      const { contentType, totalBytes, fileName, fileSize, mimeType, salt } = offerPayload
+      const { contentType, totalBytes, fileName, fileSize, mimeType } = offerPayload
       const isFile = contentType === 'file'
 
       // Security check: Enforce MAX_MESSAGE_SIZE
@@ -135,11 +133,6 @@ export function useQRReceive(): UseQRReceiveReturn {
         })
         return
       }
-
-      // Derive key from PIN and salt
-      setState({ status: 'generating_answer', message: 'Processing offer...' })
-      const saltBytes = new Uint8Array(salt || [])
-      const key = await deriveKeyFromPin(pin, saltBytes)
 
       if (cancelledRef.current) return
 
@@ -318,24 +311,20 @@ export function useQRReceive(): UseQRReceiveReturn {
       // Send acknowledgment
       rtc.send('ACK')
 
-      // Combine chunks
+      // Combine chunks (data is already decrypted via WebRTC DTLS)
       const totalLength = receivedChunks.reduce((acc, chunk) => acc + chunk.length, 0)
-      const encryptedData = new Uint8Array(totalLength)
+      const receivedData = new Uint8Array(totalLength)
       let offset = 0
       for (const chunk of receivedChunks) {
-        encryptedData.set(chunk, offset)
+        receivedData.set(chunk, offset)
         offset += chunk.length
       }
-
-      // Decrypt
-      setState(s => ({ ...s, message: 'Decrypting...' }))
-      const decryptedData = await decrypt(key, encryptedData)
 
       // Set received content
       if (contentType === 'file') {
         setReceivedContent({
           contentType: 'file',
-          data: decryptedData,
+          data: receivedData,
           fileName: fileName!,
           fileSize: fileSize!,
           mimeType: mimeType!,
@@ -351,7 +340,7 @@ export function useQRReceive(): UseQRReceiveReturn {
           },
         })
       } else {
-        const message = new TextDecoder().decode(decryptedData)
+        const message = new TextDecoder().decode(receivedData)
         setReceivedContent({
           contentType: 'text',
           message,

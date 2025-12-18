@@ -209,12 +209,11 @@ interface SignalingPayload {
   type: 'offer' | 'answer'
   sdp: string                    // WebRTC session description
   candidates: string[]           // ICE candidates
-  salt?: number[]                // Encryption salt (offer only)
   contentType?: 'text' | 'file'  // Content type (offer only)
   fileName?: string              // File name (offer only, if file)
   fileSize?: number              // File size (offer only, if file)
   mimeType?: string              // MIME type (offer only, if file)
-  totalBytes?: number            // Total encrypted size (offer only)
+  totalBytes?: number            // Total size in bytes (offer only)
 }
 ```
 
@@ -235,6 +234,12 @@ interface SignalingPayload {
 - Binary mode QR codes for efficient byte encoding
 - Single QR code per payload (no chunking needed)
 - Uses `zxing-wasm` for both generation and scanning
+
+**Security Model:**
+QR mode security differs from Nostr/PeerJS modes:
+- **Nostr/PeerJS**: PIN encrypts signaling data sent over public networks, preventing unauthorized connection establishment
+- **QR mode**: Physical QR exchange provides security (only present parties can scan). PIN serves as verification code (both parties confirm the same PIN)
+- **All modes**: Once WebRTC connection is established, DTLS encrypts all data in transit
 
 ### WebRTC (`src/lib/webrtc.ts`)
 
@@ -388,10 +393,14 @@ interface PinExchangePayload {
 ## Security Considerations
 
 1. **Ephemeral Keys**: New keypair generated for each transfer
-2. **Forward Secrecy**: PIN-derived key is unique per transfer (includes random salt)
+2. **Forward Secrecy**: PIN-derived key is unique per transfer (includes random salt) - applies to Nostr/PeerJS modes
 3. **No Server Trust**: Encrypted data on cloud, relays only see metadata
 4. **PIN Entropy**: ~71 bits with 12-char mixed charset
 5. **Brute-Force Resistance**: 600K PBKDF2 iterations (planned: Argon2id)
+6. **PIN Role by Mode**:
+   - **Nostr/PeerJS**: PIN encrypts signaling, preventing unauthorized P2P connection establishment
+   - **QR**: PIN serves as verification code; security comes from physical QR exchange
+7. **Transport Security**: All P2P transfers use WebRTC DTLS encryption regardless of signaling method
 
 ## File Structure
 

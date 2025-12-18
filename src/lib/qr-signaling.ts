@@ -10,7 +10,6 @@ export interface SignalingPayload {
   sdp: string
   candidates: string[] // ICE candidates as SDP strings
   // Offer-only fields:
-  salt?: number[] // Encryption salt for key derivation
   contentType?: ContentType
   fileName?: string
   fileSize?: number
@@ -25,7 +24,6 @@ export interface SignalingPayload {
 export function generateOfferQRBinary(
   offer: RTCSessionDescriptionInit,
   candidates: RTCIceCandidate[],
-  salt: Uint8Array,
   metadata: {
     contentType: ContentType
     totalBytes: number
@@ -38,7 +36,6 @@ export function generateOfferQRBinary(
     type: 'offer',
     sdp: offer.sdp || '',
     candidates: candidates.map(c => c.candidate),
-    salt: Array.from(salt),
     contentType: metadata.contentType,
     totalBytes: metadata.totalBytes,
     fileName: metadata.fileName,
