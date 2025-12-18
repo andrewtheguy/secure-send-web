@@ -1,19 +1,29 @@
 # Roadmap
 
 ## Planned Features
-### Progressive Web App (PWA)
-Convert to PWA for extended offline functionality:
-- Service worker for caching app assets
-- QR code mode already works offline once loaded; PWA would extend offline period indefinitely
-- Enable "Add to Home Screen" capability
 
 ### Improved Error Handling
 Better user feedback for network errors, relay failures, and WebRTC connection issues.
 
 ## Backlog (Future Considerations)
 - Better website UI/UX
-- Assymetric file encryption
 
+### Asymmetric Encryption with Fixed Public Key
+Add an alternative flow that favors convenience over ephemeral security:
+- Receiver generates or imports a persistent keypair (e.g., X25519 or secp256k1)
+- Receiver shares their public key (as a URL, QR code, or text)
+- Sender encrypts using receiver's public key - no PIN exchange needed
+- Receiver decrypts with their private key
+
+**Use cases:**
+- "Send me files anytime" - receiver shares public key once, accepts transfers indefinitely
+- Integration with existing identity systems (Nostr npub, etc.)
+- Simpler UX when receiver identity is already known
+
+**Trade-offs vs current PIN flow:**
+- More convenient (no real-time coordination needed)
+- Less ephemeral (key reuse vs one-time PIN)
+- Requires receiver to manage/backup their private key
 
 ### NIP-65/NIP-66 Relay Discovery
 Implement automatic relay discovery using Nostr relay list events:
