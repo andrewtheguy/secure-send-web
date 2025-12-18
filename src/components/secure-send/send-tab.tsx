@@ -97,13 +97,14 @@ export function SendTab() {
   const canSendFolder = folderFiles && folderFiles.length > 0 && !isFolderOverLimit && state.status === 'idle' && !isCompressing
   const canSend = mode === 'text' ? canSendText : mode === 'file' ? canSendFiles : canSendFolder
 
-  const handleSend = async () => {
+  const handleSend = async (overrideMethod?: ForcedMethod) => {
     // Determine which method to use
     let methodToUse: SignalingMethod
+    const effectiveMethod = overrideMethod ?? forcedMethod
 
-    if (forcedMethod) {
+    if (effectiveMethod) {
       // User forced a specific method via advanced options
-      methodToUse = forcedMethod.replace('-only', '') as SignalingMethod
+      methodToUse = effectiveMethod.replace('-only', '') as SignalingMethod
     } else {
       // Smart mode: test Nostr relay availability first, then PeerJS
       setDetectingMethod(true)
@@ -207,10 +208,8 @@ export function SendTab() {
   const handleUseManualExchange = () => {
     setSignalingUnavailable(false)
     setForcedMethod('manual-only')
-    // Trigger send with a small delay to ensure state is updated
-    setTimeout(() => {
-      handleSend()
-    }, 0)
+    // Pass method directly to avoid state timing issues
+    handleSend('manual-only')
   }
 
   const handleRetrySignaling = () => {
@@ -573,7 +572,7 @@ export function SendTab() {
               </div>
             </div>
           ) : (
-            <Button onClick={handleSend} disabled={!canSend || detectingMethod} className="w-full">
+            <Button onClick={() => handleSend()} disabled={!canSend || detectingMethod} className="w-full">
               <Send className="mr-2 h-4 w-4" />
               Generate PIN & Send
             </Button>
