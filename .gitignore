@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# WASM files (copied from node_modules via postinstall)
+public/*.wasm
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
