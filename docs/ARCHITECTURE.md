@@ -99,13 +99,13 @@ Sender                              Receiver
   ├─── Generate PIN, create WebRTC     │
   │    offer, encrypt content          │
   │                                    │
-  ├─── Display Offer QR code(s) ──────>│ (scan or paste)
-  │    (JSON → gzip → base45 → QR)     │
+  ├─── Display Offer QR code ─────────>│ (scan or paste)
+  │    (JSON → gzip → binary QR)       │
   │                                    │
   │                                    ├─── Decode QR, validate PIN
   │                                    ├─── Create WebRTC answer
   │                                    │
-  │    (scan or paste) <──────────────┤ Display Answer QR code(s)
+  │    (scan or paste) <──────────────┤ Display Answer QR code
   │                                    │
   ├─── Process answer, establish       │
   │    WebRTC connection               │
@@ -119,14 +119,12 @@ If P2P connection fails → Transfer fails (no server fallback)
 ```
 
 **QR Code Format:**
-- Payload: `SignalingPayload` JSON → gzip compress → base45 encode
-- Split into chunks if >1000 chars: `X/Y:data$` format
-  - `X`: chunk index (1-9)
-  - `Y`: total chunks (1-9)
-  - `data`: base45-encoded portion
-  - `$`: integrity marker
-- Example: `1/3:ABC123XYZ$` (chunk 1 of 3)
+- Payload: `SignalingPayload` JSON → gzip compress → binary QR code (8-bit byte mode)
+- Single QR code (~2000 bytes capacity, sufficient for WebRTC signaling)
 - Copy/paste uses raw JSON (no encoding)
+
+> **Note:** Prior to PR #15, QR codes used base45 encoding with multi-QR chunking.
+> For the previous implementation, see commit `89d935b3b61ea37c9f98bc85de4d4c78c7be3891`.
 
 ## Key Components
 
@@ -200,9 +198,9 @@ Fully offline signaling method using QR codes for WebRTC offer/answer exchange.
 
 **How it works:**
 - Sender generates WebRTC offer with ICE candidates
-- Offer payload encoded as: JSON → gzip → base45 → split into QR chunks
-- Receiver scans QR codes (or pastes raw JSON), creates answer
-- Answer sent back via same encoding (QR codes or raw JSON paste)
+- Offer payload encoded as: JSON → gzip → binary QR code
+- Receiver scans QR code (or pastes raw JSON), creates answer
+- Answer sent back via same encoding (QR code or raw JSON paste)
 - Both peers establish WebRTC connection using exchanged SDP/ICE candidates
 
 **Payload Structure:**
@@ -220,31 +218,23 @@ interface SignalingPayload {
 }
 ```
 
-**QR Chunk Format (`X/Y:data$`):**
-- Fixed 4-char header: `X/Y:` where X=index (1-9), Y=total (1-9)
-- Data: base45-encoded payload portion
-- End marker: `$` for integrity validation
-- Max chunk size: 1000 chars (optimized for QR code capacity)
-- Max 9 QR codes per payload
-
 **Encoding Pipeline:**
 1. `SignalingPayload` object
 2. `JSON.stringify()` → JSON string
-3. `pako.gzip()` → compressed bytes
-4. `base45Encode()` → alphanumeric string (QR-friendly)
-5. `splitQRData()` → array of QR chunks with headers
+3. `pako.gzip()` → compressed bytes (~800-1200 bytes for typical WebRTC signaling)
+4. Binary QR code (8-bit byte mode, ~2000 bytes capacity)
 
 **Input Methods:**
 | Method | Encoding | Use Case |
 |--------|----------|----------|
-| QR Scan | base45 + gzip | Camera available |
+| QR Scan | Binary (gzip) | Camera available |
 | Paste | Raw JSON | No camera, text-based exchange |
 
 **Key Features:**
 - No server required - fully air-gapped operation
-- Base45 encoding uses QR alphanumeric charset (RFC 9285)
-- Multi-QR support with manual navigation
-- Chunk header format ensures first char is never space (won't get trimmed)
+- Binary mode QR codes for efficient byte encoding
+- Single QR code per payload (no chunking needed)
+- Uses `zxing-wasm` for both generation and scanning
 
 ### WebRTC (`src/lib/webrtc.ts`)
 
@@ -320,8 +310,8 @@ Fallback storage when P2P connection cannot be established (15s timeout). Not us
 2. Generate PIN, derive encryption key with salt
 3. Create WebRTC offer with ICE candidates
 4. Wait for ICE gathering to complete
-5. Encode offer payload: JSON → gzip → base45 → split into QR chunks
-6. Display QR codes (with navigation for multi-QR) and raw JSON copy button
+5. Encode offer payload: JSON → gzip → binary QR code
+6. Display QR code and raw JSON copy button
 7. Wait for user to input receiver's answer (scan or paste)
 8. Process answer, establish WebRTC connection
 9. Encrypt and send data via data channel
@@ -333,8 +323,8 @@ Fallback storage when P2P connection cannot be established (15s timeout). Not us
 3. Parse offer, extract metadata and salt
 4. Derive encryption key from PIN and salt
 5. Create WebRTC answer with ICE candidates
-6. Encode answer payload: JSON → gzip → base45 → split into QR chunks
-7. Display QR codes and raw JSON copy button
+6. Encode answer payload: JSON → gzip → binary QR code
+7. Display QR code and raw JSON copy button
 8. Wait for WebRTC connection to establish
 9. Receive encrypted data via data channel
 10. Decrypt and present content
@@ -420,11 +410,13 @@ src/
 │   │   └── relays.ts        # Default relays
 │   ├── peerjs-signaling.ts  # PeerJS wrapper (signaling option 2)
 │   ├── qr-signaling.ts      # QR code signaling (signaling option 3)
-│   ├── qr-utils.ts          # QR code generation utilities
-│   ├── base45.ts            # Base45 encoding/decoding (RFC 9285)
+│   ├── qr-utils.ts          # Binary QR code generation (zxing-wasm)
 │   ├── webrtc.ts            # WebRTC connection management
 │   ├── cloud-storage.ts     # Cloud fallback (Nostr mode only)
 │   └── file-utils.ts        # File reading utilities
+├── workers/
+│   ├── qrGenerator.worker.ts    # Binary QR generation (zxing-wasm/full)
+│   └── zxing-qr-scanner.worker.ts # QR scanning (zxing-wasm/reader)
 ├── hooks/
 │   ├── use-nostr-send.ts    # Sender hook (Nostr mode)
 │   ├── use-nostr-receive.ts # Receiver hook (Nostr mode)
@@ -435,8 +427,8 @@ src/
 │   └── useQRScanner.ts      # Camera-based QR scanning hook
 ├── components/
 │   └── secure-send/
-│       ├── qr-display.tsx   # Multi-QR display with navigation
-│       ├── qr-scanner.tsx   # QR scanner with chunk collection
+│       ├── qr-display.tsx   # Binary QR code display
+│       ├── qr-scanner.tsx   # QR scanner (binary mode)
 │       └── qr-input.tsx     # Dual input (scan or paste)
 └── pages/                   # Page components
 ```
