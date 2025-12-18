@@ -69,6 +69,7 @@ function minifyCandidate(candidate: string): string {
     .replace(/ generation \d+/g, '')
     .replace(/ ufrag \S+/g, '')
     .replace(/ network-id \d+/g, '')
+    .replace(/ network-cost \d+/g, '')
     .trim()
 
   // Parse candidate string
@@ -84,6 +85,16 @@ function minifyCandidate(candidate: string): string {
 
   const [, foundation, component, proto, priority, ip, port, type, raddr, rport, tcptype] = match
 
+  // Skip minification for mDNS .local addresses (can't be IP-encoded)
+  if (ip.endsWith('.local') || (raddr && raddr.endsWith('.local'))) {
+    return stripped
+  }
+
+  // Skip if IP is not a valid IPv4/IPv6 (e.g., 0.0.0.0 or ::)
+  if (ip === '0.0.0.0' || ip === '::') {
+    return stripped
+  }
+
   // Build compact form with ~ prefix
   const parts = [
     encodeUint32(parseInt(foundation, 10)),  // foundation → base64
@@ -96,7 +107,7 @@ function minifyCandidate(candidate: string): string {
   ]
 
   // Add optional fields
-  if (raddr) {
+  if (raddr && raddr !== '0.0.0.0' && raddr !== '::') {
     parts.push(encodeIP(raddr))
     parts.push(encodeUint16(parseInt(rport || '0', 10)))
   }
@@ -108,9 +119,19 @@ function minifyCandidate(candidate: string): string {
 }
 
 /**
- * Expand minified candidate back to full format (v2 compact format)
+ * Expand minified candidate back to full format
+ * Handles both compact (~prefixed) and plain formats
  */
 function expandCandidate(minified: string): string {
+  // If not compact format, just add generation 0 if needed
+  if (!minified.startsWith('~')) {
+    if (!minified.includes(' generation ')) {
+      return minified + ' generation 0'
+    }
+    return minified
+  }
+
+  // Parse compact format
   const parts = minified.slice(1).split('|') // Remove ~ prefix
   const foundation = decodeUint32(parts[0])
   const component = parts[1]
