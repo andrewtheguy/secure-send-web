@@ -3,11 +3,11 @@ import { ClipboardPaste, AlertCircle, Camera } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { parseJSONPayload, isValidEncryptedSignalingPayload, type EncryptedSignalingPayload } from '@/lib/qr-signaling'
+import { parseClipboardPayload, isValidBinaryPayload } from '@/lib/qr-signaling'
 import { QRScanner } from './qr-scanner'
 
 interface QRInputProps {
-  onSubmit: (payload: EncryptedSignalingPayload) => void
+  onSubmit: (payload: Uint8Array) => void
   expectedType: 'offer' | 'answer'
   label?: string
   disabled?: boolean
@@ -32,33 +32,33 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
     }
   }, [])
 
-  // Paste tab handles ONLY raw JSON
+  // Paste tab handles base64-encoded binary payload
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim()
     if (!trimmed) {
-      setError('Please paste JSON data')
+      setError('Please paste the data')
       return
     }
 
-    // Parse as raw JSON
-    const payload = parseJSONPayload(trimmed)
-    if (!payload) {
-      setError('Invalid JSON format. Make sure you copied the complete text.')
+    // Parse as base64 binary payload
+    const binary = parseClipboardPayload(trimmed)
+    if (!binary) {
+      setError('Invalid format. Make sure you copied the complete text.')
       return
     }
 
-    if (!isValidEncryptedSignalingPayload(payload)) {
-      setError('Malformed encrypted payload')
+    if (!isValidBinaryPayload(binary)) {
+      setError('Invalid or unsupported payload format')
       return
     }
 
     setError(null)
-    onSubmit(payload)
-  }, [value, expectedType, onSubmit])
+    onSubmit(binary)
+  }, [value, onSubmit])
 
-  const handleScanSuccess = useCallback((payload: EncryptedSignalingPayload) => {
+  const handleScanSuccess = useCallback((binary: Uint8Array) => {
     setError(null)
-    onSubmit(payload)
+    onSubmit(binary)
   }, [onSubmit])
 
   const handleScanError = useCallback((err: string) => {
@@ -118,7 +118,7 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
                 setValue(e.target.value)
                 setError(null)
               }}
-              placeholder={`Paste the ${expectedType} JSON data here...`}
+              placeholder={`Paste the ${expectedType} data here...`}
               className="min-h-[100px] font-mono text-xs"
               disabled={disabled}
             />

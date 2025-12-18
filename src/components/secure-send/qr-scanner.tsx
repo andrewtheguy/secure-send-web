@@ -2,11 +2,11 @@ import { useState, useCallback } from 'react'
 import { RefreshCw, AlertCircle, Loader2, Camera } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useQRScanner } from '@/hooks/useQRScanner'
-import { parseBinaryQRPayload, isValidEncryptedSignalingPayload, type EncryptedSignalingPayload } from '@/lib/qr-signaling'
+import { parseBinaryQRPayload, isValidBinaryPayload } from '@/lib/qr-signaling'
 import { isMobileDevice } from '@/lib/utils'
 
 interface QRScannerProps {
-  onScan: (payload: EncryptedSignalingPayload) => void
+  onScan: (binary: Uint8Array) => void
   expectedType: 'offer' | 'answer'
   onError?: (error: string) => void
   disabled?: boolean
@@ -20,22 +20,22 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
   )
 
   const handleScan = useCallback((binaryData: Uint8Array) => {
-    // Parse binary QR data (gzipped JSON)
-    const payload = parseBinaryQRPayload(binaryData)
-    if (!payload) {
+    // Parse binary QR data (gzipped binary payload)
+    const binary = parseBinaryQRPayload(binaryData)
+    if (!binary) {
       setError('QR scanned but data format is invalid')
       onError?.('QR scanned but data format is invalid')
       return
     }
 
-    if (!isValidEncryptedSignalingPayload(payload)) {
-      setError('Malformed encrypted QR payload')
-      onError?.('Malformed encrypted QR payload')
+    if (!isValidBinaryPayload(binary)) {
+      setError('Invalid or unsupported QR payload format')
+      onError?.('Invalid or unsupported QR payload format')
       return
     }
 
     setError(null)
-    onScan(payload)
+    onScan(binary)
   }, [onScan, onError])
 
   const handleError = useCallback((err: string) => {

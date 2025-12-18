@@ -121,7 +121,7 @@ Note: QR mode avoids signaling servers. For offline operation, devices must be o
 ```
 
 **QR Code Format:**
-- Binary payload: `[0x01 version][salt][encrypted SignalingPayload]`
+- Binary payload: `[4 bytes: "SS01" magic (0x53 0x53 0x30 0x31)][16 bytes: salt][encrypted SignalingPayload]`
 - QR: gzip compress binary → binary QR code (8-bit byte mode, ~2000 bytes capacity)
 - Copy/paste: base64 encode binary → text string for clipboard
 
@@ -207,14 +207,14 @@ Fully offline signaling method using QR codes for WebRTC offer/answer exchange.
 
 **Binary Payload Format:**
 ```
-[1 byte: version 0x01][16 bytes: salt][remaining: AES-GCM encrypted SignalingPayload]
+[4 bytes: "SS01" magic (0x53 0x53 0x30 0x31)][16 bytes: salt][remaining: AES-GCM encrypted SignalingPayload]
 ```
-This compact binary format avoids JSON overhead and double base64 encoding.
+The "SS01" magic header (Secure Send version 1) identifies the format and allows for future versioning. This compact binary format avoids JSON overhead and double base64 encoding.
 
 **Encoding Pipeline:**
 1. `SignalingPayload` object → JSON string
 2. Encrypt with PIN-derived key (AES-GCM)
-3. Construct binary: `[0x01][salt][encrypted bytes]`
+3. Construct binary: `[SS01][salt][encrypted bytes]`
 
 **Output Methods:**
 | Method | Encoding | Use Case |
