@@ -1,6 +1,19 @@
 # Roadmap
 
 ## Planned Features
+### Progressive Web App (PWA)
+Convert to PWA for extended offline functionality:
+- Service worker for caching app assets
+- QR code mode already works offline once loaded; PWA would extend offline period indefinitely
+- Enable "Add to Home Screen" capability
+
+### Improved Error Handling
+Better user feedback for network errors, relay failures, and WebRTC connection issues.
+
+## Backlog (Future Considerations)
+- Better website UI/UX
+- Assymetric file encryption
+
 
 ### NIP-65/NIP-66 Relay Discovery
 Implement automatic relay discovery using Nostr relay list events:
@@ -18,19 +31,6 @@ Current chunked implementation still loads 10MB chunks into memory.
 - Implement true streaming with smaller buffer sizes
 - Use Streams API for more efficient memory usage
 - Enable even larger file transfers
-
-### Improved Error Handling
-Better user feedback for network errors, relay failures, and WebRTC connection issues.
-
-## Backlog (Future Considerations)
-- Better website UI/UX
-- Assymetric file encryption
-
-### Progressive Web App (PWA)
-Convert to PWA for extended offline functionality:
-- Service worker for caching app assets
-- QR code mode already works offline once loaded; PWA would extend offline period indefinitely
-- Enable "Add to Home Screen" capability
 
 ### Argon2id Key Derivation
 Replace PBKDF2 with Argon2id (via WASM) for stronger resistance to brute-force attacks on the PIN.
