@@ -34,7 +34,7 @@ export function ReceiveTab() {
   // Use the appropriate hook based on detected signaling method from PIN
   const activeHook = detectedMethod === 'nostr' ? nostrHook : detectedMethod === 'peerjs' ? peerJSHook : manualHook
   const { state: rawState, receivedContent, receive, cancel, reset } = activeHook
-  const submitOffer = detectedMethod === 'qr' ? manualHook.submitOffer : undefined
+  const submitOffer = detectedMethod === 'manual' ? manualHook.submitOffer : undefined
 
   // Normalize state for QR hook (it has additional status values)
   const state = rawState as typeof nostrHook.state & { answerQRData?: Uint8Array; clipboardData?: string }
@@ -197,8 +197,8 @@ export function ReceiveTab() {
   }
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
-  const showQRInput = detectedMethod === 'qr' && state.status === 'waiting_for_offer'
-  const showQRDisplay = detectedMethod === 'qr' && state.answerQRData && state.status === 'showing_answer_qr'
+  const showQRInput = detectedMethod === 'manual' && state.status === 'waiting_for_offer'
+  const showQRDisplay = detectedMethod === 'manual' && state.answerQRData && state.status === 'showing_answer_qr'
 
   return (
     <div className="space-y-4 pt-4">
@@ -217,7 +217,7 @@ export function ReceiveTab() {
                 PIN cleared due to inactivity. Please re-enter.
               </p>
             )}
-            {detectedMethod === 'qr' && isPinValid && (
+            {detectedMethod === 'manual' && isPinValid && (
               <p className="text-xs text-muted-foreground">
                 QR mode detected. You'll scan the sender's QR code next.
               </p>

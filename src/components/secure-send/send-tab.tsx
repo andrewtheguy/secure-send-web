@@ -19,7 +19,7 @@ import { compressFilesToZip, getFolderName, getTotalSize, supportsFolderSelectio
 import type { SignalingMethod } from '@/lib/nostr/types'
 
 type ContentMode = 'text' | 'file' | 'folder'
-type ForcedMethod = 'nostr-only' | 'peerjs-only' | 'qr-only'
+type ForcedMethod = 'nostr-only' | 'peerjs-only' | 'manual-only'
 
 // Declare global for TypeScript
 declare global {
@@ -60,9 +60,9 @@ export function SendTab() {
   const manualHook = useManualSend()
 
   // Use the appropriate hook based on active method (defaults to nostr before detection)
-  const activeHook = activeMethod === 'peerjs' ? peerJSHook : activeMethod === 'qr' ? manualHook : nostrHook
+  const activeHook = activeMethod === 'peerjs' ? peerJSHook : activeMethod === 'manual' ? manualHook : nostrHook
   const { state: rawState, pin, cancel } = activeHook
-  const submitAnswer = activeMethod === 'qr' ? manualHook.submitAnswer : undefined
+  const submitAnswer = activeMethod === 'manual' ? manualHook.submitAnswer : undefined
 
   // Normalize state for QR hook (it has additional status values)
   const state = rawState as typeof nostrHook.state & { offerQRData?: Uint8Array; clipboardData?: string }
@@ -206,7 +206,7 @@ export function SendTab() {
 
   const handleUseManualExchange = () => {
     setSignalingUnavailable(false)
-    setForcedMethod('qr-only')
+    setForcedMethod('manual-only')
     // Trigger send with a small delay to ensure state is updated
     setTimeout(() => {
       handleSend()
@@ -279,8 +279,8 @@ export function SendTab() {
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
   const showPinDisplay = pin && (state.status === 'waiting_for_receiver' || state.status === 'showing_offer_qr')
-  const showQRDisplay = activeMethod === 'qr' && state.offerQRData && (state.status === 'showing_offer_qr' || state.status === 'waiting_for_receiver')
-  const showQRInput = activeMethod === 'qr' && state.status === 'showing_offer_qr'
+  const showQRDisplay = activeMethod === 'manual' && state.offerQRData && (state.status === 'showing_offer_qr' || state.status === 'waiting_for_receiver')
+  const showQRInput = activeMethod === 'manual' && state.status === 'showing_offer_qr'
 
   return (
     <div className="space-y-4 pt-4">
@@ -517,8 +517,8 @@ export function SendTab() {
                     </Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="qr-only" id="qr-only" />
-                    <Label htmlFor="qr-only" className="text-sm font-normal cursor-pointer flex items-center gap-1">
+                    <RadioGroupItem value="manual-only" id="manual-only" />
+                    <Label htmlFor="manual-only" className="text-sm font-normal cursor-pointer flex items-center gap-1">
                       <QrCode className="h-3 w-3" />
                       Manual
                     </Label>
@@ -597,7 +597,7 @@ export function SendTab() {
               ) : (
                 <>
                   <QrCode className="h-3 w-3" />
-                  <span>Using QR{forcedMethod ? ' (forced)' : ''}</span>
+                  <span>Using Manual{forcedMethod ? ' (forced)' : ''}</span>
                 </>
               )}
             </div>

@@ -150,7 +150,7 @@ export function useManualSend(): UseManualSendReturn {
 
       // Generate PIN and derive encryption key
       setState({ status: 'generating_offer', message: 'Generating secure PIN...' })
-      const newPin = generatePinForMethod('qr')
+      const newPin = generatePinForMethod('manual')
       setPin(newPin)
 
       const salt = generateSalt()
