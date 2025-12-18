@@ -77,7 +77,7 @@ All signaling methods share a **unified encryption layer**: content is encrypted
 **Signaling Methods** (sender chooses):
 - **Nostr** (default): Decentralized relay signaling with cloud fallback
 - **PeerJS**: Simpler P2P via PeerJS cloud server (no fallback)
-- **QR Code**: No signaling server; uses STUN for NAT traversal. Works without internet on same local network (not air-gapped)
+- **Manual Exchange**: No internet required. Exchange signaling via QR scan or copy/paste (camera optional). Works on same local network (not air-gapped)
 
 **Data Transfer**: WebRTC P2P preferred; cloud fallback available in Nostr mode only.
 
@@ -88,7 +88,7 @@ See [Architecture](./docs/ARCHITECTURE.md) for detailed transfer flows and encry
 The signaling method is encoded in the PIN's first character:
 - **Uppercase letter** (A-Z): Nostr signaling
 - **Lowercase letter** (a-z): PeerJS signaling
-- **Digit "2"**: QR code signaling
+- **Digit "2"**: Manual exchange (QR or copy/paste)
 
 Receivers don't need to select a signaling method - it's automatically detected from the PIN.
 

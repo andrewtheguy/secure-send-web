@@ -23,8 +23,9 @@ By default, Nostr is used for signaling. PeerJS and QR are available as alternat
 | Cloud Fallback | Yes (tmpfiles.org) | No | No |
 | Reliability | Higher (fallback available) | P2P only | P2P only |
 | Privacy | Better (no central server) | PeerJS server sees peer IDs | Best (no signaling server) |
-| Complexity | More complex | Simpler | Manual QR exchange |
-| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | No signaling server; works without internet on local network (not air-gapped) |
+| Complexity | More complex | Simpler | Manual exchange (QR or copy/paste) |
+| Internet Required | Yes | Yes | No (works on local network) |
+| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | Offline transfers, no signaling server |
 
 ## Transfer Flow
 
@@ -97,7 +98,7 @@ Sender                              Receiver
 If P2P connection fails → Transfer fails (no cloud fallback)
 ```
 
-### QR Mode (No Signaling Server)
+### Manual Exchange Mode (No Internet Required)
 ```
 Sender                              Receiver
   │                                    │
@@ -124,9 +125,18 @@ Sender                              Receiver
   ✓                                    ✓
 
 If P2P connection fails → Transfer fails (no server fallback)
-
-Note: QR mode avoids signaling servers but uses STUN (stun.l.google.com) for NAT traversal. Works without internet if devices are on the same local network (WebRTC connects via local ICE candidates). Does not work air-gapped (requires network connectivity).
 ```
+
+**Requirements:**
+- Both devices need either a working camera OR ability to copy/paste text
+- Camera is optional - encrypted signaling data can be exchanged via clipboard
+- Devices must be on the same network (WiFi, LAN, etc.) - not air-gapped
+- No internet connection required if both devices are on the local network
+
+**How it works without internet:**
+- STUN server (stun.l.google.com) is used when available for NAT traversal
+- On local network without internet, WebRTC discovers local ICE candidates directly
+- Connection establishes via local IP addresses without external servers
 
 **QR Code Format:**
 - Binary payload: `[4 bytes: "SS01" magic][16 bytes: salt][encrypted deflate-compressed SignalingPayload]`
@@ -203,9 +213,9 @@ Alternative signaling method using PeerJS cloud server instead of Nostr relays.
 - Centralized signaling server (PeerJS cloud)
 - Metadata exchange happens over data channel (not signaling)
 
-### QR Signaling (`src/lib/qr-signaling.ts`)
+### Manual Exchange / QR Signaling (`src/lib/qr-signaling.ts`)
 
-Signaling method using QR codes for WebRTC offer/answer exchange. Avoids signaling servers but uses STUN for NAT traversal. Works without internet for devices on the same local network (not air-gapped).
+Signaling method using QR codes or copy/paste for WebRTC offer/answer exchange. No internet connection required - works on same local network (not air-gapped). Camera is optional; signaling data can be exchanged via clipboard.
 
 **How it works:**
 - Sender generates WebRTC offer with ICE candidates
@@ -233,9 +243,10 @@ The "SS01" magic header (Secure Send version 1) identifies the format and allows
 | Copy/Paste | Base64-encoded binary | No camera, text-safe for clipboard |
 
 **Key Features:**
-- No signaling server required - manual QR exchange
-- Uses STUN (stun.l.google.com) for NAT traversal
-- Works without internet on same local network (not air-gapped - requires network connectivity)
+- No signaling server required - manual exchange via QR scan or copy/paste
+- Camera optional - encrypted payload can be copied as text and pasted on other device
+- No internet required - works on same local network (not air-gapped)
+- Uses STUN (stun.l.google.com) when available for NAT traversal
 - Binary mode QR codes for efficient byte encoding
 - Single QR code per payload (no chunking needed)
 - Uses `zxing-wasm` for both generation and scanning
@@ -313,9 +324,9 @@ Fallback storage when P2P connection cannot be established (15s timeout). Not us
 7. On done: send done acknowledgment
 8. If connection fails: transfer fails (no cloud fallback)
 
-**QR Mode:**
+**Manual Exchange Mode:**
 
-**`use-qr-send.ts`** - Sender logic (QR):
+**`use-qr-send.ts`** - Sender logic (Manual Exchange):
 1. Read content (file or text), validate size
 2. Generate PIN and salt, derive encryption key
 3. Create WebRTC offer with ICE candidates
@@ -327,7 +338,7 @@ Fallback storage when P2P connection cannot be established (15s timeout). Not us
 9. Encrypt and send data in 128KB chunks via data channel
 10. Wait for receiver ACK
 
-**`use-qr-receive.ts`** - Receiver logic (QR):
+**`use-qr-receive.ts`** - Receiver logic (Manual Exchange):
 1. Validate PIN entered by user
 2. Wait for user to input sender's offer (scan or paste)
 3. Decrypt offer with PIN, extract metadata and salt

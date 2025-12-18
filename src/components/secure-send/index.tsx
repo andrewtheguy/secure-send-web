@@ -105,8 +105,8 @@ export function SecureSend() {
                     <p className="text-sm">Uses PeerJS cloud server (0.peerjs.com) for simpler P2P signaling. No cloud fallback - transfer fails if P2P connection cannot be established. Simpler but less reliable behind strict NATs.</p>
                   </div>
                   <div>
-                    <p className="text-foreground font-medium">QR Code — PIN starts with "2"</p>
-                    <p className="text-sm">Exchange QR codes directly with receiver. No signaling server required — uses STUN for NAT traversal. Works without internet if devices are on the same local network (not air-gapped). Both parties must exchange QR codes (scan) or copy/paste the encrypted signaling data. P2P only, no fallback.</p>
+                    <p className="text-foreground font-medium">Manual Exchange — PIN starts with "2"</p>
+                    <p className="text-sm">No internet required. Exchange signaling data via QR scan or copy/paste (camera not required). Uses STUN for NAT traversal if available. Works on same local network without internet (not air-gapped). P2P only, no fallback.</p>
                   </div>
                 </div>
               </section>

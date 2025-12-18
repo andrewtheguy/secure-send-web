@@ -449,7 +449,7 @@ export function SendTab() {
               {forcedMethod && (
                 <span className="ml-auto text-xs bg-muted px-2 py-0.5 rounded">
                   {forcedMethod === 'nostr-only' ? 'Nostr only' :
-                   forcedMethod === 'peerjs-only' ? 'PeerJS only' : 'QR only'}
+                   forcedMethod === 'peerjs-only' ? 'PeerJS only' : 'Manual'}
                 </span>
               )}
             </button>
@@ -483,7 +483,7 @@ export function SendTab() {
                     <RadioGroupItem value="qr-only" id="qr-only" />
                     <Label htmlFor="qr-only" className="text-sm font-normal cursor-pointer flex items-center gap-1">
                       <QrCode className="h-3 w-3" />
-                      QR only
+                      Manual
                     </Label>
                   </div>
                 </RadioGroup>
@@ -494,7 +494,7 @@ export function SendTab() {
                       ? 'Force Nostr relays. Transfer fails if relays are unavailable.'
                       : forcedMethod === 'peerjs-only'
                         ? 'Force PeerJS signaling server. No cloud fallback.'
-                        : 'Force QR code exchange. No signaling server needed.'}
+                        : 'Manual exchange via QR scan or copy/paste. No internet required on same local network.'}
                 </p>
               </div>
             )}
