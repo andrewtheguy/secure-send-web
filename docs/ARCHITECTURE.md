@@ -16,14 +16,14 @@ Secure Send is a browser-based encrypted file and message transfer application. 
 
 By default, Nostr is used for signaling. PeerJS and QR are available as alternatives under "Advanced Options" in the UI. Both sender and receiver must use the same method.
 
-| Feature | Nostr (Default) | PeerJS (Advanced) | QR (Serverless Signaling) |
+| Feature | Nostr (Default) | PeerJS (Advanced) | QR (Offline Signaling) |
 |---------|-----------------|-------------------|---------------------------|
 | Signaling Server | Decentralized relays | Centralized (0.peerjs.com) | None (manual QR exchange) |
 | Cloud Fallback | Yes (tmpfiles.org) | No | No |
 | Reliability | Higher (fallback available) | P2P only | P2P only |
 | Privacy | Better (no central server) | PeerJS server sees peer IDs | Best (no signaling server) |
 | Complexity | More complex | Simpler | Manual QR exchange |
-| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | Air-gapped scenarios, works offline once page is loaded |
+| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | Air-gapped scenarios, works without internet |
 
 ## Transfer Flow
 
@@ -95,7 +95,7 @@ Sender                              Receiver
 If P2P connection fails → Transfer fails (no cloud fallback)
 ```
 
-### QR Mode (Serverless Signaling)
+### QR Mode (Offline Signaling)
 ```
 Sender                              Receiver
   │                                    │
@@ -201,7 +201,7 @@ Alternative signaling method using PeerJS cloud server instead of Nostr relays.
 
 ### QR Signaling (`src/lib/qr-signaling.ts`)
 
-Fully offline signaling method using QR codes for WebRTC offer/answer exchange.
+Fully offline signaling method using QR codes for WebRTC offer/answer exchange. Works without internet for devices on the same local network.
 
 **How it works:**
 - Sender generates WebRTC offer with ICE candidates

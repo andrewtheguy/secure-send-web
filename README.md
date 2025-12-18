@@ -12,7 +12,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 - **Cloud fallback**: Falls back to cloud storage (tmpfiles.org) if WebRTC connection fails
 - **End-to-end encryption**: All transfers use AES-256-GCM encryption with unique nonces per chunk, in addition to WebRTC DTLS
 - **No accounts required**: Ephemeral keypairs are generated for each transfer
-- **Multiple signaling methods**: Choose between Nostr relays (with cloud fallback), PeerJS (simpler P2P), or QR codes (serverless)
+- **Multiple signaling methods**: Choose between Nostr relays (with cloud fallback), PeerJS (simpler P2P), or QR codes (works without internet)
 - **Auto-detection**: Receiver automatically detects signaling method from PIN format
 
 ## How It Works
@@ -77,7 +77,7 @@ The application uses a hybrid transport approach:
 1. **Signaling Methods** (sender chooses in Advanced Options):
    - **Nostr** (default): PIN exchange and WebRTC signaling via decentralized Nostr relays. Falls back to encrypted cloud transfer if P2P fails.
    - **PeerJS**: Uses PeerJS cloud server (0.peerjs.com) for simpler signaling. No cloud fallback - P2P only.
-   - **QR Code**: Exchange WebRTC signaling data via QR codes. Serverless signaling. Works offline once the page is loaded - sender and receiver must be on the same local network so WebRTC can connect using local IP addresses without STUN server assistance. Both parties must exchange QR codes (scan) or copy/paste the encrypted signaling data (too long to type manually). P2P only, no fallback.
+   - **QR Code**: Exchange WebRTC signaling data via QR codes. Works without internet - no signaling server required. Devices must be on the same local network for WebRTC to connect via local IP addresses when offline. Both parties must exchange QR codes (scan) or copy/paste the encrypted signaling data. P2P only, no fallback.
 2. **Data Transfer**:
    - **WebRTC P2P** (default): Direct peer-to-peer connection for fastest transfer
    - **Cloud Fallback**: If WebRTC fails (Nostr mode only), encrypted data is uploaded to cloud storage with automatic failover
