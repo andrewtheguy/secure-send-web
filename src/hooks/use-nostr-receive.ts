@@ -8,6 +8,7 @@ import {
   parseChunkMessage,
   decryptChunk,
   MAX_MESSAGE_SIZE,
+  ENCRYPTION_CHUNK_SIZE,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -219,8 +220,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       const transferResult = await new Promise<{ mode: 'p2p' | 'cloud' | 'inline'; data: Uint8Array }>((resolve, reject) => {
         let rtc: WebRTCConnection | null = null
-        // Store decrypted chunks by index for on-the-fly decryption
-        const decryptedP2PChunks: Map<number, Uint8Array> = new Map()
+
+        // Pre-allocate buffer for received data to avoid 2x memory during assembly
+        // For files, use fileSize; for text, we'll grow as needed
+        const expectedSize = payload.fileSize || 0
+        let combinedBuffer: Uint8Array | null = expectedSize > 0 ? new Uint8Array(expectedSize) : null
+        const receivedChunkIndices: Set<number> = new Set()
         let totalDecryptedBytes = 0
         let settled = false
         let cloudTransferStarted = false
@@ -259,9 +264,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 const expectedChunks = parseInt(data.split(':')[1], 10)
 
                 // Verify all chunks received
-                if (decryptedP2PChunks.size !== expectedChunks) {
-                  console.error(`Chunk count mismatch: got ${decryptedP2PChunks.size}, expected ${expectedChunks}`)
-                  reject(new Error(`Missing chunks: got ${decryptedP2PChunks.size}, expected ${expectedChunks}`))
+                if (receivedChunkIndices.size !== expectedChunks) {
+                  console.error(`Chunk count mismatch: got ${receivedChunkIndices.size}, expected ${expectedChunks}`)
+                  reject(new Error(`Missing chunks: got ${receivedChunkIndices.size}, expected ${expectedChunks}`))
                   return
                 }
 
@@ -275,28 +280,14 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                     rtc.close()
                   }
 
-                  // Assemble decrypted chunks in order
-                  const orderedChunks: Uint8Array[] = []
-                  for (let i = 0; i < expectedChunks; i++) {
-                    const chunk = decryptedP2PChunks.get(i)
-                    if (!chunk) {
-                      reject(new Error(`Missing chunk ${i}`))
-                      return
-                    }
-                    orderedChunks.push(chunk)
-                  }
+                  // Buffer is already assembled - just trim to actual size if needed
+                  const result = combinedBuffer
+                    ? combinedBuffer.slice(0, totalDecryptedBytes)
+                    : new Uint8Array(0)
 
-                  const totalLen = orderedChunks.reduce((acc, val) => acc + val.length, 0)
-                  const combined = new Uint8Array(totalLen)
-                  let offset = 0
-                  for (const b of orderedChunks) {
-                    combined.set(b, offset)
-                    offset += b.length
-                  }
-
-                  console.log(`P2P transfer complete: received and decrypted ${expectedChunks} chunks`)
+                  console.log(`P2P transfer complete: received and decrypted ${expectedChunks} chunks (${totalDecryptedBytes} bytes)`)
                   webRTCSuccess = true
-                  resolve({ mode: 'p2p', data: combined })
+                  resolve({ mode: 'p2p', data: result })
                 }
                 return
               }
@@ -310,14 +301,28 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
               // Handle encrypted chunk data
               if (data instanceof ArrayBuffer) {
-                // Parse and decrypt chunk on-the-fly
+                // Parse and decrypt chunk on-the-fly, write directly to buffer
                 (async () => {
                   try {
                     const { chunkIndex, encryptedData } = parseChunkMessage(data)
                     const decryptedChunk = await decryptChunk(key!, encryptedData)
 
-                    // Store decrypted chunk
-                    decryptedP2PChunks.set(chunkIndex, decryptedChunk)
+                    // Calculate write position based on chunk index
+                    const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE
+
+                    // Ensure buffer is large enough (for text messages or unknown sizes)
+                    const requiredSize = writePosition + decryptedChunk.length
+                    if (!combinedBuffer || combinedBuffer.length < requiredSize) {
+                      const newBuffer = new Uint8Array(Math.max(requiredSize, (combinedBuffer?.length || 0) * 2))
+                      if (combinedBuffer) {
+                        newBuffer.set(combinedBuffer)
+                      }
+                      combinedBuffer = newBuffer
+                    }
+
+                    // Write directly to position in buffer - no intermediate storage!
+                    combinedBuffer.set(decryptedChunk, writePosition)
+                    receivedChunkIndices.add(chunkIndex)
                     totalDecryptedBytes += decryptedChunk.length
 
                     // Update progress
