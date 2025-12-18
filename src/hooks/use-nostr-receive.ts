@@ -5,6 +5,8 @@ import {
   deriveKeyFromPin,
   decrypt,
   encrypt,
+  parseChunkMessage,
+  decryptChunk,
   MAX_MESSAGE_SIZE,
 } from '@/lib/crypto'
 import {
@@ -217,8 +219,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       const transferResult = await new Promise<{ mode: 'p2p' | 'cloud' | 'inline'; data: Uint8Array }>((resolve, reject) => {
         let rtc: WebRTCConnection | null = null
-        let webRTCBuffer: Uint8Array[] = []
-        let webRTCReceivedBytes = 0
+        // Store decrypted chunks by index for on-the-fly decryption
+        const decryptedP2PChunks: Map<number, Uint8Array> = new Map()
+        let totalDecryptedBytes = 0
         let settled = false
         let cloudTransferStarted = false
 
@@ -251,7 +254,17 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               setState(s => ({ ...s, message: 'Receiving via P2P...', useWebRTC: true }))
             },
             (data) => {
-              if (typeof data === 'string' && data === 'DONE') {
+              // Handle DONE message with chunk count (format: "DONE:N")
+              if (typeof data === 'string' && data.startsWith('DONE:')) {
+                const expectedChunks = parseInt(data.split(':')[1], 10)
+
+                // Verify all chunks received
+                if (decryptedP2PChunks.size !== expectedChunks) {
+                  console.error(`Chunk count mismatch: got ${decryptedP2PChunks.size}, expected ${expectedChunks}`)
+                  reject(new Error(`Missing chunks: got ${decryptedP2PChunks.size}, expected ${expectedChunks}`))
+                  return
+                }
+
                 // Transfer complete via WebRTC
                 if (!settled) {
                   settled = true
@@ -262,36 +275,66 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                     rtc.close()
                   }
 
-                  // Reconstruct from buffer
-                  const totalLen = webRTCBuffer.reduce((acc, val) => acc + val.length, 0)
+                  // Assemble decrypted chunks in order
+                  const orderedChunks: Uint8Array[] = []
+                  for (let i = 0; i < expectedChunks; i++) {
+                    const chunk = decryptedP2PChunks.get(i)
+                    if (!chunk) {
+                      reject(new Error(`Missing chunk ${i}`))
+                      return
+                    }
+                    orderedChunks.push(chunk)
+                  }
+
+                  const totalLen = orderedChunks.reduce((acc, val) => acc + val.length, 0)
                   const combined = new Uint8Array(totalLen)
                   let offset = 0
-                  for (const b of webRTCBuffer) {
+                  for (const b of orderedChunks) {
                     combined.set(b, offset)
                     offset += b.length
                   }
 
+                  console.log(`P2P transfer complete: received and decrypted ${expectedChunks} chunks`)
                   webRTCSuccess = true
                   resolve({ mode: 'p2p', data: combined })
                 }
                 return
               }
 
-              if (data instanceof ArrayBuffer) {
-                const bytes = new Uint8Array(data)
-                webRTCBuffer.push(bytes)
-                webRTCReceivedBytes += bytes.length
+              // Handle legacy DONE format (for backwards compatibility)
+              if (typeof data === 'string' && data === 'DONE') {
+                console.warn('Received legacy DONE format without chunk count')
+                // Fall through to old behavior - should not happen with new sender
+                return
+              }
 
-                // Update progress
-                const totalBytes = payload?.fileSize || 0
-                setState(s => ({
-                  ...s,
-                  status: 'receiving',
-                  progress: {
-                    current: webRTCReceivedBytes,
-                    total: totalBytes > 0 ? totalBytes : webRTCReceivedBytes
+              // Handle encrypted chunk data
+              if (data instanceof ArrayBuffer) {
+                // Parse and decrypt chunk on-the-fly
+                (async () => {
+                  try {
+                    const { chunkIndex, encryptedData } = parseChunkMessage(data)
+                    const decryptedChunk = await decryptChunk(key!, encryptedData)
+
+                    // Store decrypted chunk
+                    decryptedP2PChunks.set(chunkIndex, decryptedChunk)
+                    totalDecryptedBytes += decryptedChunk.length
+
+                    // Update progress
+                    const totalBytes = payload?.fileSize || 0
+                    setState(s => ({
+                      ...s,
+                      status: 'receiving',
+                      progress: {
+                        current: totalDecryptedBytes,
+                        total: totalBytes > 0 ? totalBytes : totalDecryptedBytes
+                      }
+                    }))
+                  } catch (err) {
+                    console.error('Failed to decrypt chunk:', err)
+                    // Don't reject immediately - might be a transient error
                   }
-                }))
+                })()
               }
             }
           )
@@ -433,26 +476,26 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           processEvent
         )
 
-        // Query for existing events that may have arrived before subscription
-        // This fixes race condition where sender's offer arrives before receiver subscribes
-        ;(async () => {
-          try {
-            const existingEvents = await client.query([
-              {
-                kinds: [EVENT_KIND_DATA_TRANSFER],
-                '#t': [transferId!],
-                authors: [senderPubkey!],
-                limit: 50,
-              },
-            ])
-            console.log(`Found ${existingEvents.length} existing events for transfer`)
-            for (const event of existingEvents) {
-              await processEvent(event)
+          // Query for existing events that may have arrived before subscription
+          // This fixes race condition where sender's offer arrives before receiver subscribes
+          ; (async () => {
+            try {
+              const existingEvents = await client.query([
+                {
+                  kinds: [EVENT_KIND_DATA_TRANSFER],
+                  '#t': [transferId!],
+                  authors: [senderPubkey!],
+                  limit: 50,
+                },
+              ])
+              console.log(`Found ${existingEvents.length} existing events for transfer`)
+              for (const event of existingEvents) {
+                await processEvent(event)
+              }
+            } catch (err) {
+              console.error('Failed to query existing events:', err)
             }
-          } catch (err) {
-            console.error('Failed to query existing events:', err)
-          }
-        })()
+          })()
 
         // Handle inline text message (no P2P or cloud needed)
         if (payload.textMessage) {
@@ -470,10 +513,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       let contentData: Uint8Array
 
       if (transferResult.mode === 'p2p') {
-        // P2P data is raw content (not encrypted)
+        // P2P data is already decrypted on-the-fly during reception
         contentData = transferResult.data
         webRTCSuccess = true
-        console.log('Received data via P2P')
+        console.log('Received and decrypted data via P2P')
       } else if (transferResult.mode === 'cloud') {
         // Cloud data is encrypted - need to decrypt
         setState(s => ({ ...s, message: 'Decrypting...' }))

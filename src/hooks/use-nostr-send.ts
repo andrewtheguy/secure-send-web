@@ -7,9 +7,11 @@ import {
   deriveKeyFromPin,
   encrypt,
   decrypt,
+  encryptChunk,
   MAX_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
   CLOUD_CHUNK_SIZE,
+  ENCRYPTION_CHUNK_SIZE,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -345,22 +347,36 @@ export function useNostrSend(): UseNostrSendReturn {
                 })
 
                 try {
-                  // Send file content in chunks with backpressure
-                  const chunkSize = 16384 // 16KB chunks for data channel
-                  for (let i = 0; i < contentBytes.length; i += chunkSize) {
-                    if (cancelledRef.current) throw new Error('Cancelled')
-                    const end = Math.min(i + chunkSize, contentBytes.length)
-                    await rtc.sendWithBackpressure(contentBytes.slice(i, end))
+                  // Encrypt and send content in 64KB chunks on-the-fly
+                  // Each chunk is encrypted separately with unique nonce
+                  let chunkIndex = 0
+                  const totalChunks = Math.ceil(contentBytes.length / ENCRYPTION_CHUNK_SIZE)
 
-                    // Update progress
+                  for (let i = 0; i < contentBytes.length; i += ENCRYPTION_CHUNK_SIZE) {
+                    if (cancelledRef.current) throw new Error('Cancelled')
+
+                    const end = Math.min(i + ENCRYPTION_CHUNK_SIZE, contentBytes.length)
+                    const plainChunk = contentBytes.slice(i, end)
+
+                    // Encrypt this chunk with chunk index prefix
+                    const encryptedChunk = await encryptChunk(key, plainChunk, chunkIndex)
+
+                    // Send encrypted chunk as single message
+                    // WebRTC data channel handles fragmentation internally
+                    await rtc.sendWithBackpressure(encryptedChunk)
+
+                    chunkIndex++
+
+                    // Update progress based on original file size
                     setState(s => ({
                       ...s,
                       progress: { current: end, total: contentBytes.length },
                     }))
                   }
 
-                  // Send "DONE" message (small, no backpressure needed)
-                  rtc.send('DONE')
+                  // Send "DONE:N" message with total chunk count for verification
+                  rtc.send(`DONE:${totalChunks}`)
+                  console.log(`P2P transfer complete: sent ${totalChunks} encrypted chunks`)
                   webRTCSuccess = true
                   resolve()
                 } catch (err) {
