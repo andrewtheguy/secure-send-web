@@ -12,7 +12,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 - **Cloud fallback**: Falls back to cloud storage (tmpfiles.org) if WebRTC connection fails
 - **End-to-end encryption**: All transfers use AES-256-GCM encryption with unique nonces per chunk, in addition to WebRTC DTLS
 - **No accounts required**: Ephemeral keypairs are generated for each transfer
-- **Multiple signaling methods**: Choose between Nostr relays (with cloud fallback), PeerJS (simpler P2P), or QR codes (works without internet)
+- **Multiple signaling methods**: Choose between Nostr relays (with cloud fallback), PeerJS (simpler P2P), or Manual Exchange (works without internet on local network)
 - **Auto-detection**: Receiver automatically detects signaling method from PIN format
 
 ## How It Works
@@ -72,23 +72,23 @@ npm run build
 
 ## Transport Layer
 
-The application uses a hybrid transport approach:
+All signaling methods share a **unified encryption layer**: content is encrypted in 128KB AES-256-GCM chunks before transmission, regardless of transport. Receivers preallocate buffers and write directly to position for memory efficiency.
 
-1. **Signaling Methods** (sender chooses in Advanced Options):
-   - **Nostr** (default): PIN exchange and WebRTC signaling via decentralized Nostr relays. Falls back to encrypted cloud transfer if P2P fails.
-   - **PeerJS**: Uses PeerJS cloud server (0.peerjs.com) for simpler signaling. No cloud fallback - P2P only.
-   - **QR Code**: Exchange WebRTC signaling data via QR codes. Works without internet - no signaling server required. Devices must be on the same local network for WebRTC to connect via local IP addresses when offline. Both parties must exchange QR codes (scan) or copy/paste the encrypted signaling data. P2P only, no fallback.
-2. **Data Transfer**:
-   - **WebRTC P2P** (default): Direct peer-to-peer connection for fastest transfer
-   - **Cloud Fallback**: If WebRTC fails (Nostr mode only), encrypted data is uploaded to cloud storage with automatic failover
-3. **Encryption**: All transfers (P2P and cloud) use AES-256-GCM encryption with streaming 256KB chunks. P2P also has DTLS encryption at the WebRTC layer for defense in depth.
+**Signaling Methods** (sender chooses):
+- **Nostr** (default): Requires internet. Decentralized relay signaling. Devices can be on different networks. Has cloud fallback.
+- **PeerJS**: Requires internet. Simpler P2P via PeerJS cloud server. Devices can be on different networks. No fallback.
+- **Manual Exchange**: No internet required. Exchange signaling via QR scan or copy/paste (camera optional). With internet, works across different networks. Without internet, devices must be on same local network.
+
+**Data Transfer**: WebRTC P2P preferred; cloud fallback available in Nostr mode only.
+
+See [Architecture](./docs/ARCHITECTURE.md) for detailed transfer flows and encryption specifics.
 
 ### PIN Auto-Detection
 
 The signaling method is encoded in the PIN's first character:
 - **Uppercase letter** (A-Z): Nostr signaling
 - **Lowercase letter** (a-z): PeerJS signaling
-- **Digit "2"**: QR code signaling
+- **Digit "2"**: Manual exchange (QR or copy/paste)
 
 Receivers don't need to select a signaling method - it's automatically detected from the PIN.
 

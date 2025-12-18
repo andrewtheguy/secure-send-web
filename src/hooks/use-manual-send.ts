@@ -1,8 +1,12 @@
 import { useState, useCallback, useRef } from 'react'
 import {
   generatePinForMethod,
+  generateSalt,
+  deriveKeyFromPin,
+  encryptChunk,
   MAX_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
+  ENCRYPTION_CHUNK_SIZE,
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
 import {
@@ -10,12 +14,12 @@ import {
   generateOfferQRBinary,
   generateClipboardData,
   type SignalingPayload,
-} from '@/lib/qr-signaling'
+} from '@/lib/manual-signaling'
 import type { TransferState, ContentType } from '@/lib/nostr/types'
 import { readFileAsBytes } from '@/lib/file-utils'
 
-// Extended transfer status for QR mode
-export type QRTransferStatus =
+// Extended transfer status for Manual Exchange mode
+export type ManualTransferStatus =
   | 'idle'
   | 'generating_offer'
   | 'showing_offer_qr'
@@ -25,14 +29,14 @@ export type QRTransferStatus =
   | 'complete'
   | 'error'
 
-export interface QRTransferState extends Omit<TransferState, 'status'> {
-  status: QRTransferStatus
+export interface ManualTransferState extends Omit<TransferState, 'status'> {
+  status: ManualTransferStatus
   offerQRData?: Uint8Array  // Binary data for QR code (gzipped JSON)
   clipboardData?: string  // Raw JSON for copy button
 }
 
-export interface UseQRSendReturn {
-  state: QRTransferState
+export interface UseManualSendReturn {
+  state: ManualTransferState
   pin: string | null
   send: (content: string | File) => Promise<void>
   submitAnswer: (answerData: Uint8Array) => void
@@ -43,8 +47,8 @@ const ICE_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 }
 
-export function useQRSend(): UseQRSendReturn {
-  const [state, setState] = useState<QRTransferState>({ status: 'idle' })
+export function useManualSend(): UseManualSendReturn {
+  const [state, setState] = useState<ManualTransferState>({ status: 'idle' })
   const [pin, setPin] = useState<string | null>(null)
 
   const rtcRef = useRef<WebRTCConnection | null>(null)
@@ -144,10 +148,13 @@ export function useQRSend(): UseQRSendReturn {
         }
       }
 
-      // Generate PIN for verification
+      // Generate PIN and derive encryption key
       setState({ status: 'generating_offer', message: 'Generating secure PIN...' })
-      const newPin = generatePinForMethod('qr')
+      const newPin = generatePinForMethod('manual')
       setPin(newPin)
+
+      const salt = generateSalt()
+      const key = await deriveKeyFromPin(newPin, salt)
 
       // Set expiration timeout
       clearExpirationTimeout()
@@ -231,7 +238,7 @@ export function useQRSend(): UseQRSendReturn {
 
       if (cancelledRef.current) return
 
-      // Generate binary QR data with offer + candidates + metadata
+      // Generate binary QR data with offer + candidates + metadata + salt
       const qrBinaryData = await generateOfferQRBinary(
         offerSDP!,
         iceCandidates,
@@ -241,6 +248,7 @@ export function useQRSend(): UseQRSendReturn {
           fileName,
           fileSize,
           mimeType,
+          salt: Array.from(salt), // Include salt for receiver to derive key
         },
         newPin
       )
@@ -255,6 +263,7 @@ export function useQRSend(): UseQRSendReturn {
         fileName,
         fileSize,
         mimeType,
+        salt: Array.from(salt), // Include salt for receiver to derive key
       }
       const clipboardBase64 = await generateClipboardData(offerPayload, newPin)
 
@@ -343,15 +352,20 @@ export function useQRSend(): UseQRSendReturn {
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
       })
 
-      // Send data in chunks
-      const chunkSize = 16384 // 16KB chunks
-      for (let i = 0; i < contentBytes.length; i += chunkSize) {
+      // Send data in encrypted chunks
+      let chunkIndex = 0
+      for (let i = 0; i < contentBytes.length; i += ENCRYPTION_CHUNK_SIZE) {
         if (cancelledRef.current) throw new Error('Cancelled')
 
-        const end = Math.min(i + chunkSize, contentBytes.length)
-        const chunk = contentBytes.slice(i, end)
+        const end = Math.min(i + ENCRYPTION_CHUNK_SIZE, contentBytes.length)
+        const plainChunk = contentBytes.slice(i, end)
 
-        await rtc.sendWithBackpressure(chunk.buffer)
+        // Encrypt this chunk with chunk index prefix
+        const encryptedChunk = await encryptChunk(key, plainChunk, chunkIndex)
+
+        await rtc.sendWithBackpressure(encryptedChunk)
+
+        chunkIndex++
 
         setState(s => ({
           ...s,

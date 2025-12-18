@@ -5,6 +5,84 @@ import { computePinHint } from '@/lib/crypto'
 // PeerJS cloud server configuration
 const PEERJS_HOST = '0.peerjs.com'
 const PEERJS_PORT = 443
+const PEERJS_TEST_TIMEOUT_MS = 5000
+
+export interface PeerJSAvailabilityResult {
+  available: boolean
+  error?: string
+}
+
+/**
+ * Test PeerJS server availability by attempting to connect.
+ * Returns quickly with availability status.
+ */
+export async function testPeerJSAvailability(
+  timeoutMs: number = PEERJS_TEST_TIMEOUT_MS
+): Promise<PeerJSAvailabilityResult> {
+  return new Promise((resolve) => {
+    let peer: Peer | null = null
+    let resolved = false
+
+    const cleanup = () => {
+      if (peer) {
+        try {
+          peer.destroy()
+        } catch {
+          // Ignore cleanup errors
+        }
+        peer = null
+      }
+    }
+
+    const timeoutId = setTimeout(() => {
+      if (!resolved) {
+        resolved = true
+        cleanup()
+        resolve({ available: false, error: 'Connection timeout' })
+      }
+    }, timeoutMs)
+
+    try {
+      // Generate a random test peer ID
+      const testId = `ss-test-${Math.random().toString(36).substring(2, 10)}`
+
+      peer = new Peer(testId, {
+        host: PEERJS_HOST,
+        port: PEERJS_PORT,
+        secure: true,
+        debug: 0, // No logging for test
+      })
+
+      peer.on('open', () => {
+        if (!resolved) {
+          resolved = true
+          clearTimeout(timeoutId)
+          cleanup()
+          resolve({ available: true })
+        }
+      })
+
+      peer.on('error', (err) => {
+        if (!resolved) {
+          resolved = true
+          clearTimeout(timeoutId)
+          cleanup()
+          resolve({ available: false, error: err.message || 'Connection failed' })
+        }
+      })
+    } catch (error) {
+      if (!resolved) {
+        resolved = true
+        clearTimeout(timeoutId)
+        cleanup()
+        resolve({
+          available: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        })
+      }
+    }
+  })
+}
 
 // Derive peer ID from PIN (must be same for sender and receiver)
 export async function derivePeerId(pin: string): Promise<string> {

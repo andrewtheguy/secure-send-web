@@ -98,15 +98,15 @@ export function SecureSend() {
                 <div className="space-y-3 text-muted-foreground">
                   <div>
                     <p className="text-foreground font-medium">Nostr (Default) — PIN starts with uppercase</p>
-                    <p className="text-sm">Uses decentralized Nostr relays for signaling. If P2P connection fails, automatically falls back to encrypted cloud transfer. More reliable but requires multiple relay connections.</p>
+                    <p className="text-sm">Requires internet. Uses decentralized Nostr relays for signaling. Devices can be on different networks. If P2P connection fails, automatically falls back to encrypted cloud transfer.</p>
                   </div>
                   <div>
                     <p className="text-foreground font-medium">PeerJS — PIN starts with lowercase</p>
-                    <p className="text-sm">Uses PeerJS cloud server (0.peerjs.com) for simpler P2P signaling. No cloud fallback - transfer fails if P2P connection cannot be established. Simpler but less reliable behind strict NATs.</p>
+                    <p className="text-sm">Requires internet. Uses PeerJS cloud server for simpler P2P signaling. Devices can be on different networks. No cloud fallback - transfer fails if P2P connection cannot be established.</p>
                   </div>
                   <div>
-                    <p className="text-foreground font-medium">QR Code — PIN starts with "2"</p>
-                    <p className="text-sm">Exchange QR codes directly with receiver. Works without internet — no signaling server required. Devices must be on the same local network for WebRTC to connect via local IP addresses when offline. Both parties must exchange QR codes (scan) or copy/paste the encrypted signaling data. P2P only, no fallback.</p>
+                    <p className="text-foreground font-medium">Manual Exchange — PIN starts with "2"</p>
+                    <p className="text-sm">No internet required. Exchange signaling via QR scan or copy/paste (camera optional). With internet, works across different networks via STUN. Without internet, devices must be on same local network. P2P only, no fallback.</p>
                   </div>
                 </div>
               </section>

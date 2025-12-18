@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import { RefreshCw, AlertCircle, Loader2, Camera } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useQRScanner } from '@/hooks/useQRScanner'
-import { parseBinaryQRPayload, isValidBinaryPayload } from '@/lib/qr-signaling'
+import { parseBinaryQRPayload, isValidBinaryPayload } from '@/lib/manual-signaling'
 import { isMobileDevice } from '@/lib/utils'
 
 interface QRScannerProps {

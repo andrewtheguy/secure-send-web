@@ -3,7 +3,10 @@ import {
   isValidPin,
   deriveKeyFromPin,
   decrypt,
+  parseChunkMessage,
+  decryptChunk,
   MAX_MESSAGE_SIZE,
+  ENCRYPTION_CHUNK_SIZE,
 } from '@/lib/crypto'
 import {
   derivePeerId,
@@ -163,16 +166,17 @@ export function usePeerJSReceive(): UsePeerJSReceiveReturn {
         return
       }
 
-      // Receive file/large text data
-      const receivedChunks: Uint8Array[] = []
-      let receivedBytes = 0
+      // Receive and decrypt file/large text data
+      let contentData = new Uint8Array(metadata.totalBytes)
+      let totalDecryptedBytes = 0
+      const receivedChunkIndices = new Set<number>()
 
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Transfer timeout'))
         }, 10 * 60 * 1000) // 10 minutes
 
-        peerRef.current!.onMessage((message: PeerJSMessage) => {
+        peerRef.current!.onMessage(async (message: PeerJSMessage) => {
           if (cancelledRef.current) {
             clearTimeout(timeout)
             reject(new Error('Cancelled'))
@@ -180,17 +184,38 @@ export function usePeerJSReceive(): UsePeerJSReceiveReturn {
           }
 
           if (message.type === 'chunk' && message.data) {
-            const chunk = new Uint8Array(message.data as ArrayBuffer)
-            receivedChunks.push(chunk)
-            receivedBytes += chunk.length
+            try {
+              // Parse and decrypt chunk
+              const encryptedChunk = new Uint8Array(message.data as ArrayBuffer)
+              const { chunkIndex, encryptedData } = parseChunkMessage(encryptedChunk)
+              const decryptedChunk = await decryptChunk(key, encryptedData)
 
-            setState(s => ({
-              ...s,
-              progress: {
-                current: receivedBytes,
-                total: metadata.totalBytes,
-              },
-            }))
+              // Calculate write position based on chunk index
+              const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE
+
+              // Ensure buffer is large enough
+              const requiredSize = writePosition + decryptedChunk.length
+              if (contentData.length < requiredSize) {
+                const newBuffer = new Uint8Array(Math.max(requiredSize, contentData.length * 2))
+                newBuffer.set(contentData)
+                contentData = newBuffer
+              }
+
+              // Write directly to position in buffer
+              contentData.set(decryptedChunk, writePosition)
+              receivedChunkIndices.add(chunkIndex)
+              totalDecryptedBytes += decryptedChunk.length
+
+              setState(s => ({
+                ...s,
+                progress: {
+                  current: totalDecryptedBytes,
+                  total: metadata.totalBytes,
+                },
+              }))
+            } catch (err) {
+              console.error('Failed to decrypt chunk:', err)
+            }
           } else if (message.type === 'done') {
             clearTimeout(timeout)
             resolve()
@@ -200,14 +225,8 @@ export function usePeerJSReceive(): UsePeerJSReceiveReturn {
 
       if (cancelledRef.current) return
 
-      // Combine chunks
-      const totalLength = receivedChunks.reduce((acc, chunk) => acc + chunk.length, 0)
-      const contentData = new Uint8Array(totalLength)
-      let offset = 0
-      for (const chunk of receivedChunks) {
-        contentData.set(chunk, offset)
-        offset += chunk.length
-      }
+      // Trim buffer to actual content size
+      contentData = contentData.slice(0, totalDecryptedBytes)
 
       // Send done_ack
       peerRef.current!.send({ type: 'done_ack' })

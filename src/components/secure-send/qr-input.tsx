@@ -3,7 +3,7 @@ import { ClipboardPaste, AlertCircle, Camera } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { parseClipboardPayload, isValidBinaryPayload } from '@/lib/qr-signaling'
+import { parseClipboardPayload, isValidBinaryPayload } from '@/lib/manual-signaling'
 import { QRScanner } from './qr-scanner'
 
 interface QRInputProps {

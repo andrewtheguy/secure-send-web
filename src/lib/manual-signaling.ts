@@ -6,8 +6,8 @@ import { deriveKeyFromPin, encrypt, decrypt, generateSalt } from './crypto'
 const MAGIC_HEADER = new Uint8Array([0x53, 0x53, 0x30, 0x31])
 
 /**
- * Signaling Payload - method-agnostic format for the pipeline
- * Used by both QR and copy/paste modes
+ * Signaling Payload - method-agnostic format for Manual Exchange mode
+ * Used by both QR scan and copy/paste methods
  */
 export interface SignalingPayload {
   type: 'offer' | 'answer'
@@ -19,6 +19,7 @@ export interface SignalingPayload {
   fileSize?: number
   mimeType?: string
   totalBytes?: number
+  salt?: number[] // Salt for content encryption key derivation
 }
 
 function uint8ArrayToBase64(bytes: Uint8Array): string {
@@ -110,6 +111,7 @@ export async function generateOfferQRBinary(
     fileName?: string
     fileSize?: number
     mimeType?: string
+    salt?: number[] // Salt for content encryption key derivation
   },
   pin: string
 ): Promise<Uint8Array> {
@@ -122,6 +124,7 @@ export async function generateOfferQRBinary(
     fileName: metadata.fileName,
     fileSize: metadata.fileSize,
     mimeType: metadata.mimeType,
+    salt: metadata.salt,
   }
   return encryptSignalingPayload(payload, pin)
 }

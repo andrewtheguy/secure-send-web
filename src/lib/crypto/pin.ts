@@ -77,7 +77,7 @@ function randomCharFromCharset(charset: string): string {
  * - Lowercase first char (a-z excluding i,l,o) = PeerJS
  * - '2' first char = QR
  */
-export function generatePinForMethod(method: 'nostr' | 'peerjs' | 'qr'): string {
+export function generatePinForMethod(method: 'nostr' | 'peerjs' | 'manual'): string {
   let firstCharset: string
   if (method === 'nostr') firstCharset = NOSTR_FIRST_CHARSET
   else if (method === 'peerjs') firstCharset = PEERJS_FIRST_CHARSET
@@ -117,10 +117,10 @@ export function generatePinForMethod(method: 'nostr' | 'peerjs' | 'qr'): string 
  * - '2' = QR
  * - Other digits/symbols = null (reserved for future protocols)
  */
-export function detectSignalingMethod(pin: string): 'nostr' | 'peerjs' | 'qr' | null {
+export function detectSignalingMethod(pin: string): 'nostr' | 'peerjs' | 'manual' | null {
   if (!pin || pin.length === 0) return null
   const firstChar = pin[0]
-  if (QR_FIRST_CHARSET.includes(firstChar)) return 'qr'
+  if (QR_FIRST_CHARSET.includes(firstChar)) return 'manual'
   if (NOSTR_FIRST_CHARSET.includes(firstChar)) return 'nostr'
   if (PEERJS_FIRST_CHARSET.includes(firstChar)) return 'peerjs'
   return null // Reserved for future protocols
