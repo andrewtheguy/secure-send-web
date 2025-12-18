@@ -37,7 +37,7 @@ export function ReceiveTab() {
   const submitOffer = detectedMethod === 'qr' ? qrHook.submitOffer : undefined
 
   // Normalize state for QR hook (it has additional status values)
-  const state = rawState as typeof nostrHook.state & { answerQRData?: string[]; clipboardData?: string }
+  const state = rawState as typeof nostrHook.state & { answerQRData?: Uint8Array; clipboardData?: string }
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pinInactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null)

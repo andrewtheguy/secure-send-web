@@ -1,5 +1,4 @@
 import pako from 'pako'
-import { base45Encode, base45Decode } from './base45'
 import type { ContentType } from './nostr/types'
 
 /**
@@ -19,27 +18,11 @@ export interface SignalingPayload {
   totalBytes?: number
 }
 
-// Keep old name as alias for compatibility during migration
-export type QRSignalingPayload = SignalingPayload
-
 /**
- * QR chunk format constants
- * Format: X/Y:data$
- * - X: chunk index (1-9)
- * - Y: total chunks (1-9)
- * - data: base45 encoded gzipped JSON
- * - $: end marker for integrity check
+ * Generate offer as binary data (gzipped JSON)
+ * Returns Uint8Array ready for binary QR code encoding
  */
-const HEADER_SIZE = 4  // "X/Y:"
-const END_MARKER_SIZE = 1  // "$"
-const MAX_CHUNKS = 9
-export const MAX_QR_CHUNK_SIZE = 1000  // chars per QR code
-
-/**
- * Generate offer QR data as array of chunks
- * Returns array of QR-ready strings in format: X/Y:base45data$
- */
-export function generateOfferQRData(
+export function generateOfferQRBinary(
   offer: RTCSessionDescriptionInit,
   candidates: RTCIceCandidate[],
   salt: Uint8Array,
@@ -50,7 +33,7 @@ export function generateOfferQRData(
     fileSize?: number
     mimeType?: string
   }
-): string[] {
+): Uint8Array {
   const payload: SignalingPayload = {
     type: 'offer',
     sdp: offer.sdp || '',
@@ -63,27 +46,36 @@ export function generateOfferQRData(
     mimeType: metadata.mimeType,
   }
   const json = JSON.stringify(payload)
-  const compressed = pako.gzip(json)
-  const base45Data = base45Encode(new Uint8Array(compressed))
-  return splitQRData(base45Data)
+  return pako.gzip(json)
 }
 
 /**
- * Generate answer QR data as array of chunks
+ * Generate answer as binary data (gzipped JSON)
+ * Returns Uint8Array ready for binary QR code encoding
  */
-export function generateAnswerQRData(
+export function generateAnswerQRBinary(
   answer: RTCSessionDescriptionInit,
   candidates: RTCIceCandidate[]
-): string[] {
+): Uint8Array {
   const payload: SignalingPayload = {
     type: 'answer',
     sdp: answer.sdp || '',
     candidates: candidates.map(c => c.candidate),
   }
   const json = JSON.stringify(payload)
-  const compressed = pako.gzip(json)
-  const base45Data = base45Encode(new Uint8Array(compressed))
-  return splitQRData(base45Data)
+  return pako.gzip(json)
+}
+
+/**
+ * Parse binary QR data (gzipped JSON) to SignalingPayload
+ */
+export function parseBinaryQRPayload(bytes: Uint8Array): SignalingPayload | null {
+  try {
+    const json = pako.ungzip(bytes, { to: 'string' })
+    return JSON.parse(json)
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -91,20 +83,6 @@ export function generateAnswerQRData(
  */
 export function generateClipboardData(payload: SignalingPayload): string {
   return JSON.stringify(payload)
-}
-
-/**
- * Parse base45-encoded QR data to SignalingPayload
- * Used after merging multi-QR chunks
- */
-export function parseQRPayload(base45Data: string): SignalingPayload | null {
-  try {
-    const compressed = base45Decode(base45Data)
-    const json = pako.ungzip(compressed, { to: 'string' })
-    return JSON.parse(json)
-  } catch {
-    return null
-  }
 }
 
 /**
@@ -119,74 +97,6 @@ export function parseJSONPayload(json: string): SignalingPayload | null {
 }
 
 /**
- * Split base45 data into QR chunks with fixed-length header
- * Format: X/Y:data$
- */
-export function splitQRData(base45Data: string): string[] {
-  const chunkDataSize = MAX_QR_CHUNK_SIZE - HEADER_SIZE - END_MARKER_SIZE
-
-  if (base45Data.length <= chunkDataSize) {
-    return [`1/1:${base45Data}$`]
-  }
-
-  const numChunks = Math.ceil(base45Data.length / chunkDataSize)
-  if (numChunks > MAX_CHUNKS) {
-    throw new Error(`Payload too large: would need ${numChunks} QR codes (max ${MAX_CHUNKS})`)
-  }
-
-  const chunks: string[] = []
-  for (let i = 0; i < base45Data.length; i += chunkDataSize) {
-    chunks.push(base45Data.slice(i, i + chunkDataSize))
-  }
-  return chunks.map((chunk, i) => `${i + 1}/${chunks.length}:${chunk}$`)
-}
-
-/**
- * Parse a QR chunk with fixed 4-char header "X/Y:" and trailing "$"
- * Returns null if format is invalid (corrupt data)
- */
-export function parseQRChunk(data: string): { index: number; total: number; data: string } | null {
-  // Validate format: X/Y:...$ (min length 6: "1/1:x$")
-  if (data.length < 6 || data[1] !== '/' || data[3] !== ':' || data[data.length - 1] !== '$') {
-    return null  // Corrupt or invalid format
-  }
-  const index = parseInt(data[0])
-  const total = parseInt(data[2])
-  if (isNaN(index) || isNaN(total) || index < 1 || total < 1 || index > total || total > MAX_CHUNKS) {
-    return null
-  }
-  const payload = data.slice(4, -1)  // Skip 4-char header, remove trailing $
-  return { index, total, data: payload }
-}
-
-/**
- * Merge QR chunks back together
- * Returns the combined base45 data or null if incomplete/invalid
- */
-export function mergeQRChunks(chunks: string[]): string | null {
-  if (chunks.length === 0) return null
-
-  const parsed = chunks.map(parseQRChunk).filter((c): c is NonNullable<typeof c> => c !== null)
-  if (parsed.length === 0) return null
-
-  const total = parsed[0].total
-  if (parsed.length !== total) return null  // Incomplete
-
-  // Validate all chunks have same total
-  if (!parsed.every(p => p.total === total)) return null
-
-  // Sort by index and merge
-  parsed.sort((a, b) => a.index - b.index)
-
-  // Verify sequential indices
-  for (let i = 0; i < parsed.length; i++) {
-    if (parsed[i].index !== i + 1) return null
-  }
-
-  return parsed.map(p => p.data).join('')
-}
-
-/**
  * Validate SignalingPayload structure
  */
 export function isValidSignalingPayload(payload: unknown): payload is SignalingPayload {
@@ -198,21 +108,11 @@ export function isValidSignalingPayload(payload: unknown): payload is SignalingP
   return true
 }
 
-// Keep old name as alias for compatibility
-export const isValidQRPayload = isValidSignalingPayload
-
 /**
- * Estimate number of QR codes needed for a payload
+ * Estimate compressed payload size in bytes
  */
-export function estimateQRCount(payload: SignalingPayload): number {
+export function estimatePayloadSize(payload: SignalingPayload): number {
   const json = JSON.stringify(payload)
   const compressed = pako.gzip(json)
-  const base45Data = base45Encode(new Uint8Array(compressed))
-  const chunkDataSize = MAX_QR_CHUNK_SIZE - HEADER_SIZE - END_MARKER_SIZE
-  return Math.ceil(base45Data.length / chunkDataSize)
+  return compressed.length
 }
-
-/**
- * Max QR code data size (legacy export for compatibility)
- */
-export const MAX_QR_DATA_SIZE = MAX_QR_CHUNK_SIZE
