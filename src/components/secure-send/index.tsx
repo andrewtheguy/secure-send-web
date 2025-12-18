@@ -106,7 +106,7 @@ export function SecureSend() {
                   </div>
                   <div>
                     <p className="text-foreground font-medium">QR Code — PIN starts with "2"</p>
-                    <p className="text-sm">Exchange QR codes directly with receiver. Works without internet — no signaling server required. Devices must be on the same local network for WebRTC to connect via local IP addresses when offline. Both parties must exchange QR codes (scan) or copy/paste the encrypted signaling data. P2P only, no fallback.</p>
+                    <p className="text-sm">Exchange QR codes directly with receiver. No signaling server required — uses STUN for NAT traversal. Works without internet if devices are on the same local network (not air-gapped). Both parties must exchange QR codes (scan) or copy/paste the encrypted signaling data. P2P only, no fallback.</p>
                   </div>
                 </div>
               </section>

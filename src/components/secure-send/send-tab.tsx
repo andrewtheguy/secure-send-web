@@ -494,7 +494,7 @@ export function SendTab() {
                       ? 'Force Nostr relays. Transfer fails if relays are unavailable.'
                       : forcedMethod === 'peerjs-only'
                         ? 'Force PeerJS signaling server. No cloud fallback.'
-                        : 'Force QR code exchange. Truly serverless P2P.'}
+                        : 'Force QR code exchange. No signaling server needed.'}
                 </p>
               </div>
             )}

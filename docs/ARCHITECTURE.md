@@ -16,14 +16,15 @@ Secure Send is a browser-based encrypted file and message transfer application. 
 
 By default, Nostr is used for signaling. PeerJS and QR are available as alternatives under "Advanced Options" in the UI. Both sender and receiver must use the same method.
 
-| Feature | Nostr (Default) | PeerJS (Advanced) | QR (Offline Signaling) |
+| Feature | Nostr (Default) | PeerJS (Advanced) | QR (No Signaling Server) |
 |---------|-----------------|-------------------|---------------------------|
 | Signaling Server | Decentralized relays | Centralized (0.peerjs.com) | None (manual QR exchange) |
+| STUN Server | Yes (Google) | Yes (Google) | Yes (Google) |
 | Cloud Fallback | Yes (tmpfiles.org) | No | No |
 | Reliability | Higher (fallback available) | P2P only | P2P only |
 | Privacy | Better (no central server) | PeerJS server sees peer IDs | Best (no signaling server) |
 | Complexity | More complex | Simpler | Manual QR exchange |
-| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | Air-gapped scenarios, works without internet |
+| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | No signaling server; works without internet on local network (not air-gapped) |
 
 ## Transfer Flow
 
@@ -96,7 +97,7 @@ Sender                              Receiver
 If P2P connection fails → Transfer fails (no cloud fallback)
 ```
 
-### QR Mode (Offline Signaling)
+### QR Mode (No Signaling Server)
 ```
 Sender                              Receiver
   │                                    │
@@ -124,7 +125,7 @@ Sender                              Receiver
 
 If P2P connection fails → Transfer fails (no server fallback)
 
-Note: QR mode avoids signaling servers. For offline operation, devices must be on the same local network so WebRTC can connect using local/host ICE candidates without STUN.
+Note: QR mode avoids signaling servers but uses STUN (stun.l.google.com) for NAT traversal. Works without internet if devices are on the same local network (WebRTC connects via local ICE candidates). Does not work air-gapped (requires network connectivity).
 ```
 
 **QR Code Format:**
@@ -204,7 +205,7 @@ Alternative signaling method using PeerJS cloud server instead of Nostr relays.
 
 ### QR Signaling (`src/lib/qr-signaling.ts`)
 
-Fully offline signaling method using QR codes for WebRTC offer/answer exchange. Works without internet for devices on the same local network.
+Signaling method using QR codes for WebRTC offer/answer exchange. Avoids signaling servers but uses STUN for NAT traversal. Works without internet for devices on the same local network (not air-gapped).
 
 **How it works:**
 - Sender generates WebRTC offer with ICE candidates
@@ -232,8 +233,9 @@ The "SS01" magic header (Secure Send version 1) identifies the format and allows
 | Copy/Paste | Base64-encoded binary | No camera, text-safe for clipboard |
 
 **Key Features:**
-- No server required - fully air-gapped operation
-- Works offline once the page is loaded - devices must be on the same local network so WebRTC can connect using local/host ICE candidates without STUN server assistance
+- No signaling server required - manual QR exchange
+- Uses STUN (stun.l.google.com) for NAT traversal
+- Works without internet on same local network (not air-gapped - requires network connectivity)
 - Binary mode QR codes for efficient byte encoding
 - Single QR code per payload (no chunking needed)
 - Uses `zxing-wasm` for both generation and scanning
