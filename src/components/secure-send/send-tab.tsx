@@ -494,7 +494,7 @@ export function SendTab() {
                       ? 'Force Nostr relays. Transfer fails if relays are unavailable.'
                       : forcedMethod === 'peerjs-only'
                         ? 'Force PeerJS signaling server. No cloud fallback.'
-                        : 'Manual exchange via QR scan or copy/paste. No internet required on same local network.'}
+                        : 'Manual exchange via QR scan or copy/paste. No internet required. Without internet, devices must be on same local network.'}
                 </p>
               </div>
             )}

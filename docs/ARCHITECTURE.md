@@ -16,16 +16,17 @@ Secure Send is a browser-based encrypted file and message transfer application. 
 
 By default, Nostr is used for signaling. PeerJS and QR are available as alternatives under "Advanced Options" in the UI. Both sender and receiver must use the same method.
 
-| Feature | Nostr (Default) | PeerJS (Advanced) | QR (No Signaling Server) |
-|---------|-----------------|-------------------|---------------------------|
-| Signaling Server | Decentralized relays | Centralized (0.peerjs.com) | None (manual QR exchange) |
-| STUN Server | Yes (Google) | Yes (Google) | Yes (Google) |
+| Feature | Nostr (Default) | PeerJS (Advanced) | Manual Exchange (No Signaling Server) |
+|---------|-----------------|-------------------|---------------------------------------|
+| Signaling Server | Decentralized relays | Centralized (0.peerjs.com) | None (QR or copy/paste) |
+| STUN Server | Yes (Google) | Yes (Google) | Yes (Google, when available) |
 | Cloud Fallback | Yes (tmpfiles.org) | No | No |
 | Reliability | Higher (fallback available) | P2P only | P2P only |
 | Privacy | Better (no central server) | PeerJS server sees peer IDs | Best (no signaling server) |
 | Complexity | More complex | Simpler | Manual exchange (QR or copy/paste) |
-| Internet Required | Yes | Yes | No (works on local network) |
-| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | Offline transfers, no signaling server |
+| Internet Required | Yes | Yes | No |
+| Network Requirement | Any (via internet) | Any (via internet) | Same local network (without internet) |
+| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | Offline transfers, local network only |
 
 ## Transfer Flow
 
@@ -128,15 +129,17 @@ If P2P connection fails → Transfer fails (no server fallback)
 ```
 
 **Requirements:**
-- Both devices need either a working camera OR ability to copy/paste text
-- Camera is optional - encrypted signaling data can be exchanged via clipboard
-- Devices must be on the same network (WiFi, LAN, etc.) - not air-gapped
-- No internet connection required if both devices are on the local network
+- Both devices need either a working camera OR ability to copy/paste text (camera optional)
+- Encrypted signaling data can be exchanged via QR scan or clipboard
 
-**How it works without internet:**
-- STUN server (stun.l.google.com) is used when available for NAT traversal
-- On local network without internet, WebRTC discovers local ICE candidates directly
-- Connection establishes via local IP addresses without external servers
+**Network Requirements:**
+- **With internet**: Works across different networks (STUN server enables NAT traversal)
+- **Without internet**: Devices must be on same local network (WiFi, LAN, etc.)
+- **Not air-gapped**: Requires some network connectivity between devices
+
+**How it works:**
+- With internet: STUN server (stun.l.google.com) enables connections across different networks via NAT traversal
+- Without internet: WebRTC discovers local ICE candidates directly, connection establishes via local IP addresses
 
 **QR Code Format:**
 - Binary payload: `[4 bytes: "SS01" magic][16 bytes: salt][encrypted deflate-compressed SignalingPayload]`
@@ -215,7 +218,7 @@ Alternative signaling method using PeerJS cloud server instead of Nostr relays.
 
 ### Manual Exchange Signaling (`src/lib/manual-signaling.ts`)
 
-Signaling method using QR codes or copy/paste for WebRTC offer/answer exchange. No internet connection required - works on devices connected to the same local network if internet connection is not available (not air-gapped). Camera is optional; signaling data can be exchanged via clipboard.
+Signaling method using QR codes or copy/paste for WebRTC offer/answer exchange. Camera is optional; signaling data can be exchanged via clipboard. **Network requirements:** With internet, works across different networks via STUN. Without internet, devices must be on same local network (not air-gapped - requires network connectivity).
 
 **How it works:**
 - Sender generates WebRTC offer with ICE candidates
@@ -245,8 +248,9 @@ The "SS01" magic header (Secure Send version 1) identifies the format and allows
 **Key Features:**
 - No signaling server required - manual exchange via QR scan or copy/paste
 - Camera optional - encrypted payload can be copied as text and pasted on other device
-- No internet required - works on devices connected to the same local network (not air-gapped)
-- Uses STUN (stun.l.google.com) when available for NAT traversal
+- No internet required when devices are on same local network
+- With internet: works across different networks via STUN (stun.l.google.com) for NAT traversal
+- Not air-gapped: requires network connectivity between devices (either local network or internet)
 - Binary mode QR codes for efficient byte encoding
 - Single QR code per payload (no chunking needed)
 - Uses `zxing-wasm` for both generation and scanning
