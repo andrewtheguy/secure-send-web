@@ -1,18 +1,15 @@
 import { writeBarcode } from 'zxing-wasm/full'
 
 /**
- * Generate a QR code image from Latin-1 encoded data
+ * Generate a QR code image from text data (base64 encoded payload)
  * Returns a data URL (PNG image)
  */
 export async function generateQRCode(data: string, options?: {
   width?: number
   errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H'
 }): Promise<string> {
-  // Convert Latin-1 string to bytes (preserves byte values 0x00-0xFF)
-  const bytes = new Uint8Array(data.length)
-  for (let i = 0; i < data.length; i++) {
-    bytes[i] = data.charCodeAt(i) & 0xFF
-  }
+  // Base64 text is just ASCII, use TextEncoder
+  const bytes = new TextEncoder().encode(data)
 
   const result = await writeBarcode(bytes, {
     format: 'QRCode',

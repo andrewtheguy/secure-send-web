@@ -19,14 +19,9 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
     isMobileDevice() ? 'environment' : 'user'
   )
 
-  const handleScan = useCallback((data: Uint8Array) => {
-    // Convert bytes to Latin-1 string
-    let latin1String = ''
-    for (let i = 0; i < data.length; i++) {
-      latin1String += String.fromCharCode(data[i])
-    }
-
-    const payload = parseQRPayload(latin1String)
+  const handleScan = useCallback((data: string) => {
+    // Data is base64 encoded, parse directly
+    const payload = parseQRPayload(data)
     if (!payload) {
       setError('Invalid QR code data')
       onError?.('Invalid QR code data')

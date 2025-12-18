@@ -3,7 +3,7 @@ import { ClipboardPaste, AlertCircle, Camera } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { parseQRPayload, isValidQRPayload, base64ToQRData, type QRSignalingPayload } from '@/lib/qr-signaling'
+import { parseQRPayload, isValidQRPayload, type QRSignalingPayload } from '@/lib/qr-signaling'
 import { QRScanner } from './qr-scanner'
 import { isMobileDevice } from '@/lib/utils'
 
@@ -39,17 +39,8 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
       return
     }
 
-    // Input is base64 encoded (from clipboard copy)
-    // Convert to Latin-1 for parsing
-    let qrData: string
-    try {
-      qrData = base64ToQRData(trimmed)
-    } catch {
-      setError('Invalid base64 data. Make sure you copied the complete text.')
-      return
-    }
-
-    const payload = parseQRPayload(qrData)
+    // Data is already base64 encoded, parse directly
+    const payload = parseQRPayload(trimmed)
     if (!payload) {
       setError('Invalid QR code data. Make sure you copied the complete text.')
       return

@@ -3,7 +3,7 @@ import { isMobileDevice } from '@/lib/utils'
 import ZXingWorker from '@/workers/zxing-qr-scanner.worker?worker'
 
 interface UseQRScannerOptions {
-  onScan: (data: Uint8Array) => void
+  onScan: (data: string) => void
   onError?: (error: string) => void
   onCameraReady?: () => void
   isScanning: boolean
@@ -53,21 +53,18 @@ export function useQRScanner(options: UseQRScannerOptions) {
     worker.onmessage = (e: MessageEvent) => {
       if (e.data.type === 'result') {
         if (e.data.data && Array.isArray(e.data.data) && e.data.data.length > 0) {
-          const scannedData = e.data.data[0] as Uint8Array
-
-          // Convert to string for debounce comparison
-          const scannedString = String.fromCharCode(...scannedData)
+          const scannedText = e.data.data[0] as string
           const now = Date.now()
 
           // Debounce duplicate scans
-          if (debounceMs > 0 && scannedString === lastScannedRef.current && now - lastScanTimeRef.current < debounceMs) {
+          if (debounceMs > 0 && scannedText === lastScannedRef.current && now - lastScanTimeRef.current < debounceMs) {
             return
           }
 
-          lastScannedRef.current = scannedString
+          lastScannedRef.current = scannedText
           lastScanTimeRef.current = now
 
-          onScan(scannedData)
+          onScan(scannedText)
         }
         if (e.data.error) {
           console.error('Worker decode error:', e.data.error)
@@ -109,12 +106,12 @@ export function useQRScanner(options: UseQRScannerOptions) {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
 
-      // Send to worker with binary mode enabled for Latin-1 data
+      // Send to worker with text mode (base64 is text)
       workerRef.current.postMessage(
         {
           type: 'scan',
           imageData,
-          binary: true,
+          binary: false,
         },
         [imageData.data.buffer]
       )

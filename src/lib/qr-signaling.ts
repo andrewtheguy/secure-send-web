@@ -98,44 +98,26 @@ function base64ToBytes(b64: string): number[] {
 }
 
 /**
- * Encode bytes to ASCII string using Latin-1 (ISO-8859-1)
- * Each byte maps to a character 0x00-0xFF
- * More compact than base64 for QR byte mode
+ * Convert Uint8Array to base64 string
  */
-function bytesToLatin1(bytes: Uint8Array): string {
-  let result = ''
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = ''
   for (let i = 0; i < bytes.length; i++) {
-    result += String.fromCharCode(bytes[i])
+    binary += String.fromCharCode(bytes[i])
   }
-  return result
+  return btoa(binary)
 }
 
 /**
- * Decode Latin-1 string back to bytes
+ * Convert base64 string to Uint8Array
  */
-function latin1ToBytes(str: string): Uint8Array {
-  const bytes = new Uint8Array(str.length)
-  for (let i = 0; i < str.length; i++) {
-    bytes[i] = str.charCodeAt(i)
+function base64ToUint8Array(b64: string): Uint8Array {
+  const binary = atob(b64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
   }
   return bytes
-}
-
-/**
- * Convert Latin-1 QR data to base64 for clipboard copy/paste
- * Latin-1 contains non-printable chars that don't survive clipboard
- */
-export function qrDataToBase64(latin1Data: string): string {
-  const bytes = latin1ToBytes(latin1Data)
-  return btoa(String.fromCharCode(...bytes))
-}
-
-/**
- * Convert base64 clipboard data back to Latin-1 for parsing
- */
-export function base64ToQRData(b64Data: string): string {
-  const binary = atob(b64Data)
-  return binary // This is already Latin-1 compatible
 }
 
 /**
@@ -183,21 +165,21 @@ function expandPayload(minified: MinifiedPayload): QRSignalingPayload {
 
 /**
  * Compress signaling payload for QR code
- * Uses minified JSON + gzip compression + Latin-1 encoding
+ * Uses minified JSON + gzip compression + base64 encoding
+ * Base64 is used for consistency - same format for QR display and clipboard
  */
 export function compressSignalingData(payload: QRSignalingPayload): string {
   const minified = minifyPayload(payload)
   const json = JSON.stringify(minified)
   const compressed = pako.gzip(json)
-  // Use Latin-1 encoding (1 byte = 1 char) instead of base64 (33% overhead)
-  return bytesToLatin1(compressed)
+  return uint8ArrayToBase64(compressed)
 }
 
 /**
- * Decompress signaling payload from QR code data
+ * Decompress signaling payload from QR code data (base64 encoded)
  */
-export function decompressSignalingData(compressed: string): QRSignalingPayload {
-  const bytes = latin1ToBytes(compressed)
+export function decompressSignalingData(base64Data: string): QRSignalingPayload {
+  const bytes = base64ToUint8Array(base64Data)
   const decompressed = pako.ungzip(bytes, { to: 'string' })
   const minified = JSON.parse(decompressed) as MinifiedPayload
   return expandPayload(minified)
