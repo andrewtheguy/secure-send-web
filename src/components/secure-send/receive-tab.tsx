@@ -8,7 +8,7 @@ import { QRDisplay } from './qr-display'
 import { QRInput } from './qr-input'
 import { useNostrReceive } from '@/hooks/use-nostr-receive'
 import { usePeerJSReceive } from '@/hooks/use-peerjs-receive'
-import { useQRReceive } from '@/hooks/use-qr-receive'
+import { useManualReceive } from '@/hooks/use-manual-receive'
 import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
 import { detectSignalingMethod } from '@/lib/crypto'
 import type { SignalingMethod } from '@/lib/nostr/types'
@@ -29,12 +29,12 @@ export function ReceiveTab() {
   // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrReceive()
   const peerJSHook = usePeerJSReceive()
-  const qrHook = useQRReceive()
+  const manualHook = useManualReceive()
 
   // Use the appropriate hook based on detected signaling method from PIN
-  const activeHook = detectedMethod === 'nostr' ? nostrHook : detectedMethod === 'peerjs' ? peerJSHook : qrHook
+  const activeHook = detectedMethod === 'nostr' ? nostrHook : detectedMethod === 'peerjs' ? peerJSHook : manualHook
   const { state: rawState, receivedContent, receive, cancel, reset } = activeHook
-  const submitOffer = detectedMethod === 'qr' ? qrHook.submitOffer : undefined
+  const submitOffer = detectedMethod === 'qr' ? manualHook.submitOffer : undefined
 
   // Normalize state for QR hook (it has additional status values)
   const state = rawState as typeof nostrHook.state & { answerQRData?: Uint8Array; clipboardData?: string }

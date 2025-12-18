@@ -11,7 +11,7 @@ import { QRDisplay } from './qr-display'
 import { QRInput } from './qr-input'
 import { useNostrSend } from '@/hooks/use-nostr-send'
 import { usePeerJSSend } from '@/hooks/use-peerjs-send'
-import { useQRSend } from '@/hooks/use-qr-send'
+import { useManualSend } from '@/hooks/use-manual-send'
 import { MAX_MESSAGE_SIZE } from '@/lib/crypto'
 import { formatFileSize } from '@/lib/file-utils'
 import { setCloudServer } from '@/lib/cloud-storage'
@@ -56,12 +56,12 @@ export function SendTab() {
   // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrSend()
   const peerJSHook = usePeerJSSend()
-  const qrHook = useQRSend()
+  const manualHook = useManualSend()
 
   // Use the appropriate hook based on active method (defaults to nostr before detection)
-  const activeHook = activeMethod === 'peerjs' ? peerJSHook : activeMethod === 'qr' ? qrHook : nostrHook
+  const activeHook = activeMethod === 'peerjs' ? peerJSHook : activeMethod === 'qr' ? manualHook : nostrHook
   const { state: rawState, pin, cancel } = activeHook
-  const submitAnswer = activeMethod === 'qr' ? qrHook.submitAnswer : undefined
+  const submitAnswer = activeMethod === 'qr' ? manualHook.submitAnswer : undefined
 
   // Normalize state for QR hook (it has additional status values)
   const state = rawState as typeof nostrHook.state & { offerQRData?: Uint8Array; clipboardData?: string }
@@ -130,7 +130,7 @@ export function SendTab() {
       } else if (methodToUse === 'peerjs') {
         peerJSHook.send(content)
       } else {
-        qrHook.send(content)
+        manualHook.send(content)
       }
     }
 
@@ -171,7 +171,7 @@ export function SendTab() {
   const handleReset = () => {
     nostrHook.cancel()
     peerJSHook.cancel()
-    qrHook.cancel()
+    manualHook.cancel()
     setMessage('')
     setSelectedFiles([])
     setFolderFiles(null)

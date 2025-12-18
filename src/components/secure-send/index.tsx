@@ -106,7 +106,7 @@ export function SecureSend() {
                   </div>
                   <div>
                     <p className="text-foreground font-medium">Manual Exchange — PIN starts with "2"</p>
-                    <p className="text-sm">No internet required. Exchange signaling data via QR scan or copy/paste (camera not required). Uses STUN for NAT traversal if available. Works on same local network without internet (not air-gapped). P2P only, no fallback.</p>
+                    <p className="text-sm">No internet required. Exchange signaling data via QR scan or copy/paste (camera not required). Uses STUN for NAT traversal if available. Works on devices connected to the same local network without internet (not air-gapped). P2P only, no fallback.</p>
                   </div>
                 </div>
               </section>

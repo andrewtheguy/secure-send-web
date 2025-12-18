@@ -6,8 +6,8 @@ import { deriveKeyFromPin, encrypt, decrypt, generateSalt } from './crypto'
 const MAGIC_HEADER = new Uint8Array([0x53, 0x53, 0x30, 0x31])
 
 /**
- * Signaling Payload - method-agnostic format for the pipeline
- * Used by both QR and copy/paste modes
+ * Signaling Payload - method-agnostic format for Manual Exchange mode
+ * Used by both QR scan and copy/paste methods
  */
 export interface SignalingPayload {
   type: 'offer' | 'answer'

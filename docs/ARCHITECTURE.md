@@ -213,9 +213,9 @@ Alternative signaling method using PeerJS cloud server instead of Nostr relays.
 - Centralized signaling server (PeerJS cloud)
 - Metadata exchange happens over data channel (not signaling)
 
-### Manual Exchange / QR Signaling (`src/lib/qr-signaling.ts`)
+### Manual Exchange Signaling (`src/lib/manual-signaling.ts`)
 
-Signaling method using QR codes or copy/paste for WebRTC offer/answer exchange. No internet connection required - works on same local network (not air-gapped). Camera is optional; signaling data can be exchanged via clipboard.
+Signaling method using QR codes or copy/paste for WebRTC offer/answer exchange. No internet connection required - works on devices connected to the same local network if internet connection is not available (not air-gapped). Camera is optional; signaling data can be exchanged via clipboard.
 
 **How it works:**
 - Sender generates WebRTC offer with ICE candidates
@@ -245,7 +245,7 @@ The "SS01" magic header (Secure Send version 1) identifies the format and allows
 **Key Features:**
 - No signaling server required - manual exchange via QR scan or copy/paste
 - Camera optional - encrypted payload can be copied as text and pasted on other device
-- No internet required - works on same local network (not air-gapped)
+- No internet required - works on devices connected to the same local network (not air-gapped)
 - Uses STUN (stun.l.google.com) when available for NAT traversal
 - Binary mode QR codes for efficient byte encoding
 - Single QR code per payload (no chunking needed)
@@ -326,7 +326,7 @@ Fallback storage when P2P connection cannot be established (15s timeout). Not us
 
 **Manual Exchange Mode:**
 
-**`use-qr-send.ts`** - Sender logic (Manual Exchange):
+**`use-manual-send.ts`** - Sender logic (Manual Exchange):
 1. Read content (file or text), validate size
 2. Generate PIN and salt, derive encryption key
 3. Create WebRTC offer with ICE candidates
@@ -338,7 +338,7 @@ Fallback storage when P2P connection cannot be established (15s timeout). Not us
 9. Encrypt and send data in 128KB chunks via data channel
 10. Wait for receiver ACK
 
-**`use-qr-receive.ts`** - Receiver logic (Manual Exchange):
+**`use-manual-receive.ts`** - Receiver logic (Manual Exchange):
 1. Validate PIN entered by user
 2. Wait for user to input sender's offer (scan or paste)
 3. Decrypt offer with PIN, extract metadata and salt
@@ -355,7 +355,7 @@ Fallback storage when P2P connection cannot be established (15s timeout). Not us
 
 ### Unified Transfer Layer
 
-All three signaling methods (Nostr, PeerJS, QR) share the same encryption middleware. This protocol-agnostic layer provides consistent security regardless of the transport mechanism.
+All three signaling methods (Nostr, PeerJS, Manual Exchange) share the same encryption middleware. This protocol-agnostic layer provides consistent security regardless of the transport mechanism.
 
 **Why encrypt when WebRTC provides DTLS?**
 - **Defense in depth**: Multiple encryption layers protect against implementation bugs
@@ -394,7 +394,7 @@ interface PinExchangePayload {
 
 ### Streaming Encryption (All Methods)
 
-All P2P transfers (Nostr, PeerJS, QR) encrypt content in 128KB chunks using identical logic:
+All P2P transfers (Nostr, PeerJS, Manual Exchange) encrypt content in 128KB chunks using identical logic:
 
 **Sender side:**
 ```typescript
@@ -492,8 +492,8 @@ This ensures consistent memory behavior across all transfer modes - P2P and clou
 4. **PIN Entropy**: ~71 bits with 12-char mixed charset
 5. **Brute-Force Resistance**: 600K PBKDF2 iterations (planned: Argon2id)
 6. **PIN Role**: PIN encrypts signaling (preventing unauthorized P2P connection) AND content (defense in depth)
-7. **Transport Security**: All P2P transfers (Nostr, PeerJS, QR) use both AES-256-GCM encryption (128KB chunks) and WebRTC DTLS
-8. **Protocol-Agnostic Security**: Same encryption layer used regardless of signaling method - no security difference between Nostr, PeerJS, or QR
+7. **Transport Security**: All P2P transfers (Nostr, PeerJS, Manual Exchange) use both AES-256-GCM encryption (128KB chunks) and WebRTC DTLS
+8. **Protocol-Agnostic Security**: Same encryption layer used regardless of signaling method - no security difference between Nostr, PeerJS, or Manual Exchange
 
 ## File Structure
 
@@ -512,7 +512,7 @@ src/
 │   │   ├── client.ts        # Relay client
 │   │   └── relays.ts        # Default relays
 │   ├── peerjs-signaling.ts  # PeerJS wrapper (signaling option 2)
-│   ├── qr-signaling.ts      # QR code signaling (signaling option 3)
+│   ├── manual-signaling.ts  # Manual exchange signaling (signaling option 3)
 │   ├── qr-utils.ts          # Binary QR code generation (zxing-wasm)
 │   ├── webrtc.ts            # WebRTC connection management
 │   ├── cloud-storage.ts     # Cloud fallback (Nostr mode only)
@@ -525,8 +525,8 @@ src/
 │   ├── use-nostr-receive.ts # Receiver hook (Nostr mode)
 │   ├── use-peerjs-send.ts   # Sender hook (PeerJS mode)
 │   ├── use-peerjs-receive.ts # Receiver hook (PeerJS mode)
-│   ├── use-qr-send.ts       # Sender hook (QR mode)
-│   ├── use-qr-receive.ts    # Receiver hook (QR mode)
+│   ├── use-manual-send.ts   # Sender hook (Manual Exchange mode)
+│   ├── use-manual-receive.ts # Receiver hook (Manual Exchange mode)
 │   └── useQRScanner.ts      # Camera-based QR scanning hook
 ├── components/
 │   └── secure-send/

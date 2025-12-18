@@ -77,7 +77,7 @@ All signaling methods share a **unified encryption layer**: content is encrypted
 **Signaling Methods** (sender chooses):
 - **Nostr** (default): Decentralized relay signaling with cloud fallback
 - **PeerJS**: Simpler P2P via PeerJS cloud server (no fallback)
-- **Manual Exchange**: No internet required. Exchange signaling via QR scan or copy/paste (camera optional). Works on same local network (not air-gapped)
+- **Manual Exchange**: No internet required. Exchange signaling via QR scan or copy/paste (camera optional). Works on devices connected to the same local network without internet (not air-gapped)
 
 **Data Transfer**: WebRTC P2P preferred; cloud fallback available in Nostr mode only.
 

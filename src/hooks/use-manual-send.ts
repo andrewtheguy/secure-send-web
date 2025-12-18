@@ -14,12 +14,12 @@ import {
   generateOfferQRBinary,
   generateClipboardData,
   type SignalingPayload,
-} from '@/lib/qr-signaling'
+} from '@/lib/manual-signaling'
 import type { TransferState, ContentType } from '@/lib/nostr/types'
 import { readFileAsBytes } from '@/lib/file-utils'
 
-// Extended transfer status for QR mode
-export type QRTransferStatus =
+// Extended transfer status for Manual Exchange mode
+export type ManualTransferStatus =
   | 'idle'
   | 'generating_offer'
   | 'showing_offer_qr'
@@ -29,14 +29,14 @@ export type QRTransferStatus =
   | 'complete'
   | 'error'
 
-export interface QRTransferState extends Omit<TransferState, 'status'> {
-  status: QRTransferStatus
+export interface ManualTransferState extends Omit<TransferState, 'status'> {
+  status: ManualTransferStatus
   offerQRData?: Uint8Array  // Binary data for QR code (gzipped JSON)
   clipboardData?: string  // Raw JSON for copy button
 }
 
-export interface UseQRSendReturn {
-  state: QRTransferState
+export interface UseManualSendReturn {
+  state: ManualTransferState
   pin: string | null
   send: (content: string | File) => Promise<void>
   submitAnswer: (answerData: Uint8Array) => void
@@ -47,8 +47,8 @@ const ICE_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 }
 
-export function useQRSend(): UseQRSendReturn {
-  const [state, setState] = useState<QRTransferState>({ status: 'idle' })
+export function useManualSend(): UseManualSendReturn {
+  const [state, setState] = useState<ManualTransferState>({ status: 'idle' })
   const [pin, setPin] = useState<string | null>(null)
 
   const rtcRef = useRef<WebRTCConnection | null>(null)

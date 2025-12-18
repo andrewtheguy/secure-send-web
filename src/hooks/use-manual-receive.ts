@@ -13,11 +13,11 @@ import {
   generateAnswerQRBinary,
   generateClipboardData,
   type SignalingPayload,
-} from '@/lib/qr-signaling'
+} from '@/lib/manual-signaling'
 import type { TransferState, ReceivedContent, ContentType } from '@/lib/nostr/types'
 
-// Extended transfer status for QR receive mode
-export type QRReceiveStatus =
+// Extended transfer status for Manual Exchange receive mode
+export type ManualReceiveStatus =
   | 'idle'
   | 'waiting_for_offer'
   | 'generating_answer'
@@ -27,14 +27,14 @@ export type QRReceiveStatus =
   | 'complete'
   | 'error'
 
-export interface QRReceiveState extends Omit<TransferState, 'status'> {
-  status: QRReceiveStatus
+export interface ManualReceiveState extends Omit<TransferState, 'status'> {
+  status: ManualReceiveStatus
   answerQRData?: Uint8Array  // Binary data for QR code (gzipped JSON)
   clipboardData?: string   // Raw JSON for copy button
 }
 
-export interface UseQRReceiveReturn {
-  state: QRReceiveState
+export interface UseManualReceiveReturn {
+  state: ManualReceiveState
   receivedContent: ReceivedContent | null
   receive: (pin: string) => Promise<void>
   submitOffer: (offerData: Uint8Array) => void
@@ -46,8 +46,8 @@ const ICE_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 }
 
-export function useQRReceive(): UseQRReceiveReturn {
-  const [state, setState] = useState<QRReceiveState>({ status: 'idle' })
+export function useManualReceive(): UseManualReceiveReturn {
+  const [state, setState] = useState<ManualReceiveState>({ status: 'idle' })
   const [receivedContent, setReceivedContent] = useState<ReceivedContent | null>(null)
 
   const rtcRef = useRef<WebRTCConnection | null>(null)
@@ -378,7 +378,7 @@ export function useQRReceive(): UseQRReceiveReturn {
         })
         setState({
           status: 'complete',
-          message: 'File received (P2P via QR)!',
+          message: 'File received (P2P)!',
           contentType: 'file',
           fileMetadata: {
             fileName: fileName!,
@@ -394,7 +394,7 @@ export function useQRReceive(): UseQRReceiveReturn {
         })
         setState({
           status: 'complete',
-          message: 'Message received (P2P via QR)!',
+          message: 'Message received (P2P)!',
           contentType: 'text',
         })
       }
