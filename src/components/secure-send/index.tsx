@@ -113,7 +113,7 @@ export function SecureSend() {
 
               <section className="pt-2 border-t">
                 <p className="text-muted-foreground text-xs">
-                  Open source on <a href="https://github.com/andrewtheguy/secure-send-web" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">GitHub</a>
+                  Source code available for audit at <a href="https://github.com/andrewtheguy/secure-send-web" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">GitHub</a>
                 </p>
               </section>
             </div>

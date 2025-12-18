@@ -6,6 +6,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 
 ## Features
 
+- **100% Static - No Backend Required**: The entire app is a static site that can be hosted on any static hosting service (GitHub Pages, Netlify, Vercel, S3, etc.). No server-side code, no database, no backend infrastructure needed.
 - **PIN-based security**: PIN encrypts signaling payloads so only the PIN holder can establish a connection
 - **Text & file transfer**: Send text messages or files up to 100MB
 - **WebRTC P2P**: Direct peer-to-peer connections for fast, efficient data transfer
@@ -14,6 +15,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 - **No accounts required**: Ephemeral keypairs are generated for each transfer
 - **Multiple signaling methods**: Choose between Nostr relays (with cloud fallback), PeerJS (simpler P2P), or Manual Exchange (works without internet on local network)
 - **Auto-detection**: Receiver automatically detects signaling method from PIN format
+- **PWA Support**: Install as a Progressive Web App for offline access (QR scanning works offline after install)
 
 ## How It Works
 
