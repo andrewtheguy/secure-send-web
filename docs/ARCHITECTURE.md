@@ -8,7 +8,7 @@ Secure Send is a browser-based encrypted file and message transfer application. 
 
 1. **P2P First**: Direct WebRTC connections are always preferred for data transfer.
 2. **Protocol-Agnostic Encryption**: All content is encrypted at the application layer using AES-256-GCM in 128KB chunks, regardless of transport encryption. This provides defense in depth and consistent security across all signaling methods.
-3. **Memory-Efficient Streaming**: Content is encrypted/decrypted in streaming 128KB chunks. Receivers preallocate buffers and write directly to position - no intermediate chunk storage.
+3. **Memory-Efficient Streaming**: Content is encrypted/decrypted in streaming chunks. All receivers (P2P and cloud) preallocate buffers and write directly to calculated positions - no intermediate chunk arrays.
 4. **Pluggable Signaling**: Signaling (Nostr, PeerJS, QR) is decoupled from the transfer layer. The same encryption/chunking logic is used regardless of signaling method.
 5. **PIN-Based Security**: A 12-character PIN serves as the shared secret for key derivation.
 
@@ -433,6 +433,22 @@ contentData.set(decryptedChunk, writePosition)  // Direct write, no intermediate
        128KB encrypted chunks  ──────────>  Decrypt + direct buffer write
        [idx][nonce][cipher][tag]            at position: idx * 128KB
 ```
+
+### Cloud Transfer Memory Efficiency (Nostr Fallback)
+
+Cloud transfers use the same memory-efficient receiving pattern:
+
+```typescript
+// Preallocate buffer based on expected total size
+const estimatedSize = totalChunks * CLOUD_CHUNK_SIZE
+let cloudBuffer = new Uint8Array(estimatedSize)
+
+// On each cloud chunk downloaded:
+const writePosition = chunkIndex * CLOUD_CHUNK_SIZE
+cloudBuffer.set(chunkData, writePosition)  // Direct write, no intermediate storage
+```
+
+This ensures consistent memory behavior across all transfer modes - P2P and cloud fallback both avoid creating intermediate chunk arrays.
 
 ## Size Limits
 
