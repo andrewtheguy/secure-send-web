@@ -15,14 +15,14 @@ Secure Send is a browser-based encrypted file and message transfer application. 
 
 By default, Nostr is used for signaling. PeerJS and QR are available as alternatives under "Advanced Options" in the UI. Both sender and receiver must use the same method.
 
-| Feature | Nostr (Default) | PeerJS (Advanced) | QR (Offline) |
-|---------|-----------------|-------------------|--------------|
-| Signaling Server | Decentralized relays | Centralized (0.peerjs.com) | None (offline) |
+| Feature | Nostr (Default) | PeerJS (Advanced) | QR (Serverless Signaling) |
+|---------|-----------------|-------------------|---------------------------|
+| Signaling Server | Decentralized relays | Centralized (0.peerjs.com) | None (manual QR exchange) |
 | Cloud Fallback | Yes (tmpfiles.org) | No | No |
 | Reliability | Higher (fallback available) | P2P only | P2P only |
-| Privacy | Better (no central server) | PeerJS server sees peer IDs | Best (fully offline) |
+| Privacy | Better (no central server) | PeerJS server sees peer IDs | Best (no signaling server) |
 | Complexity | More complex | Simpler | Manual QR exchange |
-| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | Air-gapped, offline scenarios |
+| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | Air-gapped, offline-friendly scenarios |
 
 ## Transfer Flow
 
@@ -92,7 +92,7 @@ Sender                              Receiver
 If P2P connection fails → Transfer fails (no cloud fallback)
 ```
 
-### QR Mode (Fully Offline - No Server Required)
+### QR Mode (Serverless Signaling - STUN Still Used)
 ```
 Sender                              Receiver
   │                                    │
@@ -116,6 +116,8 @@ Sender                              Receiver
   ✓                                    ✓
 
 If P2P connection fails → Transfer fails (no server fallback)
+
+Note: QR mode avoids signaling servers, but WebRTC still uses STUN servers for NAT traversal.
 ```
 
 **QR Code Format:**
