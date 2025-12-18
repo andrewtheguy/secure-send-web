@@ -61,7 +61,7 @@ export function SendTab() {
   const submitAnswer = signalingMethod === 'qr' ? qrHook.submitAnswer : undefined
 
   // Normalize state for QR hook (it has additional status values)
-  const state = rawState as typeof nostrHook.state & { offerQRData?: string[]; clipboardData?: string }
+  const state = rawState as typeof nostrHook.state & { offerQRData?: Uint8Array; clipboardData?: string }
 
   // Expose console function to enable/disable cloud-only mode for testing
   useEffect(() => {

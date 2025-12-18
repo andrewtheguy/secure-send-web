@@ -7,7 +7,7 @@ import {
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
 import {
-  generateAnswerQRData,
+  generateAnswerQRBinary,
   generateClipboardData,
   type SignalingPayload,
 } from '@/lib/qr-signaling'
@@ -26,7 +26,7 @@ export type QRReceiveStatus =
 
 export interface QRReceiveState extends Omit<TransferState, 'status'> {
   status: QRReceiveStatus
-  answerQRData?: string[]  // Array of QR chunks to display
+  answerQRData?: Uint8Array  // Binary data for QR code (gzipped JSON)
   clipboardData?: string   // Raw JSON for copy button
 }
 
@@ -235,8 +235,8 @@ export function useQRReceive(): UseQRReceiveReturn {
 
       if (cancelledRef.current) return
 
-      // Generate QR data with answer + candidates
-      const qrData = generateAnswerQRData(answerSDP!, iceCandidates)
+      // Generate binary QR data with answer + candidates
+      const qrBinaryData = generateAnswerQRBinary(answerSDP!, iceCandidates)
 
       // Generate raw JSON for clipboard
       const answerPayload: SignalingPayload = {
@@ -250,7 +250,7 @@ export function useQRReceive(): UseQRReceiveReturn {
       setState({
         status: 'showing_answer_qr',
         message: 'Show this QR to sender and wait for connection',
-        answerQRData: qrData,
+        answerQRData: qrBinaryData,
         clipboardData: clipboardJson,
         contentType: contentType as ContentType,
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,

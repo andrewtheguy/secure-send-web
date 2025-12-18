@@ -9,7 +9,7 @@ import {
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
 import {
-  generateOfferQRData,
+  generateOfferQRBinary,
   generateClipboardData,
   type SignalingPayload,
 } from '@/lib/qr-signaling'
@@ -29,7 +29,7 @@ export type QRTransferStatus =
 
 export interface QRTransferState extends Omit<TransferState, 'status'> {
   status: QRTransferStatus
-  offerQRData?: string[]  // Array of QR chunks to display
+  offerQRData?: Uint8Array  // Binary data for QR code (gzipped JSON)
   clipboardData?: string  // Raw JSON for copy button
 }
 
@@ -225,8 +225,8 @@ export function useQRSend(): UseQRSendReturn {
 
       if (cancelledRef.current) return
 
-      // Generate QR data with offer + candidates + metadata
-      const qrChunks = generateOfferQRData(
+      // Generate binary QR data with offer + candidates + metadata
+      const qrBinaryData = generateOfferQRBinary(
         offerSDP!,
         iceCandidates,
         salt,
@@ -257,7 +257,7 @@ export function useQRSend(): UseQRSendReturn {
       setState({
         status: 'showing_offer_qr',
         message: 'Show this QR to receiver, then paste their response below',
-        offerQRData: qrChunks,
+        offerQRData: qrBinaryData,
         clipboardData: clipboardJson,
         contentType,
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,

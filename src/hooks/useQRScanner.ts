@@ -3,7 +3,7 @@ import { isMobileDevice } from '@/lib/utils'
 import ZXingWorker from '@/workers/zxing-qr-scanner.worker?worker'
 
 interface UseQRScannerOptions {
-  onScan: (data: string) => void
+  onScan: (data: Uint8Array) => void
   onError?: (error: string) => void
   onCameraReady?: () => void
   isScanning: boolean
@@ -20,9 +20,9 @@ export function useQRScanner(options: UseQRScannerOptions) {
     onCameraReady,
     isScanning,
     facingMode = 'environment',
-    scanInterval = 125,
+    scanInterval = 33, // Faster for better QR detection
     debounceMs = 500,
-    preferLowRes = false,
+    preferLowRes = true, // Default true for QR scanning
   } = options
 
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -53,18 +53,21 @@ export function useQRScanner(options: UseQRScannerOptions) {
     worker.onmessage = (e: MessageEvent) => {
       if (e.data.type === 'result') {
         if (e.data.data && Array.isArray(e.data.data) && e.data.data.length > 0) {
-          const scannedText = e.data.data[0] as string
+          const scannedData = e.data.data[0] as Uint8Array
           const now = Date.now()
 
+          // Create hash for debouncing binary data
+          const dataHash = Array.from(scannedData.slice(0, 32)).join(',')
+
           // Debounce duplicate scans
-          if (debounceMs > 0 && scannedText === lastScannedRef.current && now - lastScanTimeRef.current < debounceMs) {
+          if (debounceMs > 0 && dataHash === lastScannedRef.current && now - lastScanTimeRef.current < debounceMs) {
             return
           }
 
-          lastScannedRef.current = scannedText
+          lastScannedRef.current = dataHash
           lastScanTimeRef.current = now
 
-          onScan(scannedText)
+          onScan(scannedData)
         }
         if (e.data.error) {
           console.error('Worker decode error:', e.data.error)
@@ -106,12 +109,12 @@ export function useQRScanner(options: UseQRScannerOptions) {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
 
-      // Send to worker with text mode (base64 is text)
+      // Send to worker with binary mode enabled
       workerRef.current.postMessage(
         {
           type: 'scan',
           imageData,
-          binary: false,
+          binary: true, // Always use binary mode for gzipped data
         },
         [imageData.data.buffer]
       )
