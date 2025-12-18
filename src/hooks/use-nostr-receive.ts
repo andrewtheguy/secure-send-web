@@ -5,7 +5,11 @@ import {
   deriveKeyFromPin,
   decrypt,
   encrypt,
+  parseChunkMessage,
+  decryptChunk,
   MAX_MESSAGE_SIZE,
+  ENCRYPTION_CHUNK_SIZE,
+  CLOUD_CHUNK_SIZE,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -25,7 +29,7 @@ import {
   createSignalingEvent,
   parseSignalingEvent,
 } from '@/lib/nostr'
-import { downloadFromCloud, combineChunks } from '@/lib/cloud-storage'
+import { downloadFromCloud } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { WebRTCConnection } from '@/lib/webrtc'
 
@@ -212,13 +216,21 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Unified listener for both P2P and chunked cloud transfer
       // P2P is preferred, but if sender can't establish P2P, they'll send chunk notifications
       let webRTCSuccess = false
-      const receivedChunks: Map<number, Uint8Array> = new Map()
+      // Cloud uses separate tracking since encrypted chunks have different size
+      const receivedCloudChunkIndices: Set<number> = new Set()
+      let cloudBuffer: Uint8Array | null = null
+      let cloudTotalBytes = 0
       let expectedTotalChunks = payload.totalChunks || 1
 
       const transferResult = await new Promise<{ mode: 'p2p' | 'cloud' | 'inline'; data: Uint8Array }>((resolve, reject) => {
         let rtc: WebRTCConnection | null = null
-        let webRTCBuffer: Uint8Array[] = []
-        let webRTCReceivedBytes = 0
+
+        // Pre-allocate buffer for received data to avoid 2x memory during assembly
+        // For files, use fileSize; for text, we'll grow as needed
+        const expectedSize = payload.fileSize || 0
+        let combinedBuffer: Uint8Array | null = expectedSize > 0 ? new Uint8Array(expectedSize) : null
+        const receivedChunkIndices: Set<number> = new Set()
+        let totalDecryptedBytes = 0
         let settled = false
         let cloudTransferStarted = false
 
@@ -251,7 +263,17 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               setState(s => ({ ...s, message: 'Receiving via P2P...', useWebRTC: true }))
             },
             (data) => {
-              if (typeof data === 'string' && data === 'DONE') {
+              // Handle DONE message with chunk count (format: "DONE:N")
+              if (typeof data === 'string' && data.startsWith('DONE:')) {
+                const expectedChunks = parseInt(data.split(':')[1], 10)
+
+                // Verify all chunks received
+                if (receivedChunkIndices.size !== expectedChunks) {
+                  console.error(`Chunk count mismatch: got ${receivedChunkIndices.size}, expected ${expectedChunks}`)
+                  reject(new Error(`Missing chunks: got ${receivedChunkIndices.size}, expected ${expectedChunks}`))
+                  return
+                }
+
                 // Transfer complete via WebRTC
                 if (!settled) {
                   settled = true
@@ -262,36 +284,66 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                     rtc.close()
                   }
 
-                  // Reconstruct from buffer
-                  const totalLen = webRTCBuffer.reduce((acc, val) => acc + val.length, 0)
-                  const combined = new Uint8Array(totalLen)
-                  let offset = 0
-                  for (const b of webRTCBuffer) {
-                    combined.set(b, offset)
-                    offset += b.length
-                  }
+                  // Buffer is already assembled - just trim to actual size if needed
+                  const result = combinedBuffer
+                    ? combinedBuffer.slice(0, totalDecryptedBytes)
+                    : new Uint8Array(0)
 
+                  console.log(`P2P transfer complete: received and decrypted ${expectedChunks} chunks (${totalDecryptedBytes} bytes)`)
                   webRTCSuccess = true
-                  resolve({ mode: 'p2p', data: combined })
+                  resolve({ mode: 'p2p', data: result })
                 }
                 return
               }
 
-              if (data instanceof ArrayBuffer) {
-                const bytes = new Uint8Array(data)
-                webRTCBuffer.push(bytes)
-                webRTCReceivedBytes += bytes.length
+              // Handle legacy DONE format (for backwards compatibility)
+              if (typeof data === 'string' && data === 'DONE') {
+                console.warn('Received legacy DONE format without chunk count')
+                // Fall through to old behavior - should not happen with new sender
+                return
+              }
 
-                // Update progress
-                const totalBytes = payload?.fileSize || 0
-                setState(s => ({
-                  ...s,
-                  status: 'receiving',
-                  progress: {
-                    current: webRTCReceivedBytes,
-                    total: totalBytes > 0 ? totalBytes : webRTCReceivedBytes
+              // Handle encrypted chunk data
+              if (data instanceof ArrayBuffer) {
+                // Parse and decrypt chunk on-the-fly, write directly to buffer
+                (async () => {
+                  try {
+                    const { chunkIndex, encryptedData } = parseChunkMessage(data)
+                    const decryptedChunk = await decryptChunk(key!, encryptedData)
+
+                    // Calculate write position based on chunk index
+                    const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE
+
+                    // Ensure buffer is large enough (for text messages or unknown sizes)
+                    const requiredSize = writePosition + decryptedChunk.length
+                    if (!combinedBuffer || combinedBuffer.length < requiredSize) {
+                      const newBuffer = new Uint8Array(Math.max(requiredSize, (combinedBuffer?.length || 0) * 2))
+                      if (combinedBuffer) {
+                        newBuffer.set(combinedBuffer)
+                      }
+                      combinedBuffer = newBuffer
+                    }
+
+                    // Write directly to position in buffer - no intermediate storage!
+                    combinedBuffer.set(decryptedChunk, writePosition)
+                    receivedChunkIndices.add(chunkIndex)
+                    totalDecryptedBytes += decryptedChunk.length
+
+                    // Update progress
+                    const totalBytes = payload?.fileSize || 0
+                    setState(s => ({
+                      ...s,
+                      status: 'receiving',
+                      progress: {
+                        current: totalDecryptedBytes,
+                        total: totalBytes > 0 ? totalBytes : totalDecryptedBytes
+                      }
+                    }))
+                  } catch (err) {
+                    console.error('Failed to decrypt chunk:', err)
+                    // Don't reject immediately - might be a transient error
                   }
-                }))
+                })()
               }
             }
           )
@@ -312,6 +364,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               rtc.close()
               rtc = null
             }
+
+            // Pre-allocate buffer for encrypted cloud data
+            // Cloud chunks are encrypted, so we estimate size based on totalChunks * chunkSize
+            // Add some overhead for encryption (28 bytes per original chunk, but cloud encrypts whole content)
+            const estimatedEncryptedSize = chunkPayload.totalChunks * CLOUD_CHUNK_SIZE
+            cloudBuffer = new Uint8Array(estimatedEncryptedSize)
           }
 
           expectedTotalChunks = chunkPayload.totalChunks
@@ -324,14 +382,13 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
           try {
             // Download this chunk
-            const baseProgress = Array.from(receivedChunks.values()).reduce((sum, c) => sum + c.length, 0)
             const chunkData = await downloadFromCloud(
               chunkPayload.chunkUrl,
               (loaded) => {
                 setState(s => ({
                   ...s,
                   progress: {
-                    current: baseProgress + loaded,
+                    current: cloudTotalBytes + loaded,
                     total: payload.fileSize || (chunkPayload.totalChunks * chunkPayload.chunkSize),
                   },
                 }))
@@ -343,8 +400,24 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               console.warn(`Chunk ${chunkPayload.chunkIndex} size mismatch: expected ${chunkPayload.chunkSize}, got ${chunkData.length}`)
             }
 
-            // Store chunk
-            receivedChunks.set(chunkPayload.chunkIndex, chunkData)
+            // Calculate write position based on chunk index and cloud chunk size
+            const writePosition = chunkPayload.chunkIndex * CLOUD_CHUNK_SIZE
+
+            // Ensure buffer is large enough
+            const requiredSize = writePosition + chunkData.length
+            if (!cloudBuffer || cloudBuffer.length < requiredSize) {
+              const newBuffer = new Uint8Array(Math.max(requiredSize, (cloudBuffer?.length || 0) * 2))
+              if (cloudBuffer) {
+                newBuffer.set(cloudBuffer)
+              }
+              cloudBuffer = newBuffer
+            }
+
+            // Write directly to position in buffer - no intermediate storage!
+            cloudBuffer.set(chunkData, writePosition)
+            receivedCloudChunkIndices.add(chunkPayload.chunkIndex)
+            cloudTotalBytes += chunkData.length
+
             console.log(`Chunk ${chunkPayload.chunkIndex + 1}/${chunkPayload.totalChunks} downloaded (${chunkData.length} bytes)`)
 
             // Send chunk ACK (seq = chunkIndex + 1, 1-based)
@@ -358,24 +431,15 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             console.log(`Chunk ${chunkPayload.chunkIndex + 1} ACK sent`)
 
             // Check if all chunks received
-            if (receivedChunks.size === expectedTotalChunks) {
+            if (receivedCloudChunkIndices.size === expectedTotalChunks) {
               settled = true
               clearTimeout(overallTimeout)
               client.unsubscribe(subId)
 
-              // Combine chunks in order
-              const orderedChunks: Uint8Array[] = []
-              for (let i = 0; i < expectedTotalChunks; i++) {
-                const chunk = receivedChunks.get(i)
-                if (!chunk) {
-                  reject(new Error(`Missing chunk ${i}`))
-                  return
-                }
-                orderedChunks.push(chunk)
-              }
-              const combined = combineChunks(orderedChunks)
-              console.log(`All ${expectedTotalChunks} chunks combined (${combined.length} bytes)`)
-              resolve({ mode: 'cloud', data: combined })
+              // Buffer is already assembled - just trim to actual size
+              const result = cloudBuffer.slice(0, cloudTotalBytes)
+              console.log(`All ${expectedTotalChunks} cloud chunks assembled (${cloudTotalBytes} bytes)`)
+              resolve({ mode: 'cloud', data: result })
             }
           } catch (err) {
             console.error(`Failed to download chunk ${chunkPayload.chunkIndex}:`, err)
@@ -415,7 +479,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           const chunkNotify = parseChunkNotifyEvent(event)
           if (chunkNotify && chunkNotify.transferId === transferId) {
             // Avoid processing duplicate chunk notifications
-            if (!receivedChunks.has(chunkNotify.chunkIndex)) {
+            if (!receivedCloudChunkIndices.has(chunkNotify.chunkIndex)) {
               await handleChunkNotify(chunkNotify)
             }
           }
@@ -433,26 +497,26 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           processEvent
         )
 
-        // Query for existing events that may have arrived before subscription
-        // This fixes race condition where sender's offer arrives before receiver subscribes
-        ;(async () => {
-          try {
-            const existingEvents = await client.query([
-              {
-                kinds: [EVENT_KIND_DATA_TRANSFER],
-                '#t': [transferId!],
-                authors: [senderPubkey!],
-                limit: 50,
-              },
-            ])
-            console.log(`Found ${existingEvents.length} existing events for transfer`)
-            for (const event of existingEvents) {
-              await processEvent(event)
+          // Query for existing events that may have arrived before subscription
+          // This fixes race condition where sender's offer arrives before receiver subscribes
+          ; (async () => {
+            try {
+              const existingEvents = await client.query([
+                {
+                  kinds: [EVENT_KIND_DATA_TRANSFER],
+                  '#t': [transferId!],
+                  authors: [senderPubkey!],
+                  limit: 50,
+                },
+              ])
+              console.log(`Found ${existingEvents.length} existing events for transfer`)
+              for (const event of existingEvents) {
+                await processEvent(event)
+              }
+            } catch (err) {
+              console.error('Failed to query existing events:', err)
             }
-          } catch (err) {
-            console.error('Failed to query existing events:', err)
-          }
-        })()
+          })()
 
         // Handle inline text message (no P2P or cloud needed)
         if (payload.textMessage) {
@@ -470,10 +534,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       let contentData: Uint8Array
 
       if (transferResult.mode === 'p2p') {
-        // P2P data is raw content (not encrypted)
+        // P2P data is already decrypted on-the-fly during reception
         contentData = transferResult.data
         webRTCSuccess = true
-        console.log('Received data via P2P')
+        console.log('Received and decrypted data via P2P')
       } else if (transferResult.mode === 'cloud') {
         // Cloud data is encrypted - need to decrypt
         setState(s => ({ ...s, message: 'Decrypting...' }))

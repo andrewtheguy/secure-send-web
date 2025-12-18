@@ -440,7 +440,7 @@ export function SendTab() {
                     <RadioGroupItem value="qr" id="qr" />
                     <Label htmlFor="qr" className="text-sm font-normal cursor-pointer flex items-center gap-1">
                       <QrCode className="h-3 w-3" />
-                      QR Code (serverless)
+                      QR Code (offline/local)
                     </Label>
                   </div>
                 </RadioGroup>
@@ -448,8 +448,8 @@ export function SendTab() {
                   {signalingMethod === 'nostr'
                     ? 'Uses decentralized Nostr relays. Falls back to cloud if P2P fails.'
                     : signalingMethod === 'peerjs'
-                    ? 'Uses PeerJS server for simpler P2P. No cloud fallback - transfer fails if P2P unavailable.'
-                    : 'Exchange QR codes directly with receiver. No signaling server - truly serverless P2P.'}
+                      ? 'Uses PeerJS server for simpler P2P. No cloud fallback - transfer fails if P2P unavailable.'
+                      : 'Exchange QR codes directly with receiver. Works without internet - using manual P2P exchange.'}
                 </p>
               </div>
             )}

@@ -7,22 +7,23 @@ Secure Send is a browser-based encrypted file and message transfer application. 
 ## Core Principles
 
 1. **P2P First**: Direct WebRTC connections are always preferred for data transfer.
-2. **End-to-End Encryption**: Signaling metadata and cloud-stored data are encrypted client-side; P2P content relies on WebRTC DTLS without extra encryption.
-3. **Explicit Signaling Choice**: Users choose between Nostr (with cloud fallback), PeerJS (P2P only), or QR (offline).
-4. **PIN-Based Security**: A 12-character PIN serves as the shared secret for key derivation.
+2. **End-to-End Encryption**: All content (P2P and cloud) is encrypted with AES-256-GCM before transfer. P2P adds DTLS for defense in depth.
+3. **Streaming Encryption**: Content is encrypted/decrypted in 256KB chunks for memory efficiency.
+4. **Explicit Signaling Choice**: Users choose between Nostr (with cloud fallback), PeerJS (P2P only), or QR (offline).
+5. **PIN-Based Security**: A 12-character PIN serves as the shared secret for key derivation.
 
 ## Signaling Methods
 
 By default, Nostr is used for signaling. PeerJS and QR are available as alternatives under "Advanced Options" in the UI. Both sender and receiver must use the same method.
 
-| Feature | Nostr (Default) | PeerJS (Advanced) | QR (Serverless Signaling) |
+| Feature | Nostr (Default) | PeerJS (Advanced) | QR (Offline Signaling) |
 |---------|-----------------|-------------------|---------------------------|
 | Signaling Server | Decentralized relays | Centralized (0.peerjs.com) | None (manual QR exchange) |
 | Cloud Fallback | Yes (tmpfiles.org) | No | No |
 | Reliability | Higher (fallback available) | P2P only | P2P only |
 | Privacy | Better (no central server) | PeerJS server sees peer IDs | Best (no signaling server) |
 | Complexity | More complex | Simpler | Manual QR exchange |
-| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | Air-gapped scenarios, works offline once page is loaded |
+| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | Air-gapped scenarios, works without internet |
 
 ## Transfer Flow
 
@@ -36,8 +37,10 @@ Sender                              Receiver
   ├─── WebRTC Offer ──────────────────>│
   │<────────── WebRTC Answer ──────────┤
   │                                    │
-  │==== P2P Data Channel (16KB chunks) ===│
+  │= P2P Data Channel (256KB encrypted chunks) =│
+  │   [chunkIndex][nonce][ciphertext][tag]    │
   │                                    │
+  ├─── DONE:N (total chunk count) ────>│
   │<────────── Complete ACK (seq=-1) ──┤
   ✓                                    ✓
 ```
@@ -92,7 +95,7 @@ Sender                              Receiver
 If P2P connection fails → Transfer fails (no cloud fallback)
 ```
 
-### QR Mode (Serverless Signaling)
+### QR Mode (Offline Signaling)
 ```
 Sender                              Receiver
   │                                    │
@@ -137,12 +140,14 @@ Note: QR mode avoids signaling servers. For offline operation, devices must be o
 | `pin.ts` | PIN generation and validation (12-char, mixed charset) |
 | `kdf.ts` | Key derivation using PBKDF2-SHA256 (600,000 iterations) |
 | `aes-gcm.ts` | AES-256-GCM encryption/decryption |
+| `stream-crypto.ts` | Streaming encryption/decryption for P2P (256KB chunks) |
 | `constants.ts` | Crypto parameters, size limits, timeouts |
 
 **Key Parameters:**
 - `MAX_MESSAGE_SIZE`: 100MB (maximum file size)
 - `CLOUD_CHUNK_SIZE`: 10MB (chunk size for cloud uploads)
-- `CHUNK_SIZE`: 16KB (WebRTC data channel chunk size)
+- `ENCRYPTION_CHUNK_SIZE`: 256KB (application-level encryption chunk size)
+- `CHUNK_SIZE`: 16KB (WebRTC data channel chunk size, handled by WebRTC internally)
 - `PBKDF2_ITERATIONS`: 600,000
 
 ### Nostr Signaling (`src/lib/nostr/`)
@@ -196,7 +201,7 @@ Alternative signaling method using PeerJS cloud server instead of Nostr relays.
 
 ### QR Signaling (`src/lib/qr-signaling.ts`)
 
-Fully offline signaling method using QR codes for WebRTC offer/answer exchange.
+Fully offline signaling method using QR codes for WebRTC offer/answer exchange. Works without internet for devices on the same local network.
 
 **How it works:**
 - Sender generates WebRTC offer with ICE candidates
@@ -356,15 +361,22 @@ interface PinExchangePayload {
 |------|--------------|----------------|
 | PIN Exchange Payload | Encrypted (AES-GCM) | Encrypted (AES-GCM) |
 | WebRTC Signals | Encrypted (AES-GCM) | N/A |
-| File Content | Raw (channel is secure) | Encrypted (AES-GCM) |
+| File Content | Encrypted (AES-GCM, 256KB chunks) | Encrypted (AES-GCM, whole file) |
 
-**Note:** P2P sends raw content because the WebRTC data channel is already a secure, authenticated channel between the two peers. Cloud storage receives encrypted data because it's stored on third-party servers.
+**Streaming Encryption (P2P):**
+P2P transfers encrypt content in 256KB chunks, each with a unique nonce. This provides:
+- **Defense in depth**: AES-GCM on top of WebRTC DTLS
+- **Streaming decryption**: Receiver decrypts each chunk as it arrives
+- **Memory efficiency**: Pre-allocated buffers avoid 2x memory peak during assembly
 
-**PeerJS note:** PeerJS uses a PIN-derived peer ID for signaling access control; metadata is encrypted with the PIN, while data chunks are sent over the DTLS-secured channel.
+**Encrypted Chunk Format (P2P):**
+```
+[2 bytes: chunk index][12 bytes: nonce][ciphertext][16 bytes: tag]
+```
 
-**Optimization:** File content encryption is deferred until cloud fallback is triggered. If P2P succeeds, encryption is skipped entirely, saving CPU time and memory for large files.
+**PeerJS note:** PeerJS uses a PIN-derived peer ID for signaling access control; metadata is encrypted with the PIN, while data chunks are sent over the DTLS-secured channel (no extra encryption layer currently).
 
-**Why PIN-encrypted signaling avoids extra P2P encryption:** The PIN encrypts the WebRTC offer/answer and ICE candidates (the signaling data needed to complete the handshake). Without the PIN, an attacker cannot decrypt this signaling data, so they cannot establish a P2P session in the first place. Once a session is established, WebRTC DTLS already provides confidentiality and integrity for the data channel, so additional content encryption would be redundant for P2P.
+**Why streaming on-the-fly?** Each 256KB chunk is encrypted and sent immediately, and the receiver decrypts each chunk as it arrives and writes directly to a pre-allocated buffer. This avoids holding both encrypted and decrypted copies in memory.
 
 ```
          PIN (shared out-of-band)
@@ -410,7 +422,7 @@ interface PinExchangePayload {
 5. **Brute-Force Resistance**: 600K PBKDF2 iterations (planned: Argon2id)
 6. **PIN Role by Mode**:
    - **Nostr/PeerJS/QR**: PIN encrypts signaling, preventing unauthorized P2P connection establishment
-7. **Transport Security**: All P2P transfers use WebRTC DTLS encryption regardless of signaling method
+7. **Transport Security**: All Nostr P2P transfers use both AES-256-GCM encryption (256KB chunks) and WebRTC DTLS
 
 ## File Structure
 
@@ -421,7 +433,8 @@ src/
 │   │   ├── constants.ts     # Parameters and limits
 │   │   ├── pin.ts           # PIN generation/validation
 │   │   ├── kdf.ts           # Key derivation
-│   │   └── aes-gcm.ts       # Encryption/decryption
+│   │   ├── aes-gcm.ts       # Encryption/decryption
+│   │   └── stream-crypto.ts # Streaming chunk encryption (P2P)
 │   ├── nostr/               # Nostr protocol (signaling option 1)
 │   │   ├── types.ts         # Type definitions
 │   │   ├── events.ts        # Event creation/parsing

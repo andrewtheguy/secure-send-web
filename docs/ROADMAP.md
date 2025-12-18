@@ -34,3 +34,27 @@ Current chunked implementation still loads 10MB chunks into memory.
 
 ### Argon2id Key Derivation
 Replace PBKDF2 with Argon2id (via WASM) for stronger resistance to brute-force attacks on the PIN.
+
+### File System Access API for Direct-to-Disk Streaming
+Use the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API) to write received file chunks directly to disk, eliminating the need to buffer the entire file in memory.
+
+**Benefits:**
+- Near-zero memory usage for receiving files (only one chunk in memory at a time)
+- Enable transfers of files larger than available RAM
+- Decrypted chunks written directly to file handle
+
+**Implementation approach:**
+- Use `showSaveFilePicker()` to get a writable file handle before transfer starts
+- Create a `FileSystemWritableFileStream` for streaming writes
+- Write each decrypted chunk directly to disk as it arrives
+- Close the stream when transfer completes
+
+**Browser support:**
+- Chrome/Edge: Full support (Chromium 86+)
+- Safari: Partial support (origin private file system only)
+- Firefox: Not supported (use fallback to current in-memory approach)
+
+**Fallback strategy:**
+- Feature-detect `window.showSaveFilePicker`
+- If unavailable, use current in-memory buffering approach
+- Progressive enhancement - works everywhere, better on supported browsers
