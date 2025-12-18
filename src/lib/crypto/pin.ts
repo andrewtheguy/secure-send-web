@@ -5,6 +5,7 @@ import {
   PIN_HINT_LENGTH,
   NOSTR_FIRST_CHARSET,
   PEERJS_FIRST_CHARSET,
+  QR_FIRST_CHARSET,
 } from './constants'
 
 /**
@@ -72,11 +73,15 @@ function randomCharFromCharset(charset: string): string {
 
 /**
  * Generate PIN with signaling method encoded in first character
- * - Uppercase first char (A-Z excluding I,O) = Nostr
+ * - Uppercase first char (A-Z excluding I,L,O) = Nostr
  * - Lowercase first char (a-z excluding i,l,o) = PeerJS
+ * - '2' first char = QR
  */
-export function generatePinForMethod(method: 'nostr' | 'peerjs'): string {
-  const firstCharset = method === 'nostr' ? NOSTR_FIRST_CHARSET : PEERJS_FIRST_CHARSET
+export function generatePinForMethod(method: 'nostr' | 'peerjs' | 'qr'): string {
+  let firstCharset: string
+  if (method === 'nostr') firstCharset = NOSTR_FIRST_CHARSET
+  else if (method === 'peerjs') firstCharset = PEERJS_FIRST_CHARSET
+  else firstCharset = QR_FIRST_CHARSET
   const dataLength = PIN_LENGTH - PIN_CHECKSUM_LENGTH
 
   // Generate first character from method-specific charset
@@ -109,11 +114,13 @@ export function generatePinForMethod(method: 'nostr' | 'peerjs'): string {
  * Detect signaling method from PIN's first character
  * - Uppercase = Nostr
  * - Lowercase = PeerJS
- * - Digits/Symbols = null (reserved for future protocols)
+ * - '2' = QR
+ * - Other digits/symbols = null (reserved for future protocols)
  */
-export function detectSignalingMethod(pin: string): 'nostr' | 'peerjs' | null {
+export function detectSignalingMethod(pin: string): 'nostr' | 'peerjs' | 'qr' | null {
   if (!pin || pin.length === 0) return null
   const firstChar = pin[0]
+  if (QR_FIRST_CHARSET.includes(firstChar)) return 'qr'
   if (NOSTR_FIRST_CHARSET.includes(firstChar)) return 'nostr'
   if (PEERJS_FIRST_CHARSET.includes(firstChar)) return 'peerjs'
   return null // Reserved for future protocols

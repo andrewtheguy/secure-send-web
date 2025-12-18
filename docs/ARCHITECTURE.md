@@ -2,7 +2,7 @@
 
 ## Overview
 
-Secure Send is a browser-based encrypted file and message transfer application. It uses PIN-based encryption, supports two signaling methods (Nostr relays or PeerJS), and enables direct P2P (WebRTC) data transfer with optional cloud fallback (Nostr mode only).
+Secure Send is a browser-based encrypted file and message transfer application. It uses PIN-based encryption, supports three signaling methods (Nostr relays, PeerJS, or QR codes), and enables direct P2P (WebRTC) data transfer with optional cloud fallback (Nostr mode only).
 
 ## Core Principles
 
@@ -13,16 +13,16 @@ Secure Send is a browser-based encrypted file and message transfer application. 
 
 ## Signaling Methods
 
-By default, Nostr is used for signaling. PeerJS is available as an alternative under "Advanced Options" in the UI. Both sender and receiver must use the same method.
+By default, Nostr is used for signaling. PeerJS and QR are available as alternatives under "Advanced Options" in the UI. Both sender and receiver must use the same method.
 
-| Feature | Nostr (Default) | PeerJS (Advanced) |
-|---------|-----------------|-------------------|
-| Signaling Server | Decentralized relays | Centralized (0.peerjs.com) |
-| Cloud Fallback | Yes (tmpfiles.org) | No |
-| Reliability | Higher (fallback available) | P2P only |
-| Privacy | Better (no central server) | PeerJS server sees peer IDs |
-| Complexity | More complex | Simpler |
-| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity |
+| Feature | Nostr (Default) | PeerJS (Advanced) | QR (Offline) |
+|---------|-----------------|-------------------|--------------|
+| Signaling Server | Decentralized relays | Centralized (0.peerjs.com) | None (offline) |
+| Cloud Fallback | Yes (tmpfiles.org) | No | No |
+| Reliability | Higher (fallback available) | P2P only | P2P only |
+| Privacy | Better (no central server) | PeerJS server sees peer IDs | Best (fully offline) |
+| Complexity | More complex | Simpler | Manual QR exchange |
+| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | Air-gapped, offline scenarios |
 
 ## Transfer Flow
 
@@ -92,6 +92,42 @@ Sender                              Receiver
 If P2P connection fails → Transfer fails (no cloud fallback)
 ```
 
+### QR Mode (Fully Offline - No Server Required)
+```
+Sender                              Receiver
+  │                                    │
+  ├─── Generate PIN, create WebRTC     │
+  │    offer, encrypt content          │
+  │                                    │
+  ├─── Display Offer QR code(s) ──────>│ (scan or paste)
+  │    (JSON → gzip → base45 → QR)     │
+  │                                    │
+  │                                    ├─── Decode QR, validate PIN
+  │                                    ├─── Create WebRTC answer
+  │                                    │
+  │    (scan or paste) <──────────────┤ Display Answer QR code(s)
+  │                                    │
+  ├─── Process answer, establish       │
+  │    WebRTC connection               │
+  │                                    │
+  │==== P2P Data Channel (16KB chunks) ===│
+  │                                    │
+  │<────────── ACK ───────────────────┤
+  ✓                                    ✓
+
+If P2P connection fails → Transfer fails (no server fallback)
+```
+
+**QR Code Format:**
+- Payload: `SignalingPayload` JSON → gzip compress → base45 encode
+- Split into chunks if >1000 chars: `X/Y:data$` format
+  - `X`: chunk index (1-9)
+  - `Y`: total chunks (1-9)
+  - `data`: base45-encoded portion
+  - `$`: integrity marker
+- Example: `1/3:ABC123XYZ$` (chunk 1 of 3)
+- Copy/paste uses raw JSON (no encoding)
+
 ## Key Components
 
 ### Cryptography (`src/lib/crypto/`)
@@ -157,6 +193,58 @@ Alternative signaling method using PeerJS cloud server instead of Nostr relays.
 - Simpler protocol - no event kinds or tags
 - Centralized signaling server (PeerJS cloud)
 - Metadata exchange happens over data channel (not signaling)
+
+### QR Signaling (`src/lib/qr-signaling.ts`)
+
+Fully offline signaling method using QR codes for WebRTC offer/answer exchange.
+
+**How it works:**
+- Sender generates WebRTC offer with ICE candidates
+- Offer payload encoded as: JSON → gzip → base45 → split into QR chunks
+- Receiver scans QR codes (or pastes raw JSON), creates answer
+- Answer sent back via same encoding (QR codes or raw JSON paste)
+- Both peers establish WebRTC connection using exchanged SDP/ICE candidates
+
+**Payload Structure:**
+```typescript
+interface SignalingPayload {
+  type: 'offer' | 'answer'
+  sdp: string                    // WebRTC session description
+  candidates: string[]           // ICE candidates
+  salt?: number[]                // Encryption salt (offer only)
+  contentType?: 'text' | 'file'  // Content type (offer only)
+  fileName?: string              // File name (offer only, if file)
+  fileSize?: number              // File size (offer only, if file)
+  mimeType?: string              // MIME type (offer only, if file)
+  totalBytes?: number            // Total encrypted size (offer only)
+}
+```
+
+**QR Chunk Format (`X/Y:data$`):**
+- Fixed 4-char header: `X/Y:` where X=index (1-9), Y=total (1-9)
+- Data: base45-encoded payload portion
+- End marker: `$` for integrity validation
+- Max chunk size: 1000 chars (optimized for QR code capacity)
+- Max 9 QR codes per payload
+
+**Encoding Pipeline:**
+1. `SignalingPayload` object
+2. `JSON.stringify()` → JSON string
+3. `pako.gzip()` → compressed bytes
+4. `base45Encode()` → alphanumeric string (QR-friendly)
+5. `splitQRData()` → array of QR chunks with headers
+
+**Input Methods:**
+| Method | Encoding | Use Case |
+|--------|----------|----------|
+| QR Scan | base45 + gzip | Camera available |
+| Paste | Raw JSON | No camera, text-based exchange |
+
+**Key Features:**
+- No server required - fully air-gapped operation
+- Base45 encoding uses QR alphanumeric charset (RFC 9285)
+- Multi-QR support with manual navigation
+- Chunk header format ensures first char is never space (won't get trimmed)
 
 ### WebRTC (`src/lib/webrtc.ts`)
 
@@ -224,6 +312,32 @@ Fallback storage when P2P connection cannot be established (15s timeout). Not us
 5. Receive data chunks, accumulate
 6. On done: decrypt content, send done acknowledgment
 7. If connection fails: transfer fails (no cloud fallback)
+
+**QR Mode:**
+
+**`use-qr-send.ts`** - Sender logic (QR):
+1. Read content (file or text), validate size
+2. Generate PIN, derive encryption key with salt
+3. Create WebRTC offer with ICE candidates
+4. Wait for ICE gathering to complete
+5. Encode offer payload: JSON → gzip → base45 → split into QR chunks
+6. Display QR codes (with navigation for multi-QR) and raw JSON copy button
+7. Wait for user to input receiver's answer (scan or paste)
+8. Process answer, establish WebRTC connection
+9. Encrypt and send data via data channel
+10. Wait for receiver ACK
+
+**`use-qr-receive.ts`** - Receiver logic (QR):
+1. Validate PIN entered by user
+2. Wait for user to input sender's offer (scan or paste)
+3. Parse offer, extract metadata and salt
+4. Derive encryption key from PIN and salt
+5. Create WebRTC answer with ICE candidates
+6. Encode answer payload: JSON → gzip → base45 → split into QR chunks
+7. Display QR codes and raw JSON copy button
+8. Wait for WebRTC connection to establish
+9. Receive encrypted data via data channel
+10. Decrypt and present content
 
 ## Data Encryption
 
@@ -305,14 +419,24 @@ src/
 │   │   ├── client.ts        # Relay client
 │   │   └── relays.ts        # Default relays
 │   ├── peerjs-signaling.ts  # PeerJS wrapper (signaling option 2)
-│   ├── webrtc.ts            # WebRTC connection (Nostr mode)
+│   ├── qr-signaling.ts      # QR code signaling (signaling option 3)
+│   ├── qr-utils.ts          # QR code generation utilities
+│   ├── base45.ts            # Base45 encoding/decoding (RFC 9285)
+│   ├── webrtc.ts            # WebRTC connection management
 │   ├── cloud-storage.ts     # Cloud fallback (Nostr mode only)
 │   └── file-utils.ts        # File reading utilities
 ├── hooks/
 │   ├── use-nostr-send.ts    # Sender hook (Nostr mode)
 │   ├── use-nostr-receive.ts # Receiver hook (Nostr mode)
 │   ├── use-peerjs-send.ts   # Sender hook (PeerJS mode)
-│   └── use-peerjs-receive.ts # Receiver hook (PeerJS mode)
-├── components/              # React UI components
+│   ├── use-peerjs-receive.ts # Receiver hook (PeerJS mode)
+│   ├── use-qr-send.ts       # Sender hook (QR mode)
+│   ├── use-qr-receive.ts    # Receiver hook (QR mode)
+│   └── useQRScanner.ts      # Camera-based QR scanning hook
+├── components/
+│   └── secure-send/
+│       ├── qr-display.tsx   # Multi-QR display with navigation
+│       ├── qr-scanner.tsx   # QR scanner with chunk collection
+│       └── qr-input.tsx     # Dual input (scan or paste)
 └── pages/                   # Page components
 ```

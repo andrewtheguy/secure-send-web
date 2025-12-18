@@ -12,7 +12,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 - **Cloud fallback**: Falls back to cloud storage (tmpfiles.org) if WebRTC connection fails
 - **End-to-end encryption**: All data is encrypted before upload, only you and the receiver can decrypt
 - **No accounts required**: Ephemeral keypairs are generated for each transfer
-- **Dual signaling methods**: Choose between Nostr relays (with cloud fallback) or PeerJS (simpler P2P)
+- **Multiple signaling methods**: Choose between Nostr relays (with cloud fallback), PeerJS (simpler P2P), or QR codes (serverless)
 - **Auto-detection**: Receiver automatically detects signaling method from PIN format
 
 ## How It Works
@@ -76,6 +76,7 @@ The application uses a hybrid transport approach:
 1. **Signaling Methods** (sender chooses in Advanced Options):
    - **Nostr** (default): PIN exchange and WebRTC signaling via decentralized Nostr relays. Falls back to encrypted cloud transfer if P2P fails.
    - **PeerJS**: Uses PeerJS cloud server (0.peerjs.com) for simpler signaling. No cloud fallback - P2P only.
+   - **QR Code**: Exchange WebRTC signaling data via QR codes. Truly serverless - no signaling server required. Both parties must be able to scan each other's screens. P2P only, no fallback.
 2. **Data Transfer**:
    - **WebRTC P2P** (default): Direct peer-to-peer connection for fastest transfer
    - **Cloud Fallback**: If WebRTC fails (Nostr mode only), encrypted data is uploaded to cloud storage with automatic failover
@@ -86,6 +87,7 @@ The application uses a hybrid transport approach:
 The signaling method is encoded in the PIN's first character:
 - **Uppercase letter** (A-Z): Nostr signaling
 - **Lowercase letter** (a-z): PeerJS signaling
+- **Digit "2"**: QR code signaling
 
 Receivers don't need to select a signaling method - it's automatically detected from the PIN.
 

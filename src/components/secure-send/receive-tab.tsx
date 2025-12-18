@@ -4,8 +4,11 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { PinInput, type PinInputRef } from './pin-input'
 import { TransferStatus } from './transfer-status'
+import { QRDisplay } from './qr-display'
+import { QRInput } from './qr-input'
 import { useNostrReceive } from '@/hooks/use-nostr-receive'
 import { usePeerJSReceive } from '@/hooks/use-peerjs-receive'
+import { useQRReceive } from '@/hooks/use-qr-receive'
 import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
 import { detectSignalingMethod } from '@/lib/crypto'
 import type { SignalingMethod } from '@/lib/nostr/types'
@@ -23,12 +26,18 @@ export function ReceiveTab() {
   const [timeRemaining, setTimeRemaining] = useState(0)
   const [detectedMethod, setDetectedMethod] = useState<SignalingMethod>('nostr')
 
-  // Both hooks must be called unconditionally (React rules)
+  // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrReceive()
   const peerJSHook = usePeerJSReceive()
+  const qrHook = useQRReceive()
 
   // Use the appropriate hook based on detected signaling method from PIN
-  const { state, receivedContent, receive, cancel, reset } = detectedMethod === 'nostr' ? nostrHook : peerJSHook
+  const activeHook = detectedMethod === 'nostr' ? nostrHook : detectedMethod === 'peerjs' ? peerJSHook : qrHook
+  const { state: rawState, receivedContent, receive, cancel, reset } = activeHook
+  const submitOffer = detectedMethod === 'qr' ? qrHook.submitOffer : undefined
+
+  // Normalize state for QR hook (it has additional status values)
+  const state = rawState as typeof nostrHook.state & { answerQRData?: string[]; clipboardData?: string }
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pinInactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -188,6 +197,8 @@ export function ReceiveTab() {
   }
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
+  const showQRInput = detectedMethod === 'qr' && state.status === 'waiting_for_offer'
+  const showQRDisplay = detectedMethod === 'qr' && state.answerQRData && state.status === 'showing_answer_qr'
 
   return (
     <div className="space-y-4 pt-4">
@@ -206,6 +217,11 @@ export function ReceiveTab() {
                 PIN cleared due to inactivity. Please re-enter.
               </p>
             )}
+            {detectedMethod === 'qr' && isPinValid && (
+              <p className="text-xs text-muted-foreground">
+                QR mode detected. You'll scan the sender's QR code next.
+              </p>
+            )}
           </div>
 
           <Button onClick={handleReceive} disabled={!canReceive} className="w-full">
@@ -216,6 +232,28 @@ export function ReceiveTab() {
       ) : (
         <>
           <TransferStatus state={state} />
+
+          {/* QR Input for receiving offer */}
+          {showQRInput && submitOffer && (
+            <div className="space-y-4">
+              <QRInput
+                expectedType="offer"
+                label="Scan sender's QR code and paste the data below"
+                onSubmit={submitOffer}
+              />
+            </div>
+          )}
+
+          {/* QR Code display for receiver's answer */}
+          {showQRDisplay && state.answerQRData && (
+            <div className="space-y-4">
+              <QRDisplay
+                data={state.answerQRData}
+                clipboardData={state.clipboardData}
+                label="Show this QR to sender and wait for connection"
+              />
+            </div>
+          )}
 
           {state.status === 'complete' && receivedContent?.contentType === 'text' && (
             <div className="space-y-2">
