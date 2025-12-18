@@ -365,6 +365,22 @@ interface PinExchangePayload {
 
 **Optimization:** File content encryption is deferred until cloud fallback is triggered. If P2P succeeds, encryption is skipped entirely, saving CPU time and memory for large files.
 
+**Why PIN-encrypted signaling avoids extra P2P encryption:** The PIN encrypts the WebRTC offer/answer and ICE candidates (the signaling data needed to complete the handshake). Without the PIN, an attacker cannot decrypt this signaling data, so they cannot establish a P2P session in the first place. Once a session is established, WebRTC DTLS already provides confidentiality and integrity for the data channel, so additional content encryption would be redundant for P2P.
+
+```
+         PIN (shared out-of-band)
+                 │
+                 v
+ Signaling (offer/answer/ICE) --AES-GCM--> Encrypted payload
+                 │
+        (must decrypt to connect)
+                 v
+        WebRTC handshake (DTLS)
+                 │
+                 v
+         P2P data channel (DTLS)
+```
+
 ## Size Limits
 
 | Limit | Value | Rationale |
