@@ -10,6 +10,7 @@ import {
   MAX_MESSAGE_SIZE,
   ENCRYPTION_CHUNK_SIZE,
   CLOUD_CHUNK_SIZE,
+  TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -142,8 +143,26 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       let transferId: string | null = null
       let senderPubkey: string | null = null
       let key: CryptoKey | null = null
+      let sawExpiredCandidate = false
+      let sawNonExpiredCandidate = false
+      let selectedCreatedAtSec: number | null = null
 
-      for (const event of events) {
+      // Prefer newest non-expired events first.
+      const sortedEvents = [...events].sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
+
+      for (const event of sortedEvents) {
+        // Enforce TTL before establishing any session, even if PIN is correct.
+        if (!event.created_at) {
+          sawExpiredCandidate = true
+          continue
+        }
+        const eventAgeMs = Date.now() - event.created_at * 1000
+        if (eventAgeMs > TRANSFER_EXPIRATION_MS) {
+          sawExpiredCandidate = true
+          continue
+        }
+        sawNonExpiredCandidate = true
+
         const parsed = parsePinExchangeEvent(event)
         if (!parsed) continue
 
@@ -160,6 +179,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           transferId = parsed.transferId
           senderPubkey = event.pubkey
           key = derivedKey
+          selectedCreatedAtSec = event.created_at || null
           break
         } catch {
           // Decryption failed, try next event
@@ -168,7 +188,16 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       }
 
       if (!payload || !transferId || !senderPubkey || !key) {
+        if (!sawNonExpiredCandidate && sawExpiredCandidate) {
+          setState({ status: 'error', message: 'Transfer expired. Ask sender to generate a new PIN.' })
+          return
+        }
         setState({ status: 'error', message: 'Could not decrypt transfer. Wrong PIN?' })
+        return
+      }
+
+      if (!selectedCreatedAtSec || Date.now() - selectedCreatedAtSec * 1000 > TRANSFER_EXPIRATION_MS) {
+        setState({ status: 'error', message: 'Transfer expired. Ask sender to generate a new PIN.' })
         return
       }
 
@@ -298,8 +327,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
               // Handle legacy DONE format (for backwards compatibility)
               if (typeof data === 'string' && data === 'DONE') {
-                console.warn('Received legacy DONE format without chunk count')
-                // Fall through to old behavior - should not happen with new sender
+                reject(new Error('Unsupported sender: missing chunk count. Ask sender to update and retry.'))
                 return
               }
 

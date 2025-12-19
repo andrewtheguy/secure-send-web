@@ -183,21 +183,17 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
         type: 'metadata',
         contentType,
         totalBytes: contentBytes.length,
+        createdAt: sessionStartTime,
         fileName: isFile ? fileName : undefined,
         fileSize: isFile ? fileSize : undefined,
         mimeType: isFile ? mimeType : undefined,
-      }
-
-      // Encrypt metadata with salt so receiver can derive key
-      const metadataWithSalt = {
-        ...metadata,
-        salt: Array.from(salt), // Convert Uint8Array to array for JSON
+        salt: Array.from(salt), // Convert Uint8Array to array for JSON transport
       }
 
       // For small text messages, include encrypted content in metadata
       if (!isFile && contentBytes.length < 10 * 1024) { // < 10KB
         const encryptedText = await encrypt(key, contentBytes)
-        metadataWithSalt.encryptedPayload = btoa(String.fromCharCode(...encryptedText))
+        metadata.encryptedPayload = btoa(String.fromCharCode(...encryptedText))
       }
 
       // Send metadata
@@ -208,7 +204,7 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
       })
 
-      peerRef.current!.send(metadataWithSalt as any)
+      peerRef.current!.send(metadata)
 
       // Wait for ready acknowledgment
       const isReady = await new Promise<boolean>((resolve, reject) => {
@@ -226,8 +222,13 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
 
       if (!isReady || cancelledRef.current) return
 
+      // Enforce TTL again right before data transfer begins
+      if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
+        throw new Error('Session expired. Please start a new transfer.')
+      }
+
       // If small text was included in metadata, we're done (just wait for done_ack)
-      if (metadataWithSalt.encryptedPayload) {
+      if (metadata.encryptedPayload) {
         // Small text already sent in metadata
         setState({
           status: 'transferring',
