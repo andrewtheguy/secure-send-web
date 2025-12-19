@@ -52,11 +52,13 @@ export function SendTab() {
 
   // Use the appropriate hook based on active method (defaults to nostr before detection)
   const activeHook = activeMethod === 'peerjs' ? peerJSHook : activeMethod === 'manual' ? manualHook : nostrHook
-  const { state: rawState, pin, cancel } = activeHook
+  // Only nostr and peerjs hooks have PIN
+  const pin = activeMethod === 'manual' ? null : (activeHook as typeof nostrHook).pin
+  const { state: rawState, cancel } = activeHook
   const submitAnswer = activeMethod === 'manual' ? manualHook.submitAnswer : undefined
 
-  // Normalize state for QR hook (it has additional status values)
-  const state = rawState as typeof nostrHook.state & { offerQRData?: Uint8Array; clipboardData?: string }
+  // Normalize state for different hooks
+  const state = rawState as typeof nostrHook.state & { offerData?: Uint8Array; clipboardData?: string }
 
   const encoder = new TextEncoder()
   const messageSize = encoder.encode(message).length
@@ -251,9 +253,9 @@ export function SendTab() {
   }, [])
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
-  const showPinDisplay = pin && (state.status === 'waiting_for_receiver' || state.status === 'showing_offer_qr')
-  const showQRDisplay = activeMethod === 'manual' && state.offerQRData && (state.status === 'showing_offer_qr' || state.status === 'waiting_for_receiver')
-  const showQRInput = activeMethod === 'manual' && state.status === 'showing_offer_qr'
+  const showPinDisplay = pin && state.status === 'waiting_for_receiver'
+  const showQRDisplay = activeMethod === 'manual' && state.offerData && state.status === 'showing_offer'
+  const showQRInput = activeMethod === 'manual' && state.status === 'showing_offer'
 
   return (
     <div className="space-y-4 pt-4">
@@ -568,7 +570,7 @@ export function SendTab() {
           ) : (
             <Button onClick={() => handleSend()} disabled={!canSend || detectingMethod} className="w-full">
               <Send className="mr-2 h-4 w-4" />
-              Generate PIN & Send
+              {forcedMethod === 'manual-only' ? 'Generate & Send' : 'Generate PIN & Send'}
             </Button>
           )}
         </>
@@ -606,9 +608,9 @@ export function SendTab() {
           />
 
           {/* QR Code display for sender */}
-          {showQRDisplay && state.offerQRData && (
+          {showQRDisplay && state.offerData && (
             <QRDisplay
-              data={state.offerQRData}
+              data={state.offerData}
               clipboardData={state.clipboardData}
               label="Show this QR to receiver"
             />

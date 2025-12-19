@@ -1,8 +1,9 @@
 import { useState, useCallback, useRef } from 'react'
 import {
-  generatePinForMethod,
   generateSalt,
-  deriveKeyFromPin,
+  generateECDHKeyPair,
+  deriveSharedSecret,
+  deriveAESKeyFromSecret,
   encryptChunk,
   MAX_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
@@ -10,9 +11,9 @@ import {
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
 import {
-  decryptSignalingPayload,
-  generateOfferQRBinary,
-  generateClipboardData,
+  generateMutualOfferBinary,
+  generateMutualClipboardData,
+  parseMutualPayload,
   type SignalingPayload,
 } from '@/lib/manual-signaling'
 import type { TransferState, ContentType } from '@/lib/nostr/types'
@@ -22,7 +23,7 @@ import { readFileAsBytes } from '@/lib/file-utils'
 export type ManualTransferStatus =
   | 'idle'
   | 'generating_offer'
-  | 'showing_offer_qr'
+  | 'showing_offer'
   | 'waiting_for_answer'
   | 'connecting'
   | 'transferring'
@@ -31,13 +32,12 @@ export type ManualTransferStatus =
 
 export interface ManualTransferState extends Omit<TransferState, 'status'> {
   status: ManualTransferStatus
-  offerQRData?: Uint8Array  // Binary data for QR code (gzipped JSON)
-  clipboardData?: string  // Raw JSON for copy button
+  offerData?: Uint8Array // Binary data for QR code
+  clipboardData?: string // Base64 for copy button
 }
 
 export interface UseManualSendReturn {
   state: ManualTransferState
-  pin: string | null
   send: (content: string | File) => Promise<void>
   submitAnswer: (answerData: Uint8Array) => void
   cancel: () => void
@@ -49,12 +49,15 @@ const ICE_CONFIG: RTCConfiguration = {
 
 export function useManualSend(): UseManualSendReturn {
   const [state, setState] = useState<ManualTransferState>({ status: 'idle' })
-  const [pin, setPin] = useState<string | null>(null)
 
   const rtcRef = useRef<WebRTCConnection | null>(null)
   const cancelledRef = useRef(false)
   const sendingRef = useRef(false)
   const expirationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Store ECDH private key for computing shared secret when answer arrives
+  const ecdhPrivateKeyRef = useRef<CryptoKey | null>(null)
+  const saltRef = useRef<Uint8Array | null>(null)
 
   // Store data needed for answer processing
   const pendingTransferRef = useRef<{
@@ -83,35 +86,42 @@ export function useManualSend(): UseManualSendReturn {
     answerResolverRef.current = null
     answerRejectRef.current = null
     pendingTransferRef.current = null
+    ecdhPrivateKeyRef.current = null
+    saltRef.current = null
     if (rtcRef.current) {
       rtcRef.current.close()
       rtcRef.current = null
     }
-    setPin(null)
     setState({ status: 'idle' })
   }, [clearExpirationTimeout])
 
   const submitAnswer = useCallback((answerBinary: Uint8Array) => {
-    if (!answerResolverRef.current || !pin) return
-    decryptSignalingPayload(answerBinary, pin).then((decrypted) => {
-      if (!decrypted) {
-        answerRejectRef.current?.(new Error('Invalid PIN or QR response'))
-        answerResolverRef.current = null
-        return
-      }
-      if (decrypted.type !== 'answer') {
-        answerRejectRef.current?.(new Error('Invalid QR response type'))
-        answerResolverRef.current = null
-        return
-      }
-      if (typeof decrypted.createdAt !== 'number' || !Number.isFinite(decrypted.createdAt)) {
-        answerRejectRef.current?.(new Error('Invalid QR response: missing TTL. Ask receiver to update and retry.'))
-        answerResolverRef.current = null
-        return
-      }
-      answerResolverRef.current?.(decrypted)
-    })
-  }, [pin])
+    if (!answerResolverRef.current) return
+
+    // Parse mutual payload (no decryption needed)
+    const parsed = parseMutualPayload(answerBinary)
+    if (!parsed) {
+      answerRejectRef.current?.(new Error('Invalid response format'))
+      answerResolverRef.current = null
+      return
+    }
+    if (parsed.type !== 'answer') {
+      answerRejectRef.current?.(new Error('Expected answer, got offer'))
+      answerResolverRef.current = null
+      return
+    }
+    if (!parsed.publicKey) {
+      answerRejectRef.current?.(new Error('Missing public key in response'))
+      answerResolverRef.current = null
+      return
+    }
+    if (typeof parsed.createdAt !== 'number' || !Number.isFinite(parsed.createdAt)) {
+      answerRejectRef.current?.(new Error('Invalid response: missing TTL'))
+      answerResolverRef.current = null
+      return
+    }
+    answerResolverRef.current?.(parsed)
+  }, [])
 
   const send = useCallback(async (content: string | File) => {
     // Guard against concurrent invocations
@@ -153,24 +163,25 @@ export function useManualSend(): UseManualSendReturn {
         }
       }
 
-      // Generate PIN and derive encryption key
-      setState({ status: 'generating_offer', message: 'Generating secure PIN...' })
-      const newPin = generatePinForMethod('manual')
+      // Generate ECDH keypair and salt
+      setState({ status: 'generating_offer', message: 'Generating keys...' })
       const sessionStartTime = Date.now()
-      setPin(newPin)
 
+      const ecdhKeyPair = await generateECDHKeyPair()
+      ecdhPrivateKeyRef.current = ecdhKeyPair.privateKey
       const salt = generateSalt()
-      const key = await deriveKeyFromPin(newPin, salt)
+      saltRef.current = salt
 
       // Set expiration timeout
       clearExpirationTimeout()
       expirationTimeoutRef.current = setTimeout(() => {
         if (!cancelledRef.current && sendingRef.current) {
-          setPin(null)
           setState({ status: 'error', message: 'Session expired. Please try again.' })
           sendingRef.current = false
           answerResolverRef.current = null
           pendingTransferRef.current = null
+          ecdhPrivateKeyRef.current = null
+          saltRef.current = null
           if (rtcRef.current) {
             rtcRef.current.close()
             rtcRef.current = null
@@ -244,8 +255,8 @@ export function useManualSend(): UseManualSendReturn {
 
       if (cancelledRef.current) return
 
-      // Generate binary QR data with offer + candidates + metadata + salt
-      const qrBinaryData = await generateOfferQRBinary(
+      // Generate binary offer data with ECDH public key
+      const offerBinary = generateMutualOfferBinary(
         offerSDP!,
         iceCandidates,
         {
@@ -255,31 +266,19 @@ export function useManualSend(): UseManualSendReturn {
           fileName,
           fileSize,
           mimeType,
-          salt: Array.from(salt), // Include salt for receiver to derive key
-        },
-        newPin
+          publicKey: ecdhKeyPair.publicKeyBytes,
+          salt,
+        }
       )
 
       // Generate base64 clipboard data
-      const offerPayload: SignalingPayload = {
-        type: 'offer',
-        sdp: offerSDP!.sdp || '',
-        candidates: iceCandidates.map(c => c.candidate),
-        createdAt: sessionStartTime,
-        contentType,
-        totalBytes: contentBytes.length,
-        fileName,
-        fileSize,
-        mimeType,
-        salt: Array.from(salt), // Include salt for receiver to derive key
-      }
-      const clipboardBase64 = await generateClipboardData(offerPayload, newPin)
+      const clipboardBase64 = generateMutualClipboardData(offerBinary)
 
-      // Show QR code and wait for answer
+      // Show offer and wait for answer
       setState({
-        status: 'showing_offer_qr',
-        message: 'Show this QR to receiver, then paste their response below',
-        offerQRData: qrBinaryData,
+        status: 'showing_offer',
+        message: 'Show this to receiver, then scan/paste their response',
+        offerData: offerBinary,
         clipboardData: clipboardBase64,
         contentType,
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
@@ -306,8 +305,15 @@ export function useManualSend(): UseManualSendReturn {
         throw new Error('Session expired. Please start a new transfer.')
       }
 
-      // Process answer
-      setState({ status: 'connecting', message: 'Establishing connection...' })
+      // Derive shared secret from receiver's public key
+      setState({ status: 'connecting', message: 'Establishing secure connection...' })
+
+      const receiverPublicKey = new Uint8Array(answerPayload.publicKey!)
+      const sharedSecret = await deriveSharedSecret(ecdhPrivateKeyRef.current!, receiverPublicKey)
+      const key = await deriveAESKeyFromSecret(sharedSecret, saltRef.current!)
+
+      // Clear ECDH private key - no longer needed
+      ecdhPrivateKeyRef.current = null
 
       // Handle answer signal
       await rtc.handleSignal({ type: 'answer', sdp: answerPayload.sdp })
@@ -352,9 +358,6 @@ export function useManualSend(): UseManualSendReturn {
       })
 
       if (cancelledRef.current) return
-
-      // Hide PIN now that we're connected
-      setPin(null)
 
       // Enforce TTL again right before data transfer begins
       if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
@@ -414,7 +417,6 @@ export function useManualSend(): UseManualSendReturn {
 
     } catch (error) {
       if (!cancelledRef.current) {
-        setPin(null)
         setState(prevState => ({
           ...prevState,
           status: 'error',
@@ -427,6 +429,8 @@ export function useManualSend(): UseManualSendReturn {
       answerResolverRef.current = null
       answerRejectRef.current = null
       pendingTransferRef.current = null
+      ecdhPrivateKeyRef.current = null
+      saltRef.current = null
       if (rtcRef.current) {
         rtcRef.current.close()
         rtcRef.current = null
@@ -434,5 +438,5 @@ export function useManualSend(): UseManualSendReturn {
     }
   }, [clearExpirationTimeout])
 
-  return { state, pin, send, submitAnswer, cancel }
+  return { state, send, submitAnswer, cancel }
 }

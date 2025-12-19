@@ -2,8 +2,11 @@ import pako from 'pako'
 import type { ContentType } from './nostr/types'
 import { deriveKeyFromPin, encrypt, decrypt, generateSalt } from './crypto'
 
-// Magic header: "SS01" = Secure Send version 1
+// Magic header: "SS01" = Secure Send version 1 (PIN-encrypted, deprecated)
 const MAGIC_HEADER = new Uint8Array([0x53, 0x53, 0x30, 0x31])
+
+// Magic header: "SS02" = Secure Send version 2 (ECDH mutual exchange, no encryption)
+const MAGIC_HEADER_V2 = new Uint8Array([0x53, 0x53, 0x30, 0x32])
 
 /**
  * Signaling Payload - method-agnostic format for Manual Exchange mode
@@ -15,13 +18,15 @@ export interface SignalingPayload {
   candidates: string[] // ICE candidates as SDP strings
   // Milliseconds since epoch when this payload was generated (TTL enforced by receiver for offers).
   createdAt: number
+  // ECDH public key for mutual exchange (65 bytes P-256 uncompressed)
+  publicKey?: number[]
   // Offer-only fields:
   contentType?: ContentType
   fileName?: string
   fileSize?: number
   mimeType?: string
   totalBytes?: number
-  salt?: number[] // Salt for content encryption key derivation
+  salt?: number[] // Salt for content encryption key derivation (from ECDH shared secret)
 }
 
 function uint8ArrayToBase64(bytes: Uint8Array): string {
@@ -213,4 +218,137 @@ export function estimatePayloadSize(payload: SignalingPayload): number {
   const json = JSON.stringify(payload)
   const compressed = pako.gzip(json)
   return compressed.length
+}
+
+// ============================================================================
+// Mutual Exchange (ECDH-based, no PIN required)
+// ============================================================================
+
+/**
+ * Generate mutual offer as binary data
+ * Format: [SS02 magic (4 bytes)][compressed payload]
+ * NOT encrypted - ECDH public keys are not secret
+ */
+export function generateMutualOfferBinary(
+  offer: RTCSessionDescriptionInit,
+  candidates: RTCIceCandidate[],
+  metadata: {
+    createdAt: number
+    contentType: ContentType
+    totalBytes: number
+    fileName?: string
+    fileSize?: number
+    mimeType?: string
+    publicKey: Uint8Array // ECDH public key (65 bytes)
+    salt: Uint8Array // Salt for AES key derivation
+  }
+): Uint8Array {
+  const payload: SignalingPayload = {
+    type: 'offer',
+    sdp: offer.sdp || '',
+    candidates: candidates.map((c) => c.candidate),
+    createdAt: metadata.createdAt,
+    contentType: metadata.contentType,
+    totalBytes: metadata.totalBytes,
+    fileName: metadata.fileName,
+    fileSize: metadata.fileSize,
+    mimeType: metadata.mimeType,
+    publicKey: Array.from(metadata.publicKey),
+    salt: Array.from(metadata.salt),
+  }
+
+  const encoder = new TextEncoder()
+  const jsonBytes = encoder.encode(JSON.stringify(payload))
+  const compressed = pako.deflate(jsonBytes)
+
+  // Build binary: [SS02][compressed]
+  const result = new Uint8Array(4 + compressed.length)
+  result.set(MAGIC_HEADER_V2, 0)
+  result.set(compressed, 4)
+  return result
+}
+
+/**
+ * Generate mutual answer as binary data
+ * Format: [SS02 magic (4 bytes)][compressed payload]
+ */
+export function generateMutualAnswerBinary(
+  answer: RTCSessionDescriptionInit,
+  candidates: RTCIceCandidate[],
+  publicKey: Uint8Array // ECDH public key (65 bytes)
+): Uint8Array {
+  const payload: SignalingPayload = {
+    type: 'answer',
+    sdp: answer.sdp || '',
+    candidates: candidates.map((c) => c.candidate),
+    createdAt: Date.now(),
+    publicKey: Array.from(publicKey),
+  }
+
+  const encoder = new TextEncoder()
+  const jsonBytes = encoder.encode(JSON.stringify(payload))
+  const compressed = pako.deflate(jsonBytes)
+
+  // Build binary: [SS02][compressed]
+  const result = new Uint8Array(4 + compressed.length)
+  result.set(MAGIC_HEADER_V2, 0)
+  result.set(compressed, 4)
+  return result
+}
+
+/**
+ * Parse mutual exchange binary payload (offer or answer)
+ * Returns null if invalid format or version
+ */
+export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null {
+  try {
+    // Verify magic header "SS02"
+    if (
+      binary.length < 5 ||
+      binary[0] !== 0x53 ||
+      binary[1] !== 0x53 ||
+      binary[2] !== 0x30 ||
+      binary[3] !== 0x32
+    ) {
+      return null
+    }
+
+    const compressed = binary.slice(4)
+    const jsonBytes = pako.inflate(compressed)
+    const json = new TextDecoder().decode(jsonBytes)
+    const payload = JSON.parse(json)
+
+    if (!isValidSignalingPayload(payload)) {
+      return null
+    }
+
+    // Validate publicKey is present for mutual exchange
+    if (!payload.publicKey || !Array.isArray(payload.publicKey)) {
+      return null
+    }
+
+    return payload
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Check if binary payload is mutual exchange format (SS02)
+ */
+export function isMutualPayload(binary: Uint8Array): boolean {
+  return (
+    binary.length > 4 &&
+    binary[0] === 0x53 &&
+    binary[1] === 0x53 &&
+    binary[2] === 0x30 &&
+    binary[3] === 0x32
+  )
+}
+
+/**
+ * Generate base64 string for clipboard (mutual exchange)
+ */
+export function generateMutualClipboardData(binary: Uint8Array): string {
+  return uint8ArrayToBase64(binary)
 }

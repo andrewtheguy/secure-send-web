@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Download, X, RotateCcw, Check, Copy, FileDown, AlertCircle } from 'lucide-react'
+import { Download, X, RotateCcw, Check, Copy, FileDown, AlertCircle, QrCode, KeyRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PinInput, type PinInputRef } from './pin-input'
 import { TransferStatus } from './transfer-status'
 import { QRDisplay } from './qr-display'
@@ -15,7 +16,11 @@ import type { SignalingMethod } from '@/lib/nostr/types'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
+type ReceiveMode = 'pin' | 'scan'
+
 export function ReceiveTab() {
+  const [receiveMode, setReceiveMode] = useState<ReceiveMode>('pin')
+
   // Store PIN in ref to avoid React DevTools exposure
   const pinRef = useRef('')
   const pinInputRef = useRef<PinInputRef>(null)
@@ -31,13 +36,24 @@ export function ReceiveTab() {
   const peerJSHook = usePeerJSReceive()
   const manualHook = useManualReceive()
 
-  // Use the appropriate hook based on detected signaling method from PIN
-  const activeHook = detectedMethod === 'nostr' ? nostrHook : detectedMethod === 'peerjs' ? peerJSHook : manualHook
-  const { state: rawState, receivedContent, receive, cancel, reset } = activeHook
-  const submitOffer = detectedMethod === 'manual' ? manualHook.submitOffer : undefined
+  // Determine which hook to use based on mode
+  const isManualMode = receiveMode === 'scan'
+  const activeHook = isManualMode
+    ? manualHook
+    : detectedMethod === 'nostr'
+      ? nostrHook
+      : detectedMethod === 'peerjs'
+        ? peerJSHook
+        : nostrHook
 
-  // Normalize state for QR hook (it has additional status values)
-  const state = rawState as typeof nostrHook.state & { answerQRData?: Uint8Array; clipboardData?: string }
+  const { state: rawState, receivedContent, cancel, reset } = activeHook
+
+  // Get the right receive function based on mode
+  const pinReceive = !isManualMode ? (activeHook as typeof nostrHook).receive : undefined
+  const { startReceive, submitOffer } = manualHook
+
+  // Normalize state for different hooks
+  const state = rawState as typeof nostrHook.state & { answerData?: Uint8Array; clipboardData?: string }
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pinInactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -114,10 +130,11 @@ export function ReceiveTab() {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
-  const canReceive = isPinValid && state.status === 'idle'
+  const canReceivePin = isPinValid && state.status === 'idle'
+  const canReceiveScan = state.status === 'idle'
 
-  const handleReceive = () => {
-    if (canReceive && pinRef.current) {
+  const handleReceivePin = () => {
+    if (canReceivePin && pinRef.current && pinReceive) {
       clearPinInactivityTimeout()
       const pin = pinRef.current
       // Clear PIN immediately after getting it
@@ -126,7 +143,13 @@ export function ReceiveTab() {
       pinInputRef.current?.clear()
       setPinExpired(false)
       // Pass PIN to receive function
-      receive(pin)
+      pinReceive(pin)
+    }
+  }
+
+  const handleReceiveScan = () => {
+    if (canReceiveScan) {
+      startReceive()
     }
   }
 
@@ -197,60 +220,85 @@ export function ReceiveTab() {
   }
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
-  const showQRInput = detectedMethod === 'manual' && state.status === 'waiting_for_offer'
-  const showQRDisplay = detectedMethod === 'manual' && state.answerQRData && state.status === 'showing_answer_qr'
+  const showQRInput = isManualMode && state.status === 'waiting_for_offer'
+  const showQRDisplay = isManualMode && state.answerData && state.status === 'showing_answer'
 
   return (
     <div className="space-y-4 pt-4">
       {state.status === 'idle' ? (
         <>
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Enter PIN from sender</label>
-            <PinInput ref={pinInputRef} onPinChange={handlePinChange} disabled={isActive} />
-            {timeRemaining > 0 && (
-              <p className="text-xs text-amber-600 font-medium">
-                PIN will be cleared in {formatTime(timeRemaining)}
-              </p>
-            )}
-            {pinExpired && (
-              <p className="text-xs text-muted-foreground">
-                PIN cleared due to inactivity. Please re-enter.
-              </p>
-            )}
-            {detectedMethod === 'manual' && isPinValid && (
-              <p className="text-xs text-muted-foreground">
-                QR mode detected. You'll scan the sender's QR code next.
-              </p>
-            )}
-          </div>
+          <Tabs value={receiveMode} onValueChange={(v) => setReceiveMode(v as ReceiveMode)}>
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="pin" className="flex items-center gap-2">
+                <KeyRound className="h-4 w-4" />
+                Enter PIN
+              </TabsTrigger>
+              <TabsTrigger value="scan" className="flex items-center gap-2">
+                <QrCode className="h-4 w-4" />
+                Scan Code
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
 
-          <Button onClick={handleReceive} disabled={!canReceive} className="w-full">
-            <Download className="mr-2 h-4 w-4" />
-            Receive
-          </Button>
+          {receiveMode === 'pin' ? (
+            <>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Enter PIN from sender</label>
+                <PinInput ref={pinInputRef} onPinChange={handlePinChange} disabled={isActive} />
+                {timeRemaining > 0 && (
+                  <p className="text-xs text-amber-600 font-medium">
+                    PIN will be cleared in {formatTime(timeRemaining)}
+                  </p>
+                )}
+                {pinExpired && (
+                  <p className="text-xs text-muted-foreground">
+                    PIN cleared due to inactivity. Please re-enter.
+                  </p>
+                )}
+              </div>
+
+              <Button onClick={handleReceivePin} disabled={!canReceivePin} className="w-full">
+                <Download className="mr-2 h-4 w-4" />
+                Receive
+              </Button>
+            </>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  Scan or paste the sender's code to receive their content. No PIN required.
+                </p>
+              </div>
+
+              <Button onClick={handleReceiveScan} disabled={!canReceiveScan} className="w-full">
+                <Download className="mr-2 h-4 w-4" />
+                Start Receive
+              </Button>
+            </>
+          )}
         </>
       ) : (
         <>
           <TransferStatus state={state} />
 
           {/* QR Input for receiving offer */}
-          {showQRInput && submitOffer && (
+          {showQRInput && (
             <div className="space-y-4">
               <QRInput
                 expectedType="offer"
-                label="Scan sender's QR code and paste the data below"
+                label="Scan or paste the sender's code"
                 onSubmit={submitOffer}
               />
             </div>
           )}
 
           {/* QR Code display for receiver's answer */}
-          {showQRDisplay && state.answerQRData && (
+          {showQRDisplay && state.answerData && (
             <div className="space-y-4">
               <QRDisplay
-                data={state.answerQRData}
+                data={state.answerData}
                 clipboardData={state.clipboardData}
-                label="Show this QR to sender and wait for connection"
+                label="Show this to sender and wait for connection"
               />
             </div>
           )}
