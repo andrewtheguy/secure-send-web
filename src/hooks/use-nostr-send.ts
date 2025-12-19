@@ -338,6 +338,7 @@ export function useNostrSend(): UseNostrSendReturn {
                   } catch {
                     // ignore
                   }
+                  cleanup()
                   reject(new Error('Session expired. Please start a new transfer.'))
                   return
                 }

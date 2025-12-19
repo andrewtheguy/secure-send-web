@@ -3,8 +3,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { SendTab } from './send-tab'
 import { ReceiveTab } from './receive-tab'
+import { QRDisplay } from './qr-display'
 
 export function SecureSend() {
+  const siteUrl = typeof window !== 'undefined' ? window.location.origin : ''
+  const siteUrlBytes = new TextEncoder().encode(siteUrl)
+
   return (
     <Card className="w-full max-w-2xl">
       <CardHeader>
@@ -108,6 +112,21 @@ export function SecureSend() {
                     <p className="text-foreground font-medium">Manual Exchange — PIN starts with "2"</p>
                     <p className="text-sm">No internet required. Exchange signaling via QR scan or copy/paste (camera optional). With internet, works across different networks via STUN. Without internet, devices must be on same local network. P2P only, no fallback.</p>
                   </div>
+                </div>
+              </section>
+
+              <section>
+                <h3 className="font-semibold text-base mb-2">Share App</h3>
+                <div className="flex flex-col items-center gap-4 p-4 border rounded-lg bg-muted/50">
+                  <QRDisplay 
+                    data={siteUrlBytes} 
+                    label="Scan to open on mobile" 
+                    clipboardData={siteUrl}
+                    showSize={false}
+                  />
+                  <p className="text-sm text-muted-foreground text-center break-all">
+                    {siteUrl}
+                  </p>
                 </div>
               </section>
 

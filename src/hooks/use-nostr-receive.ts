@@ -259,6 +259,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         const expectedSize = payload.fileSize || 0
         let combinedBuffer: Uint8Array | null = expectedSize > 0 ? new Uint8Array(expectedSize) : null
         const receivedChunkIndices: Set<number> = new Set()
+        const pendingChunkPromises: Set<Promise<void>> = new Set()
         let totalDecryptedBytes = 0
         let settled = false
         let cloudTransferStarted = false
@@ -294,34 +295,45 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             (data) => {
               // Handle DONE message with chunk count (format: "DONE:N")
               if (typeof data === 'string' && data.startsWith('DONE:')) {
-                const expectedChunks = parseInt(data.split(':')[1], 10)
-
-                // Verify all chunks received
-                if (receivedChunkIndices.size !== expectedChunks) {
-                  console.error(`Chunk count mismatch: got ${receivedChunkIndices.size}, expected ${expectedChunks}`)
-                  reject(new Error(`Missing chunks: got ${receivedChunkIndices.size}, expected ${expectedChunks}`))
-                  return
-                }
-
-                // Transfer complete via WebRTC
-                if (!settled) {
-                  settled = true
-                  clearTimeout(overallTimeout)
-                  client.unsubscribe(subId)
-                  if (rtc) {
-                    rtc.send('DONE_ACK')
-                    rtc.close()
+                void (async () => {
+                  const expectedChunks = parseInt(data.split(':')[1], 10)
+                  if (!Number.isFinite(expectedChunks)) {
+                    reject(new Error('Invalid DONE message: missing chunk count'))
+                    return
                   }
 
-                  // Buffer is already assembled - just trim to actual size if needed
-                  const result = combinedBuffer
-                    ? combinedBuffer.slice(0, totalDecryptedBytes)
-                    : new Uint8Array(0)
+                  // Wait for any in-flight chunk decrypts to complete before verifying.
+                  if (pendingChunkPromises.size > 0) {
+                    await Promise.allSettled(Array.from(pendingChunkPromises))
+                  }
 
-                  console.log(`P2P transfer complete: received and decrypted ${expectedChunks} chunks (${totalDecryptedBytes} bytes)`)
-                  webRTCSuccess = true
-                  resolve({ mode: 'p2p', data: result })
-                }
+                  // Verify all chunks received
+                  if (receivedChunkIndices.size !== expectedChunks) {
+                    console.error(`Chunk count mismatch: got ${receivedChunkIndices.size}, expected ${expectedChunks}`)
+                    reject(new Error(`Missing chunks: got ${receivedChunkIndices.size}, expected ${expectedChunks}`))
+                    return
+                  }
+
+                  // Transfer complete via WebRTC
+                  if (!settled) {
+                    settled = true
+                    clearTimeout(overallTimeout)
+                    client.unsubscribe(subId)
+                    if (rtc) {
+                      rtc.send('DONE_ACK')
+                      rtc.close()
+                    }
+
+                    // Buffer is already assembled - just trim to actual size if needed
+                    const result = combinedBuffer
+                      ? combinedBuffer.slice(0, totalDecryptedBytes)
+                      : new Uint8Array(0)
+
+                    console.log(`P2P transfer complete: received and decrypted ${expectedChunks} chunks (${totalDecryptedBytes} bytes)`)
+                    webRTCSuccess = true
+                    resolve({ mode: 'p2p', data: result })
+                  }
+                })()
                 return
               }
 
@@ -333,8 +345,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
               // Handle encrypted chunk data
               if (data instanceof ArrayBuffer) {
+                if (settled) return
                 // Parse and decrypt chunk on-the-fly, write directly to buffer
-                (async () => {
+                const decryptPromise = (async () => {
                   try {
                     const { chunkIndex, encryptedData } = parseChunkMessage(data)
                     const decryptedChunk = await decryptChunk(key!, encryptedData)
@@ -372,6 +385,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                     // Don't reject immediately - might be a transient error
                   }
                 })()
+                pendingChunkPromises.add(decryptPromise)
+                decryptPromise.finally(() => {
+                  pendingChunkPromises.delete(decryptPromise)
+                })
               }
             }
           )
