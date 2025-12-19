@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { Send, X, RotateCcw, FileUp, FileText, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, Zap, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -14,19 +14,11 @@ import { usePeerJSSend } from '@/hooks/use-peerjs-send'
 import { useManualSend } from '@/hooks/use-manual-send'
 import { MAX_MESSAGE_SIZE } from '@/lib/crypto'
 import { formatFileSize } from '@/lib/file-utils'
-import { setCloudServer } from '@/lib/cloud-storage'
 import { compressFilesToZip, getFolderName, getTotalSize, supportsFolderSelection } from '@/lib/folder-utils'
 import type { SignalingMethod } from '@/lib/nostr/types'
 
 type ContentMode = 'text' | 'file' | 'folder'
 type ForcedMethod = 'nostr-only' | 'peerjs-only' | 'manual-only'
-
-// Declare global for TypeScript
-declare global {
-  interface Window {
-    testCloudTransfer?: (enable: boolean, server?: string | null) => void
-  }
-}
 
 // Extend input element to include webkitdirectory attribute
 declare module 'react' {
@@ -44,7 +36,6 @@ export function SendTab() {
   const [activeMethod, setActiveMethod] = useState<SignalingMethod | null>(null)
   const [detectingMethod, setDetectingMethod] = useState(false)
   const [relayOnly, setRelayOnly] = useState(false)
-  const [selectedServer, setSelectedServer] = useState<string | null>(null)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [folderFiles, setFolderFiles] = useState<FileList | null>(null) // Keep FileList for folder to preserve paths
   const [isCompressing, setIsCompressing] = useState(false)
@@ -66,23 +57,6 @@ export function SendTab() {
 
   // Normalize state for QR hook (it has additional status values)
   const state = rawState as typeof nostrHook.state & { offerQRData?: Uint8Array; clipboardData?: string }
-
-  // Expose console function to enable/disable cloud-only mode for testing
-  useEffect(() => {
-    window.testCloudTransfer = (enable: boolean, server?: string | null) => {
-      setRelayOnly(enable)
-      if (enable && server !== undefined) {
-        setCloudServer(server)
-        setSelectedServer(server)
-      } else if (!enable) {
-        setSelectedServer(null)
-      }
-      console.log(`Cloud-only transfer mode ${enable ? 'enabled' : 'disabled'}${enable && server ? ` (server: ${server})` : ''}`)
-    }
-    return () => {
-      delete window.testCloudTransfer
-    }
-  }, [])
 
   const encoder = new TextEncoder()
   const messageSize = encoder.encode(message).length
@@ -494,7 +468,13 @@ export function SendTab() {
                 <Label className="text-sm font-medium">Force Signaling Method</Label>
                 <RadioGroup
                   value={forcedMethod || 'auto'}
-                  onValueChange={(v) => setForcedMethod(v === 'auto' ? null : v as ForcedMethod)}
+                  onValueChange={(v) => {
+                    const nextMethod = v === 'auto' ? null : v as ForcedMethod
+                    setForcedMethod(nextMethod)
+                    if (nextMethod !== 'nostr-only') {
+                      setRelayOnly(false)
+                    }
+                  }}
                   className="flex flex-wrap gap-4"
                 >
                   <div className="flex items-center space-x-2">
@@ -532,6 +512,20 @@ export function SendTab() {
                         ? 'Force PeerJS signaling server. No cloud fallback.'
                         : 'Manual exchange via QR scan or copy/paste. No internet required. Without internet, devices must be on same local network.'}
                 </p>
+                {forcedMethod === 'nostr-only' && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      id="force-cloud-transfer"
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={relayOnly}
+                      onChange={(e) => setRelayOnly(e.target.checked)}
+                    />
+                    <Label htmlFor="force-cloud-transfer" className="text-sm font-normal cursor-pointer">
+                      Force cloud transfer (skip P2P)
+                    </Label>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -539,7 +533,7 @@ export function SendTab() {
           {relayOnly && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded">
               <Cloud className="h-3 w-3" />
-              <span>Cloud-only mode{selectedServer ? `: ${selectedServer}` : ''}</span>
+              <span>Cloud-only mode</span>
             </div>
           )}
 
@@ -586,7 +580,11 @@ export function SendTab() {
               {activeMethod === 'nostr' ? (
                 <>
                   <Cloud className="h-3 w-3" />
-                  <span>Using Nostr{forcedMethod ? ' (forced)' : ' (auto-detected)'}</span>
+                  <span>
+                    {relayOnly
+                      ? 'Using Nostr with Cloud Transfer Only (forced)'
+                      : `Using Nostr${forcedMethod ? ' (forced)' : ' (auto-detected)'}`}
+                  </span>
                 </>
               ) : activeMethod === 'peerjs' ? (
                 <>
