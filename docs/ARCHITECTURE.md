@@ -404,9 +404,9 @@ contentData.set(decryptedChunk, writePosition)  // Direct write, no intermediate
 ```mermaid
 flowchart LR
     PIN[PIN shared out-of-band] --> Signaling[Signaling offer/answer/ICE]
-    Signaling -->|AES-GCM| EncryptedPayload[Encrypted payload (includes salt)]
+    Signaling -->|AES-GCM| EncryptedPayload[Encrypted payload<br/>includes salt]
     EncryptedPayload --> Decrypt[Decrypt to connect]
-    Decrypt --> DTLS[WebRTC handshake (DTLS)]
+    Decrypt --> DTLS[WebRTC handshake<br/>DTLS]
     DTLS --> Channel[P2P data channel]
     Channel --> Chunks[128KB encrypted chunks]
     Chunks --> Write[Decrypt + direct buffer write at idx * 128KB]
