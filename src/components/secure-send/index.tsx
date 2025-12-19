@@ -1,13 +1,38 @@
+import { useEffect, useState } from 'react'
 import { Send, Download, Info, Shield, Zap, Globe, Lock } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { SendTab } from './send-tab'
 import { ReceiveTab } from './receive-tab'
-import { QRDisplay } from './qr-display'
+import { generateTextQRCode } from '@/lib/qr-utils'
 
 export function SecureSend() {
   const siteUrl = typeof window !== 'undefined' ? window.location.origin : ''
-  const siteUrlBytes = new TextEncoder().encode(siteUrl)
+  const [shareQrUrl, setShareQrUrl] = useState<string | null>(null)
+  const [shareQrError, setShareQrError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    if (!siteUrl) return
+    generateTextQRCode(siteUrl, { width: 220, errorCorrectionLevel: 'M' })
+      .then((url) => {
+        if (active) setShareQrUrl(url)
+      })
+      .catch((err) => {
+        if (active) setShareQrError(err instanceof Error ? err.message : 'Failed to generate QR code')
+      })
+    return () => {
+      active = false
+    }
+  }, [siteUrl])
+
+  useEffect(() => {
+    return () => {
+      if (shareQrUrl) {
+        URL.revokeObjectURL(shareQrUrl)
+      }
+    }
+  }, [shareQrUrl])
 
   return (
     <Card className="w-full max-w-2xl">
@@ -118,12 +143,20 @@ export function SecureSend() {
               <section>
                 <h3 className="font-semibold text-base mb-2">Share App</h3>
                 <div className="flex flex-col items-center gap-4 p-4 border rounded-lg bg-muted/50">
-                  <QRDisplay 
-                    data={siteUrlBytes} 
-                    label="Scan to open on mobile" 
-                    clipboardData={siteUrl}
-                    showSize={false}
-                  />
+                  {shareQrUrl && !shareQrError ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <img
+                        src={shareQrUrl}
+                        alt="Scan to open on mobile"
+                        className="w-[220px] h-[220px] rounded-md border bg-white p-2"
+                      />
+                      <p className="text-xs text-muted-foreground">Scan to open on mobile</p>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-destructive">
+                      {shareQrError || 'Generating QR code...'}
+                    </div>
+                  )}
                   <p className="text-sm text-muted-foreground text-center break-all">
                     {siteUrl}
                   </p>
