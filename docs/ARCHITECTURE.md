@@ -402,7 +402,7 @@ contentData.set(decryptedChunk, writePosition)  // Direct write, no intermediate
 - **Out-of-order handling**: Chunks can arrive in any order and be placed correctly
 
 ```mermaid
-flowchart LR
+flowchart TD
     PIN[PIN shared out-of-band] --> Signaling[Signaling offer/answer/ICE]
     Signaling -->|AES-GCM| EncryptedPayload[Encrypted payload<br/>includes salt]
     EncryptedPayload --> Decrypt[Decrypt to connect]
