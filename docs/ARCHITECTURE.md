@@ -204,7 +204,7 @@ Alternative signaling method using PeerJS cloud server instead of Nostr relays.
 **Message Types:**
 | Type | Direction | Purpose |
 |------|-----------|---------|
-| `metadata` | Sender → Receiver | Transfer info (salt, contentType, fileName, etc.) |
+| `metadata` | Sender → Receiver | Transfer info (includes `createdAt` TTL + key derivation `salt`) |
 | `ready` | Receiver → Sender | Acknowledge metadata received |
 | `chunk` | Sender → Receiver | Data chunk (ArrayBuffer) |
 | `done` | Sender → Receiver | Transfer complete |
@@ -226,6 +226,7 @@ Signaling method using QR codes or copy/paste for WebRTC offer/answer exchange. 
 - Receiver scans QR code (or pastes encrypted JSON), decrypts with PIN, creates answer
 - Answer encrypted with PIN and sent back via same encoding (QR code or encrypted JSON paste)
 - Both peers establish WebRTC connection using exchanged SDP/ICE candidates
+- Both offer and answer include a required `createdAt` timestamp; receivers refuse to proceed if the offer is expired or missing TTL
 
 **Binary Payload Format:**
 ```
@@ -485,8 +486,30 @@ This ensures consistent memory behavior across all transfer modes - P2P and clou
 | P2P data transfer | Unlimited | Once connected, data transfer has no timeout |
 | Chunk ACK | 60 seconds | Time to download and acknowledge a cloud chunk |
 | Overall transfer | 10 minutes | Maximum time for entire transfer (receiver side) |
-| PIN expiration | 1 hour | Transfer session validity (NIP-40) |
+| Transfer TTL | 1 hour | Transfer session validity (`TRANSFER_EXPIRATION_MS`) |
 | Receiver PIN inactivity | 5 minutes | Clears PIN input if no changes made |
+
+## TTL / Expiration Spec
+
+Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a session or begin transfer, even if the PIN/key is correct.
+
+**Duration**
+- `TRANSFER_EXPIRATION_MS` (currently 1 hour)
+
+**TTL Anchor (start time)**
+- **Nostr**: PIN exchange event `created_at` (seconds since epoch)
+- **PeerJS**: `PeerJSMetadata.createdAt` (milliseconds since epoch)
+- **Manual Exchange**: `SignalingPayload.createdAt` (milliseconds since epoch)
+
+**Enforcement Points (hard fail)**
+- **Receiver-side (pre-session)**:
+  - Reject expired/missing TTL before acknowledging or establishing a session (no `ready` ACK in PeerJS/Nostr; no WebRTC answer in Manual).
+- **Sender-side (pre-transfer)**:
+  - Re-check TTL immediately before sending any data (including at WebRTC DataChannel open and before any cloud upload fallback).
+
+**No Backward Compatibility**
+- Requests/payloads missing TTL fields are rejected (treated as invalid).
+- Nostr P2P completion requires `DONE:N` (legacy `DONE` without chunk count is unsupported).
 
 ## Security Considerations
 
