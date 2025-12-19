@@ -475,8 +475,8 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 
 1. **Ephemeral Keys**: New keypair generated for each transfer
 2. **Forward Secrecy**: PIN-derived key is unique per transfer (includes random salt) - applies to all modes
-3. **No Server Trust**: Encrypted data on cloud, relays only see metadata
-4. **PIN Entropy**: ~71 bits with 12-char mixed charset
+3. **No Server Trust**: Cloud storage and relays see only encrypted payloads and minimal routing metadata; plaintext never leaves the device
+4. **PIN Entropy**: ~67 bits (11 random chars from 69-char set + 1 checksum)
 5. **Brute-Force Resistance**: 600K PBKDF2 iterations (planned: Argon2id)
 6. **PIN Role**: PIN encrypts signaling (preventing unauthorized P2P connection) AND content (defense in depth)
 7. **Transport Security**: All P2P transfers (Nostr, PeerJS, Manual Exchange) use both AES-256-GCM encryption (128KB chunks) and WebRTC DTLS
