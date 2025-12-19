@@ -31,101 +31,68 @@ By default, Nostr is used for signaling. PeerJS and QR are available as alternat
 ## Transfer Flow
 
 ### Nostr Mode - P2P Success Path (Preferred)
-```
-Sender                              Receiver
-  │                                    │
-  ├─── PIN Exchange (via Nostr) ──────>│
-  │<────────── Ready ACK (seq=0) ──────┤
-  │                                    │
-  ├─── WebRTC Offer ──────────────────>│
-  │<────────── WebRTC Answer ──────────┤
-  │                                    │
-  │= P2P Data Channel (128KB encrypted chunks) =│
-  │   [4B index][12B nonce][ciphertext][16B tag]│
-  │                                    │
-  ├─── DONE:N (total chunk count) ────>│
-  │<────────── Complete ACK (seq=-1) ──┤
-  ✓                                    ✓
+```mermaid
+sequenceDiagram
+    participant Sender
+    participant Receiver
+    Sender->>Receiver: PIN Exchange (via Nostr)
+    Receiver-->>Sender: Ready ACK (seq=0)
+    Sender->>Receiver: WebRTC Offer
+    Receiver-->>Sender: WebRTC Answer
+    Note over Sender,Receiver: P2P Data Channel (128KB encrypted chunks)
+    Sender->>Receiver: DONE:N (total chunk count)
+    Receiver-->>Sender: Complete ACK (seq=-1)
 ```
 
 ### Cloud Fallback Path (Nostr Mode - When P2P Connection Fails)
-```
-Sender                              Receiver
-  │                                    │
-  ├─── PIN Exchange (via Nostr) ──────>│
-  │<────────── Ready ACK (seq=0) ──────┤
-  │                                    │
-  │~~~ P2P connection timeout (15s) ~~~│
-  │                                    │
-  ├─── Upload Chunk 0 to cloud         │
-  ├─── ChunkNotify (chunk 0 URL) ─────>│
-  │                                    ├─── Download chunk 0
-  │<────────── Chunk ACK (seq=1) ──────┤
-  │                                    │
-  ├─── Upload Chunk N to cloud         │
-  ├─── ChunkNotify (chunk N URL) ─────>│
-  │                                    ├─── Download chunk N
-  │<────────── Chunk ACK (seq=N+1) ────┤
-  │                                    │
-  │                                    ├─── Combine & decrypt
-  │<────────── Complete ACK (seq=-1) ──┤
-  ✓                                    ✓
+```mermaid
+sequenceDiagram
+    participant Sender
+    participant Receiver
+    Sender->>Receiver: PIN Exchange (via Nostr)
+    Receiver-->>Sender: Ready ACK (seq=0)
+    Note over Sender,Receiver: P2P connection timeout (15s)
+    loop Each chunk
+        Sender->>Receiver: ChunkNotify (chunk URL)
+        Receiver->>Receiver: Download chunk
+        Receiver-->>Sender: Chunk ACK (seq=chunk_index+1)
+    end
+    Receiver->>Receiver: Combine & decrypt
+    Receiver-->>Sender: Complete ACK (seq=-1)
 ```
 
 ### PeerJS Mode (P2P Only - No Cloud Fallback)
-```
-Sender                              Receiver
-  │                                    │
-  ├─── Create Peer(ss-{pinHint})       │
-  │    on 0.peerjs.com:443             │
-  │                                    │
-  │         (shares PIN out-of-band)   │
-  │                                    │
-  │                   Connect to ──────┤
-  │                   Peer(ss-{pinHint})
-  │                                    │
-  │<════ PeerJS Data Channel Open ════>│
-  │                                    │
-  ├─── Metadata (salt, contentType) ──>│
-  │<────────── Ready ─────────────────┤
-  │                                    │
-  │= Data Transfer (128KB encrypted chunks) =│
-  │   [4B index][12B nonce][ciphertext][16B tag]│
-  │                                    │
-  ├─── Done ──────────────────────────>│
-  │<────────── Done ACK ──────────────┤
-  ✓                                    ✓
-
-If P2P connection fails → Transfer fails (no cloud fallback)
+```mermaid
+sequenceDiagram
+    participant Sender
+    participant Receiver
+    Sender->>Sender: Create Peer(ss-{pinHint}) on 0.peerjs.com:443
+    Note over Sender,Receiver: Share PIN out-of-band
+    Receiver->>Sender: Connect to Peer(ss-{pinHint})
+    Note over Sender,Receiver: PeerJS Data Channel Open
+    Sender->>Receiver: Metadata (salt, contentType)
+    Receiver-->>Sender: Ready
+    Note over Sender,Receiver: Data Transfer (128KB encrypted chunks)
+    Sender->>Receiver: Done
+    Receiver-->>Sender: Done ACK
+    Note over Sender,Receiver: If P2P connection fails, transfer fails (no cloud fallback)
 ```
 
 ### Manual Exchange Mode (No Internet Required)
-```
-Sender                              Receiver
-  │                                    │
-  ├─── Generate PIN, create WebRTC     │
-  │    offer, encrypt signaling payload│
-  │    (includes salt for key derivation)
-  │                                    │
-  ├─── Display Offer QR code ─────────>│ (scan or paste)
-  │    (Encrypted JSON → deflate → QR) │
-  │                                    │
-  │                                    ├─── Decode QR, decrypt with PIN
-  │                                    ├─── Extract salt, derive key
-  │                                    ├─── Create WebRTC answer
-  │                                    │
-  │    (scan or paste) <──────────────┤ Display Answer QR code
-  │                                    │
-  ├─── Process answer, establish       │
-  │    WebRTC connection               │
-  │                                    │
-  │= P2P Data Channel (128KB encrypted chunks) =│
-  │   [4B index][12B nonce][ciphertext][16B tag]│
-  │                                    │
-  │<────────── ACK ───────────────────┤
-  ✓                                    ✓
-
-If P2P connection fails → Transfer fails (no server fallback)
+```mermaid
+sequenceDiagram
+    participant Sender
+    participant Receiver
+    Sender->>Sender: Generate PIN, create WebRTC offer
+    Sender->>Sender: Encrypt signaling payload (includes salt)
+    Sender->>Receiver: Display Offer QR (scan or paste)
+    Receiver->>Receiver: Decrypt with PIN, derive key
+    Receiver->>Receiver: Create WebRTC answer
+    Receiver-->>Sender: Display Answer QR (scan or paste)
+    Sender->>Receiver: Process answer, establish WebRTC
+    Note over Sender,Receiver: P2P Data Channel (128KB encrypted chunks)
+    Receiver-->>Sender: ACK
+    Note over Sender,Receiver: If P2P connection fails, transfer fails (no server fallback)
 ```
 
 **Requirements:**
@@ -434,22 +401,15 @@ contentData.set(decryptedChunk, writePosition)  // Direct write, no intermediate
 - **Memory efficiency**: Preallocated buffer with direct position writes - no intermediate chunk arrays
 - **Out-of-order handling**: Chunks can arrive in any order and be placed correctly
 
-```
-         PIN (shared out-of-band)
-                 │
-                 v
- Signaling (offer/answer/ICE) --AES-GCM--> Encrypted payload
-                 │                          (includes salt)
-        (must decrypt to connect)
-                 v
-        WebRTC handshake (DTLS)
-                 │
-                 v
-         P2P data channel
-                 │
-                 v
-       128KB encrypted chunks  ──────────>  Decrypt + direct buffer write
-       [idx][nonce][cipher][tag]            at position: idx * 128KB
+```mermaid
+flowchart LR
+    PIN[PIN shared out-of-band] --> Signaling[Signaling offer/answer/ICE]
+    Signaling -->|AES-GCM| EncryptedPayload[Encrypted payload (includes salt)]
+    EncryptedPayload --> Decrypt[Decrypt to connect]
+    Decrypt --> DTLS[WebRTC handshake (DTLS)]
+    DTLS --> Channel[P2P data channel]
+    Channel --> Chunks[128KB encrypted chunks]
+    Chunks --> Write[Decrypt + direct buffer write at idx * 128KB]
 ```
 
 ### Cloud Transfer Memory Efficiency (Nostr Fallback)
