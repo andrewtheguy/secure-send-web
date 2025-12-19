@@ -18,12 +18,8 @@ export function generateEphemeralKeys(): { secretKey: Uint8Array; publicKey: str
  * TTL Behavior:
  * - Events include an 'expiration' tag set to 1 hour from creation (NIP-40)
  * - NIP-40 compliant relays MAY auto-delete events after expiration
- * - Sender enforces TTL by rejecting receiver connections after expiration
- *   (checked in use-nostr-send.ts after receiving ready ACK)
- *
- * Note: Receiver-side expiration checks are not implemented since a modified
- * client could bypass them. The sender-side check provides hard enforcement
- * because the sender must be online to respond to the receiver.
+ * - Sender enforces TTL by refusing to start transfer after expiration
+ * - Receiver enforces TTL by refusing to ACK/establish sessions for expired events
  */
 export function createPinExchangeEvent(
   secretKey: Uint8Array,

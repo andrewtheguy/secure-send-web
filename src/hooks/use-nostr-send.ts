@@ -332,6 +332,17 @@ export function useNostrSend(): UseNostrSendReturn {
               },
               async () => {
                 // DataChannel open - P2P connection established!
+                if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
+                  try {
+                    rtc.close()
+                  } catch {
+                    // ignore
+                  }
+                  cleanup()
+                  reject(new Error('Session expired. Please start a new transfer.'))
+                  return
+                }
+
                 cleanup()
 
                 // Mark P2P as established - NO cloud fallback after this point
@@ -480,6 +491,11 @@ export function useNostrSend(): UseNostrSendReturn {
 
       // Cloud fallback: Only if P2P was never established (connection timeout or disabled)
       if (!webRTCSuccess && !p2pConnectionEstablished) {
+        // Enforce TTL right before any cloud upload begins
+        if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
+          throw new Error('Session expired. Please start a new transfer.')
+        }
+
         // Encrypt content now (deferred from earlier since P2P doesn't need it)
         setState({
           status: 'transferring',

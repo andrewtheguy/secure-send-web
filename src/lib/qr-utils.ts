@@ -40,3 +40,22 @@ export async function generateBinaryQRCode(
     worker.postMessage({ type: 'generate', id, binaryBuffer: buffer, options: options || {} }, [buffer])
   })
 }
+
+/**
+ * Generate a QR code image from text data
+ * Returns a blob URL (PNG image)
+ * Uses text mode for smaller payloads like URLs
+ */
+export async function generateTextQRCode(
+  text: string,
+  options?: {
+    width?: number
+    errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H'
+  }
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const id = requestId++
+    pending.set(id, { resolve, reject })
+    worker.postMessage({ type: 'generate', id, text, options: options || {} })
+  })
+}

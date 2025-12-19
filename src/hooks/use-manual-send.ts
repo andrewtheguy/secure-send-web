@@ -104,6 +104,11 @@ export function useManualSend(): UseManualSendReturn {
         answerResolverRef.current = null
         return
       }
+      if (typeof decrypted.createdAt !== 'number' || !Number.isFinite(decrypted.createdAt)) {
+        answerRejectRef.current?.(new Error('Invalid QR response: missing TTL. Ask receiver to update and retry.'))
+        answerResolverRef.current = null
+        return
+      }
       answerResolverRef.current?.(decrypted)
     })
   }, [pin])
@@ -151,6 +156,7 @@ export function useManualSend(): UseManualSendReturn {
       // Generate PIN and derive encryption key
       setState({ status: 'generating_offer', message: 'Generating secure PIN...' })
       const newPin = generatePinForMethod('manual')
+      const sessionStartTime = Date.now()
       setPin(newPin)
 
       const salt = generateSalt()
@@ -243,6 +249,7 @@ export function useManualSend(): UseManualSendReturn {
         offerSDP!,
         iceCandidates,
         {
+          createdAt: sessionStartTime,
           contentType,
           totalBytes: contentBytes.length,
           fileName,
@@ -258,6 +265,7 @@ export function useManualSend(): UseManualSendReturn {
         type: 'offer',
         sdp: offerSDP!.sdp || '',
         candidates: iceCandidates.map(c => c.candidate),
+        createdAt: sessionStartTime,
         contentType,
         totalBytes: contentBytes.length,
         fileName,
@@ -292,6 +300,11 @@ export function useManualSend(): UseManualSendReturn {
       })
 
       if (cancelledRef.current) return
+
+      // Enforce TTL: refuse to proceed with old answers/offers
+      if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
+        throw new Error('Session expired. Please start a new transfer.')
+      }
 
       // Process answer
       setState({ status: 'connecting', message: 'Establishing connection...' })
@@ -342,6 +355,11 @@ export function useManualSend(): UseManualSendReturn {
 
       // Hide PIN now that we're connected
       setPin(null)
+
+      // Enforce TTL again right before data transfer begins
+      if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
+        throw new Error('Session expired. Please start a new transfer.')
+      }
 
       // Send data via P2P (WebRTC DTLS provides transport encryption)
       setState({

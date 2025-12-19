@@ -6,6 +6,7 @@ import {
   decryptChunk,
   MAX_MESSAGE_SIZE,
   ENCRYPTION_CHUNK_SIZE,
+  TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
 import {
@@ -136,6 +137,16 @@ export function useManualReceive(): UseManualReceiveReturn {
         return
       }
 
+      // Enforce TTL before establishing any session, even if PIN is correct
+      if (typeof offerPayload.createdAt !== 'number' || !Number.isFinite(offerPayload.createdAt)) {
+        setState({ status: 'error', message: 'Transfer request missing TTL. Ask sender to generate a new QR/PIN.' })
+        return
+      }
+      if (Date.now() - offerPayload.createdAt > TRANSFER_EXPIRATION_MS) {
+        setState({ status: 'error', message: 'Transfer expired. Ask sender to generate a new QR/PIN.' })
+        return
+      }
+
       // Extract metadata from offer
       const { contentType, totalBytes, fileName, fileSize, mimeType, salt: saltArray } = offerPayload
       const isFile = contentType === 'file'
@@ -260,6 +271,7 @@ export function useManualReceive(): UseManualReceiveReturn {
         type: 'answer',
         sdp: answerSDP!.sdp || '',
         candidates: iceCandidates.map(c => c.candidate),
+        createdAt: Date.now(),
       }
       const clipboardBase64 = await generateClipboardData(answerPayload, pin)
 

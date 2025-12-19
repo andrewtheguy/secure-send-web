@@ -13,6 +13,8 @@ export interface SignalingPayload {
   type: 'offer' | 'answer'
   sdp: string
   candidates: string[] // ICE candidates as SDP strings
+  // Milliseconds since epoch when this payload was generated (TTL enforced by receiver for offers).
+  createdAt: number
   // Offer-only fields:
   contentType?: ContentType
   fileName?: string
@@ -106,6 +108,7 @@ export async function generateOfferQRBinary(
   offer: RTCSessionDescriptionInit,
   candidates: RTCIceCandidate[],
   metadata: {
+    createdAt: number
     contentType: ContentType
     totalBytes: number
     fileName?: string
@@ -119,6 +122,7 @@ export async function generateOfferQRBinary(
     type: 'offer',
     sdp: offer.sdp || '',
     candidates: candidates.map((c) => c.candidate),
+    createdAt: metadata.createdAt,
     contentType: metadata.contentType,
     totalBytes: metadata.totalBytes,
     fileName: metadata.fileName,
@@ -142,6 +146,7 @@ export async function generateAnswerQRBinary(
     type: 'answer',
     sdp: answer.sdp || '',
     candidates: candidates.map((c) => c.candidate),
+    createdAt: Date.now(),
   }
   return encryptSignalingPayload(payload, pin)
 }

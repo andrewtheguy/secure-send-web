@@ -10,6 +10,7 @@ import {
   MAX_MESSAGE_SIZE,
   ENCRYPTION_CHUNK_SIZE,
   CLOUD_CHUNK_SIZE,
+  TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -142,8 +143,26 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       let transferId: string | null = null
       let senderPubkey: string | null = null
       let key: CryptoKey | null = null
+      let sawExpiredCandidate = false
+      let sawNonExpiredCandidate = false
+      let selectedCreatedAtSec: number | null = null
 
-      for (const event of events) {
+      // Prefer newest non-expired events first.
+      const sortedEvents = [...events].sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
+
+      for (const event of sortedEvents) {
+        // Enforce TTL before establishing any session, even if PIN is correct.
+        if (!event.created_at) {
+          sawExpiredCandidate = true
+          continue
+        }
+        const eventAgeMs = Date.now() - event.created_at * 1000
+        if (eventAgeMs > TRANSFER_EXPIRATION_MS) {
+          sawExpiredCandidate = true
+          continue
+        }
+        sawNonExpiredCandidate = true
+
         const parsed = parsePinExchangeEvent(event)
         if (!parsed) continue
 
@@ -160,6 +179,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           transferId = parsed.transferId
           senderPubkey = event.pubkey
           key = derivedKey
+          selectedCreatedAtSec = event.created_at || null
           break
         } catch {
           // Decryption failed, try next event
@@ -168,7 +188,16 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       }
 
       if (!payload || !transferId || !senderPubkey || !key) {
+        if (!sawNonExpiredCandidate && sawExpiredCandidate) {
+          setState({ status: 'error', message: 'Transfer expired. Ask sender to generate a new PIN.' })
+          return
+        }
         setState({ status: 'error', message: 'Could not decrypt transfer. Wrong PIN?' })
+        return
+      }
+
+      if (!selectedCreatedAtSec || Date.now() - selectedCreatedAtSec * 1000 > TRANSFER_EXPIRATION_MS) {
+        setState({ status: 'error', message: 'Transfer expired. Ask sender to generate a new PIN.' })
         return
       }
 
@@ -230,6 +259,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         const expectedSize = payload.fileSize || 0
         let combinedBuffer: Uint8Array | null = expectedSize > 0 ? new Uint8Array(expectedSize) : null
         const receivedChunkIndices: Set<number> = new Set()
+        const pendingChunkPromises: Set<Promise<void>> = new Set()
         let totalDecryptedBytes = 0
         let settled = false
         let cloudTransferStarted = false
@@ -265,48 +295,59 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             (data) => {
               // Handle DONE message with chunk count (format: "DONE:N")
               if (typeof data === 'string' && data.startsWith('DONE:')) {
-                const expectedChunks = parseInt(data.split(':')[1], 10)
-
-                // Verify all chunks received
-                if (receivedChunkIndices.size !== expectedChunks) {
-                  console.error(`Chunk count mismatch: got ${receivedChunkIndices.size}, expected ${expectedChunks}`)
-                  reject(new Error(`Missing chunks: got ${receivedChunkIndices.size}, expected ${expectedChunks}`))
-                  return
-                }
-
-                // Transfer complete via WebRTC
-                if (!settled) {
-                  settled = true
-                  clearTimeout(overallTimeout)
-                  client.unsubscribe(subId)
-                  if (rtc) {
-                    rtc.send('DONE_ACK')
-                    rtc.close()
+                void (async () => {
+                  const expectedChunks = parseInt(data.split(':')[1], 10)
+                  if (!Number.isFinite(expectedChunks)) {
+                    reject(new Error('Invalid DONE message: missing chunk count'))
+                    return
                   }
 
-                  // Buffer is already assembled - just trim to actual size if needed
-                  const result = combinedBuffer
-                    ? combinedBuffer.slice(0, totalDecryptedBytes)
-                    : new Uint8Array(0)
+                  // Wait for any in-flight chunk decrypts to complete before verifying.
+                  if (pendingChunkPromises.size > 0) {
+                    await Promise.allSettled(Array.from(pendingChunkPromises))
+                  }
 
-                  console.log(`P2P transfer complete: received and decrypted ${expectedChunks} chunks (${totalDecryptedBytes} bytes)`)
-                  webRTCSuccess = true
-                  resolve({ mode: 'p2p', data: result })
-                }
+                  // Verify all chunks received
+                  if (receivedChunkIndices.size !== expectedChunks) {
+                    console.error(`Chunk count mismatch: got ${receivedChunkIndices.size}, expected ${expectedChunks}`)
+                    reject(new Error(`Missing chunks: got ${receivedChunkIndices.size}, expected ${expectedChunks}`))
+                    return
+                  }
+
+                  // Transfer complete via WebRTC
+                  if (!settled) {
+                    settled = true
+                    clearTimeout(overallTimeout)
+                    client.unsubscribe(subId)
+                    if (rtc) {
+                      rtc.send('DONE_ACK')
+                      rtc.close()
+                    }
+
+                    // Buffer is already assembled - just trim to actual size if needed
+                    const result = combinedBuffer
+                      ? combinedBuffer.slice(0, totalDecryptedBytes)
+                      : new Uint8Array(0)
+
+                    console.log(`P2P transfer complete: received and decrypted ${expectedChunks} chunks (${totalDecryptedBytes} bytes)`)
+                    webRTCSuccess = true
+                    resolve({ mode: 'p2p', data: result })
+                  }
+                })()
                 return
               }
 
               // Handle legacy DONE format (for backwards compatibility)
               if (typeof data === 'string' && data === 'DONE') {
-                console.warn('Received legacy DONE format without chunk count')
-                // Fall through to old behavior - should not happen with new sender
+                reject(new Error('Unsupported sender: missing chunk count. Ask sender to update and retry.'))
                 return
               }
 
               // Handle encrypted chunk data
               if (data instanceof ArrayBuffer) {
+                if (settled) return
                 // Parse and decrypt chunk on-the-fly, write directly to buffer
-                (async () => {
+                const decryptPromise = (async () => {
                   try {
                     const { chunkIndex, encryptedData } = parseChunkMessage(data)
                     const decryptedChunk = await decryptChunk(key!, encryptedData)
@@ -344,6 +385,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                     // Don't reject immediately - might be a transient error
                   }
                 })()
+                pendingChunkPromises.add(decryptPromise)
+                decryptPromise.finally(() => {
+                  pendingChunkPromises.delete(decryptPromise)
+                })
               }
             }
           )

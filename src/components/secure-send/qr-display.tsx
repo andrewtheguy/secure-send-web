@@ -8,9 +8,10 @@ interface QRDisplayProps {
   label?: string
   showCopyButton?: boolean
   clipboardData?: string  // Raw JSON for copy button
+  showSize?: boolean
 }
 
-export function QRDisplay({ data, label, showCopyButton = true, clipboardData }: QRDisplayProps) {
+export function QRDisplay({ data, label, showCopyButton = true, clipboardData, showSize = true }: QRDisplayProps) {
   const [copied, setCopied] = useState(false)
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
@@ -86,9 +87,11 @@ export function QRDisplay({ data, label, showCopyButton = true, clipboardData }:
         ) : null}
       </div>
 
-      <div className="text-xs text-muted-foreground">
-        {data.length.toLocaleString()} bytes (compressed)
-      </div>
+      {showSize && (
+        <div className="text-xs text-muted-foreground">
+          {data.length.toLocaleString()} bytes (compressed)
+        </div>
+      )}
 
       {showCopyButton && clipboardData && (
         <Button

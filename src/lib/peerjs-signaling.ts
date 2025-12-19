@@ -96,6 +96,11 @@ export interface PeerJSMetadata {
   type: 'metadata'
   contentType: 'text' | 'file'
   totalBytes: number
+  // Milliseconds since epoch when sender created the transfer request.
+  // Receiver must enforce TTL before sending "ready".
+  createdAt: number
+  // Salt used for key derivation (serialized as number[] for JSON transport).
+  salt: number[]
   fileName?: string
   fileSize?: number
   mimeType?: string

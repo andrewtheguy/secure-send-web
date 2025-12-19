@@ -7,6 +7,7 @@ import {
   decryptChunk,
   MAX_MESSAGE_SIZE,
   ENCRYPTION_CHUNK_SIZE,
+  TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto'
 import {
   derivePeerId,
@@ -89,13 +90,13 @@ export function usePeerJSReceive(): UsePeerJSReceiveReturn {
       setState({ status: 'receiving', message: 'Waiting for metadata...' })
 
       // Wait for metadata from sender
-      const metadata = await new Promise<any>((resolve, reject) => {
+      const metadata = await new Promise<Extract<PeerJSMessage, { type: 'metadata' }>>((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Timeout waiting for metadata'))
         }, 30000)
 
         peerRef.current!.onMessage((message: PeerJSMessage) => {
-          if ((message as any).type === 'metadata') {
+          if (message.type === 'metadata') {
             clearTimeout(timeout)
             resolve(message)
           }
@@ -105,6 +106,15 @@ export function usePeerJSReceive(): UsePeerJSReceiveReturn {
       if (cancelledRef.current) return
 
       // Extract salt and derive key
+      if (typeof metadata.createdAt !== 'number' || !Number.isFinite(metadata.createdAt)) {
+        setState({ status: 'error', message: 'Transfer request missing TTL. Ask sender to generate a new PIN.' })
+        return
+      }
+      if (Date.now() - metadata.createdAt > TRANSFER_EXPIRATION_MS) {
+        setState({ status: 'error', message: 'Transfer expired. Ask sender to generate a new PIN.' })
+        return
+      }
+
       const salt = new Uint8Array(metadata.salt)
       const key = await deriveKeyFromPin(pin, salt)
 
@@ -119,14 +129,25 @@ export function usePeerJSReceive(): UsePeerJSReceiveReturn {
 
       const isFile = metadata.contentType === 'file'
 
+      if (isFile) {
+        if (
+          typeof metadata.fileName !== 'string' ||
+          typeof metadata.fileSize !== 'number' ||
+          typeof metadata.mimeType !== 'string'
+        ) {
+          setState({ status: 'error', message: 'Invalid transfer metadata (missing file info)' })
+          return
+        }
+      }
+
       setState({
         status: 'receiving',
         message: `Receiving ${isFile ? 'file' : 'message'}...`,
         contentType: metadata.contentType,
         fileMetadata: isFile ? {
-          fileName: metadata.fileName,
-          fileSize: metadata.fileSize,
-          mimeType: metadata.mimeType,
+          fileName: metadata.fileName!,
+          fileSize: metadata.fileSize!,
+          mimeType: metadata.mimeType!,
         } : undefined,
         useWebRTC: true,
       })
@@ -236,18 +257,18 @@ export function usePeerJSReceive(): UsePeerJSReceiveReturn {
         setReceivedContent({
           contentType: 'file',
           data: contentData,
-          fileName: metadata.fileName,
-          fileSize: metadata.fileSize,
-          mimeType: metadata.mimeType,
+          fileName: metadata.fileName!,
+          fileSize: metadata.fileSize!,
+          mimeType: metadata.mimeType!,
         })
         setState({
           status: 'complete',
           message: 'File received (P2P)!',
           contentType: 'file',
           fileMetadata: {
-            fileName: metadata.fileName,
-            fileSize: metadata.fileSize,
-            mimeType: metadata.mimeType,
+            fileName: metadata.fileName!,
+            fileSize: metadata.fileSize!,
+            mimeType: metadata.mimeType!,
           },
         })
       } else {
