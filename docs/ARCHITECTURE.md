@@ -51,7 +51,7 @@ sequenceDiagram
     participant Receiver
     Sender->>Receiver: PIN Exchange (via Nostr)
     Receiver-->>Sender: Ready ACK (seq=0)
-    Note over Sender,Receiver: P2P connection timeout (15s)
+    Note over Sender,Receiver: P2P connection timeout (30s)
     loop Each chunk
         Sender->>Receiver: ChunkNotify (chunk URL)
         Receiver->>Receiver: Download chunk
@@ -189,7 +189,7 @@ Signaling method using QR codes or copy/paste for WebRTC offer/answer exchange. 
 
 **How it works:**
 - Sender generates WebRTC offer with ICE candidates
-- Offer payload encrypted with PIN, then encoded as: JSON → gzip → binary QR code
+- Offer payload encrypted with PIN, then encoded as: JSON → deflate → binary QR code
 - Receiver scans QR code (or pastes encrypted JSON), decrypts with PIN, creates answer
 - Answer encrypted with PIN and sent back via same encoding (QR code or encrypted JSON paste)
 - Both peers establish WebRTC connection using exchanged SDP/ICE candidates
@@ -210,7 +210,7 @@ The "SS01" magic header (Secure Send version 1) identifies the format and allows
 **Output Methods:**
 | Method | Encoding | Use Case |
 |--------|----------|----------|
-| QR Code | Gzip-compressed binary | Camera available, most compact |
+| QR Code | Deflate-compressed binary | Camera available, most compact |
 | Copy/Paste | Base64-encoded binary | No camera, text-safe for clipboard |
 
 **Key Features:**
@@ -235,13 +235,13 @@ Handles direct peer-to-peer connections using WebRTC data channels.
 **Features:**
 - ICE candidate queuing for reliable connection establishment
 - STUN server for NAT traversal (`stun.l.google.com:19302`)
-- 16KB chunked data transfer over data channel
+- 128KB encrypted chunk messages with backpressure (WebRTC handles fragmentation)
 - Backpressure support (waits for buffer to drain before sending more data)
 - Connection state monitoring
 
 ### Cloud Storage (`src/lib/cloud-storage.ts`)
 
-Fallback storage when P2P connection cannot be established (15s timeout). Not used if P2P connects successfully.
+Fallback storage when P2P connection cannot be established (30s timeout window). Not used if P2P connects successfully.
 
 **Features:**
 - Multiple upload servers with automatic failover
@@ -250,8 +250,8 @@ Fallback storage when P2P connection cannot be established (15s timeout). Not us
 - Chunked upload/download for files >10MB
 
 **Current Services:**
-- Upload: tmpfiles.org
-- CORS Proxies: corsproxy.io, leverson83, codetabs, cors-anywhere
+- Upload: tmpfiles.org, litterbox, uguu.se, x0.at
+- CORS Proxies: corsproxy.io, leverson83, codetabs, cors-anywhere, allorigins
 
 ### React Hooks (`src/hooks/`)
 
@@ -261,7 +261,7 @@ Fallback storage when P2P connection cannot be established (15s timeout). Not us
 1. Read content (encrypt only if cloud fallback is needed)
 2. Publish PIN exchange (without cloud URL)
 3. Wait for receiver ready ACK
-4. Attempt P2P connection (15s timeout for connection only)
+4. Attempt P2P connection (30s timeout for connection only)
 5. If P2P connects: transfer via data channel (all-or-nothing, no cloud fallback)
 6. If P2P connection fails: chunked cloud upload with ACK coordination
 7. Wait for completion ACK
