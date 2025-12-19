@@ -10,7 +10,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 - **PIN-based security**: PIN encrypts signaling payloads so only the PIN holder can establish a connection
 - **Text & file transfer**: Send text messages or files up to 100MB
 - **WebRTC P2P**: Direct peer-to-peer connections for fast, efficient data transfer
-- **Cloud fallback**: Falls back to cloud storage (tmpfiles.org) if WebRTC connection fails
+- **Cloud fallback**: Automatic multi-host upload failover (tmpfiles.org, litterbox.catbox.moe, uguu.se, x0.at) if WebRTC connection fails
 - **End-to-end encryption**: All transfers use AES-256-GCM encryption with unique nonces per chunk, in addition to WebRTC DTLS
 - **No accounts required**: Ephemeral keypairs are generated for each transfer
 - **Multiple signaling methods**: Choose between Nostr relays (with cloud fallback), PeerJS (simpler P2P), or Manual Exchange (works without internet on local network)
@@ -101,11 +101,16 @@ Upload servers and CORS proxies with automatic failover:
 **Upload Servers:**
 - tmpfiles.org
 - litterbox.catbox.moe (1h expiration, upload via CORS proxy)
+- uguu.se
+- x0.at
 
 **CORS Proxies (for download):**
 - Direct download (for litterbox URLs)
 - corsproxy.io
 - cors.leverson83.org
+- api.codetabs.com
+- cors-anywhere.com
+- api.allorigins.win
 
 ## Debug
 
