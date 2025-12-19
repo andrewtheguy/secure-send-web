@@ -1,6 +1,20 @@
 import { AES_KEY_LENGTH } from './constants'
 
 /**
+ * ECDH Key Exchange for Mutual Authentication
+ *
+ * SECURITY NOTE: The Web Crypto API's generateKey applies the extractability flag
+ * to both public and private keys together. We set extractable=true because the
+ * public key must be exported to raw bytes for QR/clipboard transmission.
+ *
+ * This means the private key is technically extractable, but:
+ * - Private keys are EPHEMERAL: regenerated for each transfer session
+ * - Private keys must NEVER be exported, serialized, or stored
+ * - Private keys are cleared from refs immediately after deriving the shared secret
+ * - Only the deriveBits operation is used on private keys
+ */
+
+/**
  * Helper to get a proper ArrayBuffer from Uint8Array (handles subarray views)
  */
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -12,25 +26,34 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 /**
- * ECDH key pair with raw public key bytes for QR encoding
+ * ECDH key pair with raw public key bytes for transmission.
+ * WARNING: privateKey must never be exported or stored - use only for deriveBits.
  */
 export interface ECDHKeyPair {
   publicKey: CryptoKey
-  privateKey: CryptoKey
+  privateKey: CryptoKey // Ephemeral only - never export or store
   publicKeyBytes: Uint8Array // 65 bytes uncompressed P-256 (0x04 || x || y)
 }
 
 /**
- * Generate an ephemeral ECDH key pair using P-256 curve
- * Returns the key pair along with raw public key bytes for encoding in QR
+ * Generate an ephemeral ECDH key pair using P-256 curve.
+ * Returns the key pair along with raw public key bytes for transmission.
+ *
+ * IMPORTANT: The private key is ephemeral and must be:
+ * - Used only for a single key exchange
+ * - Never exported, serialized, or persisted
+ * - Cleared from memory after deriving the shared secret
  */
 export async function generateECDHKeyPair(): Promise<ECDHKeyPair> {
+  // extractable=true is required to export the public key to raw bytes.
+  // The private key is also marked extractable as a side effect (Web Crypto limitation),
+  // but must NEVER actually be exported - it's used only for deriveBits.
   const keyPair = await crypto.subtle.generateKey(
     {
       name: 'ECDH',
       namedCurve: 'P-256',
     },
-    true, // extractable so we can get raw bytes
+    true,
     ['deriveBits']
   )
 

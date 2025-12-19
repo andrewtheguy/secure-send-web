@@ -83,12 +83,12 @@ export function isValidBinaryPayload(binary: Uint8Array): boolean {
 }
 
 /**
- * Estimate compressed payload size in bytes
+ * Estimate compressed payload size in bytes (includes SS02 magic header)
  */
 export function estimatePayloadSize(payload: SignalingPayload): number {
   const json = JSON.stringify(payload)
-  const compressed = pako.gzip(json)
-  return compressed.length
+  const compressed = pako.deflate(json)
+  return 4 + compressed.length // 4 bytes for SS02 magic header
 }
 
 /**

@@ -52,8 +52,19 @@ export function ReceiveTab() {
   const pinReceive = !isManualMode ? (activeHook as typeof nostrHook).receive : undefined
   const { startReceive, submitOffer } = manualHook
 
-  // Normalize state for different hooks
-  const state = rawState as typeof nostrHook.state & { answerData?: Uint8Array; clipboardData?: string }
+  // Use rawState directly for common properties
+  const state = rawState
+
+  // Runtime normalization for manual-mode specific properties
+  const rawStateAny = rawState as unknown as Record<string, unknown>
+  const answerData: Uint8Array | undefined =
+    rawStateAny.answerData instanceof Uint8Array
+      ? rawStateAny.answerData
+      : undefined
+  const clipboardData: string | undefined =
+    typeof rawStateAny.clipboardData === 'string'
+      ? rawStateAny.clipboardData
+      : undefined
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pinInactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -221,7 +232,7 @@ export function ReceiveTab() {
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
   const showQRInput = isManualMode && state.status === 'waiting_for_offer'
-  const showQRDisplay = isManualMode && state.answerData && state.status === 'showing_answer'
+  const showQRDisplay = isManualMode && answerData && state.status === 'showing_answer'
 
   return (
     <div className="space-y-4 pt-4">
@@ -293,11 +304,11 @@ export function ReceiveTab() {
           )}
 
           {/* QR Code display for receiver's answer */}
-          {showQRDisplay && state.answerData && (
+          {showQRDisplay && answerData && (
             <div className="space-y-4">
               <QRDisplay
-                data={state.answerData}
-                clipboardData={state.clipboardData}
+                data={answerData}
+                clipboardData={clipboardData}
                 label="Show this to sender and wait for connection"
               />
             </div>

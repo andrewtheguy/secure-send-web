@@ -116,7 +116,7 @@ export function useManualSend(): UseManualSendReturn {
       return
     }
     if (typeof parsed.createdAt !== 'number' || !Number.isFinite(parsed.createdAt)) {
-      answerRejectRef.current?.(new Error('Invalid response: missing TTL'))
+      answerRejectRef.current?.(new Error('Invalid response: missing timestamp'))
       answerResolverRef.current = null
       return
     }
@@ -308,9 +308,13 @@ export function useManualSend(): UseManualSendReturn {
       // Derive shared secret from receiver's public key
       setState({ status: 'connecting', message: 'Establishing secure connection...' })
 
+      if (!ecdhPrivateKeyRef.current || !saltRef.current) {
+        throw new Error('Cryptographic state missing. Please try again.')
+      }
+
       const receiverPublicKey = new Uint8Array(answerPayload.publicKey!)
-      const sharedSecret = await deriveSharedSecret(ecdhPrivateKeyRef.current!, receiverPublicKey)
-      const key = await deriveAESKeyFromSecret(sharedSecret, saltRef.current!)
+      const sharedSecret = await deriveSharedSecret(ecdhPrivateKeyRef.current, receiverPublicKey)
+      const key = await deriveAESKeyFromSecret(sharedSecret, saltRef.current)
 
       // Clear ECDH private key - no longer needed
       ecdhPrivateKeyRef.current = null
