@@ -44,7 +44,7 @@ export interface SignalingPayload {
   // Milliseconds since epoch when this payload was generated (TTL enforced by receiver for offers).
   createdAt: number
   // ECDH public key for mutual exchange (65 bytes P-256 uncompressed)
-  publicKey?: number[]
+  publicKey: number[]
   // Offer-only fields:
   fileName?: string
   fileSize?: number
@@ -94,7 +94,7 @@ export function isValidSignalingPayload(payload: unknown): payload is SignalingP
   if (!Array.isArray(p.candidates)) return false
   if (!(p.candidates as unknown[]).every((c) => typeof c === 'string')) return false
   if (typeof p.createdAt !== 'number') return false
-  if (p.publicKey !== undefined && !Array.isArray(p.publicKey)) return false
+  if (!Array.isArray(p.publicKey)) return false
   return true
 }
 

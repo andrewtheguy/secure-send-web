@@ -109,11 +109,6 @@ export function useManualSend(): UseManualSendReturn {
       answerResolverRef.current = null
       return
     }
-    if (!parsed.publicKey) {
-      answerRejectRef.current?.(new Error('Missing public key in response'))
-      answerResolverRef.current = null
-      return
-    }
     if (typeof parsed.createdAt !== 'number' || !Number.isFinite(parsed.createdAt)) {
       answerRejectRef.current?.(new Error('Invalid response: missing timestamp'))
       answerResolverRef.current = null
