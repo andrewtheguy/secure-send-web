@@ -31,9 +31,8 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
     const [error, setError] = useState<string | null>(null)
     const [charDisplayLength, setCharDisplayLength] = useState(0)
     const [wordDisplayLength, setWordDisplayLength] = useState(0)
-    const [charPin, setCharPin] = useState('')
-    const [wordPin, setWordPin] = useState('')
-    const [, setValidationTrigger] = useState(0)
+    const [charIsValid, setCharIsValid] = useState(false)
+    const [wordIsValid, setWordIsValid] = useState(false)
 
     const inputRefs = useRef<(HTMLInputElement | null)[]>(Array(7).fill(null))
     const charInputRef = useRef<HTMLInputElement>(null)
@@ -47,8 +46,8 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       clear: () => {
         charPinRef.current = ''
         wordPinRef.current = ''
-        setCharPin('')
-        setWordPin('')
+        setCharIsValid(false)
+        setWordIsValid(false)
         setCharDisplayLength(0)
         setWordDisplayLength(0)
         setWords(Array(7).fill(''))
@@ -85,12 +84,11 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
 
       setWordDisplayLength(validWordCount)
       wordPinRef.current = pin
-      setWordPin(pin)
-      setValidationTrigger(v => v + 1)
+      setWordIsValid(isValidPin(pin))
 
       if (validWordCount > 0) {
         charPinRef.current = ''
-        setCharPin('')
+        setCharIsValid(false)
         setCharDisplayLength(0)
         if (charInputRef.current) charInputRef.current.value = ''
       }
@@ -112,15 +110,14 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       const filtered = validChars.slice(0, PIN_LENGTH).join('')
       setCharDisplayLength(filtered.length)
       charPinRef.current = filtered
-      setCharPin(filtered)
-      setValidationTrigger(v => v + 1)
+      setCharIsValid(isValidPin(filtered))
       if (charInputRef.current) charInputRef.current.value = filtered
 
       // Clear word input when character input is used
       if (filtered.length > 0) {
         setWords(Array(7).fill(''))
         wordPinRef.current = ''
-        setWordPin('')
+        setWordIsValid(false)
         setWordDisplayLength(0)
       }
 
@@ -336,8 +333,8 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
 
     const charIsComplete = charDisplayLength === PIN_LENGTH
     const wordIsComplete = words.length === 7 && words.every(w => isValidPinWord(w))
-    const charHasChecksumError = charIsComplete && !isValidPin(charPinRef.current)
-    const wordHasChecksumError = wordIsComplete && !isValidPin(wordPinRef.current)
+    const charHasChecksumError = charIsComplete && !charIsValid
+    const wordHasChecksumError = wordIsComplete && !wordIsValid
 
     return (
       <div className="flex flex-col gap-4">
