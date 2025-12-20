@@ -13,7 +13,8 @@ import {
   PeerJSSignaling,
   type PeerJSMessage,
 } from '@/lib/peerjs-signaling'
-import type { TransferState, ReceivedContent } from '@/lib/nostr/types'
+import type { TransferState } from '@/lib/nostr/types'
+import type { ReceivedContent } from '@/lib/types'
 
 export interface UsePeerJSReceiveReturn {
   state: TransferState

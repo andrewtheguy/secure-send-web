@@ -16,7 +16,8 @@ import {
   generateMutualClipboardData,
   type SignalingPayload,
 } from '@/lib/manual-signaling'
-import type { TransferState, ReceivedContent, ContentType } from '@/lib/nostr/types'
+import type { TransferState, ContentType } from '@/lib/nostr/types'
+import type { ReceivedContent } from '@/lib/types'
 
 // Extended transfer status for Manual Exchange receive mode
 export type ManualReceiveStatus =

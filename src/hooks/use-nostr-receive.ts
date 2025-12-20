@@ -22,7 +22,6 @@ import {
   DEFAULT_RELAYS,
   type TransferState,
   type PinExchangePayload,
-  type ReceivedContent,
   type ChunkNotifyPayload,
   EVENT_KIND_PIN_EXCHANGE,
   EVENT_KIND_DATA_TRANSFER,
@@ -30,6 +29,7 @@ import {
   createSignalingEvent,
   parseSignalingEvent,
 } from '@/lib/nostr'
+import type { ReceivedContent } from '@/lib/types'
 import { downloadFromCloud } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { WebRTCConnection } from '@/lib/webrtc'
