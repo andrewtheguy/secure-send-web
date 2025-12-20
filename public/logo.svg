@@ -1,11 +1,97 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
-  <rect width="180" height="180" fill="#1a1a1a" rx="20"/>
-  <text
-    x="90"
-    y="120"
-    font-family="system-ui, -apple-system, sans-serif"
-    font-size="80"
-    font-weight="700"
-    fill="#22c55e"
-    text-anchor="middle">SS</text>
+  <defs>
+    <!-- Background gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7c3aed;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#5b21b6;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Shield gradient -->
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#06b6d4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0891b2;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- File gradient -->
+    <linearGradient id="fileGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fb923c;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f97316;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Arrow gradient -->
+    <linearGradient id="arrowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fde047;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#facc15;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Glow filter -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Strong glow for better visibility -->
+    <filter id="strongGlow">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="180" height="180" fill="url(#bgGrad)" rx="28"/>
+
+  <!-- Shield with glow -->
+  <g filter="url(#strongGlow)">
+    <path d="M90 15 L160 38 L160 95 Q160 135 90 165 Q20 135 20 95 L20 38 Z"
+          fill="url(#shieldGrad)" opacity="0.25"/>
+    <path d="M90 15 L160 38 L160 95 Q160 135 90 165 Q20 135 20 95 L20 38 Z"
+          fill="none" stroke="url(#shieldGrad)" stroke-width="6" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Lock accent inside shield -->
+  <g opacity="0.5" filter="url(#glow)">
+    <rect x="80" y="88" width="20" height="24" rx="2.5" fill="url(#shieldGrad)"/>
+    <path d="M83 88 L83 80 Q83 73 90 73 Q97 73 97 80 L97 88"
+          fill="none" stroke="url(#shieldGrad)" stroke-width="3.5"/>
+  </g>
+
+  <!-- File/Document icon with glow -->
+  <g filter="url(#strongGlow)">
+    <!-- File body -->
+    <rect x="63" y="60" width="54" height="70" rx="5" fill="url(#fileGrad)"/>
+    <!-- Folded corner -->
+    <path d="M112 60 L112 73 L117 73 L117 65 Z" fill="#ea580c"/>
+    <path d="M112 60 L112 73 L117 73" fill="#c2410c" opacity="0.6"/>
+    <!-- File lines -->
+    <line x1="72" y1="80" x2="108" y2="80" stroke="#fff" stroke-width="3.5" stroke-linecap="round" opacity="0.95"/>
+    <line x1="72" y1="92" x2="108" y2="92" stroke="#fff" stroke-width="3.5" stroke-linecap="round" opacity="0.95"/>
+    <line x1="72" y1="104" x2="98" y2="104" stroke="#fff" stroke-width="3.5" stroke-linecap="round" opacity="0.95"/>
+    <line x1="72" y1="116" x2="104" y2="116" stroke="#fff" stroke-width="3.5" stroke-linecap="round" opacity="0.95"/>
+  </g>
+
+  <!-- Send arrow (top right) with animation feel -->
+  <g filter="url(#strongGlow)">
+    <circle cx="140" cy="35" r="15" fill="url(#arrowGrad)" opacity="0.4"/>
+    <path d="M131 35 L149 35 M149 35 L141 27 M149 35 L141 43"
+          stroke="url(#arrowGrad)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Receive arrow (bottom left) with animation feel -->
+  <g filter="url(#strongGlow)">
+    <circle cx="40" cy="145" r="15" fill="url(#arrowGrad)" opacity="0.4"/>
+    <path d="M49 145 L31 145 M31 145 L39 137 M31 145 L39 153"
+          stroke="url(#arrowGrad)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Decorative dots for tech feel -->
+  <circle cx="160" cy="160" r="4" fill="#06b6d4" opacity="0.6"/>
+  <circle cx="170" cy="170" r="3" fill="#fde047" opacity="0.6"/>
+  <circle cx="20" cy="20" r="3.5" fill="#fb923c" opacity="0.6"/>
+  <circle cx="10" cy="10" r="3" fill="#06b6d4" opacity="0.6"/>
 </svg>
