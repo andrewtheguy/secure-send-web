@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
-  <g transform="translate(90 90) scale(1.28) translate(-90 -90)">
+  <g transform="translate(90 90) scale(1.1) translate(-90 -90)">
     <!-- Folder tab -->
     <path d="M20 45 L20 40 Q20 35 25 35 L70 35 L80 50 L155 50 Q160 50 160 55"
           fill="#6B7280" opacity="0.6"/>

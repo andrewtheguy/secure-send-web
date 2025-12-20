@@ -22,8 +22,8 @@ export default defineConfig({
       },
       manifest: {
         name: 'Secure Send',
-        short_name: 'SecureSend',
-        description: 'Share files and text securely with end-to-end encryption',
+        short_name: 'Secure Send',
+        description: 'Share files and folders securely with end-to-end encryption',
         theme_color: '#000000',
         background_color: '#000000',
         display: 'standalone',
