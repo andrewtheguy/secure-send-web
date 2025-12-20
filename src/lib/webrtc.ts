@@ -1,6 +1,6 @@
 export type WebRTCSignal =
-    | { type: 'offer'; sdp: string | undefined }
-    | { type: 'answer'; sdp: string | undefined }
+    | { type: 'offer'; sdp: string }
+    | { type: 'answer'; sdp: string }
     | { type: 'candidate'; candidate?: RTCIceCandidateInit | null };
 
 type WebRTCData = string | ArrayBuffer | ArrayBufferView | Blob
@@ -82,6 +82,9 @@ export class WebRTCConnection {
         console.log('Offer created, setting local description...');
         await this.pc.setLocalDescription(offer);
         console.log('Local description set. Sending offer signal.');
+        if (!offer.sdp) {
+            throw new Error('Failed to create offer: SDP is missing');
+        }
         this.onSignal({ type: 'offer', sdp: offer.sdp });
     }
 
@@ -89,6 +92,9 @@ export class WebRTCConnection {
         console.log('Handling signal:', signal.type);
         try {
             if (signal.type === 'offer') {
+                if (!signal.sdp) {
+                    throw new Error('Invalid offer signal: SDP is missing');
+                }
                 console.log('Setting remote offer...');
                 await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
                 this.remoteDescriptionSet = true;
@@ -97,8 +103,14 @@ export class WebRTCConnection {
                 console.log('Creating answer...');
                 const answer = await this.pc.createAnswer();
                 await this.pc.setLocalDescription(answer);
+                if (!answer.sdp) {
+                    throw new Error('Failed to create answer: SDP is missing');
+                }
                 this.onSignal({ type: 'answer', sdp: answer.sdp });
             } else if (signal.type === 'answer') {
+                if (!signal.sdp) {
+                    throw new Error('Invalid answer signal: SDP is missing');
+                }
                 console.log('Setting remote answer...');
                 await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
                 this.remoteDescriptionSet = true;
