@@ -6,7 +6,11 @@ import { SendTab } from './send-tab'
 import { ReceiveTab } from './receive-tab'
 import { generateTextQRCode } from '@/lib/qr-utils'
 
-export function SecureSend() {
+type SecureSendProps = {
+  defaultTab?: 'send' | 'receive' | 'about'
+}
+
+export function SecureSend({ defaultTab = 'send' }: SecureSendProps) {
   const siteUrl = typeof window !== 'undefined' ? window.location.origin : ''
   const [shareQrUrl, setShareQrUrl] = useState<string | null>(null)
   const [shareQrError, setShareQrError] = useState<string | null>(null)
@@ -43,7 +47,7 @@ export function SecureSend() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="send" className="w-full">
+        <Tabs defaultValue={defaultTab} className="w-full">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="send" className="flex items-center gap-2">
               <Send className="h-4 w-4" />
