@@ -189,23 +189,84 @@ Signaling method using QR codes or copy/paste for WebRTC offer/answer exchange. 
 
 **How it works:**
 - Sender generates WebRTC offer with ICE candidates
-- Offer payload encrypted with PIN, then encoded as: JSON → deflate → binary QR code
-- Receiver scans QR code (or pastes encrypted JSON), decrypts with PIN, creates answer
-- Answer encrypted with PIN and sent back via same encoding (QR code or encrypted JSON paste)
-- Both peers establish WebRTC connection using exchanged SDP/ICE candidates
 - Both offer and answer include a required `createdAt` timestamp; receivers refuse to proceed if the offer is expired or missing TTL
+- Payload is obfuscated using a time-bucketed seed to avoid casual inspection.
 
-**Binary Payload Format:**
-```
-[4 bytes: "SS01" magic (0x53 0x53 0x30 0x31)][16 bytes: salt][remaining: AES-GCM encrypted deflate-compressed payload]
-```
-The "SS01" magic header (Secure Send version 1) identifies the format and allows for future versioning. This compact binary format avoids JSON overhead and double base64 encoding.
+**Binary Payload Format (SS02):**
+
+The payload consists of two distinct layers to balance rapid identification with obfuscation of the content.
+
+| Component | Length | Status | Description |
+|-----------|--------|--------|-------------|
+| **Outer Magic** | 4 bytes | Plaintext | Fixed header: `"SS02"` (`0x53 0x53 0x30 0x32`) |
+| **Inner Buffer** | Variable | **Obfuscated** | Time-bucketed XOR-obfuscated content (detailed below) |
+
+**Obfuscated Inner Buffer Structure:**
+
+The following structure is revealed *after* successful de-obfuscation using the correct hourly seed:
+
+| Component | Length | Status | Description |
+|-----------|--------|--------|-------------|
+| **Inner Magic** | 4 bytes | Obfuscated | Fixed marker: `"mag!"` (`0x6d 0x61 0x67 0x21`) |
+| **Payload** | Variable | Obfuscated | Deflate-compressed `SignalingPayload` JSON |
+
+**Verification Process:**
+1. **Identification**: The receiver checks the first 4 bytes for the plaintext `"SS02"` header.
+2. **Seed Testing**: The receiver iterates through candidate seeds for the current and previous hour (2-hour sliding window). 
+3. **Optimized Check**: For each candidate seed, only the first 4 bytes of the inner buffer are de-obfuscated. If they match the `"mag!"` marker, the correct seed has been found.
+4. **Full Processing**: The rest of the buffer is de-obfuscated, decompressed via deflate, and parsed as JSON.
+
+**Time-Bucketed Obfuscation:**
+
+The obfuscation seed changes every hour to ensure the **ephemerality** of signaling data and to make the payload **look more random**. This provides several benefits:
+- **Casual Protection**: Offers a layer of deterrence against casual non-technical observers by making the raw data unreadable without the correct hourly seed.
+- **Stale Data Prevention**: Prevents the utility of stale signaling data, such as a photograph of a QR code, a screenshot, or lingering clipboard contents.
+- **Payload Randomness**: Ensures that signaling data generated at different times results in significantly different binary outputs.
+
+> [!IMPORTANT]
+> **Real Protection**: The actual security for manual signaling is the inherent **TTL (1 hour)** and the data-layer encryption. Since signaling data is ephemeral, it becomes naturally useless once the window expires. Confidentiality is strictly enforced by ECDH mutual exchange and AES-256-GCM encryption of the WebRTC data channel.
+
+- **Bucket Size**: 1 hour (`3600` seconds).
+- **Input (`bucketEpoch`)**: `floor(unix_timestamp_seconds / 3600)`.
+- **Base Seed**: `0x9e3779b9`.
+- **Algorithm**: A 32-bit MurmurHash3-style finalizer/mixer.
+
+**Seed Derivation Steps:**
+To ensure cross-implementation compatibility, the seed MUST be derived using the following steps (using 32-bit signed integer multiplication and unsigned right shifts):
+
+1.  Initialize: `h = 0x9e3779b9 ^ bucketEpoch`
+2.  Mix 1: `h = (h ^ (h >>> 16)) * 0x85ebca6b`
+3.  Mix 2: `h = (h ^ (h >>> 13)) * 0xc2b2ae35`
+4.  Finalize: `seed = (h ^ (h >>> 16)) >>> 0`
+
+*Note: In environments like JavaScript, `Math.imul` should be used for the multiplication steps to ensure consistent 32-bit integer behavior.*
+
+**Verification Window & Edge Cases:**
+A 2-hour sliding window (current bucket + 1 previous bucket) is used to verify incoming payloads. This design has several implications:
+
+-   **Validity Duration**: A payload's effective validity is between **1 and 2 hours**, aligning with the 1-hour backend TTL. If generated at the start of a bucket, it remains valid for 2 hours. If generated at the end, it remains valid for just over 1 hour.
+-   **Clock Drift Tolerance**: The window provides inherent tolerance for clock drift (+/- 1 hour).
+-   **Boundary Transitions**: When the hour rolls over, the previous bucket is dropped, and the new hour becomes the current bucket.
+-   **Out-of-Sync Clocks**: If the sender and receiver clocks differ by more than the window's tolerance (e.g., >1 hour fast or slow), de-obfuscation will fail.
+
+**Legacy Format (SS01):**
+Prior to the full-payload obfuscation refactor, the format was:
+`[4 bytes: "SS01" magic][16 bytes: salt][encrypted deflate-compressed payload]`
+and it is no longer accepted by the backend.
+
+> [!NOTE]
+| The obfuscation's goal is simply to avoid casual inspection. The actual security of the transfer is provided by ECDH mutual exchange and AES-256-GCM encryption of the data channel.
 
 **Encoding Pipeline:**
-1. `SignalingPayload` object → JSON string
-2. Compress with deflate (JSON/SDP compresses well, ~40-50% reduction)
-3. Encrypt with PIN-derived key (AES-GCM)
-4. Construct binary: `[SS01][salt][encrypted bytes]`
+1. `SignalingPayload` object → JSON string.
+2. Compress with deflate (variable length).
+3. Prepend fixed-length `"mag!"` marker (4 bytes).
+4. XOR-obfuscate this inner buffer with the current hourly seed.
+5. Prepend fixed-length plaintext `"SS02"` header (4 bytes).
+6. Result: Final binary payload.
+
+
+
 
 **Output Methods:**
 | Method | Encoding | Use Case |

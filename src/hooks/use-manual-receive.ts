@@ -93,11 +93,6 @@ export function useManualReceive(): UseManualReceiveReturn {
       offerResolverRef.current = null
       return
     }
-    if (!parsed.publicKey) {
-      offerRejectRef.current?.(new Error('Missing public key in offer'))
-      offerResolverRef.current = null
-      return
-    }
     offerResolverRef.current?.(parsed)
   }, [])
 
@@ -152,10 +147,6 @@ export function useManualReceive(): UseManualReceiveReturn {
       // Validate required fields
       if (!saltArray) {
         setState({ status: 'error', message: 'Invalid offer: missing encryption salt' })
-        return
-      }
-      if (!senderPublicKeyArray) {
-        setState({ status: 'error', message: 'Invalid offer: missing public key' })
         return
       }
 
