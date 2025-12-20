@@ -1,12 +1,12 @@
 import {
-  PIN_CHARSET,
   PIN_LENGTH,
-  PIN_CHECKSUM_LENGTH,
-  PIN_HINT_LENGTH,
+  PIN_CHARSET,
+  PIN_WORDLIST,
   NOSTR_FIRST_CHARSET,
   PEERJS_FIRST_CHARSET,
   QR_FIRST_CHARSET,
-  PIN_WORDLIST,
+  PIN_CHECKSUM_LENGTH,
+  PIN_HINT_LENGTH,
 } from './constants'
 
 /**
@@ -22,37 +22,6 @@ function computeChecksum(data: string): string {
   return PIN_CHARSET[sum % PIN_CHARSET.length]
 }
 
-/**
- * Generate random PIN with checksum
- * Charset excludes confusing characters: I, O, i, l, o, 0, 1
- * Uses rejection sampling to eliminate modulo bias
- * Last character is a checksum for typo detection
- * @deprecated Use generatePinForMethod() instead to encode signaling method
- */
-export function generatePin(): string {
-  const n = PIN_CHARSET.length
-  // Largest multiple of n that fits in a byte (0-255)
-  const maxMultiple = Math.floor(256 / n) * n
-  const dataLength = PIN_LENGTH - PIN_CHECKSUM_LENGTH
-
-  const result: string[] = []
-  const buffer = new Uint8Array(dataLength * 2) // Over-allocate for rejections
-
-  while (result.length < dataLength) {
-    crypto.getRandomValues(buffer)
-    for (const byte of buffer) {
-      // Reject bytes >= maxMultiple to eliminate modulo bias
-      if (byte < maxMultiple) {
-        result.push(PIN_CHARSET[byte % n])
-        if (result.length === dataLength) break
-      }
-    }
-  }
-
-  const data = result.join('')
-  const checksum = computeChecksum(data)
-  return data + checksum
-}
 
 /**
  * Generate random character from a charset using rejection sampling
@@ -72,8 +41,12 @@ function randomCharFromCharset(charset: string): string {
   }
 }
 
+
 /**
- * Generate PIN with signaling method encoded in first character
+ * Generate random PIN with checksum  with signaling method encoded in first character
+ * Charset excludes confusing characters: I, O, i, l, o, 0, 1
+ * Uses rejection sampling to eliminate modulo bias
+ * Last character is a checksum for typo detection
  * - Uppercase first char (A-Z excluding I,L,O) = Nostr
  * - Lowercase first char (a-z excluding i,l,o) = PeerJS
  * - '2' first char = QR
@@ -83,6 +56,7 @@ export function generatePinForMethod(method: 'nostr' | 'peerjs' | 'manual'): str
   if (method === 'nostr') firstCharset = NOSTR_FIRST_CHARSET
   else if (method === 'peerjs') firstCharset = PEERJS_FIRST_CHARSET
   else firstCharset = QR_FIRST_CHARSET
+
   const dataLength = PIN_LENGTH - PIN_CHECKSUM_LENGTH
 
   // Generate first character from method-specific charset
@@ -142,6 +116,70 @@ export function isValidPin(pin: string): boolean {
 }
 
 /**
+ * Convert alphanumeric PIN to word-based PIN (7 words using BIP-39)
+ */
+export function pinToWords(pin: string): string[] {
+  if (!pin) return Array(7).fill('')
+
+  const charsetSize = BigInt(PIN_CHARSET.length)
+  const wordlistSize = BigInt(PIN_WORDLIST.length)
+
+  // Convert PIN (base 69) to BigInt
+  let num = BigInt(0)
+  for (let i = 0; i < pin.length; i++) {
+    const charIndex = PIN_CHARSET.indexOf(pin[i])
+    if (charIndex === -1) return Array(7).fill('')
+    num = num * charsetSize + BigInt(charIndex)
+  }
+
+  // Convert BigInt to words (base 2048)
+  const result: string[] = []
+  for (let i = 0; i < 7; i++) {
+    const wordIndex = Number(num % wordlistSize)
+    result.unshift(PIN_WORDLIST[wordIndex])
+    num = num / wordlistSize
+  }
+
+  return result
+}
+
+/**
+ * Convert 7-word PIN back to 12-character alphanumeric PIN
+ */
+export function wordsToPin(words: string[]): string {
+  if (words.length === 0 || words.every(w => !w)) return ''
+
+  const charsetSize = BigInt(PIN_CHARSET.length)
+  const wordlistSize = BigInt(PIN_WORDLIST.length)
+
+  // Convert words (base 2048) back to BigInt
+  let num = BigInt(0)
+  for (const word of words) {
+    const wordIndex = PIN_WORDLIST.indexOf(word.toLowerCase())
+    if (wordIndex === -1) continue
+    num = num * wordlistSize + BigInt(wordIndex)
+  }
+
+  // Convert BigInt back to PIN (base 69)
+  const result: string[] = []
+  for (let i = 0; i < PIN_LENGTH; i++) {
+    const charIndex = Number(num % charsetSize)
+    result.unshift(PIN_CHARSET[charIndex])
+    num = num / charsetSize
+  }
+
+  return result.join('')
+}
+
+/**
+ * Check if a word is in the PIN wordlist
+ */
+export function isValidPinWord(word: string): boolean {
+  if (!word) return false
+  return PIN_WORDLIST.includes(word.toLowerCase())
+}
+
+/**
  * Compute PIN hint (first PIN_HINT_LENGTH hex chars of SHA-256)
  * Used for event filtering without revealing the PIN
  */
@@ -170,64 +208,4 @@ export function generateTransferId(): string {
   return Array.from(array)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
-}
-/**
- * Convert alphanumeric PIN to word-based PIN (7 words using BIP-39)
- */
-export function pinToWords(pin: string): string[] {
-  if (!pin) return []
-  const charsetSize = BigInt(PIN_CHARSET.length)
-  const wordlistSize = BigInt(PIN_WORDLIST.length)
-
-  // Convert PIN (base 69) to BigInt
-  let num = BigInt(0)
-  for (let i = 0; i < pin.length; i++) {
-    const charIndex = PIN_CHARSET.indexOf(pin[i])
-    if (charIndex === -1) return []
-    num = num * charsetSize + BigInt(charIndex)
-  }
-
-  // Convert BigInt to words (base 2048)
-  const result: string[] = []
-  for (let i = 0; i < 7; i++) {
-    const wordIndex = Number(num % wordlistSize)
-    result.unshift(PIN_WORDLIST[wordIndex])
-    num = num / wordlistSize
-  }
-
-  return result
-}
-
-/**
- * Convert 7-word PIN back to 12-character alphanumeric PIN
- */
-export function wordsToPin(words: string[]): string {
-  if (words.length === 0) return ''
-  const charsetSize = BigInt(PIN_CHARSET.length)
-  const wordlistSize = BigInt(PIN_WORDLIST.length)
-
-  // Convert words (base 2048) back to BigInt
-  let num = BigInt(0)
-  for (const word of words) {
-    const wordIndex = PIN_WORDLIST.indexOf(word.toLowerCase())
-    if (wordIndex === -1) continue
-    num = num * wordlistSize + BigInt(wordIndex)
-  }
-
-  // Convert BigInt back to PIN (base 69)
-  const result: string[] = []
-  for (let i = 0; i < PIN_LENGTH; i++) {
-    const charIndex = Number(num % charsetSize)
-    result.unshift(PIN_CHARSET[charIndex])
-    num = num / charsetSize
-  }
-
-  return result.join('')
-}
-
-/**
- * Check if a word is in the PIN wordlist
- */
-export function isValidPinWord(word: string): boolean {
-  return PIN_WORDLIST.includes(word.toLowerCase())
 }
