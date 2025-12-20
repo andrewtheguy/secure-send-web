@@ -149,6 +149,7 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
                 <Input
                   value={isMasked ? '\u2022\u2022\u2022\u2022\u2022' : word}
                   readOnly
+                  aria-label={`PIN word ${i + 1} of ${words.length}`}
                   className="text-center font-mono h-10 bg-background border-green-500 bg-green-50/50 cursor-default select-all"
                 />
                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
@@ -163,6 +164,7 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
           <Input
             value={isMasked ? maskedPin : pin}
             readOnly
+            aria-label="Alphanumeric PIN"
             className="text-center font-mono text-xl tracking-wider h-12 bg-background border-green-500 cursor-default select-all"
           />
         </div>
