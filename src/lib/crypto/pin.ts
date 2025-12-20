@@ -156,7 +156,7 @@ export function wordsToPin(words: string[]): string {
   let num = BigInt(0)
   for (const word of words) {
     const wordIndex = PIN_WORDLIST.indexOf(word.toLowerCase())
-    if (wordIndex === -1) continue
+    if (wordIndex === -1) return ''
     num = num * wordlistSize + BigInt(wordIndex)
   }
 
