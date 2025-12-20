@@ -38,7 +38,7 @@ export interface ManualTransferState extends Omit<TransferState, 'status'> {
 
 export interface UseManualSendReturn {
   state: ManualTransferState
-  send: (content: string | File) => Promise<void>
+  send: (content: File) => Promise<void>
   submitAnswer: (answerData: Uint8Array) => void
   cancel: () => void
 }
@@ -123,45 +123,28 @@ export function useManualSend(): UseManualSendReturn {
     answerResolverRef.current?.(parsed)
   }, [])
 
-  const send = useCallback(async (content: string | File) => {
+  const send = useCallback(async (content: File) => {
     // Guard against concurrent invocations
     if (sendingRef.current) return
     sendingRef.current = true
     cancelledRef.current = false
 
-    const isFile = content instanceof File
-    const contentType: ContentType = isFile ? 'file' : 'text'
+    const contentType: ContentType = 'file'
 
     try {
       // Get content bytes
-      let contentBytes: Uint8Array
-      let fileName: string | undefined
-      let fileSize: number | undefined
-      let mimeType: string | undefined
+      const fileName = content.name
+      const fileSize = content.size
+      const mimeType = content.type || 'application/octet-stream'
 
-      if (isFile) {
-        fileName = content.name
-        fileSize = content.size
-        mimeType = content.type || 'application/octet-stream'
-
-        if (content.size > MAX_MESSAGE_SIZE) {
-          const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
-          setState({ status: 'error', message: `File exceeds ${limitMB}MB limit` })
-          return
-        }
-
-        setState({ status: 'generating_offer', message: 'Reading file...' })
-        contentBytes = await readFileAsBytes(content)
-      } else {
-        const encoder = new TextEncoder()
-        contentBytes = encoder.encode(content)
-
-        if (contentBytes.length > MAX_MESSAGE_SIZE) {
-          const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
-          setState({ status: 'error', message: `Message exceeds ${limitMB}MB limit` })
-          return
-        }
+      if (content.size > MAX_MESSAGE_SIZE) {
+        const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
+        setState({ status: 'error', message: `File exceeds ${limitMB}MB limit` })
+        return
       }
+
+      setState({ status: 'generating_offer', message: 'Reading file...' })
+      const contentBytes = await readFileAsBytes(content)
 
       // Generate ECDH keypair and salt
       setState({ status: 'generating_offer', message: 'Generating keys...' })
@@ -281,7 +264,7 @@ export function useManualSend(): UseManualSendReturn {
         offerData: offerBinary,
         clipboardData: clipboardBase64,
         contentType,
-        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+        fileMetadata: { fileName, fileSize, mimeType },
       })
 
       // Wait for answer to be submitted
@@ -374,7 +357,7 @@ export function useManualSend(): UseManualSendReturn {
         message: 'Sending via P2P...',
         progress: { current: 0, total: contentBytes.length },
         contentType,
-        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+        fileMetadata: { fileName, fileSize, mimeType },
       })
 
       // Send data in encrypted chunks
@@ -416,8 +399,7 @@ export function useManualSend(): UseManualSendReturn {
         }
       })
 
-      const successMsg = isFile ? 'File sent via P2P!' : 'Message sent via P2P!'
-      setState({ status: 'complete', message: successMsg, contentType })
+      setState({ status: 'complete', message: 'File sent via P2P!', contentType })
 
     } catch (error) {
       if (!cancelledRef.current) {

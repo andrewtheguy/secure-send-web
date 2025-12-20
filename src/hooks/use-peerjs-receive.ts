@@ -2,7 +2,6 @@ import { useState, useCallback, useRef } from 'react'
 import {
   isValidPin,
   deriveKeyFromPin,
-  decrypt,
   parseChunkMessage,
   decryptChunk,
   MAX_MESSAGE_SIZE,
@@ -127,67 +126,31 @@ export function usePeerJSReceive(): UsePeerJSReceiveReturn {
         return
       }
 
-      const isFile = metadata.contentType === 'file'
-
-      if (isFile) {
-        if (
-          typeof metadata.fileName !== 'string' ||
-          typeof metadata.fileSize !== 'number' ||
-          typeof metadata.mimeType !== 'string'
-        ) {
-          setState({ status: 'error', message: 'Invalid transfer metadata (missing file info)' })
-          return
-        }
+      if (
+        typeof metadata.fileName !== 'string' ||
+        typeof metadata.fileSize !== 'number' ||
+        typeof metadata.mimeType !== 'string'
+      ) {
+        setState({ status: 'error', message: 'Invalid transfer metadata (missing file info)' })
+        return
       }
 
       setState({
         status: 'receiving',
-        message: `Receiving ${isFile ? 'file' : 'message'}...`,
-        contentType: metadata.contentType,
-        fileMetadata: isFile ? {
-          fileName: metadata.fileName!,
-          fileSize: metadata.fileSize!,
-          mimeType: metadata.mimeType!,
-        } : undefined,
+        message: 'Receiving file...',
+        contentType: 'file',
+        fileMetadata: {
+          fileName: metadata.fileName,
+          fileSize: metadata.fileSize,
+          mimeType: metadata.mimeType,
+        },
         useWebRTC: true,
       })
 
       // Send ready acknowledgment
       peerRef.current!.send({ type: 'ready' })
 
-      // Check if small text was included in metadata
-      if (metadata.encryptedPayload) {
-        // Decrypt the inline text
-        const encryptedBytes = Uint8Array.from(atob(metadata.encryptedPayload), c => c.charCodeAt(0))
-        const decryptedBytes = await decrypt(key, encryptedBytes)
-        const message = new TextDecoder().decode(decryptedBytes)
-
-        // Wait for done signal
-        await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error('Timeout waiting for completion signal'))
-          }, 30000)
-
-          peerRef.current!.onMessage((msg: PeerJSMessage) => {
-            if (msg.type === 'done') {
-              clearTimeout(timeout)
-              resolve()
-            }
-          })
-        })
-
-        // Send done_ack
-        peerRef.current!.send({ type: 'done_ack' })
-
-        setReceivedContent({
-          contentType: 'text',
-          message,
-        })
-        setState({ status: 'complete', message: 'Message received (P2P)!', contentType: 'text' })
-        return
-      }
-
-      // Receive and decrypt file/large text data
+      // Receive and decrypt file data
       let contentData = new Uint8Array(metadata.totalBytes)
       let totalDecryptedBytes = 0
       const receivedChunkIndices = new Set<number>()
@@ -253,36 +216,23 @@ export function usePeerJSReceive(): UsePeerJSReceiveReturn {
       peerRef.current!.send({ type: 'done_ack' })
 
       // Set received content
-      if (metadata.contentType === 'file') {
-        setReceivedContent({
-          contentType: 'file',
-          data: contentData,
+      setReceivedContent({
+        contentType: 'file',
+        data: contentData,
+        fileName: metadata.fileName!,
+        fileSize: metadata.fileSize!,
+        mimeType: metadata.mimeType!,
+      })
+      setState({
+        status: 'complete',
+        message: 'File received (P2P)!',
+        contentType: 'file',
+        fileMetadata: {
           fileName: metadata.fileName!,
           fileSize: metadata.fileSize!,
           mimeType: metadata.mimeType!,
-        })
-        setState({
-          status: 'complete',
-          message: 'File received (P2P)!',
-          contentType: 'file',
-          fileMetadata: {
-            fileName: metadata.fileName!,
-            fileSize: metadata.fileSize!,
-            mimeType: metadata.mimeType!,
-          },
-        })
-      } else {
-        const message = new TextDecoder().decode(contentData)
-        setReceivedContent({
-          contentType: 'text',
-          message,
-        })
-        setState({
-          status: 'complete',
-          message: 'Message received (P2P)!',
-          contentType: 'text',
-        })
-      }
+        },
+      })
 
     } catch (error) {
       if (!cancelledRef.current) {

@@ -202,7 +202,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       }
 
       // Security check: Enforce MAX_MESSAGE_SIZE to prevent DoS/OOM
-      const expectedSize = payload.fileSize || (payload.textMessage ? payload.textMessage.length : 0)
+      const expectedSize = payload.fileSize || 0
       if (expectedSize > MAX_MESSAGE_SIZE) {
         setState({
           status: 'error',
@@ -212,9 +212,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       }
 
       if (cancelledRef.current) return
-
-      const isFile = payload.contentType === 'file'
-      const itemType = isFile ? 'file' : 'message'
 
       // Generate receiver keypair
       const { secretKey } = generateEphemeralKeys()
@@ -229,15 +226,13 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       setState({
         status: 'receiving',
-        message: `Receiving ${itemType}...`,
+        message: 'Receiving file...',
         contentType: payload.contentType,
-        fileMetadata: isFile
-          ? {
-            fileName: payload.fileName!,
-            fileSize: payload.fileSize!,
-            mimeType: payload.mimeType!,
-          }
-          : undefined,
+        fileMetadata: {
+          fileName: payload.fileName!,
+          fileSize: payload.fileSize!,
+          mimeType: payload.mimeType!,
+        },
         useWebRTC: false,
         currentRelays: client.getRelays(),
       })
@@ -563,14 +558,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             }
           })()
 
-        // Handle inline text message (no P2P or cloud needed)
-        if (payload.textMessage) {
-          settled = true
-          clearTimeout(overallTimeout)
-          client.unsubscribe(subId)
-          const encoder = new TextEncoder()
-          resolve({ mode: 'inline', data: encoder.encode(payload.textMessage) })
-        }
       })
 
       if (cancelledRef.current) return
@@ -583,15 +570,11 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         contentData = transferResult.data
         webRTCSuccess = true
         console.log('Received and decrypted data via P2P')
-      } else if (transferResult.mode === 'cloud') {
+      } else {
         // Cloud data is encrypted - need to decrypt
         setState(s => ({ ...s, message: 'Decrypting...' }))
         contentData = await decrypt(key, transferResult.data)
         console.log('Downloaded and decrypted data from cloud storage')
-      } else {
-        // Inline text message
-        contentData = transferResult.data
-        console.log('Using inline text message from payload')
       }
 
       if (cancelledRef.current) return
@@ -602,38 +585,24 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       await publishWithBackup(client, completeAck)
       console.log(`✓ Completion ACK sent successfully`)
 
-      // Set received content based on type
-      if (payload.contentType === 'file') {
-        setReceivedContent({
-          contentType: 'file',
-          data: contentData,
+      // Set received content
+      setReceivedContent({
+        contentType: 'file',
+        data: contentData,
+        fileName: payload.fileName!,
+        fileSize: payload.fileSize!,
+        mimeType: payload.mimeType!,
+      })
+      setState({
+        status: 'complete',
+        message: webRTCSuccess ? 'File received (P2P)!' : 'File received!',
+        contentType: 'file',
+        fileMetadata: {
           fileName: payload.fileName!,
           fileSize: payload.fileSize!,
           mimeType: payload.mimeType!,
-        })
-        setState({
-          status: 'complete',
-          message: webRTCSuccess ? 'File received (P2P)!' : 'File received!',
-          contentType: 'file',
-          fileMetadata: {
-            fileName: payload.fileName!,
-            fileSize: payload.fileSize!,
-            mimeType: payload.mimeType!,
-          },
-        })
-      } else {
-        const decoder = new TextDecoder()
-        const message = decoder.decode(contentData)
-        setReceivedContent({
-          contentType: 'text',
-          message,
-        })
-        setState({
-          status: 'complete',
-          message: webRTCSuccess ? 'Message received (P2P)!' : 'Message received!',
-          contentType: 'text'
-        })
-      }
+        },
+      })
     } catch (error) {
       if (!cancelledRef.current) {
         setState(prevState => ({
