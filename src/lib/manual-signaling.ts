@@ -96,7 +96,7 @@ export function isValidSignalingPayload(payload: unknown): payload is SignalingP
   if (!Array.isArray(p.candidates)) return false
   if (!(p.candidates as unknown[]).every((c) => typeof c === 'string')) return false
   if (typeof p.createdAt !== 'number') return false
-  if (!Array.isArray(p.publicKey)) return false
+  if (!isValidPublicKeyArray(p.publicKey)) return false
   return true
 }
 
@@ -208,7 +208,7 @@ export function generateMutualAnswerBinary(
 /**
  * Validate publicKey is a valid P-256 uncompressed public key (65 bytes, values 0-255)
  */
-function isValidPublicKeyArray(arr: unknown): arr is number[] {
+export function isValidPublicKeyArray(arr: unknown): arr is number[] {
   if (!Array.isArray(arr) || arr.length !== 65) return false
   return arr.every((b) => typeof b === 'number' && Number.isInteger(b) && b >= 0 && b <= 255)
 }
