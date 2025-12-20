@@ -5,6 +5,19 @@ export const PIN_CHECKSUM_LENGTH = 1 // Last character is checksum
 // Symbols from iOS 123 layout: - / : ; ( ) $ & @ ? ! . , "
 export const PIN_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789-/:;()$&@?!.,"'
 
+// BIP-39 wordlist subset (first 68 words) mapped 1:1 to PIN_CHARSET
+export const PIN_WORDLIST = [
+    'abandon', 'ability', 'able', 'about', 'above', 'absent', 'absorb', 'abstract',
+    'absurd', 'abuse', 'access', 'accident', 'account', 'accuse', 'achieve', 'acid',
+    'acoustic', 'acquire', 'across', 'act', 'action', 'actor', 'actress', 'actual',
+    'adapt', 'add', 'addict', 'address', 'adjust', 'admit', 'adult', 'advance',
+    'advice', 'aerobic', 'affair', 'afford', 'afraid', 'again', 'age', 'agent',
+    'agree', 'ahead', 'aim', 'air', 'airport', 'aisle', 'alarm', 'album',
+    'alcohol', 'alert', 'alien', 'all', 'alley', 'allow', 'almost', 'alone',
+    'alpha', 'already', 'also', 'alter', 'always', 'amateur', 'amazing', 'among',
+    'amount', 'amused', 'analyst', 'anchor', 'ancient'
+]
+
 // First character charset split (for signaling method detection)
 // Uppercase = Nostr, Lowercase = PeerJS, '2' = QR, Rest = Reserved for future
 export const NOSTR_FIRST_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ' // 23 uppercase (excluding I, L, O)

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react'
 import { Input } from '@/components/ui/input'
-import { PIN_LENGTH, PIN_CHARSET, isValidPin } from '@/lib/crypto'
+import { PIN_LENGTH, PIN_CHARSET, isValidPin, wordsToPin, isValidPinWord, pinToWords } from '@/lib/crypto'
 
 interface PinInputProps {
   onPinChange: (pin: string, isValid: boolean) => void
@@ -15,6 +15,7 @@ export interface PinInputRef {
 export const PinInput = forwardRef<PinInputRef, PinInputProps>(
   ({ onPinChange, disabled }, ref) => {
     const [error, setError] = useState<string | null>(null)
+    const [useWords, setUseWords] = useState(false)
     const [displayLength, setDisplayLength] = useState(0)
     const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const mountedRef = useRef(true)
@@ -87,6 +88,48 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       onPinChange(filtered, isPinValid)
     }
 
+    const handleWordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const words = e.target.value.trim().split(/\s+/)
+      const lastWord = words[words.length - 1]
+
+      // Validate words as they are typed
+      if (lastWord && !isValidPinWord(lastWord) && !e.target.value.endsWith(' ')) {
+        setError(`Invalid word: ${lastWord}`)
+      } else {
+        setError(null)
+      }
+
+      const validWords = words.filter((w) => isValidPinWord(w)).slice(0, PIN_LENGTH)
+      const pin = wordsToPin(validWords)
+
+      pinRef.current = pin
+      setDisplayLength(validWords.length)
+
+      // Update input value directly for uncontrolled behavior
+      if (inputRef.current) {
+        inputRef.current.value = e.target.value
+      }
+
+      const isPinValid = validWords.length === PIN_LENGTH && isValidPin(pin)
+      onPinChange(pin, isPinValid)
+    }
+
+    const toggleMode = (e: React.MouseEvent) => {
+      e.preventDefault()
+      const currentPin = pinRef.current
+      setUseWords((prev) => {
+        const nextUseWords = !prev
+        if (inputRef.current) {
+          if (nextUseWords) {
+            inputRef.current.value = pinToWords(currentPin).join(' ')
+          } else {
+            inputRef.current.value = currentPin
+          }
+        }
+        return nextUseWords
+      })
+    }
+
     const isComplete = displayLength === PIN_LENGTH
     const hasChecksumError = isComplete && !isValidPin(pinRef.current)
 
@@ -96,16 +139,15 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
           ref={inputRef}
           type="text"
           defaultValue=""
-          onChange={handleChange}
-          placeholder={`Enter ${PIN_LENGTH}-character PIN`}
-          className={`font-mono text-xl text-center tracking-wider ${
-            error || hasChecksumError
-              ? 'border-destructive'
-              : isComplete
-                ? 'border-green-500'
-                : ''
-          }`}
-          maxLength={PIN_LENGTH}
+          onChange={useWords ? handleWordChange : handleChange}
+          placeholder={useWords ? `Enter ${PIN_LENGTH}-word PIN` : `Enter ${PIN_LENGTH}-character PIN`}
+          className={`font-mono ${useWords ? 'text-base' : 'text-xl'} text-center tracking-wider ${error || hasChecksumError
+            ? 'border-destructive'
+            : isComplete
+              ? 'border-green-500'
+              : ''
+            }`}
+          maxLength={useWords ? 255 : PIN_LENGTH}
           disabled={disabled}
           autoComplete="off"
           autoCorrect="off"
@@ -114,10 +156,24 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         />
         <div className="flex justify-between text-xs">
           <span className={error || hasChecksumError ? 'text-destructive' : 'text-muted-foreground'}>
-            {error || (hasChecksumError ? 'Invalid PIN' : `${displayLength}/${PIN_LENGTH} characters (case sensitive)`)}
+            {error ||
+              (hasChecksumError
+                ? 'Invalid PIN'
+                : `${displayLength}/${PIN_LENGTH} ${useWords ? 'words' : 'characters'} (case sensitive)`)}
           </span>
-          {isComplete && !hasChecksumError && <span className="text-green-500">PIN ready</span>}
+          <button
+            onClick={toggleMode}
+            className="text-primary hover:underline transition-colors focus:outline-none"
+            type="button"
+          >
+            {useWords ? '(use characters instead of words)' : '(use words instead of pin)'}
+          </button>
         </div>
+        {isComplete && !hasChecksumError && (
+          <div className="text-center">
+            <span className="text-xs text-green-500">PIN ready</span>
+          </div>
+        )}
       </div>
     )
   }

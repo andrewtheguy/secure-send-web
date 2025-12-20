@@ -6,6 +6,7 @@ import {
   NOSTR_FIRST_CHARSET,
   PEERJS_FIRST_CHARSET,
   QR_FIRST_CHARSET,
+  PIN_WORDLIST,
 } from './constants'
 
 /**
@@ -169,4 +170,34 @@ export function generateTransferId(): string {
   return Array.from(array)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
+}
+/**
+ * Convert alphanumeric PIN to word-based PIN
+ */
+export function pinToWords(pin: string): string[] {
+  return [...pin].map((char) => {
+    const index = PIN_CHARSET.indexOf(char)
+    if (index === -1) return ''
+    return PIN_WORDLIST[index]
+  })
+}
+
+/**
+ * Convert word-based PIN back to alphanumeric PIN
+ */
+export function wordsToPin(words: string[]): string {
+  return words
+    .map((word) => {
+      const index = PIN_WORDLIST.indexOf(word.toLowerCase())
+      if (index === -1) return ''
+      return PIN_CHARSET[index]
+    })
+    .join('')
+}
+
+/**
+ * Check if a word is in the PIN wordlist
+ */
+export function isValidPinWord(word: string): boolean {
+  return PIN_WORDLIST.includes(word.toLowerCase())
 }

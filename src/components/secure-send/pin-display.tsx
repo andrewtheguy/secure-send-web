@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Check, Copy, AlertCircle, Eye, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { PIN_DISPLAY_TIMEOUT_MS } from '@/lib/crypto'
+import { PIN_DISPLAY_TIMEOUT_MS, pinToWords } from '@/lib/crypto'
 
 interface PinDisplayProps {
   pin: string
@@ -12,6 +12,7 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState(false)
   const [isMasked, setIsMasked] = useState(false)
+  const [useWords, setUseWords] = useState(false)
   const [hasCopied, setHasCopied] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(Math.floor(PIN_DISPLAY_TIMEOUT_MS / 1000))
 
@@ -101,6 +102,14 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
+  const toggleMode = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setUseWords((prev) => !prev)
+  }, [])
+
+  const words = pinToWords(pin)
+  const wordsDisplay = words.join(' ')
+
   // Mask PIN with bullet characters
   const maskedPin = pin.replace(/./g, '\u2022')
 
@@ -108,8 +117,8 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
     <div className="flex flex-col items-center gap-2 sm:gap-4 p-4 sm:p-6 rounded-lg bg-muted">
       <p className="text-sm text-muted-foreground text-center">Share this PIN with the receiver:</p>
       <div className="flex items-center gap-2 sm:gap-3">
-        <code className="text-xl sm:text-3xl font-mono font-bold tracking-wider px-3 py-1 sm:px-4 sm:py-2 bg-background rounded-md border">
-          {isMasked ? maskedPin : pin}
+        <code className="text-xl sm:text-3xl font-mono font-bold tracking-wider px-3 py-1 sm:px-4 sm:py-2 bg-background rounded-md border text-center max-w-full overflow-x-auto">
+          {isMasked ? (useWords ? words.map(() => '\u2022\u2022\u2022').join(' ') : maskedPin) : useWords ? wordsDisplay : pin}
         </code>
         {hasCopied && (
           <Button variant="outline" size="icon" onClick={toggleMask} title={isMasked ? 'Show PIN' : 'Hide PIN'}>
@@ -126,9 +135,13 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
           )}
         </Button>
       </div>
-      <p className="text-xs text-amber-600 font-medium">
-        PIN expires in {formatTime(timeRemaining)}
-      </p>
+      <p className="text-xs text-amber-600 font-medium">PIN expires in {formatTime(timeRemaining)}</p>
+      <button
+        onClick={toggleMode}
+        className="text-xs text-primary hover:underline transition-colors"
+      >
+        {useWords ? '(use characters instead of words)' : '(use words instead of pin)'}
+      </button>
       <p className="text-xs text-muted-foreground text-center max-w-xs">
         The receiver will need this PIN to decrypt the message. PIN is case sensitive. Share it
         securely via another channel (voice, chat, etc.)
