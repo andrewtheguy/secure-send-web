@@ -201,9 +201,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         return
       }
 
-      // Required field: fileSize must be present
-      if (payload.fileSize == null) {
-        setState({ status: 'error', message: 'Transfer missing file size' })
+      // Required field: fileSize must be present and valid
+      if (payload.fileSize == null || !Number.isFinite(payload.fileSize) || payload.fileSize < 0) {
+        setState({ status: 'error', message: 'Invalid file size in transfer' })
         return
       }
 
