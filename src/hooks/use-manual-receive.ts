@@ -192,7 +192,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       setState({ status: 'generating_answer', message: 'Creating P2P answer...' })
 
       const iceCandidates: RTCIceCandidate[] = []
-      let answerSDP: RTCSessionDescriptionInit | null = null
+      let answerSdp: string | null = null
 
       // Track received data
       const receivedChunks: Uint8Array[] = []
@@ -206,7 +206,13 @@ export function useManualReceive(): UseManualReceiveReturn {
         (signal) => {
           // Collect signals (answer + candidates)
           if (signal.type === 'answer') {
-            answerSDP = { type: 'answer', sdp: signal.sdp ?? undefined }
+            if (typeof signal.sdp === 'string' && signal.sdp.trim() !== '') {
+              answerSdp = signal.sdp
+            } else {
+              console.error('Invalid answer SDP received')
+              setState({ status: 'error', message: 'Invalid answer from sender' })
+              return
+            }
           } else if (signal.type === 'candidate' && signal.candidate) {
             iceCandidates.push(new RTCIceCandidate(signal.candidate))
           }
@@ -281,8 +287,21 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       if (cancelledRef.current) return
 
+      if (typeof answerSdp !== 'string') {
+        setState({ status: 'error', message: 'Missing or invalid answer from sender' })
+        return
+      }
+
+      const trimmedAnswerSdp = (answerSdp as string).trim()
+      if (trimmedAnswerSdp === '') {
+        setState({ status: 'error', message: 'Missing or invalid answer from sender' })
+        return
+      }
+
+      const validatedAnswer: RTCSessionDescriptionInit = { type: 'answer', sdp: trimmedAnswerSdp }
+
       // Generate answer with our public key
-      const answerBinary = generateMutualAnswerBinary(answerSDP!, iceCandidates, ecdhKeyPair.publicKeyBytes)
+      const answerBinary = generateMutualAnswerBinary(validatedAnswer, iceCandidates, ecdhKeyPair.publicKeyBytes)
       const clipboardBase64 = generateMutualClipboardData(answerBinary)
 
       // Show answer and wait for connection
