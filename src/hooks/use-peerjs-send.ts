@@ -14,7 +14,7 @@ import {
   type PeerJSMetadata,
   type PeerJSMessage,
 } from '@/lib/peerjs-signaling'
-import type { TransferState, ContentType } from '@/lib/nostr/types'
+import type { TransferState } from '@/lib/nostr/types'
 import { readFileAsBytes } from '@/lib/file-utils'
 
 export interface UsePeerJSSendReturn {
@@ -62,8 +62,6 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
     if (sendingRef.current) return
     sendingRef.current = true
     cancelledRef.current = false
-
-    const contentType: ContentType = 'file'
 
     try {
       // Get content bytes
@@ -125,7 +123,7 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
       setState({
         status: 'waiting_for_receiver',
         message: 'Waiting for receiver...',
-        contentType,
+        contentType: 'file',
         fileMetadata: { fileName, fileSize, mimeType },
         useWebRTC: true,
       })
@@ -163,7 +161,7 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
       // Prepare metadata
       const metadata: PeerJSMetadata = {
         type: 'metadata',
-        contentType,
+        contentType: 'file',
         totalBytes: contentBytes.length,
         createdAt: sessionStartTime,
         fileName,
@@ -176,7 +174,7 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
       setState({
         status: 'connecting',
         message: 'Sending metadata...',
-        contentType,
+        contentType: 'file',
         fileMetadata: { fileName, fileSize, mimeType },
       })
 
@@ -208,7 +206,7 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
         status: 'transferring',
         message: 'Sending via P2P...',
         progress: { current: 0, total: contentBytes.length },
-        contentType,
+        contentType: 'file',
         fileMetadata: { fileName, fileSize, mimeType },
       })
 
@@ -250,7 +248,7 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
         })
       })
 
-      setState({ status: 'complete', message: 'File sent via P2P!', contentType })
+      setState({ status: 'complete', message: 'File sent via P2P!', contentType: 'file' })
 
     } catch (error) {
       if (!cancelledRef.current) {
