@@ -332,12 +332,28 @@ async function detectSigners(): Promise<SessionSigner[]> {
 - Unique session ID / nonce
 - Short validity window (5 minutes)
 
+## Key Rotation & Revocation
+For Nostr-based signing, key rotation means publishing a new npub and updating NIP-05 records; compromised keys should be announced via a signed "key compromised" event (kind 0 update or relay broadcast) so peers can reject sessions signed by the old key. WebAuthn credentials are ephemeral per-session, so rotation/revocation is not applicable.
+
+## Error Handling & Graceful Degradation
+If signer app is unavailable (extension not installed, NIP-46 relay unreachable, WebAuthn cancelled), fall back to ephemeral mode with a clear warning: "Identity verification unavailable - proceeding without signature." Retry NIP-46 connections up to 3 times with exponential backoff before showing "Signer unreachable" error.
+
+## Consent Flow
+All signing requests must show a user-visible prompt with session details (file name, peer npub if known, timestamp); for NIP-46 remote signing, display "Waiting for approval on signer device..." with a 60-second timeout that auto-cancels with "Signing request timed out or denied."
+
+## Integration with SS02
+Session signing is additive to existing SS02 flow: generate ECDH keypair first, then sign the ECDH public key + metadata, and include signature in the QR payload. The ECDH shared secret derivation and AES-256-GCM encryption remain unchanged; signing only authenticates the key exchange, it does not replace encryption. SS02 payloads without signatures remain valid for backward compatibility.
+
 ---
 
 # Implementation Priority (Suggested)
 
-1. **NIP-07 Extension** - Simplest, leverages existing Nostr ecosystem
-2. **Nostr-Signed QR (Enhancement A)** - Identity verification with familiar QR flow
-3. **NIP-46 Remote Signing** - Cross-device, mobile support
-4. **Nostr Relay Push (Enhancement B)** - Remote transfers without QR
-5. **WebAuthn** - Hardware-backed, but lower priority due to setup friction
+1. **NIP-07 Extension** - Simplest, leverages existing Nostr ecosystem. Start here because the browser extension ecosystem (Alby, nos2x) already exists, enabling fast integration with minimal new code.
+
+2. **Nostr-Signed QR (Enhancement A)** - Identity verification with familiar QR flow. Prioritize next because it reuses the existing QR UX users already understand, requiring only payload extension rather than new infrastructure.
+
+3. **NIP-46 Remote Signing** - Cross-device, mobile support. Worth the added protocol complexity because it unlocks mobile signer apps (Amber) and cross-device workflows that NIP-07 cannot provide.
+
+4. **Nostr Relay Push (Enhancement B)** - Remote transfers without QR. Useful for transferring to known contacts remotely, but requires relay coordination and recipient npub discovery, making it a later addition.
+
+5. **WebAuthn** - Hardware-backed, but lower priority due to setup friction. Deferred because it requires authenticator hardware, provides only device-bound identity (not portable npub), and offers less ecosystem integration than Nostr-based options.
