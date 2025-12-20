@@ -192,7 +192,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       setState({ status: 'generating_answer', message: 'Creating P2P answer...' })
 
       const iceCandidates: RTCIceCandidate[] = []
-      let answerSdp: string | null = null
+      let answerSDP: RTCSessionDescriptionInit | null = null
 
       // Track received data
       const receivedChunks: Uint8Array[] = []
@@ -206,9 +206,7 @@ export function useManualReceive(): UseManualReceiveReturn {
         (signal) => {
           // Collect signals (answer + candidates)
           if (signal.type === 'answer') {
-            if (typeof signal.sdp === 'string' && signal.sdp.trim() !== '') {
-              answerSdp = signal.sdp.trim()
-            }
+            answerSDP = { type: 'answer', sdp: signal.sdp ?? undefined }
           } else if (signal.type === 'candidate' && signal.candidate) {
             iceCandidates.push(new RTCIceCandidate(signal.candidate))
           }
@@ -265,7 +263,7 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       await new Promise<void>((resolve) => {
         const checkIce = () => {
-          const pc = rtc.getPeerConnection()
+          const pc = (rtc as any).pc as RTCPeerConnection
           if (pc.iceGatheringState === 'complete') {
             resolve()
           } else {
@@ -283,19 +281,8 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       if (cancelledRef.current) return
 
-      const isNonEmptyString = (value: unknown): value is string =>
-        typeof value === 'string' && value.trim() !== ''
-
-      if (!isNonEmptyString(answerSdp)) {
-        setState({ status: 'error', message: 'Missing or invalid answer from sender' })
-        return
-      }
-
-      const trimmedAnswerSdp = (answerSdp as string).trim()
-      const validatedAnswer: RTCSessionDescriptionInit = { type: 'answer', sdp: trimmedAnswerSdp }
-
       // Generate answer with our public key
-      const answerBinary = generateMutualAnswerBinary(validatedAnswer, iceCandidates, ecdhKeyPair.publicKeyBytes)
+      const answerBinary = generateMutualAnswerBinary(answerSDP!, iceCandidates, ecdhKeyPair.publicKeyBytes)
       const clipboardBase64 = generateMutualClipboardData(answerBinary)
 
       // Show answer and wait for connection
@@ -320,7 +307,7 @@ export function useManualReceive(): UseManualReceiveReturn {
         }
 
         // Check if already open
-        const dc = rtc.getDataChannel()
+        const dc = (rtc as any).dataChannel as RTCDataChannel
         if (dc && dc.readyState === 'open') {
           clearTimeout(timeout)
           resolve()
