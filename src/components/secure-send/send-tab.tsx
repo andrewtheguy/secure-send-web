@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react'
-import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, Zap, AlertTriangle } from 'lucide-react'
+import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, Zap, AlertTriangle, Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
@@ -432,6 +432,21 @@ export function SendTab() {
             </div>
           )}
 
+          {/* How it works info box */}
+          <div className="rounded-lg bg-gradient-to-br from-primary/5 to-accent/5 border border-primary/10 p-4">
+            <div className="flex items-start gap-3">
+              <div className="rounded-full bg-primary/10 p-2">
+                <Info className="h-4 w-4 text-primary" />
+              </div>
+              <div className="text-sm">
+                <p className="font-medium mb-1">How it works</p>
+                <p className="text-muted-foreground">
+                  Your files are encrypted on your device before sending. Share a PIN with your recipient—only they can decrypt and receive your files.
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Advanced Options */}
           <div className="border rounded-lg overflow-hidden">
             <button
@@ -553,7 +568,8 @@ export function SendTab() {
           ) : (
             <Button onClick={() => handleSend()} disabled={!canSend || detectingMethod} className="w-full">
               <Send className="mr-2 h-4 w-4" />
-              {forcedMethod === 'manual-only' ? 'Generate & Send' : 'Generate PIN & Send'}
+              {forcedMethod === 'manual-only' ? 'Generate & Send' : 'Generate Secure PIN'}
+              <ChevronRight className="ml-1 h-3 w-3" />
             </Button>
           )}
         </>

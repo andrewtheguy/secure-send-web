@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 import { Navbar } from '@/components/navbar'
+import { Footer } from '@/components/footer'
 import { SendPage } from '@/pages/send'
 import { ReceivePage } from '@/pages/receive'
 import { AboutPage } from '@/pages/about'
@@ -17,6 +18,7 @@ function App() {
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>
+      <Footer />
     </div>
   )
 }
