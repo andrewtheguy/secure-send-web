@@ -194,23 +194,24 @@ Signaling method using QR codes or copy/paste for WebRTC offer/answer exchange. 
 
 **Binary Payload Format (SS02):**
 ```
-[4 bytes: "SS02" magic (0x53 0x53 0x30 0x32)][remaining: obfuscated deflate-compressed payload]
+[4 bytes: "SS02" magic (0x53 0x53 0x30 0x32)][remaining: obfuscated inner magic + deflate-compressed payload]
 ```
 
-The `SS02` format (Secure Send version 2) obfuscates the entire combined buffer (including the magic header) using an XOR-based obfuscation with a seed that changes every hour.
+The `SS02` format (Secure Send version 2) keeps the magic header in plain sight to allow for rapid identification. The rest of the payload, including a redundant "Inner Magic" header, is obfuscated using an XOR-based obfuscation with a seed that changes every hour.
+
+**Inner Magic Verification:**
+The obfuscated area begins with an "Inner Magic" header (`mag!`, `0x6d 0x61 0x67 0x21`). This allows the receiver to verify if a candidate seed for the current time bucket is correct by de-obfuscating just the first 4 bytes of the inner payload and checking for this match. This prevents collisions and reduces processing overhead.
 
 **Time-Bucketed Obfuscation:**
 - **Bucket Size**: 1 hour (`3600` seconds).
 - **Seed Derivation**: Derived from the current Unix timestamp (in seconds) divided by the bucket size. A simple hash function ensures a unique seed per hour.
 - **Verification Window**: The receiver attempts to de-obfuscate using the seed for the current hour and the previous 3 hours. This ensures any generated payload remains valid for at least 3 hours.
-- **Optimization**: To avoid expensive full-payload processing for incorrect seeds, the receiver first de-obfuscates only the first 4 bytes and verifies they match the `SS02` magic header.
 
 **Legacy Format (SS01):**
 Prior to the full-payload obfuscation refactor, the format was:
 ```
 [4 bytes: "SS01" magic][16 bytes: salt][encrypted deflate-compressed payload]
 ```
-Wait, the previous format used AES-GCM encryption with the PIN. The current `SS02` format in `manual-signaling.ts` is described as "NOT encrypted" in comments (since public keys are public), but the architecture doc previously mentioned encryption. Actually, `manual-signaling.ts` uses `xorObfuscate` on the compressed JSON which *contains* the ECDH public key. The encryption of the *file* content happens separately.
 
 > [!NOTE]
 > The obfuscation's goal is simply to avoid casual inspection. The actual security of the transfer is provided by ECDH mutual exchange and AES-256-GCM encryption of the data channel.
@@ -218,8 +219,10 @@ Wait, the previous format used AES-GCM encryption with the PIN. The current `SS0
 **Encoding Pipeline:**
 1. `SignalingPayload` object → JSON string
 2. Compress with deflate (JSON/SDP compresses well, ~40-50% reduction)
-3. Prepend `SS02` magic header.
-4. Obfuscate entire buffer with current hour seed.
+3. Construct inner buffer: `[mag!][compressed payload]`
+4. Obfuscate inner buffer with current hour seed.
+5. Final binary: `[SS02][obfuscatedInner]`
+
 
 
 **Output Methods:**

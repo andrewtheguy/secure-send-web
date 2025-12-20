@@ -2,6 +2,8 @@ import pako from 'pako'
 
 // Magic header: "SS02" = Secure Send version 2 (ECDH mutual exchange)
 const MAGIC_HEADER_V2 = new Uint8Array([0x53, 0x53, 0x30, 0x32])
+// Inner magic: "mag!" (0x6d 0x61 0x67 0x21) - inside obfuscated area to verify seed
+const INNER_MAGIC_V2 = new Uint8Array([0x6d, 0x61, 0x67, 0x21])
 const BUCKET_SEC = 3600 // 1 hour
 const BASE_SEED = 0x9e3779b9
 
@@ -111,7 +113,7 @@ export function isValidBinaryPayload(binary: Uint8Array): boolean {
 export function estimatePayloadSize(payload: SignalingPayload): number {
   const json = JSON.stringify(payload)
   const compressed = pako.deflate(json)
-  return 4 + compressed.length // 4 bytes for SS02 magic header
+  return 4 + 4 + compressed.length // 4 for SS02, 4 for INNER_MAGIC_V2
 }
 
 /**
@@ -149,14 +151,20 @@ export function generateMutualOfferBinary(
   const jsonBytes = encoder.encode(JSON.stringify(payload))
   const compressed = pako.deflate(jsonBytes)
 
-  // Build binary: [SS02][compressed]
-  const result = new Uint8Array(4 + compressed.length)
-  result.set(MAGIC_HEADER_V2, 0)
-  result.set(compressed, 4)
+  // Build inner: [mag!][compressed]
+  const inner = new Uint8Array(4 + compressed.length)
+  inner.set(INNER_MAGIC_V2, 0)
+  inner.set(compressed, 4)
 
   const currentBucket = Math.floor(Date.now() / 1000 / BUCKET_SEC)
   const seed = getSeedForBucket(currentBucket)
-  return xorObfuscate(result, seed)
+  const obfuscatedInner = xorObfuscate(inner, seed)
+
+  // Final binary: [SS02][obfuscatedInner]
+  const result = new Uint8Array(4 + obfuscatedInner.length)
+  result.set(MAGIC_HEADER_V2, 0)
+  result.set(obfuscatedInner, 4)
+  return result
 }
 
 /**
@@ -181,14 +189,20 @@ export function generateMutualAnswerBinary(
   const jsonBytes = encoder.encode(JSON.stringify(payload))
   const compressed = pako.deflate(jsonBytes)
 
-  // Build binary: [SS02][compressed]
-  const result = new Uint8Array(4 + compressed.length)
-  result.set(MAGIC_HEADER_V2, 0)
-  result.set(compressed, 4)
+  // Build inner: [mag!][compressed]
+  const inner = new Uint8Array(4 + compressed.length)
+  inner.set(INNER_MAGIC_V2, 0)
+  inner.set(compressed, 4)
 
   const currentBucket = Math.floor(Date.now() / 1000 / BUCKET_SEC)
   const seed = getSeedForBucket(currentBucket)
-  return xorObfuscate(result, seed)
+  const obfuscatedInner = xorObfuscate(inner, seed)
+
+  // Final binary: [SS02][obfuscatedInner]
+  const result = new Uint8Array(4 + obfuscatedInner.length)
+  result.set(MAGIC_HEADER_V2, 0)
+  result.set(obfuscatedInner, 4)
+  return result
 }
 
 /**
@@ -205,10 +219,12 @@ function isValidPublicKeyArray(arr: unknown): arr is number[] {
  */
 export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null {
   try {
-    if (binary.length <= 4) {
+    if (!isMutualPayload(binary)) {
       return null
     }
 
+
+    const obfuscatedInner = binary.subarray(4)
     const currentBucket = Math.floor(Date.now() / 1000 / BUCKET_SEC)
 
     // Try current and previous 3 buckets (approx 4 hours window)
@@ -216,19 +232,19 @@ export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null 
       try {
         const seed = getSeedForBucket(currentBucket - i)
 
-        // Optimization: check magic header first
-        const head = xorObfuscate(binary.subarray(0, 4), seed)
+        // Optimization: check inner magic first (de-obfuscate only first 4 bytes)
+        const innerHead = xorObfuscate(obfuscatedInner.subarray(0, 4), seed)
         if (
-          head[0] !== MAGIC_HEADER_V2[0] ||
-          head[1] !== MAGIC_HEADER_V2[1] ||
-          head[2] !== MAGIC_HEADER_V2[2] ||
-          head[3] !== MAGIC_HEADER_V2[3]
+          innerHead[0] !== INNER_MAGIC_V2[0] ||
+          innerHead[1] !== INNER_MAGIC_V2[1] ||
+          innerHead[2] !== INNER_MAGIC_V2[2] ||
+          innerHead[3] !== INNER_MAGIC_V2[3]
         ) {
           continue
         }
 
-        const deobfuscated = xorObfuscate(binary, seed)
-        const compressed = deobfuscated.slice(4)
+        const deobfuscated = xorObfuscate(obfuscatedInner, seed)
+        const compressed = deobfuscated.slice(4) // Skip INNER_MAGIC_V2
         const jsonBytes = pako.inflate(compressed)
         const json = new TextDecoder().decode(jsonBytes)
         const payload = JSON.parse(json)
@@ -257,7 +273,13 @@ export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null 
  * Check if binary payload is mutual exchange format (SS02)
  */
 export function isMutualPayload(binary: Uint8Array): boolean {
-  return binary.length > 4
+  if (binary.length < 8) return false
+  return (
+    binary[0] === MAGIC_HEADER_V2[0] &&
+    binary[1] === MAGIC_HEADER_V2[1] &&
+    binary[2] === MAGIC_HEADER_V2[2] &&
+    binary[3] === MAGIC_HEADER_V2[3]
+  )
 }
 
 /**
