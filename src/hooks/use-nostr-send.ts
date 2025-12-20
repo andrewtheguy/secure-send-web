@@ -106,14 +106,36 @@ export function useNostrSend(): UseNostrSendReturn {
     const contentType: ContentType = 'file'
 
     try {
-      // Get content bytes
-      const fileName = content.name
+      // Validate and sanitize metadata
+      const rawFileName = content.name || ''
+      const sanitizedFileName = rawFileName.trim()
+
+      if (!sanitizedFileName) {
+        setState({ status: 'error', message: 'Missing file name' })
+        sendingRef.current = false
+        return
+      }
+
+      const fileName = sanitizedFileName
       const fileSize = content.size
       const mimeType = content.type || 'application/octet-stream'
 
-      if (content.size > MAX_MESSAGE_SIZE) {
+      if (typeof fileSize !== 'number' || !Number.isFinite(fileSize)) {
+        setState({ status: 'error', message: 'Invalid file size' })
+        sendingRef.current = false
+        return
+      }
+
+      if (fileSize <= 0) {
+        setState({ status: 'error', message: 'File is empty' })
+        sendingRef.current = false
+        return
+      }
+
+      if (fileSize > MAX_MESSAGE_SIZE) {
         const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
         setState({ status: 'error', message: `File exceeds ${limitMB}MB limit` })
+        sendingRef.current = false
         return
       }
 
