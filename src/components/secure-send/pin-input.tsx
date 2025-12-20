@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react'
-import { X, CheckCircle2, AlertCircle, ClipboardPaste } from 'lucide-react'
+import { X, CheckCircle2, AlertCircle, Hash, MessageSquareText, ClipboardPaste } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import {
@@ -350,90 +350,87 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
     return (
       <div className="flex flex-col gap-4">
         {useWords ? (
-          <>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {words.map((word, i) => (
-                <div key={i} className="relative group">
-                  <Input
-                    ref={el => { inputRefs.current[i] = el }}
-                    value={word}
-                    onChange={e => handleWordChange(i, e.target.value)}
-                    onKeyDown={e => handleKeyDown(i, e)}
-                    onPaste={e => handlePaste(e, i)}
-                    onFocus={() => handleFocus(i)}
-                    onBlur={() => handleBlur()}
-                    placeholder={`Word ${i + 1}`}
-                    className={`pr-7 text-center font-mono h-10 ${
-                      word === ''
-                        ? ''
-                        : isValidPinWord(word)
-                        ? 'border-green-500 bg-green-50/50'
-                        : 'border-destructive bg-destructive/5'
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {words.map((word, i) => (
+              <div key={i} className="relative group">
+                <Input
+                  ref={el => { inputRefs.current[i] = el }}
+                  value={word}
+                  onChange={e => handleWordChange(i, e.target.value)}
+                  onKeyDown={e => handleKeyDown(i, e)}
+                  onPaste={e => handlePaste(e, i)}
+                  onFocus={() => handleFocus(i)}
+                  onBlur={() => handleBlur()}
+                  placeholder={`Word ${i + 1}`}
+                  className={`pr-7 text-center font-mono h-10 ${word === ''
+                    ? ''
+                    : isValidPinWord(word)
+                      ? 'border-green-500 bg-green-50/50'
+                      : 'border-destructive bg-destructive/5'
                     }`}
-                    autoComplete="off"
-                    disabled={disabled}
-                  />
-                  {word && (
-                    <button
-                      onClick={() => handleWordChange(i, '')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
-                      type="button"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  )}
-                  {activeWordIndex === i && suggestions.length > 0 && (
-                    <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-[200px] overflow-y-auto animate-in fade-in zoom-in duration-200">
-                      {suggestions.slice(0, 10).map((s, si) => (
-                        <button
-                          key={si}
-                          className={`w-full text-left px-3 py-1.5 text-sm font-mono transition-colors ${
-                            si === selectedIndex
-                              ? 'bg-primary text-primary-foreground'
-                              : 'hover:bg-muted'
+                  autoComplete="off"
+                  disabled={disabled}
+                />
+                {word && (
+                  <button
+                    onClick={() => handleWordChange(i, '')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                    type="button"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+                {activeWordIndex === i && suggestions.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-[200px] overflow-y-auto animate-in fade-in zoom-in duration-200">
+                    {suggestions.slice(0, 10).map((s, si) => (
+                      <button
+                        key={si}
+                        className={`w-full text-left px-3 py-1.5 text-sm font-mono transition-colors ${si === selectedIndex
+                          ? 'bg-primary text-primary-foreground'
+                          : 'hover:bg-muted'
                           }`}
-                          onMouseEnter={() => setSelectedIndex(si)}
-                          onClick={() => selectSuggestion(i, s)}
-                        >
-                          {s}
-                        </button>
-                      ))}
-                      {suggestions.length > 10 && (
-                        <div className="px-3 py-1.5 text-xs text-muted-foreground border-t">
-                          +{suggestions.length - 10} more matches
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+                        onMouseEnter={() => setSelectedIndex(si)}
+                        onClick={() => selectSuggestion(i, s)}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                    {suggestions.length > 10 && (
+                      <div className="px-3 py-1.5 text-xs text-muted-foreground border-t">
+                        +{suggestions.length - 10} more matches
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handlePasteFromClipboard}
-              disabled={disabled}
-              className="w-full"
-              type="button"
-            >
-              <ClipboardPaste className="h-4 w-4 mr-2" />
-              Paste all words from clipboard
-            </Button>
-          </>
+            <div>
+              <Button
+                variant="default"
+                onClick={handlePasteFromClipboard}
+                disabled={disabled}
+                className="h-10 p-0 flex flex-col items-center justify-center gap-0.5"
+                type="button"
+                title="Paste all words from clipboard"
+              >
+                <ClipboardPaste className="h-4 w-4" />
+                <span className="text-[10px] leading-none">Paste</span>
+              </Button>
+            </div>
+          </div>
         ) : (
           <Input
             ref={charInputRef}
             type="text"
             onChange={handleCharChange}
             placeholder={`Enter ${PIN_LENGTH}-character PIN`}
-            className={`font-mono text-xl text-center tracking-wider ${
-              error || charHasChecksumError
-                ? 'border-destructive'
-                : charIsComplete
+            className={`font-mono text-xl text-center tracking-wider ${error || charHasChecksumError
+              ? 'border-destructive'
+              : charIsComplete
                 ? 'border-green-500'
                 : ''
-            }`}
+              }`}
             maxLength={PIN_LENGTH}
             autoComplete="off"
             spellCheck={false}
@@ -441,51 +438,67 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
           />
         )}
 
-        <div className="flex justify-between items-center text-xs">
-          <div className="flex items-center gap-1.5">
-            {useWords ? (
-              <>
-                {wordIsComplete && !wordHasChecksumError ? (
-                  <span className="text-green-600 flex items-center gap-1">
-                    <CheckCircle2 className="h-3 w-3" /> PIN Valid
-                  </span>
-                ) : wordHasChecksumError ? (
-                  <span className="text-destructive flex items-center gap-1">
-                    <AlertCircle className="h-3 w-3" /> Invalid PIN
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">
-                    {wordDisplayLength}/7 words validated
-                  </span>
-                )}
-              </>
-            ) : (
-              <>
-                {charIsComplete && !charHasChecksumError ? (
-                  <span className="text-green-600 flex items-center gap-1">
-                    <CheckCircle2 className="h-3 w-3" /> PIN Valid
-                  </span>
-                ) : charHasChecksumError ? (
-                  <span className="text-destructive flex items-center gap-1">
-                    <AlertCircle className="h-3 w-3" /> Invalid PIN
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">
-                    {charDisplayLength}/{PIN_LENGTH} characters
-                  </span>
-                )}
-              </>
-            )}
-            {error && <span className="text-destructive">• {error}</span>}
+        <div className="flex flex-col gap-3">
+          <div className="flex justify-between items-center text-xs">
+            <div className="flex items-center gap-1.5">
+              {useWords ? (
+                <>
+                  {wordIsComplete && !wordHasChecksumError ? (
+                    <span className="text-green-600 flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" /> PIN Valid
+                    </span>
+                  ) : wordHasChecksumError ? (
+                    <span className="text-destructive flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" /> Invalid PIN
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {wordDisplayLength}/7 words validated
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  {charIsComplete && !charHasChecksumError ? (
+                    <span className="text-green-600 flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" /> PIN Valid
+                    </span>
+                  ) : charHasChecksumError ? (
+                    <span className="text-destructive flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" /> Invalid PIN
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {charDisplayLength}/{PIN_LENGTH} characters
+                    </span>
+                  )}
+                </>
+              )}
+              {error && <span className="text-destructive">• {error}</span>}
+            </div>
           </div>
 
-          <button
-            onClick={toggleMode}
-            className="text-primary hover:underline transition-colors font-medium"
-            type="button"
-          >
-            {useWords ? 'Use character PIN' : 'Use words representation'}
-          </button>
+          <div className="flex justify-center">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleMode}
+              className="gap-2"
+              type="button"
+            >
+              {useWords ? (
+                <>
+                  <Hash className="h-4 w-4" />
+                  Switch to character PIN
+                </>
+              ) : (
+                <>
+                  <MessageSquareText className="h-4 w-4" />
+                  Switch to words
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       </div>
     )

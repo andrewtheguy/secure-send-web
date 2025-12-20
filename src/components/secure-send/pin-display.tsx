@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Check, Copy, AlertCircle, Eye, EyeOff, Clock } from 'lucide-react'
+import { Check, Copy, AlertCircle, Eye, EyeOff, Clock, Hash, MessageSquareText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PIN_DISPLAY_TIMEOUT_MS, pinToWords } from '@/lib/crypto'
@@ -207,13 +207,6 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
 
       {/* Info and toggle */}
       <div className="flex flex-col gap-3 items-center">
-        <button
-          onClick={toggleMode}
-          className="text-sm text-primary hover:underline transition-colors font-medium"
-        >
-          {useWords ? 'Use character PIN instead' : 'Use words representation'}
-        </button>
-
         <div className="flex flex-col gap-1.5 text-center">
           {useWords ? (
             <>
@@ -235,6 +228,25 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
             </>
           )}
         </div>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleMode}
+          className="gap-2"
+        >
+          {useWords ? (
+            <>
+              <Hash className="h-4 w-4" />
+              Switch to character PIN
+            </>
+          ) : (
+            <>
+              <MessageSquareText className="h-4 w-4" />
+              Switch to words
+            </>
+          )}
+        </Button>
       </div>
     </div>
   )
