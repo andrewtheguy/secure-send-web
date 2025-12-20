@@ -45,6 +45,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
     const [wordDisplayLength, setWordDisplayLength] = useState(0)
     const [charIsValid, setCharIsValid] = useState(false)
     const [wordIsValid, setWordIsValid] = useState(false)
+    const [maskWords, setMaskWords] = useState(false)
 
     const inputRefs = useRef<(HTMLInputElement | null)[]>(Array(7).fill(null))
     const charInputRef = useRef<HTMLInputElement>(null)
@@ -84,6 +85,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         setCharDisplayLength(0)
         setWordDisplayLength(0)
         setWords(Array(7).fill(''))
+        setMaskWords(false)
         if (charInputRef.current) charInputRef.current.value = ''
         emitChange(false, 0, null)
       },
@@ -122,6 +124,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         charPinRef.current = ''
         wordPinRef.current = ''
         setWords(Array(7).fill(''))
+        setMaskWords(true)
 
         // Keep UX feedback without keeping the raw value
         setCharDisplayLength(PIN_LENGTH)
@@ -131,7 +134,8 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         setError(null)
 
         if (charInputRef.current) {
-          charInputRef.current.value = ''
+          // Show a masked placeholder so users see that input was captured without revealing the PIN
+          charInputRef.current.value = '*'.repeat(PIN_LENGTH)
         }
 
         emitChange(true, PIN_LENGTH, method ?? null)
@@ -163,6 +167,8 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         setCharDisplayLength(0)
         if (charInputRef.current) charInputRef.current.value = ''
       }
+
+      setMaskWords(false)
 
       if (pinIsValid) {
         void securePin(pin)
@@ -197,6 +203,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         wordPinRef.current = ''
         setWordIsValid(false)
         setWordDisplayLength(0)
+        setMaskWords(false)
       }
 
       if (filteredIsValid) {
@@ -240,6 +247,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
 
     // Handling word changes
     const handleWordChange = (index: number, val: string) => {
+      setMaskWords(false)
       const newWords = [...words]
       newWords[index] = val.toLowerCase().replace(/[^a-z]/g, '')
       setWords(newWords)
@@ -260,6 +268,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
     }
 
     const selectSuggestion = (wordIndex: number, suggestion: string) => {
+      setMaskWords(false)
       const newWords = [...words]
       newWords[wordIndex] = suggestion
       setWords(newWords)
@@ -274,6 +283,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
     }
 
     const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>, fieldIndex: number) => {
+      setMaskWords(false)
       const pastedText = e.clipboardData.getData('text')
 
       // Split by spaces, newlines, tabs, commas
@@ -326,6 +336,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
           timeoutRef.current = setTimeout(() => setError(null), 3000)
           return
         }
+        setMaskWords(false)
         const text = await navigator.clipboard.readText()
         const potentialWords = text
           .toLowerCase()
@@ -427,7 +438,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
               <div key={i} className="relative group">
                 <Input
                   ref={el => { inputRefs.current[i] = el }}
-                  value={word}
+                  value={maskWords && word === '' ? '***' : word}
                   onChange={e => handleWordChange(i, e.target.value)}
                   onKeyDown={e => handleKeyDown(i, e)}
                   onPaste={e => handlePaste(e, i)}
