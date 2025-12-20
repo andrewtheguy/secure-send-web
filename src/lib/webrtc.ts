@@ -1,7 +1,12 @@
+export type WebRTCSignal =
+    | { type: 'offer'; sdp: string | null | undefined }
+    | { type: 'answer'; sdp: string | null | undefined }
+    | { type: 'candidate'; candidate?: RTCIceCandidateInit | null };
+
 export class WebRTCConnection {
     private pc: RTCPeerConnection;
     private dataChannel: RTCDataChannel | null = null;
-    private onSignal: (signal: any) => void;
+    private onSignal: (signal: WebRTCSignal) => void;
     private onDataChannelOpen: () => void;
     private onDataChannelMessage: (data: string | ArrayBuffer) => void;
     private onConnectionStateChange?: (state: RTCPeerConnectionState) => void;
@@ -11,7 +16,7 @@ export class WebRTCConnection {
 
     constructor(
         config: RTCConfiguration,
-        onSignal: (signal: any) => void,
+        onSignal: (signal: WebRTCSignal) => void,
         onDataChannelOpen: () => void,
         onDataChannelMessage: (data: string | ArrayBuffer) => void,
         onConnectionStateChange?: (state: RTCPeerConnectionState) => void
@@ -78,12 +83,12 @@ export class WebRTCConnection {
         this.onSignal({ type: 'offer', sdp: offer.sdp });
     }
 
-    public async handleSignal(signal: any) {
+    public async handleSignal(signal: WebRTCSignal) {
         console.log('Handling signal:', signal.type);
         try {
             if (signal.type === 'offer') {
                 console.log('Setting remote offer...');
-                await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
+                await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp ?? undefined }));
                 this.remoteDescriptionSet = true;
                 await this.processQueue();
 
@@ -93,7 +98,7 @@ export class WebRTCConnection {
                 this.onSignal({ type: 'answer', sdp: answer.sdp });
             } else if (signal.type === 'answer') {
                 console.log('Setting remote answer...');
-                await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
+                await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp ?? undefined }));
                 this.remoteDescriptionSet = true;
                 await this.processQueue();
             } else if (signal.type === 'candidate') {
@@ -114,6 +119,14 @@ export class WebRTCConnection {
         }
     }
 
+    public getPeerConnection(): RTCPeerConnection {
+        return this.pc;
+    }
+
+    public getDataChannel(): RTCDataChannel | null {
+        return this.dataChannel;
+    }
+
     private async processQueue() {
         console.log(`Processing ${this.candidateQueue.length} buffered candidates`);
         while (this.candidateQueue.length > 0) {
@@ -130,7 +143,7 @@ export class WebRTCConnection {
 
     public send(data: ArrayBuffer | ArrayBufferView | string) {
         if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            this.dataChannel.send(data as any);
+            this.dataChannel.send(data);
         } else {
             throw new Error('Data channel not open');
         }
@@ -167,7 +180,7 @@ export class WebRTCConnection {
             });
         }
 
-        this.dataChannel.send(data as any);
+        this.dataChannel.send(data);
     }
 
     public close() {

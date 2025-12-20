@@ -126,12 +126,16 @@ export function ReceiveTab() {
       mountedRef.current = false
       // Clear PIN from memory on unmount
       pinRef.current = ''
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current)
+      const timeoutId = timeoutRef.current
+      const countdownId = countdownIntervalRef.current
+      if (timeoutId) {
+        clearTimeout(timeoutId)
       }
-      if (countdownIntervalRef.current) {
-        clearInterval(countdownIntervalRef.current)
+      if (countdownId) {
+        clearInterval(countdownId)
       }
+      timeoutRef.current = null
+      countdownIntervalRef.current = null
       clearPinInactivityTimeout()
     }
   }, [clearPinInactivityTimeout])

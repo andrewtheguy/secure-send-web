@@ -263,7 +263,7 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       await new Promise<void>((resolve) => {
         const checkIce = () => {
-          const pc = (rtc as any).pc as RTCPeerConnection
+          const pc = rtc.getPeerConnection()
           if (pc.iceGatheringState === 'complete') {
             resolve()
           } else {
@@ -307,7 +307,7 @@ export function useManualReceive(): UseManualReceiveReturn {
         }
 
         // Check if already open
-        const dc = (rtc as any).dataChannel as RTCDataChannel
+        const dc = rtc.getDataChannel()
         if (dc && dc.readyState === 'open') {
           clearTimeout(timeout)
           resolve()

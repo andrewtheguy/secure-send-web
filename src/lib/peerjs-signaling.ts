@@ -2,6 +2,8 @@ import Peer from 'peerjs'
 import type { DataConnection } from 'peerjs'
 import { computePinHint } from '@/lib/crypto'
 
+type DataConnectionWithDataChannel = DataConnection & { dataChannel?: RTCDataChannel }
+
 // PeerJS cloud server configuration
 const PEERJS_HOST = '0.peerjs.com'
 const PEERJS_PORT = 443
@@ -220,6 +222,18 @@ export class PeerJSSignaling {
     }
   }
 
+  setOnErrorHandler(handler: (err: Error) => void): () => void {
+    const previous = this.onErrorCallback
+    this.onErrorCallback = (err) => {
+      handler(err)
+      previous?.(err)
+    }
+
+    return () => {
+      this.onErrorCallback = previous
+    }
+  }
+
   // For receiver: connect to sender's peer ID
   connectToPeer(peerId: string, timeoutMs: number = 30000): Promise<DataConnection> {
     return new Promise((resolve, reject) => {
@@ -268,7 +282,7 @@ export class PeerJSSignaling {
     }
 
     // PeerJS uses RTCDataChannel internally
-    const dc = (this.connection as any).dataChannel as RTCDataChannel | undefined
+    const dc = (this.connection as DataConnectionWithDataChannel).dataChannel
 
     if (dc) {
       while (dc.bufferedAmount > bufferThreshold) {

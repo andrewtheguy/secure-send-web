@@ -261,16 +261,23 @@ export function useQRScanner(options: UseQRScannerOptions) {
   useEffect(() => {
     return () => {
       isScanningRef.current = false
-      if (cameraStreamRef.current) {
-        cameraStreamRef.current.getTracks().forEach((track) => track.stop())
+      const stream = cameraStreamRef.current
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop())
+        cameraStreamRef.current = null
       }
-      if (scanLoopRef.current !== null) {
-        cancelAnimationFrame(scanLoopRef.current)
+
+      const scanLoopId = scanLoopRef.current
+      if (scanLoopId !== null) {
+        cancelAnimationFrame(scanLoopId)
+        scanLoopRef.current = null
       }
-      if (videoRef.current) {
+
+      const videoEl = videoRef.current
+      if (videoEl) {
         setTimeout(() => {
-          if (videoRef.current) {
-            videoRef.current.srcObject = null
+          if (videoEl) {
+            videoEl.srcObject = null
           }
         }, 50)
       }

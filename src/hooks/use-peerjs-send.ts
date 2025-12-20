@@ -157,17 +157,25 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
           return
         }
 
-        connectionCancelRef.current = peerRef.current.waitForConnection(
-          () => resolve(),
+        const peer = peerRef.current
+        let settled = false
+
+        const restoreOnError = peer.setOnErrorHandler((err) => {
+          if (settled) return
+          settled = true
+          restoreOnError()
+          reject(err)
+        })
+
+        connectionCancelRef.current = peer.waitForConnection(
+          () => {
+            if (settled) return
+            settled = true
+            restoreOnError()
+            resolve()
+          },
           TRANSFER_EXPIRATION_MS // Use same timeout as session expiration
         )
-
-        // Also listen for errors
-        const originalOnError = (peerRef.current as any).onErrorCallback;
-        (peerRef.current as any).onErrorCallback = (err: Error) => {
-          reject(err)
-          if (originalOnError) originalOnError(err)
-        }
       })
 
       if (cancelledRef.current) return
