@@ -30,6 +30,7 @@ export function ReceiveTab() {
   const [pinExpired, setPinExpired] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(0)
   const [detectedMethod, setDetectedMethod] = useState<SignalingMethod>('nostr')
+  const [pinFingerprint, setPinFingerprint] = useState<string | null>(null)
 
   // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrReceive()
@@ -190,12 +191,19 @@ export function ReceiveTab() {
     const { key, hint, method, isValid, length } = payload
     pinInputLengthRef.current = length
 
+    const formatFingerprint = (h: string) => {
+      const compact = h.slice(0, 8).toUpperCase()
+      return `${compact.slice(0, 4)}-${compact.slice(4, 8)}`
+    }
+
     if (isValid && key && hint) {
       pinSecretRef.current = { key, hint, method: method ?? null }
       setIsPinValid(true)
+      setPinFingerprint(formatFingerprint(hint))
     } else {
       pinSecretRef.current = null
       setIsPinValid(false)
+      setPinFingerprint(null)
     }
 
     resetPinInactivityTimeout(length > 0)
@@ -239,6 +247,12 @@ export function ReceiveTab() {
               <div className="space-y-2">
                 <label className="text-sm font-medium">Enter PIN from sender</label>
                 <PinInput ref={pinInputRef} onPinChange={handlePinChange} disabled={isActive} />
+                {pinFingerprint && (
+                  <p className="text-xs text-muted-foreground font-mono flex items-center gap-2">
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-semibold">FP</span>
+                    Fingerprint: {pinFingerprint}
+                  </p>
+                )}
                 {timeRemaining > 0 && (
                   <p className="text-xs text-amber-600 font-medium">
                     PIN will be cleared in {formatTime(timeRemaining)}
