@@ -379,3 +379,176 @@ With Nostr signing, users can verify counterparty identity:
 - Timestamp in signed data
 - Unique session ID / nonce
 - Short validity window (e.g., 5 minutes)
+
+---
+
+# Future Enhancements
+
+## Enhancement A: Nostr-Signed QR Exchange (Identity Verification)
+
+**Goal**: Keep the QR/manual exchange flow, but add Nostr signature for identity verification.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ SENDER                                                          │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. Connect to Nostr signer (NIP-07 extension or NIP-46 app)    │
+│ 2. Generate ephemeral ECDH keypair                              │
+│ 3. Sign session data with Nostr key: { ecdhPubkey, timestamp } │
+│ 4. Create QR: SS05(ECDH + Nostr sig + npub + SDP)              │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓ Show QR / Paste
+┌─────────────────────────────────────────────────────────────────┐
+│ RECEIVER                                                        │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. Scan QR                                                      │
+│ 2. Verify Nostr signature → Display "From: npub1abc..."        │
+│ 3. User confirms: "Yes, that's the sender's npub"              │
+│ 4. Connect own Nostr signer                                     │
+│ 5. Sign own session data                                        │
+│ 6. Create answer QR with signature                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Benefits
+- **Identity verification**: Know WHO you're exchanging with
+- **Replay protection**: Signature binds to specific session
+- **Auditability**: Could log transfers by npub (optional)
+- **Trust building**: Recognize repeat senders by npub
+
+### When to Use
+- High-value transfers where identity matters
+- Repeat exchanges with known contacts
+- When QR might pass through untrusted channels (screenshot, messaging)
+
+---
+
+## Enhancement B: Nostr Relay Push (Remote Offer Delivery)
+
+**Goal**: Push the offer through Nostr relays to recipient's npub - no QR scanning needed.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ SENDER                                                          │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. User enters recipient's npub (or NIP-05 like user@domain)   │
+│ 2. Connect to Nostr signer                                      │
+│ 3. Generate ECDH keypair                                        │
+│ 4. Create signed offer event (kind 24245)                       │
+│ 5. Encrypt offer to recipient's npub (NIP-04 or NIP-44)        │
+│ 6. Publish to relays                                            │
+│ 7. Wait for signed answer event from recipient                  │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ RECEIVER                                                        │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. Subscribe to events mentioning own npub                      │
+│ 2. Receive encrypted offer event                                │
+│ 3. Decrypt with own Nostr key                                   │
+│ 4. Verify sender's signature → Display "From: npub1xyz..."     │
+│ 5. User approves transfer                                       │
+│ 6. Generate ECDH keypair, sign session data                     │
+│ 7. Publish encrypted answer event                               │
+│ 8. Establish WebRTC P2P connection                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Event Structure (kind 24245 - Secure Send Offer)
+
+```json
+{
+  "kind": 24245,
+  "pubkey": "<sender npub>",
+  "created_at": 1234567890,
+  "tags": [
+    ["p", "<recipient npub>"],
+    ["expiration", "1234571490"]
+  ],
+  "content": "<NIP-44 encrypted offer payload>",
+  "sig": "<schnorr signature>"
+}
+```
+
+### Encrypted Payload
+
+```json
+{
+  "type": "offer",
+  "ecdhPubkey": "<65 bytes hex>",
+  "salt": "<16 bytes hex>",
+  "sdp": "<WebRTC SDP>",
+  "candidates": ["<ICE candidates>"],
+  "fileInfo": {
+    "name": "document.pdf",
+    "size": 1234567,
+    "mimeType": "application/pdf"
+  }
+}
+```
+
+### Benefits
+- **No QR scanning**: Works remotely, across the internet
+- **Async initiation**: Receiver doesn't need to be online when sender creates offer
+- **Address book**: Send to known npubs or NIP-05 addresses
+- **Encrypted signaling**: Offer/answer encrypted to recipient's npub
+- **Identity built-in**: Both parties verify via Nostr signatures
+
+### When to Use
+- Remote file transfer (not in same room)
+- Known contacts (have their npub)
+- Mobile-to-desktop transfers
+- When camera/QR scanning is inconvenient
+
+### Relay Strategy
+- Use sender's preferred relays + recipient's relay hints
+- Short TTL (e.g., 10 minutes) to avoid relay storage bloat
+- Ephemeral event flag if supported
+
+---
+
+## Comparison: QR vs Relay Push
+
+| Aspect | QR Exchange | Relay Push |
+|--------|-------------|------------|
+| Physical presence | Required (or screenshot) | Not required |
+| Works offline | Yes (local network) | No (needs relay) |
+| Recipient discovery | Visual/physical | npub/NIP-05 lookup |
+| Async initiation | No | Yes |
+| Privacy | Maximum (no relay) | Metadata on relays |
+| Setup complexity | Lower | Higher (relay + npub) |
+
+---
+
+## Implementation Phases (Revised)
+
+### Phase 1: WebAuthn Session Signing ← Current Plan
+- Hardware-backed authentication
+- Works offline, no external dependencies
+- Ephemeral credentials, no identity linkage
+
+### Phase 2: NIP-07 Extension Support
+- Detect `window.nostr`
+- Sign session data with extension
+- Display npub for verification
+- Fallback to WebAuthn/ephemeral if no extension
+
+### Phase 3: Nostr-Signed QR Exchange (Enhancement A)
+- Add Nostr signature to QR payload (SS05 format)
+- Verify counterparty npub
+- Support both NIP-07 and NIP-46 signers
+
+### Phase 4: NIP-46 Remote Signing
+- QR to connect mobile signer (Amber, nsec.app)
+- Cross-device signing capability
+- Works on mobile web
+
+### Phase 5: Nostr Relay Push (Enhancement B)
+- Send offer to npub via relay
+- Encrypted with NIP-44
+- Async receive capability
+- Address book / recent contacts
