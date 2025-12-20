@@ -281,7 +281,7 @@ export function ReceiveTab() {
                 Your connection is encrypted and private. Files are never stored unencrypted.
               </div>
 
-              <Button onClick={handleReceivePin} disabled={!canReceivePin} className="w-full">
+              <Button onClick={handleReceivePin} disabled={!canReceivePin} className="w-full bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700">
                 <Download className="mr-2 h-4 w-4" />
                 Receive
               </Button>
@@ -294,7 +294,7 @@ export function ReceiveTab() {
                 </p>
               </div>
 
-              <Button onClick={handleReceiveScan} disabled={!canReceiveScan} className="w-full">
+              <Button onClick={handleReceiveScan} disabled={!canReceiveScan} className="w-full bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700">
                 <Download className="mr-2 h-4 w-4" />
                 Start Receive
               </Button>
@@ -340,7 +340,7 @@ export function ReceiveTab() {
                     {getMimeTypeDescription(receivedContent.mimeType)}
                   </p>
                 </div>
-                <Button onClick={handleDownload} className="w-full max-w-[200px]">
+                <Button onClick={handleDownload} className="w-full max-w-[200px] bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700">
                   <Download className="mr-2 h-4 w-4" />
                   Download File
                 </Button>

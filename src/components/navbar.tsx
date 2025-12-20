@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { Download, Info, Menu, Send, X } from 'lucide-react'
 import { ModeToggle } from '@/components/mode-toggle'
+import { Logo } from '@/components/logo'
 
 const linkBase =
   'inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors'
@@ -17,7 +18,7 @@ export function Navbar() {
     <header className="w-full border-b bg-background/80 backdrop-blur">
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-4">
         <Link to="/" className="inline-flex items-center gap-3">
-          <img src="/logo.svg" alt="Secure Transfer" className="h-10 w-10" />
+          <Logo className="h-10 w-10" />
           <span className="font-semibold text-lg">Secure Transfer</span>
         </Link>
         <nav className="hidden items-center gap-2 text-sm md:flex">

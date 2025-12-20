@@ -52,10 +52,30 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
     }
   }
 
+  const getCardClassName = () => {
+    switch (view) {
+      case 'receive':
+        return 'w-full max-w-2xl border-cyan-200 dark:border-cyan-900/50 bg-gradient-to-br from-background to-cyan-50/30 dark:to-cyan-950/10'
+      default:
+        return 'w-full max-w-2xl'
+    }
+  }
+
+  const getTitleClassName = () => {
+    switch (view) {
+      case 'send':
+        return 'text-2xl text-primary'
+      case 'receive':
+        return 'text-2xl text-cyan-700 dark:text-cyan-500'
+      default:
+        return 'text-2xl'
+    }
+  }
+
   return (
-    <Card className="w-full max-w-2xl">
+    <Card className={getCardClassName()}>
       <CardHeader>
-        <CardTitle className="text-2xl">{getTitle()}</CardTitle>
+        <CardTitle className={getTitleClassName()}>{getTitle()}</CardTitle>
         <CardDescription>
           {view === 'send' && 'Share files or folders securely with end-to-end encryption.'}
           {view === 'receive' && 'Enter a PIN to securely receive files or messages.'}
