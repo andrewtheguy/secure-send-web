@@ -148,19 +148,7 @@ export class WebRTCConnection {
             throw new Error('Data channel not open');
         }
 
-        if (typeof data === 'string') {
-            this.dataChannel.send(data);
-        } else if (data instanceof Blob) {
-            this.dataChannel.send(data);
-        } else if (data instanceof ArrayBuffer) {
-            this.dataChannel.send(data);
-        } else if (ArrayBuffer.isView(data)) {
-            const copyBuffer = new ArrayBuffer(data.byteLength);
-            new Uint8Array(copyBuffer).set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
-            this.dataChannel.send(new Uint8Array(copyBuffer));
-        } else {
-            throw new Error('Unsupported data type for data channel send');
-        }
+        this.sendData(data);
     }
 
     /**
@@ -192,6 +180,14 @@ export class WebRTCConnection {
                 };
                 setTimeout(checkBuffer, 10);
             });
+        }
+
+        this.sendData(data);
+    }
+
+    private sendData(data: WebRTCData) {
+        if (!this.dataChannel) {
+            throw new Error('Data channel not open');
         }
 
         if (typeof data === 'string') {
