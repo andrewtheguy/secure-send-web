@@ -213,14 +213,14 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         return
       }
 
-      // Defensive fallbacks for older/malformed payloads
+      // Resolved metadata from validated payload
       const resolvedContentType = payload.contentType
       const resolvedFileName = payload.fileName || 'unknown'
       const resolvedFileSize = payload.fileSize
       const resolvedMimeType = payload.mimeType || 'application/octet-stream'
 
       // Security check: Enforce MAX_MESSAGE_SIZE to prevent DoS/OOM
-      const expectedSize = payload.fileSize || 0
+      const expectedSize = resolvedFileSize || 0
       if (expectedSize > MAX_MESSAGE_SIZE) {
         setState({
           status: 'error',
@@ -269,7 +269,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
         // Pre-allocate buffer for received data to avoid 2x memory during assembly
         // For files, use fileSize; for text, we'll grow as needed
-        const expectedSize = payload.fileSize || 0
+        const expectedSize = resolvedFileSize || 0
         let combinedBuffer: Uint8Array | null = expectedSize > 0 ? new Uint8Array(expectedSize) : null
         const receivedChunkIndices: Set<number> = new Set()
         const pendingChunkPromises: Set<Promise<void>> = new Set()
@@ -384,7 +384,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                     totalDecryptedBytes += decryptedChunk.length
 
                     // Update progress
-                    const totalBytes = payload?.fileSize || 0
+                    const totalBytes = resolvedFileSize || 0
                     setState(s => ({
                       ...s,
                       status: 'receiving',
@@ -447,7 +447,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                   ...s,
                   progress: {
                     current: cloudTotalBytes + loaded,
-                    total: payload.fileSize || (chunkPayload.totalChunks * chunkPayload.chunkSize),
+                    total: resolvedFileSize || (chunkPayload.totalChunks * chunkPayload.chunkSize),
                   },
                 }))
               }
