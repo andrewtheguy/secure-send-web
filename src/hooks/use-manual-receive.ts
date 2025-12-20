@@ -207,11 +207,7 @@ export function useManualReceive(): UseManualReceiveReturn {
           // Collect signals (answer + candidates)
           if (signal.type === 'answer') {
             if (typeof signal.sdp === 'string' && signal.sdp.trim() !== '') {
-              answerSdp = signal.sdp
-            } else {
-              console.error('Invalid answer SDP received')
-              setState({ status: 'error', message: 'Invalid answer from sender' })
-              return
+              answerSdp = signal.sdp.trim()
             }
           } else if (signal.type === 'candidate' && signal.candidate) {
             iceCandidates.push(new RTCIceCandidate(signal.candidate))
@@ -287,17 +283,15 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       if (cancelledRef.current) return
 
-      if (typeof answerSdp !== 'string') {
+      const isNonEmptyString = (value: unknown): value is string =>
+        typeof value === 'string' && value.trim() !== ''
+
+      if (!isNonEmptyString(answerSdp)) {
         setState({ status: 'error', message: 'Missing or invalid answer from sender' })
         return
       }
 
       const trimmedAnswerSdp = (answerSdp as string).trim()
-      if (trimmedAnswerSdp === '') {
-        setState({ status: 'error', message: 'Missing or invalid answer from sender' })
-        return
-      }
-
       const validatedAnswer: RTCSessionDescriptionInit = { type: 'answer', sdp: trimmedAnswerSdp }
 
       // Generate answer with our public key

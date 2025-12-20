@@ -223,7 +223,9 @@ export class PeerJSSignaling {
   }
 
   setOnErrorHandler(handler: (err: Error) => void): () => void {
-    this.errorHandlers.push(handler)
+    if (!this.errorHandlers.includes(handler)) {
+      this.errorHandlers.push(handler)
+    }
 
     return () => {
       this.errorHandlers = this.errorHandlers.filter((h) => h !== handler)
@@ -336,6 +338,12 @@ export class PeerJSSignaling {
   }
 
   private emitError(err: Error): void {
-    ;[...this.errorHandlers].forEach((handler) => handler(err))
+    ;[...this.errorHandlers].forEach((handler) => {
+      try {
+        handler(err)
+      } catch (handlerErr) {
+        console.error('Error handler threw:', handlerErr)
+      }
+    })
   }
 }
