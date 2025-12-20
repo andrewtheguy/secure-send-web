@@ -3,6 +3,24 @@ import type { ContentType } from './nostr/types'
 
 // Magic header: "SS02" = Secure Send version 2 (ECDH mutual exchange)
 const MAGIC_HEADER_V2 = new Uint8Array([0x53, 0x53, 0x30, 0x32])
+const OBFUSCATION_SEED = 0x9e3779b9
+
+function xorshift32(state: number): number {
+  state ^= state << 13
+  state ^= state >>> 17
+  state ^= state << 5
+  return state >>> 0
+}
+
+function xorObfuscate(data: Uint8Array): Uint8Array {
+  let state = OBFUSCATION_SEED
+  const out = new Uint8Array(data.length)
+  for (let i = 0; i < data.length; i++) {
+    state = xorshift32(state)
+    out[i] = data[i] ^ (state & 0xff)
+  }
+  return out
+}
 
 /**
  * Signaling Payload - method-agnostic format for Manual Exchange mode
@@ -88,7 +106,7 @@ export function estimatePayloadSize(payload: SignalingPayload): number {
 
 /**
  * Generate mutual offer as binary data
- * Format: [SS02 magic (4 bytes)][compressed payload]
+ * Format: [SS02 magic (4 bytes)][obfuscated compressed payload]
  * NOT encrypted - ECDH public keys are not secret
  */
 export function generateMutualOfferBinary(
@@ -122,17 +140,18 @@ export function generateMutualOfferBinary(
   const encoder = new TextEncoder()
   const jsonBytes = encoder.encode(JSON.stringify(payload))
   const compressed = pako.deflate(jsonBytes)
+  const obfuscated = xorObfuscate(compressed)
 
-  // Build binary: [SS02][compressed]
-  const result = new Uint8Array(4 + compressed.length)
+  // Build binary: [SS02][obfuscated]
+  const result = new Uint8Array(4 + obfuscated.length)
   result.set(MAGIC_HEADER_V2, 0)
-  result.set(compressed, 4)
+  result.set(obfuscated, 4)
   return result
 }
 
 /**
  * Generate mutual answer as binary data
- * Format: [SS02 magic (4 bytes)][compressed payload]
+ * Format: [SS02 magic (4 bytes)][obfuscated compressed payload]
  */
 export function generateMutualAnswerBinary(
   answer: RTCSessionDescriptionInit,
@@ -151,11 +170,12 @@ export function generateMutualAnswerBinary(
   const encoder = new TextEncoder()
   const jsonBytes = encoder.encode(JSON.stringify(payload))
   const compressed = pako.deflate(jsonBytes)
+  const obfuscated = xorObfuscate(compressed)
 
-  // Build binary: [SS02][compressed]
-  const result = new Uint8Array(4 + compressed.length)
+  // Build binary: [SS02][obfuscated]
+  const result = new Uint8Array(4 + obfuscated.length)
   result.set(MAGIC_HEADER_V2, 0)
-  result.set(compressed, 4)
+  result.set(obfuscated, 4)
   return result
 }
 
@@ -177,12 +197,16 @@ export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null 
       return null
     }
 
-    const compressed = binary.slice(4)
+    const obfuscated = binary.slice(4)
+    const compressed = xorObfuscate(obfuscated)
     const jsonBytes = pako.inflate(compressed)
     const json = new TextDecoder().decode(jsonBytes)
     const payload = JSON.parse(json)
 
     if (!isValidSignalingPayload(payload)) {
+      return null
+    }
+    if (typeof payload.createdAt !== 'number' || !Number.isFinite(payload.createdAt)) {
       return null
     }
 
