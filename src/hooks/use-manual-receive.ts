@@ -160,8 +160,17 @@ export function useManualReceive(): UseManualReceiveReturn {
       }
 
       // Validate required metadata
-      if (!fileName || fileSize == null || !mimeType || totalBytes == null) {
-        setState({ status: 'error', message: 'Invalid offer: missing file metadata' })
+      if (
+        !fileName ||
+        !mimeType ||
+        typeof fileSize !== 'number' ||
+        !Number.isFinite(fileSize) ||
+        fileSize < 0 ||
+        typeof totalBytes !== 'number' ||
+        !Number.isFinite(totalBytes) ||
+        totalBytes < 0
+      ) {
+        setState({ status: 'error', message: 'Invalid offer: missing or invalid file metadata' })
         return
       }
 
@@ -236,7 +245,7 @@ export function useManualReceive(): UseManualReceiveReturn {
               ...s,
               progress: {
                 current: receivedBytes,
-                total: totalBytes || 0,
+                total: totalBytes!,
               },
             }))
           }
@@ -322,7 +331,7 @@ export function useManualReceive(): UseManualReceiveReturn {
         contentType: 'file',
         fileMetadata: { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! },
         useWebRTC: true,
-        progress: { current: 0, total: totalBytes || 0 },
+        progress: { current: 0, total: totalBytes! },
       })
 
       // Wait for transfer to complete
@@ -358,7 +367,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       rtc.send('ACK')
 
       // Decrypt and reassemble chunks
-      let contentData = new Uint8Array(totalBytes || 0)
+      let contentData = new Uint8Array(totalBytes!)
       let totalDecryptedBytes = 0
 
       for (const encryptedChunk of receivedChunks) {
