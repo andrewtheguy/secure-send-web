@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react'
-import { X, CheckCircle2, AlertCircle } from 'lucide-react'
+import { X, CheckCircle2, AlertCircle, ClipboardPaste } from 'lucide-react'
 import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 import {
   PIN_LENGTH,
   PIN_CHARSET,
@@ -35,6 +36,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
     const charInputRef = useRef<HTMLInputElement>(null)
     const pinRef = useRef('')
     const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const mountedRef = useRef(true)
 
     useImperativeHandle(ref, () => ({
@@ -52,6 +54,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       return () => {
         mountedRef.current = false
         if (timeoutRef.current) clearTimeout(timeoutRef.current)
+        if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current)
       }
     }, [])
 
@@ -79,16 +82,50 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       updatePin(filtered)
     }
 
+    // Handle focus on word input field
+    const handleFocus = useCallback((index: number) => {
+      // Cancel any pending blur timeout to prevent it from clearing suggestions
+      if (blurTimeoutRef.current) {
+        clearTimeout(blurTimeoutRef.current)
+        blurTimeoutRef.current = null
+      }
+
+      setActiveWordIndex(index)
+      const currentWord = words[index]
+
+      if (currentWord === '') {
+        setSuggestions(PIN_WORDLIST)  // Show all words
+        setSelectedIndex(0)
+      } else {
+        const matches = PIN_WORDLIST.filter(w => w.startsWith(currentWord))
+        setSuggestions(matches)
+        setSelectedIndex(0)
+      }
+    }, [words])
+
+    // Handle blur on word input field
+    const handleBlur = useCallback(() => {
+      blurTimeoutRef.current = setTimeout(() => {
+        if (mountedRef.current) {
+          setActiveWordIndex(null)
+          setSuggestions([])
+        }
+      }, 200)
+    }, [])
+
     // Handling word changes
     const handleWordChange = (index: number, val: string) => {
       const newWords = [...words]
       newWords[index] = val.toLowerCase().replace(/[^a-z]/g, '')
       setWords(newWords)
 
-      // Filter suggestions
-      if (newWords[index].length >= 2) {
-        const matches = PIN_WORDLIST.filter(w => w.startsWith(newWords[index])).slice(0, 5)
+      // Filter suggestions - now starts at 1 character
+      if (newWords[index].length >= 1) {
+        const matches = PIN_WORDLIST.filter(w => w.startsWith(newWords[index]))
         setSuggestions(matches)
+        setSelectedIndex(0)
+      } else if (newWords[index].length === 0 && activeWordIndex === index) {
+        setSuggestions(PIN_WORDLIST)  // Show all when cleared while focused
         setSelectedIndex(0)
       } else {
         setSuggestions([])
@@ -115,19 +152,113 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       updatePin(pin)
     }
 
+    const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>, fieldIndex: number) => {
+      const pastedText = e.clipboardData.getData('text')
+
+      // Split by spaces, newlines, tabs, commas
+      const potentialWords = pastedText
+        .toLowerCase()
+        .split(/[\s,]+/)
+        .map(w => w.replace(/[^a-z]/g, ''))
+        .filter(w => w.length > 0)
+
+      // If only one word, let default paste handle it
+      if (potentialWords.length <= 1) return
+
+      e.preventDefault()
+
+      // Validate all words
+      const validWords = potentialWords.slice(0, 7)
+      const allValid = validWords.every(w => isValidPinWord(w))
+
+      if (!allValid) {
+        setError('Some pasted words are invalid')
+        if (timeoutRef.current) clearTimeout(timeoutRef.current)
+        timeoutRef.current = setTimeout(() => setError(null), 3000)
+        return
+      }
+
+      // Populate fields starting from current field
+      const newWords = [...words]
+      validWords.forEach((word, i) => {
+        const targetIndex = fieldIndex + i
+        if (targetIndex < 7) {
+          newWords[targetIndex] = word
+        }
+      })
+
+      setWords(newWords)
+      setSuggestions([])
+
+      const pin = wordsToPin(newWords)
+      setDisplayLength(newWords.filter(w => isValidPinWord(w)).length)
+      updatePin(pin)
+
+      // Focus field after last pasted word
+      const nextFocusIndex = Math.min(fieldIndex + validWords.length, 6)
+      inputRefs.current[nextFocusIndex]?.focus()
+    }, [words, updatePin])
+
+    const handlePasteFromClipboard = useCallback(async () => {
+      try {
+        const text = await navigator.clipboard.readText()
+        const potentialWords = text
+          .toLowerCase()
+          .split(/[\s,]+/)
+          .map(w => w.replace(/[^a-z]/g, ''))
+          .filter(w => w.length > 0)
+          .slice(0, 7)
+
+        const allValid = potentialWords.every(w => isValidPinWord(w))
+
+        if (!allValid) {
+          setError('Clipboard contains invalid words')
+          if (timeoutRef.current) clearTimeout(timeoutRef.current)
+          timeoutRef.current = setTimeout(() => setError(null), 3000)
+          return
+        }
+
+        const newWords = Array(7).fill('')
+        potentialWords.forEach((word, i) => {
+          newWords[i] = word
+        })
+
+        setWords(newWords)
+        setError(null)
+
+        const pin = wordsToPin(newWords)
+        setDisplayLength(potentialWords.length)
+        updatePin(pin)
+
+        const nextIndex = potentialWords.length < 7 ? potentialWords.length : 6
+        inputRefs.current[nextIndex]?.focus()
+      } catch (err) {
+        setError('Failed to read clipboard')
+        if (timeoutRef.current) clearTimeout(timeoutRef.current)
+        timeoutRef.current = setTimeout(() => setError(null), 3000)
+      }
+    }, [updatePin])
+
     const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
       if (suggestions.length > 0) {
         if (e.key === 'ArrowDown') {
           e.preventDefault()
-          setSelectedIndex(prev => (prev + 1) % suggestions.length)
+          const maxVisible = Math.min(10, suggestions.length)
+          setSelectedIndex(prev => (prev + 1) % maxVisible)
           return
         }
         if (e.key === 'ArrowUp') {
           e.preventDefault()
-          setSelectedIndex(prev => (prev - 1 + suggestions.length) % suggestions.length)
+          const maxVisible = Math.min(10, suggestions.length)
+          setSelectedIndex(prev => (prev - 1 + maxVisible) % maxVisible)
           return
         }
         if (e.key === 'Enter') {
+          e.preventDefault()
+          selectSuggestion(index, suggestions[selectedIndex])
+          return
+        }
+        if (e.key === 'Tab') {
           e.preventDefault()
           selectSuggestion(index, suggestions[selectedIndex])
           return
@@ -167,48 +298,69 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
     return (
       <div className="flex flex-col gap-4">
         {useWords ? (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {words.map((word, i) => (
-              <div key={i} className="relative group">
-                <Input
-                  ref={el => { inputRefs.current[i] = el }}
-                  value={word}
-                  onChange={e => handleWordChange(i, e.target.value)}
-                  onKeyDown={e => handleKeyDown(i, e)}
-                  onFocus={() => setActiveWordIndex(i)}
-                  onBlur={() => setTimeout(() => setActiveWordIndex(null), 200)}
-                  placeholder={`Word ${i + 1}`}
-                  className={`pr-7 text-center font-mono h-10 ${word === '' ? '' : isValidPinWord(word) ? 'border-green-500 bg-green-50/50' : 'border-destructive bg-destructive/5'
-                    }`}
-                  autoComplete="off"
-                  disabled={disabled}
-                />
-                {word && (
-                  <button
-                    onClick={() => handleWordChange(i, '')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
-                    type="button"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-                {activeWordIndex === i && suggestions.length > 0 && (
-                  <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg overflow-hidden animate-in fade-in zoom-in duration-200">
-                    {suggestions.map((s, si) => (
-                      <button
-                        key={si}
-                        className={`w-full text-left px-3 py-1.5 text-sm font-mono transition-colors ${si === selectedIndex ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'
-                          }`}
-                        onClick={() => selectSuggestion(i, s)}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {words.map((word, i) => (
+                <div key={i} className="relative group">
+                  <Input
+                    ref={el => { inputRefs.current[i] = el }}
+                    value={word}
+                    onChange={e => handleWordChange(i, e.target.value)}
+                    onKeyDown={e => handleKeyDown(i, e)}
+                    onPaste={e => handlePaste(e, i)}
+                    onFocus={() => handleFocus(i)}
+                    onBlur={() => handleBlur()}
+                    placeholder={`Word ${i + 1}`}
+                    className={`pr-7 text-center font-mono h-10 ${word === '' ? '' : isValidPinWord(word) ? 'border-green-500 bg-green-50/50' : 'border-destructive bg-destructive/5'
+                      }`}
+                    autoComplete="off"
+                    disabled={disabled}
+                  />
+                  {word && (
+                    <button
+                      onClick={() => handleWordChange(i, '')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                      type="button"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                  {activeWordIndex === i && suggestions.length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-[200px] overflow-y-auto animate-in fade-in zoom-in duration-200">
+                      {suggestions.slice(0, 10).map((s, si) => (
+                        <button
+                          key={si}
+                          className={`w-full text-left px-3 py-1.5 text-sm font-mono transition-colors ${si === selectedIndex ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'
+                            }`}
+                          onMouseEnter={() => setSelectedIndex(si)}
+                          onClick={() => selectSuggestion(i, s)}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                      {suggestions.length > 10 && (
+                        <div className="px-3 py-1.5 text-xs text-muted-foreground border-t">
+                          +{suggestions.length - 10} more matches
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePasteFromClipboard}
+              disabled={disabled}
+              className="w-full"
+              type="button"
+            >
+              <ClipboardPaste className="h-4 w-4 mr-2" />
+              Paste all words from clipboard
+            </Button>
+          </>
         ) : (
           <Input
             ref={charInputRef}
