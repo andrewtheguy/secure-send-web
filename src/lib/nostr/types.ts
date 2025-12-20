@@ -2,6 +2,8 @@
 export const EVENT_KIND_DATA_TRANSFER = 24242
 export const EVENT_KIND_PIN_EXCHANGE = 24243
 
+import type { ReceivedFile, ReceivedContent } from '../types'
+
 // Content types
 export type ContentType = 'file'
 
@@ -84,16 +86,8 @@ export interface TransferMetadata {
   publicKey: string
 }
 
-// Received content
-export interface ReceivedFile {
-  contentType: 'file'
-  data: Uint8Array
-  fileName: string
-  fileSize: number
-  mimeType: string
-}
-
-export type ReceivedContent = ReceivedFile
+// Re-export shared received-content types
+export type { ReceivedFile, ReceivedContent }
 
 // WebRTC Signaling
 export type SignalingType = 'offer' | 'answer' | 'candidate'
