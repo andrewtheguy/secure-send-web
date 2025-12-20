@@ -1,9 +1,8 @@
 import pako from 'pako'
 import type { ContentType } from './nostr/types'
-import { deriveKeyFromPin, encrypt, decrypt, generateSalt } from './crypto'
 
-// Magic header: "SS01" = Secure Send version 1
-const MAGIC_HEADER = new Uint8Array([0x53, 0x53, 0x30, 0x31])
+// Magic header: "SS02" = Secure Send version 2 (ECDH mutual exchange)
+const MAGIC_HEADER_V2 = new Uint8Array([0x53, 0x53, 0x30, 0x32])
 
 /**
  * Signaling Payload - method-agnostic format for Manual Exchange mode
@@ -15,13 +14,15 @@ export interface SignalingPayload {
   candidates: string[] // ICE candidates as SDP strings
   // Milliseconds since epoch when this payload was generated (TTL enforced by receiver for offers).
   createdAt: number
+  // ECDH public key for mutual exchange (65 bytes P-256 uncompressed)
+  publicKey?: number[]
   // Offer-only fields:
   contentType?: ContentType
   fileName?: string
   fileSize?: number
   mimeType?: string
   totalBytes?: number
-  salt?: number[] // Salt for content encryption key derivation
+  salt?: number[] // Salt for content encryption key derivation (from ECDH shared secret)
 }
 
 function uint8ArrayToBase64(bytes: Uint8Array): string {
@@ -44,133 +45,6 @@ function base64ToUint8Array(base64: string): Uint8Array {
 }
 
 /**
- * Encrypt signaling payload to binary format
- * Format: [SS01 magic (4 bytes)][salt (16 bytes)][encrypted compressed payload]
- * Compression is done before encryption (JSON compresses well, encrypted data doesn't)
- */
-export async function encryptSignalingPayload(
-  payload: SignalingPayload,
-  pin: string
-): Promise<Uint8Array> {
-  const encoder = new TextEncoder()
-  const jsonBytes = encoder.encode(JSON.stringify(payload))
-  // Compress before encryption - JSON/SDP compresses well
-  const compressed = pako.deflate(jsonBytes)
-  const salt = generateSalt()
-  const key = await deriveKeyFromPin(pin, salt)
-  const encrypted = await encrypt(key, compressed)
-
-  // Build binary: [SS01][salt][encrypted]
-  const result = new Uint8Array(4 + 16 + encrypted.length)
-  result.set(MAGIC_HEADER, 0)
-  result.set(salt, 4)
-  result.set(encrypted, 20)
-  return result
-}
-
-/**
- * Decrypt binary signaling payload
- * Expects format: [SS01 magic (4 bytes)][salt (16 bytes)][encrypted compressed payload]
- * Decompression is done after decryption
- */
-export async function decryptSignalingPayload(
-  binary: Uint8Array,
-  pin: string
-): Promise<SignalingPayload | null> {
-  try {
-    // Verify magic header "SS01"
-    if (
-      binary[0] !== 0x53 ||
-      binary[1] !== 0x53 ||
-      binary[2] !== 0x30 ||
-      binary[3] !== 0x31
-    ) {
-      throw new Error('Invalid format or unsupported version')
-    }
-    const salt = binary.slice(4, 20)
-    const encrypted = binary.slice(20)
-    const key = await deriveKeyFromPin(pin, salt)
-    const compressed = await decrypt(key, encrypted)
-    // Decompress after decryption
-    const jsonBytes = pako.inflate(compressed)
-    const json = new TextDecoder().decode(jsonBytes)
-    return JSON.parse(json)
-  } catch {
-    return null
-  }
-}
-
-/**
- * Generate offer as binary data for QR code encoding
- * Returns Uint8Array ready for binary QR code (no compression - encrypted data doesn't compress)
- */
-export async function generateOfferQRBinary(
-  offer: RTCSessionDescriptionInit,
-  candidates: RTCIceCandidate[],
-  metadata: {
-    createdAt: number
-    contentType: ContentType
-    totalBytes: number
-    fileName?: string
-    fileSize?: number
-    mimeType?: string
-    salt?: number[] // Salt for content encryption key derivation
-  },
-  pin: string
-): Promise<Uint8Array> {
-  const payload: SignalingPayload = {
-    type: 'offer',
-    sdp: offer.sdp || '',
-    candidates: candidates.map((c) => c.candidate),
-    createdAt: metadata.createdAt,
-    contentType: metadata.contentType,
-    totalBytes: metadata.totalBytes,
-    fileName: metadata.fileName,
-    fileSize: metadata.fileSize,
-    mimeType: metadata.mimeType,
-    salt: metadata.salt,
-  }
-  return encryptSignalingPayload(payload, pin)
-}
-
-/**
- * Generate answer as binary data for QR code encoding
- * Returns Uint8Array ready for binary QR code (no compression - encrypted data doesn't compress)
- */
-export async function generateAnswerQRBinary(
-  answer: RTCSessionDescriptionInit,
-  candidates: RTCIceCandidate[],
-  pin: string
-): Promise<Uint8Array> {
-  const payload: SignalingPayload = {
-    type: 'answer',
-    sdp: answer.sdp || '',
-    candidates: candidates.map((c) => c.candidate),
-    createdAt: Date.now(),
-  }
-  return encryptSignalingPayload(payload, pin)
-}
-
-/**
- * Parse binary QR data
- * Returns the raw binary payload (pass-through, no decompression needed)
- */
-export function parseBinaryQRPayload(bytes: Uint8Array): Uint8Array {
-  return bytes
-}
-
-/**
- * Generate base64 string for clipboard (from binary payload)
- */
-export async function generateClipboardData(
-  payload: SignalingPayload,
-  pin: string
-): Promise<string> {
-  const binary = await encryptSignalingPayload(payload, pin)
-  return uint8ArrayToBase64(binary)
-}
-
-/**
  * Parse base64 clipboard data to binary payload
  */
 export function parseClipboardPayload(base64: string): Uint8Array | null {
@@ -190,27 +64,155 @@ export function isValidSignalingPayload(payload: unknown): payload is SignalingP
   if (p.type !== 'offer' && p.type !== 'answer') return false
   if (typeof p.sdp !== 'string') return false
   if (!Array.isArray(p.candidates)) return false
+  if (!(p.candidates as unknown[]).every((c) => typeof c === 'string')) return false
+  if (typeof p.createdAt !== 'number') return false
+  if (p.publicKey !== undefined && !Array.isArray(p.publicKey)) return false
   return true
 }
 
 /**
- * Validate binary payload has correct magic header
+ * Validate binary payload has correct magic header (SS02)
  */
 export function isValidBinaryPayload(binary: Uint8Array): boolean {
+  return isMutualPayload(binary)
+}
+
+/**
+ * Estimate compressed payload size in bytes (includes SS02 magic header)
+ */
+export function estimatePayloadSize(payload: SignalingPayload): number {
+  const json = JSON.stringify(payload)
+  const compressed = pako.deflate(json)
+  return 4 + compressed.length // 4 bytes for SS02 magic header
+}
+
+/**
+ * Generate mutual offer as binary data
+ * Format: [SS02 magic (4 bytes)][compressed payload]
+ * NOT encrypted - ECDH public keys are not secret
+ */
+export function generateMutualOfferBinary(
+  offer: RTCSessionDescriptionInit,
+  candidates: RTCIceCandidate[],
+  metadata: {
+    createdAt: number
+    contentType: ContentType
+    totalBytes: number
+    fileName?: string
+    fileSize?: number
+    mimeType?: string
+    publicKey: Uint8Array // ECDH public key (65 bytes)
+    salt: Uint8Array // Salt for AES key derivation
+  }
+): Uint8Array {
+  const payload: SignalingPayload = {
+    type: 'offer',
+    sdp: offer.sdp || '',
+    candidates: candidates.map((c) => c.candidate),
+    createdAt: metadata.createdAt,
+    contentType: metadata.contentType,
+    totalBytes: metadata.totalBytes,
+    fileName: metadata.fileName,
+    fileSize: metadata.fileSize,
+    mimeType: metadata.mimeType,
+    publicKey: Array.from(metadata.publicKey),
+    salt: Array.from(metadata.salt),
+  }
+
+  const encoder = new TextEncoder()
+  const jsonBytes = encoder.encode(JSON.stringify(payload))
+  const compressed = pako.deflate(jsonBytes)
+
+  // Build binary: [SS02][compressed]
+  const result = new Uint8Array(4 + compressed.length)
+  result.set(MAGIC_HEADER_V2, 0)
+  result.set(compressed, 4)
+  return result
+}
+
+/**
+ * Generate mutual answer as binary data
+ * Format: [SS02 magic (4 bytes)][compressed payload]
+ */
+export function generateMutualAnswerBinary(
+  answer: RTCSessionDescriptionInit,
+  candidates: RTCIceCandidate[],
+  publicKey: Uint8Array, // ECDH public key (65 bytes)
+  createdAt: number = Date.now()
+): Uint8Array {
+  const payload: SignalingPayload = {
+    type: 'answer',
+    sdp: answer.sdp || '',
+    candidates: candidates.map((c) => c.candidate),
+    createdAt,
+    publicKey: Array.from(publicKey),
+  }
+
+  const encoder = new TextEncoder()
+  const jsonBytes = encoder.encode(JSON.stringify(payload))
+  const compressed = pako.deflate(jsonBytes)
+
+  // Build binary: [SS02][compressed]
+  const result = new Uint8Array(4 + compressed.length)
+  result.set(MAGIC_HEADER_V2, 0)
+  result.set(compressed, 4)
+  return result
+}
+
+/**
+ * Validate publicKey is a valid P-256 uncompressed public key (65 bytes, values 0-255)
+ */
+function isValidPublicKeyArray(arr: unknown): arr is number[] {
+  if (!Array.isArray(arr) || arr.length !== 65) return false
+  return arr.every((b) => typeof b === 'number' && Number.isInteger(b) && b >= 0 && b <= 255)
+}
+
+/**
+ * Parse mutual exchange binary payload (offer or answer)
+ * Returns null if invalid format or version
+ */
+export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null {
+  try {
+    if (!isMutualPayload(binary)) {
+      return null
+    }
+
+    const compressed = binary.slice(4)
+    const jsonBytes = pako.inflate(compressed)
+    const json = new TextDecoder().decode(jsonBytes)
+    const payload = JSON.parse(json)
+
+    if (!isValidSignalingPayload(payload)) {
+      return null
+    }
+
+    // Validate publicKey is a valid P-256 uncompressed key (65 bytes)
+    if (!isValidPublicKeyArray(payload.publicKey)) {
+      return null
+    }
+
+    return payload
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Check if binary payload is mutual exchange format (SS02)
+ */
+export function isMutualPayload(binary: Uint8Array): boolean {
   return (
-    binary.length > 20 &&
+    binary.length > 4 &&
     binary[0] === 0x53 &&
     binary[1] === 0x53 &&
     binary[2] === 0x30 &&
-    binary[3] === 0x31
+    binary[3] === 0x32
   )
 }
 
 /**
- * Estimate compressed payload size in bytes
+ * Generate base64 string for clipboard (mutual exchange)
  */
-export function estimatePayloadSize(payload: SignalingPayload): number {
-  const json = JSON.stringify(payload)
-  const compressed = pako.gzip(json)
-  return compressed.length
+export function generateMutualClipboardData(binary: Uint8Array): string {
+  return uint8ArrayToBase64(binary)
 }

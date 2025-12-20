@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef } from 'react'
 import {
-  isValidPin,
-  deriveKeyFromPin,
+  generateECDHKeyPair,
+  deriveSharedSecret,
+  deriveAESKeyFromSecret,
   parseChunkMessage,
   decryptChunk,
   MAX_MESSAGE_SIZE,
@@ -10,9 +11,9 @@ import {
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
 import {
-  decryptSignalingPayload,
-  generateAnswerQRBinary,
-  generateClipboardData,
+  parseMutualPayload,
+  generateMutualAnswerBinary,
+  generateMutualClipboardData,
   type SignalingPayload,
 } from '@/lib/manual-signaling'
 import type { TransferState, ReceivedContent, ContentType } from '@/lib/nostr/types'
@@ -22,7 +23,7 @@ export type ManualReceiveStatus =
   | 'idle'
   | 'waiting_for_offer'
   | 'generating_answer'
-  | 'showing_answer_qr'
+  | 'showing_answer'
   | 'connecting'
   | 'receiving'
   | 'complete'
@@ -30,14 +31,14 @@ export type ManualReceiveStatus =
 
 export interface ManualReceiveState extends Omit<TransferState, 'status'> {
   status: ManualReceiveStatus
-  answerQRData?: Uint8Array  // Binary data for QR code (gzipped JSON)
-  clipboardData?: string   // Raw JSON for copy button
+  answerData?: Uint8Array // Binary data for QR code
+  clipboardData?: string // Base64 for copy button
 }
 
 export interface UseManualReceiveReturn {
   state: ManualReceiveState
   receivedContent: ReceivedContent | null
-  receive: (pin: string) => Promise<void>
+  startReceive: () => void
   submitOffer: (offerData: Uint8Array) => void
   cancel: () => void
   reset: () => void
@@ -55,9 +56,6 @@ export function useManualReceive(): UseManualReceiveReturn {
   const cancelledRef = useRef(false)
   const receivingRef = useRef(false)
 
-  // Store PIN for key derivation after offer is received
-  const pinRef = useRef<string | null>(null)
-
   // Resolve function for offer submission
   const offerResolverRef = useRef<((payload: SignalingPayload) => void) | null>(null)
   const offerRejectRef = useRef<((error: Error) => void) | null>(null)
@@ -67,7 +65,6 @@ export function useManualReceive(): UseManualReceiveReturn {
     receivingRef.current = false
     offerResolverRef.current = null
     offerRejectRef.current = null
-    pinRef.current = null
     if (rtcRef.current) {
       rtcRef.current.close()
       rtcRef.current = null
@@ -82,37 +79,44 @@ export function useManualReceive(): UseManualReceiveReturn {
 
   const submitOffer = useCallback((offerBinary: Uint8Array) => {
     if (!offerResolverRef.current) return
-    if (!pinRef.current) return
-    decryptSignalingPayload(offerBinary, pinRef.current).then((decrypted) => {
-      if (!decrypted) {
-        offerRejectRef.current?.(new Error('Invalid PIN or QR data'))
-        offerResolverRef.current = null
-        return
-      }
-      offerResolverRef.current?.(decrypted)
-    })
+
+    // Parse mutual payload (no decryption needed)
+    const parsed = parseMutualPayload(offerBinary)
+    if (!parsed) {
+      offerRejectRef.current?.(new Error('Invalid offer format'))
+      offerResolverRef.current = null
+      return
+    }
+    if (parsed.type !== 'offer') {
+      offerRejectRef.current?.(new Error('Expected offer, got answer'))
+      offerResolverRef.current = null
+      return
+    }
+    if (!parsed.publicKey) {
+      offerRejectRef.current?.(new Error('Missing public key in offer'))
+      offerResolverRef.current = null
+      return
+    }
+    offerResolverRef.current?.(parsed)
   }, [])
 
-  const receive = useCallback(async (pin: string) => {
+  const startReceive = useCallback(() => {
     // Guard against concurrent invocations
     if (receivingRef.current) return
     receivingRef.current = true
     cancelledRef.current = false
     setReceivedContent(null)
 
+    // Start the receive flow
+    doReceive()
+  }, [])
+
+  const doReceive = async () => {
     try {
-      // Validate PIN
-      if (!isValidPin(pin)) {
-        setState({ status: 'error', message: 'Invalid PIN format' })
-        return
-      }
-
-      pinRef.current = pin
-
-      // Show input for pasting offer QR data
+      // Show input for scanning/pasting offer
       setState({
         status: 'waiting_for_offer',
-        message: 'Scan sender\'s QR code and paste the data below',
+        message: 'Scan or paste the sender\'s code',
       })
 
       // Wait for offer to be submitted
@@ -131,33 +135,29 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       if (cancelledRef.current) return
 
-      // Validate offer payload
-      if (offerPayload.type !== 'offer') {
-        setState({ status: 'error', message: 'Invalid QR: Expected offer data' })
-        return
-      }
-
-      // Enforce TTL before establishing any session, even if PIN is correct
+      // Enforce TTL
       if (typeof offerPayload.createdAt !== 'number' || !Number.isFinite(offerPayload.createdAt)) {
-        setState({ status: 'error', message: 'Transfer request missing TTL. Ask sender to generate a new QR/PIN.' })
+        setState({ status: 'error', message: 'Offer missing timestamp. Ask sender to create a new one.' })
         return
       }
       if (Date.now() - offerPayload.createdAt > TRANSFER_EXPIRATION_MS) {
-        setState({ status: 'error', message: 'Transfer expired. Ask sender to generate a new QR/PIN.' })
+        setState({ status: 'error', message: 'Offer expired. Ask sender to create a new one.' })
         return
       }
 
       // Extract metadata from offer
-      const { contentType, totalBytes, fileName, fileSize, mimeType, salt: saltArray } = offerPayload
+      const { contentType, totalBytes, fileName, fileSize, mimeType, salt: saltArray, publicKey: senderPublicKeyArray } = offerPayload
       const isFile = contentType === 'file'
 
-      // Derive key from PIN and salt (for decrypting chunks)
+      // Validate required fields
       if (!saltArray) {
         setState({ status: 'error', message: 'Invalid offer: missing encryption salt' })
         return
       }
-      const salt = new Uint8Array(saltArray)
-      const key = await deriveKeyFromPin(pin, salt)
+      if (!senderPublicKeyArray) {
+        setState({ status: 'error', message: 'Invalid offer: missing public key' })
+        return
+      }
 
       // Security check: Enforce MAX_MESSAGE_SIZE
       if (totalBytes && totalBytes > MAX_MESSAGE_SIZE) {
@@ -167,6 +167,18 @@ export function useManualReceive(): UseManualReceiveReturn {
         })
         return
       }
+
+      if (cancelledRef.current) return
+
+      // Generate our ECDH keypair and derive shared secret
+      setState({ status: 'generating_answer', message: 'Generating keys...' })
+
+      const ecdhKeyPair = await generateECDHKeyPair()
+      const senderPublicKey = new Uint8Array(senderPublicKeyArray)
+      const salt = new Uint8Array(saltArray)
+
+      const sharedSecret = await deriveSharedSecret(ecdhKeyPair.privateKey, senderPublicKey)
+      const key = await deriveAESKeyFromSecret(sharedSecret, salt)
 
       if (cancelledRef.current) return
 
@@ -263,23 +275,15 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       if (cancelledRef.current) return
 
-      // Generate binary QR data with answer + candidates
-      const qrBinaryData = await generateAnswerQRBinary(answerSDP!, iceCandidates, pin)
+      // Generate answer with our public key
+      const answerBinary = generateMutualAnswerBinary(answerSDP!, iceCandidates, ecdhKeyPair.publicKeyBytes)
+      const clipboardBase64 = generateMutualClipboardData(answerBinary)
 
-      // Generate base64 clipboard data
-      const answerPayload: SignalingPayload = {
-        type: 'answer',
-        sdp: answerSDP!.sdp || '',
-        candidates: iceCandidates.map(c => c.candidate),
-        createdAt: Date.now(),
-      }
-      const clipboardBase64 = await generateClipboardData(answerPayload, pin)
-
-      // Show QR code and wait for connection
+      // Show answer and wait for connection
       setState({
-        status: 'showing_answer_qr',
-        message: 'Show this QR to sender and wait for connection',
-        answerQRData: qrBinaryData,
+        status: 'showing_answer',
+        message: 'Show this to sender and wait for connection',
+        answerData: answerBinary,
         clipboardData: clipboardBase64,
         contentType: contentType as ContentType,
         fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
@@ -423,13 +427,12 @@ export function useManualReceive(): UseManualReceiveReturn {
       receivingRef.current = false
       offerResolverRef.current = null
       offerRejectRef.current = null
-      pinRef.current = null
       if (rtcRef.current) {
         rtcRef.current.close()
         rtcRef.current = null
       }
     }
-  }, [])
+  }
 
-  return { state, receivedContent, receive, submitOffer, cancel, reset }
+  return { state, receivedContent, startReceive, submitOffer, cancel, reset }
 }
