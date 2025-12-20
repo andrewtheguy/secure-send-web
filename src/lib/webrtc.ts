@@ -1,6 +1,6 @@
 export type WebRTCSignal =
-    | { type: 'offer'; sdp: string | null | undefined }
-    | { type: 'answer'; sdp: string | null | undefined }
+    | { type: 'offer'; sdp: string | undefined }
+    | { type: 'answer'; sdp: string | undefined }
     | { type: 'candidate'; candidate?: RTCIceCandidateInit | null };
 
 type WebRTCData = string | ArrayBuffer | ArrayBufferView | Blob
@@ -90,7 +90,7 @@ export class WebRTCConnection {
         try {
             if (signal.type === 'offer') {
                 console.log('Setting remote offer...');
-                await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp ?? undefined }));
+                await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
                 this.remoteDescriptionSet = true;
                 await this.processQueue();
 
@@ -100,7 +100,7 @@ export class WebRTCConnection {
                 this.onSignal({ type: 'answer', sdp: answer.sdp });
             } else if (signal.type === 'answer') {
                 console.log('Setting remote answer...');
-                await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp ?? undefined }));
+                await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
                 this.remoteDescriptionSet = true;
                 await this.processQueue();
             } else if (signal.type === 'candidate') {
