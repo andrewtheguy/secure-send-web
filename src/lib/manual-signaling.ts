@@ -227,8 +227,8 @@ export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null 
     const obfuscatedInner = binary.subarray(4)
     const currentBucket = Math.floor(Date.now() / 1000 / BUCKET_SEC)
 
-    // Try current and previous 3 buckets (approx 4 hours window)
-    for (let i = 0; i <= 3; i++) {
+    // Try current and previous bucket (approx 2 hours window)
+    for (let i = 0; i <= 1; i++) {
       try {
         const seed = getSeedForBucket(currentBucket - i)
 

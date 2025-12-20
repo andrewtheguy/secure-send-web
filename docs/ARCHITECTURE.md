@@ -218,7 +218,13 @@ The following structure is revealed *after* successful de-obfuscation using the 
 
 **Time-Bucketed Obfuscation:**
 
-The obfuscation seed changes every hour to discourage long-term analysis of binary patterns.
+The obfuscation seed changes every hour to ensure the **ephemerality** of signaling data and to make the payload **look more random**. This provides several benefits:
+- **Casual Protection**: Offers a layer of deterrence against casual non-technical observers by making the raw data unreadable without the correct hourly seed.
+- **Stale Data Prevention**: Prevents the utility of stale signaling data, such as a photograph of a QR code, a screenshot, or lingering clipboard contents.
+- **Payload Randomness**: Ensures that signaling data generated at different times results in significantly different binary outputs.
+
+> [!IMPORTANT]
+> **Real Protection**: The actual security for manual signaling is the inherent **TTL (1 hour)** and the data-layer encryption. Since signaling data is ephemeral, it becomes naturally useless once the window expires. Confidentiality is strictly enforced by ECDH mutual exchange and AES-256-GCM encryption of the WebRTC data channel.
 
 - **Bucket Size**: 1 hour (`3600` seconds).
 - **Input (`bucketEpoch`)**: `floor(unix_timestamp_seconds / 3600)`.
@@ -236,17 +242,17 @@ To ensure cross-implementation compatibility, the seed MUST be derived using the
 *Note: In environments like JavaScript, `Math.imul` should be used for the multiplication steps to ensure consistent 32-bit integer behavior.*
 
 **Verification Window & Edge Cases:**
-A 4-hour sliding window (current bucket + 3 previous buckets) is used to verify incoming payloads. This design has several implications:
+A 2-hour sliding window (current bucket + 1 previous bucket) is used to verify incoming payloads. This design has several implications:
 
--   **Validity Duration**: A payload's effective validity is between **3 and 4 hours**. If generated at the exact start of a bucket, it remains valid for 4 hours. If generated at the very end, it remains valid for just over 3 hours (as it will be "previous bucket #3" after 3 hours have passed).
--   **Clock Drift Tolerance**: The window provides inherent tolerance for clock drift between the sender and receiver. A receiver with a clock up to **1 hour fast** can still parse the "current" bucket of a sender. A receiver with a clock up to **3 hours slow** can still find the payload in its history.
--   **Boundary Transitions**: When the hour rolls over, the oldest bucket (4 hours ago) is dropped from the verification list, and a new "current" bucket is added.
--   **Out-of-Sync Clocks**: If the sender and receiver clocks differ by more than the window's tolerance (e.g., >1 hour fast or >3 hours slow), the de-obfuscation will fail. In such cases, the user must ensure their system clocks are synchronized to the correct UTC time.
+-   **Validity Duration**: A payload's effective validity is between **1 and 2 hours**, aligning with the 1-hour backend TTL. If generated at the start of a bucket, it remains valid for 2 hours. If generated at the end, it remains valid for just over 1 hour.
+-   **Clock Drift Tolerance**: The window provides inherent tolerance for clock drift (+/- 1 hour).
+-   **Boundary Transitions**: When the hour rolls over, the previous bucket is dropped, and the new hour becomes the current bucket.
+-   **Out-of-Sync Clocks**: If the sender and receiver clocks differ by more than the window's tolerance (e.g., >1 hour fast or slow), de-obfuscation will fail.
 
 **Legacy Format (SS01):**
 Prior to the full-payload obfuscation refactor, the format was:
 `[4 bytes: "SS01" magic][16 bytes: salt][encrypted deflate-compressed payload]`
-
+and it is no longer accepted by the backend.
 
 > [!NOTE]
 | The obfuscation's goal is simply to avoid casual inspection. The actual security of the transfer is provided by ECDH mutual exchange and AES-256-GCM encryption of the data channel.
