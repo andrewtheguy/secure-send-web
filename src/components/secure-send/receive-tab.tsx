@@ -266,7 +266,7 @@ export function ReceiveTab() {
                     PIN Fingerprint: {pinFingerprint}
                   </div>
                   <p>- It should match the sender's PIN fingerprint if you entered the same words/PIN.</p>
-                  <p>- The PIN Fingerprint is a one-way checksum: it lets you compare a match, but you can't reverse it to get the PIN or decrypt the data.</p>
+                  <p>- After you enter the correct PIN it becomes a non-extractable key; this fingerprint is the one-way checksum you can compare to confirm both sides derived the same secret, and it cannot be reversed to recover the PIN or decrypt any data.</p>
                 </div>
               )}
 

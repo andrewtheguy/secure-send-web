@@ -284,7 +284,7 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
             PIN Fingerprint: {fingerprint}
           </div>
           <p>- It should match the receiver's PIN fingerprint if they entered the same words/PIN.</p>
-          <p>- The PIN Fingerprint is a one-way checksum: it lets you compare a match, but you can't reverse it to get the PIN or decrypt the data.</p>
+          <p>- On the receiver's end, after the PIN is entered, it becomes a non-extractable key; this fingerprint is the one-way checksum you can compare to confirm you both derived the same secret, but it cannot be reversed to recover the PIN or decrypt any data.</p>
         </div>
       )}
     </div>
