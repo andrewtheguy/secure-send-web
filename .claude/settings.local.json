@@ -9,7 +9,8 @@
       "Bash(npx shadcn@latest add tabs progress textarea card input alert -y)",
       "Bash(npm run build:*)",
       "Bash(ls:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(grep:*)"
     ]
   }
 }

@@ -3,15 +3,10 @@ import { AES_KEY_LENGTH } from './constants'
 /**
  * ECDH Key Exchange for Mutual Authentication
  *
- * SECURITY NOTE: The Web Crypto API's generateKey applies the extractability flag
- * to both public and private keys together. We set extractable=true because the
- * public key must be exported to raw bytes for QR/clipboard transmission.
- *
- * This means the private key is technically extractable, but:
- * - Private keys are EPHEMERAL: regenerated for each transfer session
- * - Private keys must NEVER be exported, serialized, or stored
- * - Private keys are cleared from refs immediately after deriving the shared secret
- * - Only the deriveBits operation is used on private keys
+ * SECURITY: Private keys are generated as non-extractable to prevent exfiltration.
+ * We work around the Web Crypto API limitation (extractability applies to both keys)
+ * by generating with extractable=true, exporting and re-importing the private key
+ * as non-extractable, then discarding the extractable reference.
  */
 
 /**
@@ -39,15 +34,13 @@ export interface ECDHKeyPair {
  * Generate an ephemeral ECDH key pair using P-256 curve.
  * Returns the key pair along with raw public key bytes for transmission.
  *
- * IMPORTANT: The private key is ephemeral and must be:
- * - Used only for a single key exchange
- * - Never exported, serialized, or persisted
- * - Cleared from memory after deriving the shared secret
+ * The private key is returned as non-extractable for security:
+ * - Generated with extractable=true (required to export public key)
+ * - Private key is re-imported as non-extractable
+ * - Original extractable private key reference is discarded
  */
 export async function generateECDHKeyPair(): Promise<ECDHKeyPair> {
-  // extractable=true is required to export the public key to raw bytes.
-  // The private key is also marked extractable as a side effect (Web Crypto limitation),
-  // but must NEVER actually be exported - it's used only for deriveBits.
+  // Generate with extractable=true so we can export keys
   const keyPair = await crypto.subtle.generateKey(
     {
       name: 'ECDH',
@@ -62,9 +55,22 @@ export async function generateECDHKeyPair(): Promise<ECDHKeyPair> {
     await crypto.subtle.exportKey('raw', keyPair.publicKey)
   )
 
+  // Export private key, then re-import as non-extractable
+  const privateKeyPkcs8 = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey)
+  const nonExtractablePrivateKey = await crypto.subtle.importKey(
+    'pkcs8',
+    privateKeyPkcs8,
+    {
+      name: 'ECDH',
+      namedCurve: 'P-256',
+    },
+    false, // non-extractable
+    ['deriveBits']
+  )
+
   return {
     publicKey: keyPair.publicKey,
-    privateKey: keyPair.privateKey,
+    privateKey: nonExtractablePrivateKey,
     publicKeyBytes,
   }
 }
@@ -93,7 +99,7 @@ export async function importECDHPublicKey(publicKeyBytes: Uint8Array): Promise<C
       name: 'ECDH',
       namedCurve: 'P-256',
     },
-    true,
+    false, // non-extractable - only used for deriveBits
     []
   )
 }
