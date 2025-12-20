@@ -439,7 +439,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                   ...s,
                   progress: {
                     current: cloudTotalBytes + loaded,
-                    total: resolvedFileSize || (chunkPayload.totalChunks * chunkPayload.chunkSize),
+                    total: resolvedFileSize ?? (chunkPayload.totalChunks * chunkPayload.chunkSize),
                   },
                 }))
               }
