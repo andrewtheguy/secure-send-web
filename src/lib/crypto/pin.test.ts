@@ -2,10 +2,10 @@ import { expect, test, describe } from 'vitest'
 import { generatePin, pinToWords, wordsToPin, isValidPinWord } from './pin'
 
 describe('PIN Word Mapping', () => {
-    test('pinToWords should map all characters in charset', () => {
-        const pin = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789-/:;()$&@?!.,"'
+    test('pinToWords should result in 7 words', () => {
+        const pin = 'A/B:C;D(E)F' // 11 chars + 1 for checksum
         const words = pinToWords(pin)
-        expect(words.length).toBe(pin.length)
+        expect(words.length).toBe(7)
         expect(words.every(w => w.length > 0)).toBe(true)
     })
 

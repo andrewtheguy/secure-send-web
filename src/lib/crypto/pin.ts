@@ -172,27 +172,57 @@ export function generateTransferId(): string {
     .join('')
 }
 /**
- * Convert alphanumeric PIN to word-based PIN
+ * Convert alphanumeric PIN to word-based PIN (7 words using BIP-39)
  */
 export function pinToWords(pin: string): string[] {
-  return [...pin].map((char) => {
-    const index = PIN_CHARSET.indexOf(char)
-    if (index === -1) return ''
-    return PIN_WORDLIST[index]
-  })
+  if (!pin) return []
+  const charsetSize = BigInt(PIN_CHARSET.length)
+  const wordlistSize = BigInt(PIN_WORDLIST.length)
+
+  // Convert PIN (base 69) to BigInt
+  let num = BigInt(0)
+  for (let i = 0; i < pin.length; i++) {
+    const charIndex = PIN_CHARSET.indexOf(pin[i])
+    if (charIndex === -1) return []
+    num = num * charsetSize + BigInt(charIndex)
+  }
+
+  // Convert BigInt to words (base 2048)
+  const result: string[] = []
+  for (let i = 0; i < 7; i++) {
+    const wordIndex = Number(num % wordlistSize)
+    result.unshift(PIN_WORDLIST[wordIndex])
+    num = num / wordlistSize
+  }
+
+  return result
 }
 
 /**
- * Convert word-based PIN back to alphanumeric PIN
+ * Convert 7-word PIN back to 12-character alphanumeric PIN
  */
 export function wordsToPin(words: string[]): string {
-  return words
-    .map((word) => {
-      const index = PIN_WORDLIST.indexOf(word.toLowerCase())
-      if (index === -1) return ''
-      return PIN_CHARSET[index]
-    })
-    .join('')
+  if (words.length === 0) return ''
+  const charsetSize = BigInt(PIN_CHARSET.length)
+  const wordlistSize = BigInt(PIN_WORDLIST.length)
+
+  // Convert words (base 2048) back to BigInt
+  let num = BigInt(0)
+  for (const word of words) {
+    const wordIndex = PIN_WORDLIST.indexOf(word.toLowerCase())
+    if (wordIndex === -1) continue
+    num = num * wordlistSize + BigInt(wordIndex)
+  }
+
+  // Convert BigInt back to PIN (base 69)
+  const result: string[] = []
+  for (let i = 0; i < PIN_LENGTH; i++) {
+    const charIndex = Number(num % charsetSize)
+    result.unshift(PIN_CHARSET[charIndex])
+    num = num / charsetSize
+  }
+
+  return result.join('')
 }
 
 /**

@@ -99,7 +99,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         setError(null)
       }
 
-      const validWords = words.filter((w) => isValidPinWord(w)).slice(0, PIN_LENGTH)
+      const validWords = words.filter((w) => isValidPinWord(w)).slice(0, 7)
       const pin = wordsToPin(validWords)
 
       pinRef.current = pin
@@ -110,7 +110,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         inputRef.current.value = e.target.value
       }
 
-      const isPinValid = validWords.length === PIN_LENGTH && isValidPin(pin)
+      const isPinValid = validWords.length === 7 && isValidPin(pin)
       onPinChange(pin, isPinValid)
     }
 
@@ -130,7 +130,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       })
     }
 
-    const isComplete = displayLength === PIN_LENGTH
+    const isComplete = displayLength === (useWords ? 7 : PIN_LENGTH)
     const hasChecksumError = isComplete && !isValidPin(pinRef.current)
 
     return (
@@ -140,7 +140,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
           type="text"
           defaultValue=""
           onChange={useWords ? handleWordChange : handleChange}
-          placeholder={useWords ? `Enter ${PIN_LENGTH}-word PIN` : `Enter ${PIN_LENGTH}-character PIN`}
+          placeholder={useWords ? `Enter 7-word PIN` : `Enter ${PIN_LENGTH}-character PIN`}
           className={`font-mono ${useWords ? 'text-base' : 'text-xl'} text-center tracking-wider ${error || hasChecksumError
             ? 'border-destructive'
             : isComplete
@@ -159,7 +159,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
             {error ||
               (hasChecksumError
                 ? 'Invalid PIN'
-                : `${displayLength}/${PIN_LENGTH} ${useWords ? 'words' : 'characters'} (case sensitive)`)}
+                : `${displayLength}/${useWords ? '7' : PIN_LENGTH} ${useWords ? 'words' : 'characters'} (case sensitive)`)}
           </span>
           <button
             onClick={toggleMode}
