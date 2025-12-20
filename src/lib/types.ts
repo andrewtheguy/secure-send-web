@@ -7,3 +7,8 @@ export interface ReceivedFile {
 }
 
 export type ReceivedContent = ReceivedFile
+
+export interface PinKeyMaterial {
+  key: CryptoKey
+  hint: string
+}

@@ -1,25 +1,23 @@
 import { useState, useCallback, useRef } from 'react'
 import {
-  isValidPin,
-  deriveKeyFromPin,
   parseChunkMessage,
   decryptChunk,
   MAX_MESSAGE_SIZE,
   ENCRYPTION_CHUNK_SIZE,
   TRANSFER_EXPIRATION_MS,
+  deriveKeyFromPinKey,
 } from '@/lib/crypto'
 import {
-  derivePeerId,
   PeerJSSignaling,
   type PeerJSMessage,
 } from '@/lib/peerjs-signaling'
 import type { TransferState } from '@/lib/nostr/types'
-import type { ReceivedContent } from '@/lib/types'
+import type { PinKeyMaterial, ReceivedContent } from '@/lib/types'
 
 export interface UsePeerJSReceiveReturn {
   state: TransferState
   receivedContent: ReceivedContent | null
-  receive: (pin: string) => Promise<void>
+  receive: (pinMaterial: PinKeyMaterial) => Promise<void>
   cancel: () => void
   reset: () => void
 }
@@ -47,7 +45,7 @@ export function usePeerJSReceive(): UsePeerJSReceiveReturn {
     setReceivedContent(null)
   }, [cancel])
 
-  const receive = useCallback(async (pin: string) => {
+  const receive = useCallback(async (pinMaterial: PinKeyMaterial) => {
     // Guard against concurrent invocations
     if (receivingRef.current) return
     receivingRef.current = true
@@ -55,15 +53,14 @@ export function usePeerJSReceive(): UsePeerJSReceiveReturn {
     setReceivedContent(null)
 
     try {
-      // Validate PIN
-      if (!isValidPin(pin)) {
-        setState({ status: 'error', message: 'Invalid PIN format' })
+      if (!pinMaterial?.key || !pinMaterial?.hint) {
+        setState({ status: 'error', message: 'PIN unavailable. Please re-enter.' })
         return
       }
 
       // Derive peer ID from PIN
       setState({ status: 'connecting', message: 'Connecting to sender...' })
-      const peerId = await derivePeerId(pin)
+      const peerId = `ss-${pinMaterial.hint}`
 
       if (cancelledRef.current) return
 
@@ -116,7 +113,7 @@ export function usePeerJSReceive(): UsePeerJSReceiveReturn {
       }
 
       const salt = new Uint8Array(metadata.salt)
-      const key = await deriveKeyFromPin(pin, salt)
+      const key = await deriveKeyFromPinKey(pinMaterial.key, salt)
 
       if (metadata.totalBytes > MAX_MESSAGE_SIZE) {
         setState({

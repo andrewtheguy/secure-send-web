@@ -1,8 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import {
-  isValidPin,
-  computePinHint,
-  deriveKeyFromPin,
+  deriveKeyFromPinKey,
   decrypt,
   encrypt,
   parseChunkMessage,
@@ -29,7 +27,7 @@ import {
   createSignalingEvent,
   parseSignalingEvent,
 } from '@/lib/nostr'
-import type { ReceivedContent } from '@/lib/types'
+import type { PinKeyMaterial, ReceivedContent } from '@/lib/types'
 import { downloadFromCloud } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { WebRTCConnection } from '@/lib/webrtc'
@@ -64,7 +62,7 @@ async function publishWithBackup(
 export interface UseNostrReceiveReturn {
   state: TransferState
   receivedContent: ReceivedContent | null
-  receive: (pin: string) => Promise<void>
+  receive: (pinMaterial: PinKeyMaterial) => Promise<void>
   cancel: () => void
   reset: () => void
 }
@@ -92,7 +90,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     setReceivedContent(null)
   }, [cancel])
 
-  const receive = useCallback(async (pin: string) => {
+  const receive = useCallback(async (pinMaterial: PinKeyMaterial) => {
     // Guard against concurrent invocations
     if (receivingRef.current) return
     receivingRef.current = true
@@ -100,15 +98,14 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     setReceivedContent(null)
 
     try {
-      // Validate PIN
-      if (!isValidPin(pin)) {
-        setState({ status: 'error', message: 'Invalid PIN format' })
+      if (!pinMaterial?.key || !pinMaterial?.hint) {
+        setState({ status: 'error', message: 'PIN unavailable. Please re-enter.' })
         return
       }
 
       // Derive key from PIN
       setState({ status: 'connecting', message: 'Deriving encryption key...' })
-      const pinHint = await computePinHint(pin)
+      const pinHint = pinMaterial.hint
 
       if (cancelledRef.current) return
 
@@ -168,7 +165,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
         try {
           // Derive key with this salt
-          const derivedKey = await deriveKeyFromPin(pin, parsed.salt)
+          const derivedKey = await deriveKeyFromPinKey(pinMaterial.key, parsed.salt)
 
           // Try to decrypt
           const decrypted = await decrypt(derivedKey, parsed.encryptedPayload)

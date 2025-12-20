@@ -5,14 +5,26 @@ import { Button } from '@/components/ui/button'
 import {
   PIN_LENGTH,
   PIN_CHARSET,
+  PIN_WORDLIST,
   isValidPin,
   wordsToPin,
   isValidPinWord,
-  PIN_WORDLIST,
+  detectSignalingMethod,
+  computePinHint,
+  importPinKey,
 } from '@/lib/crypto'
+import type { SignalingMethod } from '@/lib/nostr/types'
+
+export interface PinChangePayload {
+  key: CryptoKey | null
+  hint: string | null
+  method: SignalingMethod | null
+  isValid: boolean
+  length: number
+}
 
 interface PinInputProps {
-  onPinChange: (pin: string, isValid: boolean) => void
+  onPinChange: (payload: PinChangePayload) => void
   disabled?: boolean
 }
 
@@ -41,9 +53,30 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
     const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const mountedRef = useRef(true)
+    const securedKeyRef = useRef<CryptoKey | null>(null)
+    const securedHintRef = useRef<string | null>(null)
+    const securedMethodRef = useRef<SignalingMethod | null>(null)
+
+    const clearSecuredData = useCallback(() => {
+      securedKeyRef.current = null
+      securedHintRef.current = null
+      securedMethodRef.current = null
+    }, [])
+
+    const emitChange = useCallback((isValid: boolean, length: number, method: SignalingMethod | null) => {
+      const resolvedMethod = method ?? securedMethodRef.current
+      onPinChange({
+        key: isValid ? securedKeyRef.current : null,
+        hint: isValid ? securedHintRef.current : null,
+        method: resolvedMethod,
+        isValid,
+        length,
+      })
+    }, [onPinChange])
 
     useImperativeHandle(ref, () => ({
       clear: () => {
+        clearSecuredData()
         charPinRef.current = ''
         wordPinRef.current = ''
         setCharIsValid(false)
@@ -52,6 +85,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         setWordDisplayLength(0)
         setWords(Array(7).fill(''))
         if (charInputRef.current) charInputRef.current.value = ''
+        emitChange(false, 0, null)
       },
       getValue: () => {
         // Return whichever PIN is valid, prioritizing character PIN
@@ -70,13 +104,48 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       }
     }, [])
 
-    // Notify parent with best available PIN
-    const notifyPinChange = useCallback(() => {
-      // Prioritize character PIN if valid, otherwise use word PIN
-      const pin = isValidPin(charPinRef.current) ? charPinRef.current : wordPinRef.current
-      const isPinValid = isValidPin(pin)
-      onPinChange(pin, isPinValid)
-    }, [onPinChange])
+    const securePin = useCallback(async (pin: string) => {
+      if (!isValidPin(pin)) return
+
+      try {
+        const method = detectSignalingMethod(pin)
+        const [keyMaterial, hint] = await Promise.all([
+          importPinKey(pin),
+          computePinHint(pin),
+        ])
+
+        securedKeyRef.current = keyMaterial
+        securedHintRef.current = hint
+        securedMethodRef.current = method
+
+        // Clear plaintext traces from refs/state
+        charPinRef.current = ''
+        wordPinRef.current = ''
+        setWords(Array(7).fill(''))
+
+        // Keep UX feedback without keeping the raw value
+        setCharDisplayLength(PIN_LENGTH)
+        setWordDisplayLength(7)
+        setCharIsValid(true)
+        setWordIsValid(true)
+        setError(null)
+
+        if (charInputRef.current) {
+          charInputRef.current.value = ''
+        }
+
+        emitChange(true, PIN_LENGTH, method ?? null)
+      } catch (err) {
+        console.error('Failed to secure PIN', err)
+        clearSecuredData()
+        emitChange(false, 0, null)
+        setError('Failed to secure PIN')
+      }
+    }, [clearSecuredData, emitChange])
+
+    const updateMethod = useCallback((pinCandidate: string) => {
+      securedMethodRef.current = detectSignalingMethod(pinCandidate)
+    }, [])
 
     const updateWordPin = useCallback((updatedWords: string[]) => {
       const pin = wordsToPin(updatedWords)
@@ -84,7 +153,9 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
 
       setWordDisplayLength(validWordCount)
       wordPinRef.current = pin
-      setWordIsValid(isValidPin(pin))
+      const pinIsValid = isValidPin(pin)
+      setWordIsValid(pinIsValid)
+      updateMethod(pin)
 
       if (validWordCount > 0) {
         charPinRef.current = ''
@@ -93,8 +164,13 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         if (charInputRef.current) charInputRef.current.value = ''
       }
 
-      notifyPinChange()
-    }, [notifyPinChange])
+      if (pinIsValid) {
+        void securePin(pin)
+      } else {
+        clearSecuredData()
+        emitChange(false, validWordCount, securedMethodRef.current)
+      }
+    }, [clearSecuredData, emitChange, securePin, updateMethod])
 
     // Handling character mode changes
     const handleCharChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -110,8 +186,10 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       const filtered = validChars.slice(0, PIN_LENGTH).join('')
       setCharDisplayLength(filtered.length)
       charPinRef.current = filtered
-      setCharIsValid(isValidPin(filtered))
+      const filteredIsValid = isValidPin(filtered)
+      setCharIsValid(filteredIsValid)
       if (charInputRef.current) charInputRef.current.value = filtered
+      updateMethod(filtered)
 
       // Clear word input when character input is used
       if (filtered.length > 0) {
@@ -121,7 +199,12 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         setWordDisplayLength(0)
       }
 
-      notifyPinChange()
+      if (filteredIsValid) {
+        void securePin(filtered)
+      } else {
+        clearSecuredData()
+        emitChange(false, filtered.length, securedMethodRef.current)
+      }
     }
 
     // Handle focus on word input field
