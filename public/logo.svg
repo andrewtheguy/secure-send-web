@@ -1,22 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
   <!-- Folder tab -->
   <path d="M20 45 L20 40 Q20 35 25 35 L70 35 L80 50 L155 50 Q160 50 160 55"
-        fill="#171717" opacity="0.6"/>
+        fill="#4338CA" opacity="0.6"/>
 
   <!-- Folder body -->
   <path d="M20 50 L20 140 Q20 145 25 145 L155 145 Q160 145 160 140 L160 55 Q160 55 155 50 L80 50 L70 35 L25 35 Q20 35 20 40 Z"
-        fill="#171717"/>
+        fill="#4338CA"/>
 
-  <!-- Upload arrow (left inside folder) -->
-  <g opacity="0.85">
-    <line x1="45" y1="115" x2="45" y2="85" stroke="white" stroke-width="6" stroke-linecap="round"/>
-    <path d="M38 92 L45 85 L52 92" fill="none" stroke="white" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Upload arrow (left inside folder) - teal for sending -->
+  <g opacity="0.95">
+    <line x1="45" y1="115" x2="45" y2="85" stroke="#14B8A6" stroke-width="6" stroke-linecap="round"/>
+    <path d="M38 92 L45 85 L52 92" fill="none" stroke="#14B8A6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
 
-  <!-- Download arrow (right inside folder) -->
-  <g opacity="0.85">
-    <line x1="135" y1="85" x2="135" y2="115" stroke="white" stroke-width="6" stroke-linecap="round"/>
-    <path d="M128 108 L135 115 L142 108" fill="none" stroke="white" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Download arrow (right inside folder) - cyan for receiving -->
+  <g opacity="0.95">
+    <line x1="135" y1="85" x2="135" y2="115" stroke="#06B6D4" stroke-width="6" stroke-linecap="round"/>
+    <path d="M128 108 L135 115 L142 108" fill="none" stroke="#06B6D4" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
 
   <!-- Lock circle background -->
@@ -24,10 +24,10 @@
 
   <!-- Lock shackle -->
   <path d="M82 90 Q82 80 90 80 Q98 80 98 90 L98 98"
-        fill="none" stroke="#171717" stroke-width="5" stroke-linecap="round"/>
+        fill="none" stroke="#4338CA" stroke-width="5" stroke-linecap="round"/>
 
   <!-- Lock body -->
-  <rect x="78" y="98" width="24" height="20" rx="2" fill="#171717"/>
+  <rect x="78" y="98" width="24" height="20" rx="2" fill="#4338CA"/>
 
   <!-- Keyhole -->
   <circle cx="90" cy="105" r="2.5" fill="white"/>
