@@ -284,6 +284,7 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
             PIN Fingerprint: {fingerprint}
           </div>
           <p>It should match receiver's PIN fingerprint if they entered the same words/PIN.</p>
+          <p>This fingerprint doesn't reveal your PIN or data and doesn't affect security.</p>
         </div>
       )}
     </div>

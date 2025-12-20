@@ -265,7 +265,8 @@ export function ReceiveTab() {
                     <Fingerprint className="h-3 w-3" />
                     PIN Fingerprint: {pinFingerprint}
                   </div>
-                  <p>It should match sender's PIN fingerprint if they entered the same words/PIN.</p>
+                  <p>It should match sender's PIN fingerprint if you entered the same words/PIN.</p>
+                  <p>This fingerprint doesn't reveal your PIN or data and doesn't affect security.</p>
                 </div>
               )}
 
