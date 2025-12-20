@@ -56,6 +56,8 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
       }
     }
   }, [])
+  const words = pinToWords(pin)
+  const wordsDisplay = words.join(' ')
 
   const handleCopy = useCallback(async () => {
     // Clear any existing timeout
@@ -65,7 +67,8 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
     }
 
     try {
-      await navigator.clipboard.writeText(pin)
+      const textToCopy = useWords ? wordsDisplay : pin
+      await navigator.clipboard.writeText(textToCopy)
       if (!mountedRef.current) return
 
       setError(false)
@@ -89,7 +92,7 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
         }
       }, 2000)
     }
-  }, [pin])
+  }, [pin, useWords, wordsDisplay])
 
   const toggleMask = useCallback(() => {
     setIsMasked((prev) => !prev)
@@ -106,9 +109,6 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
     e.preventDefault()
     setUseWords((prev) => !prev)
   }, [])
-
-  const words = pinToWords(pin)
-  const wordsDisplay = words.join(' ')
 
   // Mask PIN with bullet characters
   const maskedPin = pin.replace(/./g, '\u2022')
