@@ -283,8 +283,8 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
             <Fingerprint className="h-3 w-3" />
             PIN Fingerprint: {fingerprint}
           </div>
-          <p>It should match receiver's PIN fingerprint if they entered the same words/PIN.</p>
-          <p>This fingerprint doesn't reveal your PIN or data and doesn't affect security.</p>
+          <p>- It should match the receiver's PIN fingerprint if they entered the same words/PIN.</p>
+          <p>- The PIN Fingerprint is a one-way checksum: it lets you compare a match, but you can't reverse it to get the PIN or decrypt the data.</p>
         </div>
       )}
     </div>
