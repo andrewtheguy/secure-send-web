@@ -206,9 +206,9 @@ export function useManualReceive(): UseManualReceiveReturn {
         (signal) => {
           // Collect signals (answer + candidates)
           if (signal.type === 'answer') {
-            answerSDP = signal
+            answerSDP = { type: 'answer', sdp: signal.sdp ?? undefined }
           } else if (signal.type === 'candidate' && signal.candidate) {
-            iceCandidates.push(signal.candidate)
+            iceCandidates.push(new RTCIceCandidate(signal.candidate))
           }
         },
         () => {

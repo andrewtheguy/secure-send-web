@@ -3,6 +3,8 @@ export type WebRTCSignal =
     | { type: 'answer'; sdp: string | null | undefined }
     | { type: 'candidate'; candidate?: RTCIceCandidateInit | null };
 
+type WebRTCData = string | ArrayBuffer | ArrayBufferView | Blob
+
 export class WebRTCConnection {
     private pc: RTCPeerConnection;
     private dataChannel: RTCDataChannel | null = null;
@@ -141,11 +143,23 @@ export class WebRTCConnection {
         }
     }
 
-    public send(data: ArrayBuffer | ArrayBufferView | string) {
-        if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            this.dataChannel.send(data);
-        } else {
+    public send(data: WebRTCData) {
+        if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
             throw new Error('Data channel not open');
+        }
+
+        if (typeof data === 'string') {
+            this.dataChannel.send(data);
+        } else if (data instanceof Blob) {
+            this.dataChannel.send(data);
+        } else if (data instanceof ArrayBuffer) {
+            this.dataChannel.send(data);
+        } else if (ArrayBuffer.isView(data)) {
+            const copyBuffer = new ArrayBuffer(data.byteLength);
+            new Uint8Array(copyBuffer).set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+            this.dataChannel.send(new Uint8Array(copyBuffer));
+        } else {
+            throw new Error('Unsupported data type for data channel send');
         }
     }
 
@@ -154,7 +168,7 @@ export class WebRTCConnection {
      * Waits for buffer to drain if it exceeds the threshold.
      */
     public async sendWithBackpressure(
-        data: ArrayBuffer | ArrayBufferView | string,
+        data: WebRTCData,
         bufferThreshold: number = 1024 * 1024 // 1MB default threshold
     ): Promise<void> {
         if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
@@ -180,7 +194,19 @@ export class WebRTCConnection {
             });
         }
 
-        this.dataChannel.send(data);
+        if (typeof data === 'string') {
+            this.dataChannel.send(data);
+        } else if (data instanceof Blob) {
+            this.dataChannel.send(data);
+        } else if (data instanceof ArrayBuffer) {
+            this.dataChannel.send(data);
+        } else if (ArrayBuffer.isView(data)) {
+            const copyBuffer = new ArrayBuffer(data.byteLength);
+            new Uint8Array(copyBuffer).set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+            this.dataChannel.send(new Uint8Array(copyBuffer));
+        } else {
+            throw new Error('Unsupported data type for data channel send');
+        }
     }
 
     public close() {

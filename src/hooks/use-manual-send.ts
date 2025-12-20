@@ -208,9 +208,9 @@ export function useManualSend(): UseManualSendReturn {
         (signal) => {
           // Collect signals (offer + candidates)
           if (signal.type === 'offer') {
-            offerSDP = signal
+            offerSDP = { type: 'offer', sdp: signal.sdp ?? undefined }
           } else if (signal.type === 'candidate' && signal.candidate) {
-            iceCandidates.push(signal.candidate)
+            iceCandidates.push(new RTCIceCandidate(signal.candidate))
           }
         },
         () => {
