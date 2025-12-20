@@ -62,9 +62,9 @@ export function useManualSend(): UseManualSendReturn {
   // Store data needed for answer processing
   const pendingTransferRef = useRef<{
     contentBytes: Uint8Array
-    fileName?: string
-    fileSize?: number
-    mimeType?: string
+    fileName: string
+    fileSize: number
+    mimeType: string
   } | null>(null)
 
   // Resolve function for answer submission
