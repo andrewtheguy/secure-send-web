@@ -1,8 +1,9 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
 import { Navbar } from '@/components/navbar'
 import { SendPage } from '@/pages/send'
 import { ReceivePage } from '@/pages/receive'
 import { AboutPage } from '@/pages/about'
+import { NotFoundPage } from '@/pages/not-found'
 
 function App() {
   return (
@@ -13,7 +14,7 @@ function App() {
           <Route path="/" element={<SendPage />} />
           <Route path="/receive" element={<ReceivePage />} />
           <Route path="/about" element={<AboutPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>
     </div>

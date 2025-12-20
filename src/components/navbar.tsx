@@ -1,4 +1,5 @@
 import { Link, NavLink } from 'react-router-dom'
+import { Download, Info, Send } from 'lucide-react'
 import { ModeToggle } from '@/components/mode-toggle'
 
 const linkBase =
@@ -19,6 +20,7 @@ export function Navbar() {
               `${linkBase} ${isActive ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`
             }
           >
+            <Send className="h-4 w-4" />
             Send
           </NavLink>
           <NavLink
@@ -27,6 +29,7 @@ export function Navbar() {
               `${linkBase} ${isActive ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`
             }
           >
+            <Download className="h-4 w-4" />
             Receive
           </NavLink>
           <NavLink
@@ -35,6 +38,7 @@ export function Navbar() {
               `${linkBase} ${isActive ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`
             }
           >
+            <Info className="h-4 w-4" />
             About
           </NavLink>
         </nav>
