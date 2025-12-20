@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Check, Copy, AlertCircle, Eye, EyeOff } from 'lucide-react'
+import { Check, Copy, AlertCircle, Eye, EyeOff, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { PIN_DISPLAY_TIMEOUT_MS, pinToWords } from '@/lib/crypto'
 
 interface PinDisplayProps {
@@ -113,39 +114,128 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
   // Mask PIN with bullet characters
   const maskedPin = pin.replace(/./g, '\u2022')
 
+  // Calculate progress percentage for timer
+  const progressPercentage = (timeRemaining / (PIN_DISPLAY_TIMEOUT_MS / 1000)) * 100
+
   return (
-    <div className="flex flex-col items-center gap-2 sm:gap-4 p-4 sm:p-6 rounded-lg bg-muted">
-      <p className="text-sm text-muted-foreground text-center">Share this PIN with the receiver:</p>
-      <div className="flex items-center gap-2 sm:gap-3">
-        <code className="text-xl sm:text-3xl font-mono font-bold tracking-wider px-3 py-1 sm:px-4 sm:py-2 bg-background rounded-md border text-center max-w-full overflow-x-auto">
-          {isMasked ? (useWords ? words.map(() => '\u2022\u2022\u2022').join(' ') : maskedPin) : useWords ? wordsDisplay : pin}
-        </code>
+    <div className="flex flex-col gap-4 p-6 rounded-lg bg-muted/50 border">
+      {/* Header with timer */}
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium text-muted-foreground">
+          Share this PIN with the receiver
+        </h3>
+        <div className="flex items-center gap-2 text-sm">
+          <Clock className="h-4 w-4 text-amber-600" />
+          <span className="font-mono font-medium text-amber-600">
+            {formatTime(timeRemaining)}
+          </span>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
+        <div
+          className="h-full bg-amber-600 transition-all duration-1000 ease-linear"
+          style={{ width: `${progressPercentage}%` }}
+        />
+      </div>
+
+      {/* PIN/Words Display */}
+      {useWords ? (
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {words.map((word, i) => (
+              <div key={i} className="relative">
+                <Input
+                  value={isMasked ? '\u2022\u2022\u2022\u2022\u2022' : word}
+                  readOnly
+                  className="text-center font-mono h-10 bg-background border-green-500 bg-green-50/50 cursor-default select-all"
+                />
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                  {i + 1}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <Input
+            value={isMasked ? maskedPin : pin}
+            readOnly
+            className="text-center font-mono text-xl tracking-wider h-12 bg-background border-green-500 cursor-default select-all"
+          />
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="flex gap-2">
+        <Button
+          variant="default"
+          className="flex-1"
+          onClick={handleCopy}
+        >
+          {copied ? (
+            <>
+              <Check className="h-4 w-4 mr-2" />
+              Copied!
+            </>
+          ) : error ? (
+            <>
+              <AlertCircle className="h-4 w-4 mr-2" />
+              Failed to copy
+            </>
+          ) : (
+            <>
+              <Copy className="h-4 w-4 mr-2" />
+              Copy {useWords ? 'words' : 'PIN'}
+            </>
+          )}
+        </Button>
+
         {hasCopied && (
-          <Button variant="outline" size="icon" onClick={toggleMask} title={isMasked ? 'Show PIN' : 'Hide PIN'}>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={toggleMask}
+            title={isMasked ? 'Show PIN' : 'Hide PIN'}
+          >
             {isMasked ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
           </Button>
         )}
-        <Button variant="outline" size="icon" onClick={handleCopy}>
-          {copied ? (
-            <Check className="h-4 w-4 text-green-500" />
-          ) : error ? (
-            <AlertCircle className="h-4 w-4 text-destructive" />
-          ) : (
-            <Copy className="h-4 w-4" />
-          )}
-        </Button>
       </div>
-      <p className="text-xs text-amber-600 font-medium">PIN expires in {formatTime(timeRemaining)}</p>
-      <button
-        onClick={toggleMode}
-        className="text-xs text-primary hover:underline transition-colors"
-      >
-        {useWords ? '(use characters instead of words)' : '(use words instead of pin)'}
-      </button>
-      <p className="text-xs text-muted-foreground text-center max-w-xs">
-        The receiver will need this PIN to decrypt the message. PIN is case sensitive. Share it
-        securely via another channel (voice, chat, etc.)
-      </p>
+
+      {/* Info and toggle */}
+      <div className="flex flex-col gap-3 items-center">
+        <button
+          onClick={toggleMode}
+          className="text-sm text-primary hover:underline transition-colors font-medium"
+        >
+          {useWords ? 'Use character PIN instead' : 'Use words representation'}
+        </button>
+
+        <div className="flex flex-col gap-1.5 text-center">
+          {useWords ? (
+            <>
+              <p className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Words are easier to share by voice</span> - no confusion about case or special characters
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Share securely via another channel (phone call, video chat, etc.)
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Character PIN is shorter to type</span> but case sensitive
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Best for secure messaging apps. For voice calls, consider using words instead
+              </p>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
