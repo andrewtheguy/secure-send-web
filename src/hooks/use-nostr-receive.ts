@@ -212,7 +212,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       const resolvedMimeType = payload.mimeType || 'application/octet-stream'
 
       // Security check: Enforce MAX_MESSAGE_SIZE to prevent DoS/OOM
-      const expectedSize = resolvedFileSize || 0
+      const expectedSize = resolvedFileSize
       if (expectedSize > MAX_MESSAGE_SIZE) {
         setState({
           status: 'error',
@@ -261,7 +261,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
         // Pre-allocate buffer for received data to avoid 2x memory during assembly
         // For files, use fileSize; for text, we'll grow as needed
-        const expectedSize = resolvedFileSize || 0
+        const expectedSize = resolvedFileSize
         let combinedBuffer: Uint8Array | null = expectedSize > 0 ? new Uint8Array(expectedSize) : null
         const receivedChunkIndices: Set<number> = new Set()
         const pendingChunkPromises: Set<Promise<void>> = new Set()
@@ -376,13 +376,13 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                     totalDecryptedBytes += decryptedChunk.length
 
                     // Update progress
-                    const totalBytes = resolvedFileSize || 0
+                    const totalBytes = resolvedFileSize
                     setState(s => ({
                       ...s,
                       status: 'receiving',
                       progress: {
                         current: totalDecryptedBytes,
-                        total: totalBytes > 0 ? totalBytes : totalDecryptedBytes
+                        total: totalBytes
                       }
                     }))
                   } catch (err) {
