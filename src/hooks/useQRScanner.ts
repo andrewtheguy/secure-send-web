@@ -239,7 +239,8 @@ export function useQRScanner(options: UseQRScannerOptions) {
     } else if (!isScanning && isScanningRef.current) {
       stopCameraScanning()
     }
-  }, [isScanning, startCameraScanning, stopCameraScanning])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isScanning])
 
   // Restart camera when facingMode or preferLowRes changes
   const facingModeRef = useRef(facingMode)
