@@ -21,7 +21,7 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB
       },
       manifest: {
-        name: 'Secure Send',
+        name: 'Secure Send Files and Folders',
         short_name: 'Secure Send',
         description: 'Share files and folders securely with end-to-end encryption',
         theme_color: '#000000',
