@@ -94,7 +94,6 @@ export async function derivePeerId(pin: string): Promise<string> {
 // Protocol message types
 export interface PeerJSMetadata {
   type: 'metadata'
-  contentType: 'text' | 'file'
   totalBytes: number
   // Milliseconds since epoch when sender created the transfer request.
   // Receiver must enforce TTL before sending "ready".
@@ -104,8 +103,6 @@ export interface PeerJSMetadata {
   fileName?: string
   fileSize?: number
   mimeType?: string
-  // Encrypted payload for text content (small messages)
-  encryptedPayload?: string
 }
 
 export interface PeerJSReady {

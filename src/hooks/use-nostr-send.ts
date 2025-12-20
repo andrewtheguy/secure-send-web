@@ -65,7 +65,7 @@ async function publishWithBackup(
 export interface UseNostrSendReturn {
   state: TransferState
   pin: string | null
-  send: (content: string | File, options?: WebRTCOptions) => Promise<void>
+  send: (content: File, options?: WebRTCOptions) => Promise<void>
   cancel: () => void
 }
 
@@ -97,45 +97,50 @@ export function useNostrSend(): UseNostrSendReturn {
     setState({ status: 'idle' })
   }, [clearExpirationTimeout])
 
-  const send = useCallback(async (content: string | File, options?: WebRTCOptions) => {
+  const send = useCallback(async (content: File, options?: WebRTCOptions) => {
     // Guard against concurrent invocations
     if (sendingRef.current) return
     sendingRef.current = true
     cancelledRef.current = false
 
-    const isFile = content instanceof File
-    const contentType: ContentType = isFile ? 'file' : 'text'
+    const contentType: ContentType = 'file'
 
     try {
-      // Get content bytes
-      let contentBytes: Uint8Array
-      let fileName: string | undefined
-      let fileSize: number | undefined
-      let mimeType: string | undefined
+      // Validate and sanitize metadata
+      const rawFileName = content.name || ''
+      const sanitizedFileName = rawFileName.trim()
 
-      if (isFile) {
-        fileName = content.name
-        fileSize = content.size
-        mimeType = content.type || 'application/octet-stream'
-
-        if (content.size > MAX_MESSAGE_SIZE) {
-          const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
-          setState({ status: 'error', message: `File exceeds ${limitMB}MB limit` })
-          return
-        }
-
-        setState({ status: 'connecting', message: 'Reading file...' })
-        contentBytes = await readFileAsBytes(content)
-      } else {
-        const encoder = new TextEncoder()
-        contentBytes = encoder.encode(content)
-
-        if (contentBytes.length > MAX_MESSAGE_SIZE) {
-          const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
-          setState({ status: 'error', message: `Message exceeds ${limitMB}MB limit` })
-          return
-        }
+      if (!sanitizedFileName) {
+        setState({ status: 'error', message: 'Missing file name' })
+        sendingRef.current = false
+        return
       }
+
+      const fileName = sanitizedFileName
+      const fileSize = content.size
+      const mimeType = content.type || 'application/octet-stream'
+
+      if (typeof fileSize !== 'number' || !Number.isFinite(fileSize)) {
+        setState({ status: 'error', message: 'Invalid file size' })
+        sendingRef.current = false
+        return
+      }
+
+      if (fileSize <= 0) {
+        setState({ status: 'error', message: 'File is empty' })
+        sendingRef.current = false
+        return
+      }
+
+      if (fileSize > MAX_MESSAGE_SIZE) {
+        const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
+        setState({ status: 'error', message: `File exceeds ${limitMB}MB limit` })
+        sendingRef.current = false
+        return
+      }
+
+      setState({ status: 'connecting', message: 'Reading file...' })
+      const contentBytes = await readFileAsBytes(content)
 
       // Generate PIN and derive key
       setState({ status: 'connecting', message: 'Generating secure PIN...' })
@@ -187,10 +192,9 @@ export function useNostrSend(): UseNostrSendReturn {
         totalChunks: Math.ceil(estimatedEncryptedSize / CLOUD_CHUNK_SIZE),
         relays: [...DEFAULT_RELAYS],
         // NO tmpfilesUrl - cloud upload only if P2P fails
-        // For file, include metadata
-        fileName: contentType === 'file' ? fileName : undefined,
-        fileSize: contentType === 'file' ? fileSize : undefined,
-        mimeType: contentType === 'file' ? mimeType : undefined,
+        fileName,
+        fileSize,
+        mimeType,
       }
 
       const encoder = new TextEncoder()
@@ -202,7 +206,7 @@ export function useNostrSend(): UseNostrSendReturn {
         status: 'waiting_for_receiver',
         message: 'Waiting for receiver...',
         contentType,
-        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+        fileMetadata: { fileName, fileSize, mimeType },
         useWebRTC: !options?.relayOnly,
         currentRelays: client.getRelays(),
       })
@@ -354,7 +358,7 @@ export function useNostrSend(): UseNostrSendReturn {
                   message: 'Sending via P2P...',
                   progress: { current: 0, total: contentBytes.length },
                   contentType,
-                  fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+                  fileMetadata: { fileName, fileSize, mimeType },
                 })
 
                 try {
@@ -501,7 +505,7 @@ export function useNostrSend(): UseNostrSendReturn {
           status: 'transferring',
           message: 'Encrypting content for cloud upload...',
           contentType,
-          fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+          fileMetadata: { fileName, fileSize, mimeType },
           currentRelays: client.getRelays(),
         })
 
@@ -595,8 +599,8 @@ export function useNostrSend(): UseNostrSendReturn {
       }
 
       const successMsg = webRTCSuccess
-        ? (isFile ? 'File sent via P2P!' : 'Message sent via P2P!')
-        : (isFile ? 'File sent successfully!' : 'Message sent successfully!')
+        ? 'File sent via P2P!'
+        : 'File sent successfully!'
 
       setState({ status: 'complete', message: successMsg, contentType })
     } catch (error) {

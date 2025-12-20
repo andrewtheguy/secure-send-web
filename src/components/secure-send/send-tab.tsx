@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback } from 'react'
-import { Send, X, RotateCcw, FileUp, FileText, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, Zap, AlertTriangle } from 'lucide-react'
+import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, Zap, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -17,7 +16,7 @@ import { formatFileSize } from '@/lib/file-utils'
 import { compressFilesToZip, getFolderName, getTotalSize, supportsFolderSelection } from '@/lib/folder-utils'
 import type { SignalingMethod } from '@/lib/nostr/types'
 
-type ContentMode = 'text' | 'file' | 'folder'
+type ContentMode = 'file' | 'folder'
 type ForcedMethod = 'nostr-only' | 'peerjs-only' | 'manual-only'
 
 // Extend input element to include webkitdirectory attribute
@@ -30,7 +29,6 @@ declare module 'react' {
 
 export function SendTab() {
   const [mode, setMode] = useState<ContentMode>('file')
-  const [message, setMessage] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [forcedMethod, setForcedMethod] = useState<ForcedMethod | null>(null)
   const [activeMethod, setActiveMethod] = useState<SignalingMethod | null>(null)
@@ -74,18 +72,14 @@ export function SendTab() {
   const clipboardData: string | undefined =
     typeof rawStateAny.clipboardData === 'string' ? rawStateAny.clipboardData : undefined
 
-  const encoder = new TextEncoder()
-  const messageSize = encoder.encode(message).length
-  const isTextOverLimit = messageSize > MAX_MESSAGE_SIZE
   const filesTotalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0)
   const folderTotalSize = folderFiles ? getTotalSize(folderFiles) : 0
   const isFilesOverLimit = filesTotalSize > MAX_MESSAGE_SIZE
   const isFolderOverLimit = folderTotalSize > MAX_MESSAGE_SIZE
 
-  const canSendText = message.trim().length > 0 && !isTextOverLimit && state.status === 'idle'
   const canSendFiles = selectedFiles.length > 0 && !isFilesOverLimit && state.status === 'idle' && !isCompressing
   const canSendFolder = folderFiles && folderFiles.length > 0 && !isFolderOverLimit && state.status === 'idle' && !isCompressing
-  const canSend = mode === 'text' ? canSendText : mode === 'file' ? canSendFiles : canSendFolder
+  const canSend = mode === 'file' ? canSendFiles : canSendFolder
 
   const handleSend = async (overrideMethod?: ForcedMethod) => {
     // Determine which method to use
@@ -138,7 +132,7 @@ export function SendTab() {
     // Only Nostr hook supports relayOnly option
     const sendOptions = methodToUse === 'nostr' ? { relayOnly } : undefined
 
-    const doSend = (content: string | File) => {
+    const doSend = (content: File) => {
       if (methodToUse === 'nostr') {
         nostrHook.send(content, sendOptions)
       } else if (methodToUse === 'peerjs') {
@@ -148,9 +142,7 @@ export function SendTab() {
       }
     }
 
-    if (mode === 'text' && canSendText) {
-      doSend(message)
-    } else if (mode === 'file' && canSendFiles) {
+    if (mode === 'file' && canSendFiles) {
       // Single file: send directly
       if (selectedFiles.length === 1) {
         doSend(selectedFiles[0])
@@ -186,7 +178,6 @@ export function SendTab() {
     nostrHook.cancel()
     peerJSHook.cancel()
     manualHook.cancel()
-    setMessage('')
     setSelectedFiles([])
     setFolderFiles(null)
     setActiveMethod(null)
@@ -275,41 +266,19 @@ export function SendTab() {
     <div className="space-y-4 pt-4">
       {state.status === 'idle' ? (
         <>
-          <Tabs value={mode} onValueChange={(v) => setMode(v as ContentMode)}>
-            <TabsList className={`grid w-full ${supportsFolderSelection ? 'grid-cols-3' : 'grid-cols-2'}`}>
-              <TabsTrigger value="file" className="flex items-center gap-2">
-                <FileUp className="h-4 w-4" />
-                Files
-              </TabsTrigger>
-              {supportsFolderSelection && (
+          {supportsFolderSelection && (
+            <Tabs value={mode} onValueChange={(v) => setMode(v as ContentMode)}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="file" className="flex items-center gap-2">
+                  <FileUp className="h-4 w-4" />
+                  Files
+                </TabsTrigger>
                 <TabsTrigger value="folder" className="flex items-center gap-2">
                   <FolderUp className="h-4 w-4" />
                   Folder
                 </TabsTrigger>
-              )}
-              <TabsTrigger value="text" className="flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                Text
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-
-          {mode === 'text' && (
-            <div className="space-y-2">
-              <Textarea
-                placeholder="Enter your message here..."
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                className="min-h-[200px] font-mono"
-                disabled={isActive}
-              />
-              <div className="flex justify-between text-xs">
-                <span className={isTextOverLimit ? 'text-destructive' : 'text-muted-foreground'}>
-                  {formatFileSize(messageSize)} / {formatFileSize(MAX_MESSAGE_SIZE)}
-                </span>
-                {isTextOverLimit && <span className="text-destructive">Message too large</span>}
-              </div>
-            </div>
+              </TabsList>
+            </Tabs>
           )}
 
           {mode === 'file' && (

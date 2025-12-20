@@ -16,7 +16,7 @@ import {
   parseMutualPayload,
   type SignalingPayload,
 } from '@/lib/manual-signaling'
-import type { TransferState, ContentType } from '@/lib/nostr/types'
+import type { TransferState } from '@/lib/nostr/types'
 import { readFileAsBytes } from '@/lib/file-utils'
 
 // Extended transfer status for Manual Exchange mode
@@ -38,7 +38,7 @@ export interface ManualTransferState extends Omit<TransferState, 'status'> {
 
 export interface UseManualSendReturn {
   state: ManualTransferState
-  send: (content: string | File) => Promise<void>
+  send: (content: File) => Promise<void>
   submitAnswer: (answerData: Uint8Array) => void
   cancel: () => void
 }
@@ -62,10 +62,9 @@ export function useManualSend(): UseManualSendReturn {
   // Store data needed for answer processing
   const pendingTransferRef = useRef<{
     contentBytes: Uint8Array
-    contentType: ContentType
-    fileName?: string
-    fileSize?: number
-    mimeType?: string
+    fileName: string
+    fileSize: number
+    mimeType: string
   } | null>(null)
 
   // Resolve function for answer submission
@@ -123,45 +122,49 @@ export function useManualSend(): UseManualSendReturn {
     answerResolverRef.current?.(parsed)
   }, [])
 
-  const send = useCallback(async (content: string | File) => {
+  const send = useCallback(async (content: File) => {
     // Guard against concurrent invocations
     if (sendingRef.current) return
     sendingRef.current = true
     cancelledRef.current = false
 
-    const isFile = content instanceof File
-    const contentType: ContentType = isFile ? 'file' : 'text'
 
     try {
-      // Get content bytes
-      let contentBytes: Uint8Array
-      let fileName: string | undefined
-      let fileSize: number | undefined
-      let mimeType: string | undefined
+      // Validate and sanitize metadata
+      const rawFileName = content.name || ''
+      const sanitizedFileName = rawFileName.trim()
 
-      if (isFile) {
-        fileName = content.name
-        fileSize = content.size
-        mimeType = content.type || 'application/octet-stream'
-
-        if (content.size > MAX_MESSAGE_SIZE) {
-          const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
-          setState({ status: 'error', message: `File exceeds ${limitMB}MB limit` })
-          return
-        }
-
-        setState({ status: 'generating_offer', message: 'Reading file...' })
-        contentBytes = await readFileAsBytes(content)
-      } else {
-        const encoder = new TextEncoder()
-        contentBytes = encoder.encode(content)
-
-        if (contentBytes.length > MAX_MESSAGE_SIZE) {
-          const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
-          setState({ status: 'error', message: `Message exceeds ${limitMB}MB limit` })
-          return
-        }
+      if (!sanitizedFileName) {
+        setState({ status: 'error', message: 'Missing file name' })
+        sendingRef.current = false
+        return
       }
+
+      const fileName = sanitizedFileName
+      const fileSize = content.size
+      const mimeType = content.type || 'application/octet-stream'
+
+      if (typeof fileSize !== 'number' || !Number.isFinite(fileSize)) {
+        setState({ status: 'error', message: 'Invalid file size' })
+        sendingRef.current = false
+        return
+      }
+
+      if (fileSize <= 0) {
+        setState({ status: 'error', message: 'File is empty' })
+        sendingRef.current = false
+        return
+      }
+
+      if (fileSize > MAX_MESSAGE_SIZE) {
+        const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
+        setState({ status: 'error', message: `File exceeds ${limitMB}MB limit` })
+        sendingRef.current = false
+        return
+      }
+
+      setState({ status: 'generating_offer', message: 'Reading file...' })
+      const contentBytes = await readFileAsBytes(content)
 
       // Generate ECDH keypair and salt
       setState({ status: 'generating_offer', message: 'Generating keys...' })
@@ -194,7 +197,6 @@ export function useManualSend(): UseManualSendReturn {
       // Store for later use when answer is received
       pendingTransferRef.current = {
         contentBytes,
-        contentType,
         fileName,
         fileSize,
         mimeType,
@@ -261,7 +263,6 @@ export function useManualSend(): UseManualSendReturn {
         iceCandidates,
         {
           createdAt: sessionStartTime,
-          contentType,
           totalBytes: contentBytes.length,
           fileName,
           fileSize,
@@ -280,8 +281,8 @@ export function useManualSend(): UseManualSendReturn {
         message: 'Show this to receiver, then scan/paste their response',
         offerData: offerBinary,
         clipboardData: clipboardBase64,
-        contentType,
-        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+        contentType: 'file',
+        fileMetadata: { fileName, fileSize, mimeType },
       })
 
       // Wait for answer to be submitted
@@ -373,8 +374,8 @@ export function useManualSend(): UseManualSendReturn {
         status: 'transferring',
         message: 'Sending via P2P...',
         progress: { current: 0, total: contentBytes.length },
-        contentType,
-        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+        contentType: 'file',
+        fileMetadata: { fileName, fileSize, mimeType },
       })
 
       // Send data in encrypted chunks
@@ -416,8 +417,7 @@ export function useManualSend(): UseManualSendReturn {
         }
       })
 
-      const successMsg = isFile ? 'File sent via P2P!' : 'Message sent via P2P!'
-      setState({ status: 'complete', message: successMsg, contentType })
+      setState({ status: 'complete', message: 'File sent via P2P!', contentType: 'file' })
 
     } catch (error) {
       if (!cancelledRef.current) {

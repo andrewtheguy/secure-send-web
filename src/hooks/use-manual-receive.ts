@@ -16,7 +16,8 @@ import {
   generateMutualClipboardData,
   type SignalingPayload,
 } from '@/lib/manual-signaling'
-import type { TransferState, ReceivedContent, ContentType } from '@/lib/nostr/types'
+import type { TransferState } from '@/lib/nostr/types'
+import type { ReceivedContent } from '@/lib/types'
 
 // Extended transfer status for Manual Exchange receive mode
 export type ManualReceiveStatus =
@@ -146,8 +147,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       }
 
       // Extract metadata from offer
-      const { contentType, totalBytes, fileName, fileSize, mimeType, salt: saltArray, publicKey: senderPublicKeyArray } = offerPayload
-      const isFile = contentType === 'file'
+      const { totalBytes, fileName, fileSize, mimeType, salt: saltArray, publicKey: senderPublicKeyArray } = offerPayload
 
       // Validate required fields
       if (!saltArray) {
@@ -159,8 +159,23 @@ export function useManualReceive(): UseManualReceiveReturn {
         return
       }
 
+      // Validate required metadata
+      if (
+        !fileName ||
+        !mimeType ||
+        typeof fileSize !== 'number' ||
+        !Number.isFinite(fileSize) ||
+        fileSize < 0 ||
+        typeof totalBytes !== 'number' ||
+        !Number.isFinite(totalBytes) ||
+        totalBytes < 0
+      ) {
+        setState({ status: 'error', message: 'Invalid offer: missing or invalid file metadata' })
+        return
+      }
+
       // Security check: Enforce MAX_MESSAGE_SIZE
-      if (totalBytes && totalBytes > MAX_MESSAGE_SIZE) {
+      if (totalBytes > MAX_MESSAGE_SIZE) {
         setState({
           status: 'error',
           message: `Transfer rejected: Size (${Math.round(totalBytes / 1024 / 1024)}MB) exceeds limit (${MAX_MESSAGE_SIZE / 1024 / 1024}MB)`
@@ -230,7 +245,7 @@ export function useManualReceive(): UseManualReceiveReturn {
               ...s,
               progress: {
                 current: receivedBytes,
-                total: totalBytes || 0,
+                total: totalBytes!,
               },
             }))
           }
@@ -285,8 +300,8 @@ export function useManualReceive(): UseManualReceiveReturn {
         message: 'Show this to sender and wait for connection',
         answerData: answerBinary,
         clipboardData: clipboardBase64,
-        contentType: contentType as ContentType,
-        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+        contentType: 'file',
+        fileMetadata: { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! },
       })
 
       // Wait for data channel to open
@@ -312,11 +327,11 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       setState({
         status: 'receiving',
-        message: `Receiving ${isFile ? 'file' : 'message'}...`,
-        contentType: contentType as ContentType,
-        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+        message: 'Receiving file...',
+        contentType: 'file',
+        fileMetadata: { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! },
         useWebRTC: true,
-        progress: { current: 0, total: totalBytes || 0 },
+        progress: { current: 0, total: totalBytes! },
       })
 
       // Wait for transfer to complete
@@ -352,7 +367,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       rtc.send('ACK')
 
       // Decrypt and reassemble chunks
-      let contentData = new Uint8Array(totalBytes || 0)
+      let contentData = new Uint8Array(totalBytes!)
       let totalDecryptedBytes = 0
 
       for (const encryptedChunk of receivedChunks) {
@@ -384,36 +399,23 @@ export function useManualReceive(): UseManualReceiveReturn {
       const receivedData = contentData.slice(0, totalDecryptedBytes)
 
       // Set received content
-      if (contentType === 'file') {
-        setReceivedContent({
-          contentType: 'file',
-          data: receivedData,
+      setReceivedContent({
+        contentType: 'file',
+        data: receivedData,
+        fileName: fileName!,
+        fileSize: fileSize!,
+        mimeType: mimeType!,
+      })
+      setState({
+        status: 'complete',
+        message: 'File received (P2P)!',
+        contentType: 'file',
+        fileMetadata: {
           fileName: fileName!,
           fileSize: fileSize!,
           mimeType: mimeType!,
-        })
-        setState({
-          status: 'complete',
-          message: 'File received (P2P)!',
-          contentType: 'file',
-          fileMetadata: {
-            fileName: fileName!,
-            fileSize: fileSize!,
-            mimeType: mimeType!,
-          },
-        })
-      } else {
-        const message = new TextDecoder().decode(receivedData)
-        setReceivedContent({
-          contentType: 'text',
-          message,
-        })
-        setState({
-          status: 'complete',
-          message: 'Message received (P2P)!',
-          contentType: 'text',
-        })
-      }
+        },
+      })
 
     } catch (error) {
       if (!cancelledRef.current) {

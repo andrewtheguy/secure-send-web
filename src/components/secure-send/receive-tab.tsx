@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Download, X, RotateCcw, Check, Copy, FileDown, AlertCircle, QrCode, KeyRound } from 'lucide-react'
+import { Download, X, RotateCcw, FileDown, QrCode, KeyRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PinInput, type PinInputRef } from './pin-input'
 import { TransferStatus } from './transfer-status'
@@ -25,8 +24,6 @@ export function ReceiveTab() {
   const pinRef = useRef('')
   const pinInputRef = useRef<PinInputRef>(null)
   const [isPinValid, setIsPinValid] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [copyError, setCopyError] = useState(false)
   const [pinExpired, setPinExpired] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(0)
   const [detectedMethod, setDetectedMethod] = useState<SignalingMethod>('nostr')
@@ -176,8 +173,6 @@ export function ReceiveTab() {
     pinRef.current = ''
     setIsPinValid(false)
     pinInputRef.current?.clear()
-    setCopied(false)
-    setCopyError(false)
     setPinExpired(false)
   }
 
@@ -195,42 +190,8 @@ export function ReceiveTab() {
     }
   }, [resetPinInactivityTimeout])
 
-  const handleCopy = useCallback(async () => {
-    if (receivedContent?.contentType !== 'text') return
-
-    // Clear any existing timeout
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current)
-      timeoutRef.current = null
-    }
-
-    try {
-      await navigator.clipboard.writeText(receivedContent.message)
-      if (!mountedRef.current) return
-
-      setCopyError(false)
-      setCopied(true)
-      timeoutRef.current = setTimeout(() => {
-        if (mountedRef.current) {
-          setCopied(false)
-        }
-      }, 2000)
-    } catch (err) {
-      console.error('Failed to copy to clipboard:', err)
-      if (!mountedRef.current) return
-
-      setCopied(false)
-      setCopyError(true)
-      timeoutRef.current = setTimeout(() => {
-        if (mountedRef.current) {
-          setCopyError(false)
-        }
-      }, 2000)
-    }
-  }, [receivedContent])
-
   const handleDownload = () => {
-    if (receivedContent?.contentType === 'file') {
+    if (receivedContent) {
       downloadFile(receivedContent.data, receivedContent.fileName, receivedContent.mimeType)
     }
   }
@@ -319,38 +280,7 @@ export function ReceiveTab() {
             </div>
           )}
 
-          {state.status === 'complete' && receivedContent?.contentType === 'text' && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-medium">Received Message</label>
-                <Button variant="ghost" size="sm" onClick={handleCopy}>
-                  {copied ? (
-                    <>
-                      <Check className="mr-1 h-3 w-3 text-green-500" />
-                      Copied
-                    </>
-                  ) : copyError ? (
-                    <>
-                      <AlertCircle className="mr-1 h-3 w-3 text-destructive" />
-                      Failed
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="mr-1 h-3 w-3" />
-                      Copy
-                    </>
-                  )}
-                </Button>
-              </div>
-              <Textarea
-                value={receivedContent.message}
-                readOnly
-                className="min-h-[200px] font-mono bg-muted"
-              />
-            </div>
-          )}
-
-          {state.status === 'complete' && receivedContent?.contentType === 'file' && (
+          {state.status === 'complete' && receivedContent && (
             <div className="space-y-4">
               <div className="p-6 border rounded-lg bg-muted/50 text-center space-y-3">
                 <FileDown className="h-12 w-12 mx-auto text-muted-foreground" />
