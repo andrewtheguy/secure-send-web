@@ -225,7 +225,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       // Focus field after last pasted word
       const nextFocusIndex = Math.min(fieldIndex + validWords.length, 6)
       inputRefs.current[nextFocusIndex]?.focus()
-    }, [words, notifyPinChange, updateWordPin])
+    }, [words, updateWordPin])
 
     const handlePasteFromClipboard = useCallback(async () => {
       try {
@@ -294,9 +294,12 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
           return
         }
         if (e.key === 'Tab') {
-          e.preventDefault()
-          selectSuggestion(index, suggestions[selectedIndex])
-          return
+          const hasActiveSuggestion = suggestions.length > 0 && selectedIndex !== -1
+          if (hasActiveSuggestion && !e.shiftKey) {
+            e.preventDefault()
+            selectSuggestion(index, suggestions[selectedIndex])
+            return
+          }
         }
         if (e.key === 'Escape') {
           setSuggestions([])

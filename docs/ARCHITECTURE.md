@@ -234,6 +234,9 @@ Signaling method using QR codes or copy/paste for WebRTC offer/answer exchange. 
 - Both offer and answer include a required `createdAt` timestamp; receivers refuse to proceed if the offer is expired or missing TTL
 - Payload is obfuscated using a time-bucketed seed to avoid casual inspection.
 
+> [!IMPORTANT]
+> **Real protection**: Manual signaling confidentiality comes from the 1-hour TTL plus ECDH key exchange and AES-256-GCM on the data channel. Obfuscation is only a secondary deterrent against casual inspection; expired payloads are useless even if seen.
+
 **Binary Payload Format (SS02):**
 
 The payload consists of two distinct layers to balance rapid identification with obfuscation of the content.
@@ -265,8 +268,7 @@ The obfuscation seed changes every hour to ensure the **ephemerality** of signal
 - **Stale Data Prevention**: Prevents the utility of stale signaling data, such as a photograph of a QR code, a screenshot, or lingering clipboard contents.
 - **Payload Randomness**: Ensures that signaling data generated at different times results in significantly different binary outputs.
 
-> [!IMPORTANT]
-> **Real Protection**: The actual security for manual signaling is the inherent **TTL (1 hour)** and the data-layer encryption. Since signaling data is ephemeral, it becomes naturally useless once the window expires. Confidentiality is strictly enforced by ECDH mutual exchange and AES-256-GCM encryption of the WebRTC data channel.
+Primary confidentiality is provided by the 1-hour TTL and ECDH + AES-256-GCM (see note above); obfuscation is additive, not the core control.
 
 - **Bucket Size**: 1 hour (`3600` seconds).
 - **Input (`bucketEpoch`)**: `floor(unix_timestamp_seconds / 3600)`.
@@ -625,3 +627,5 @@ src/
 │       └── qr-input.tsx     # Dual input (scan or paste)
 └── pages/                   # Page components
 ```
+
+**Crypto parameters**: Key tunables like `PBKDF2_ITERATIONS`, `ENCRYPTION_CHUNK_SIZE`, and `CLOUD_CHUNK_SIZE` live in [src/lib/crypto/constants.ts](src/lib/crypto/constants.ts) for quick lookup.
