@@ -16,7 +16,7 @@ import {
   parseMutualPayload,
   type SignalingPayload,
 } from '@/lib/manual-signaling'
-import type { TransferState, ContentType } from '@/lib/nostr/types'
+import type { TransferState } from '@/lib/nostr/types'
 import { readFileAsBytes } from '@/lib/file-utils'
 
 // Extended transfer status for Manual Exchange mode
@@ -62,7 +62,6 @@ export function useManualSend(): UseManualSendReturn {
   // Store data needed for answer processing
   const pendingTransferRef = useRef<{
     contentBytes: Uint8Array
-    contentType: ContentType
     fileName?: string
     fileSize?: number
     mimeType?: string
@@ -129,7 +128,6 @@ export function useManualSend(): UseManualSendReturn {
     sendingRef.current = true
     cancelledRef.current = false
 
-    const contentType: ContentType = 'file'
 
     try {
       // Get content bytes
@@ -177,7 +175,6 @@ export function useManualSend(): UseManualSendReturn {
       // Store for later use when answer is received
       pendingTransferRef.current = {
         contentBytes,
-        contentType,
         fileName,
         fileSize,
         mimeType,
@@ -244,7 +241,6 @@ export function useManualSend(): UseManualSendReturn {
         iceCandidates,
         {
           createdAt: sessionStartTime,
-          contentType,
           totalBytes: contentBytes.length,
           fileName,
           fileSize,
@@ -263,7 +259,7 @@ export function useManualSend(): UseManualSendReturn {
         message: 'Show this to receiver, then scan/paste their response',
         offerData: offerBinary,
         clipboardData: clipboardBase64,
-        contentType,
+        contentType: 'file',
         fileMetadata: { fileName, fileSize, mimeType },
       })
 
@@ -356,7 +352,7 @@ export function useManualSend(): UseManualSendReturn {
         status: 'transferring',
         message: 'Sending via P2P...',
         progress: { current: 0, total: contentBytes.length },
-        contentType,
+        contentType: 'file',
         fileMetadata: { fileName, fileSize, mimeType },
       })
 
@@ -399,7 +395,7 @@ export function useManualSend(): UseManualSendReturn {
         }
       })
 
-      setState({ status: 'complete', message: 'File sent via P2P!', contentType })
+      setState({ status: 'complete', message: 'File sent via P2P!', contentType: 'file' })
 
     } catch (error) {
       if (!cancelledRef.current) {

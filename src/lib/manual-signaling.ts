@@ -1,5 +1,4 @@
 import pako from 'pako'
-import type { ContentType } from './nostr/types'
 
 // Magic header: "SS02" = Secure Send version 2 (ECDH mutual exchange)
 const MAGIC_HEADER_V2 = new Uint8Array([0x53, 0x53, 0x30, 0x32])
@@ -17,7 +16,6 @@ export interface SignalingPayload {
   // ECDH public key for mutual exchange (65 bytes P-256 uncompressed)
   publicKey?: number[]
   // Offer-only fields:
-  contentType?: ContentType
   fileName?: string
   fileSize?: number
   mimeType?: string
@@ -96,7 +94,6 @@ export function generateMutualOfferBinary(
   candidates: RTCIceCandidate[],
   metadata: {
     createdAt: number
-    contentType: ContentType
     totalBytes: number
     fileName?: string
     fileSize?: number
@@ -110,7 +107,6 @@ export function generateMutualOfferBinary(
     sdp: offer.sdp || '',
     candidates: candidates.map((c) => c.candidate),
     createdAt: metadata.createdAt,
-    contentType: metadata.contentType,
     totalBytes: metadata.totalBytes,
     fileName: metadata.fileName,
     fileSize: metadata.fileSize,

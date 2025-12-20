@@ -118,7 +118,6 @@ export function usePeerJSReceive(): UsePeerJSReceiveReturn {
       const salt = new Uint8Array(metadata.salt)
       const key = await deriveKeyFromPin(pin, salt)
 
-      // Security check: Enforce MAX_MESSAGE_SIZE
       if (metadata.totalBytes > MAX_MESSAGE_SIZE) {
         setState({
           status: 'error',

@@ -191,7 +191,7 @@ export function ReceiveTab() {
   }, [resetPinInactivityTimeout])
 
   const handleDownload = () => {
-    if (receivedContent?.contentType === 'file') {
+    if (receivedContent) {
       downloadFile(receivedContent.data, receivedContent.fileName, receivedContent.mimeType)
     }
   }

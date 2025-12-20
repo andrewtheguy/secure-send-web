@@ -39,7 +39,7 @@ export function SecureSend() {
       <CardHeader>
         <CardTitle className="text-2xl">Secure Send</CardTitle>
         <CardDescription>
-          Share files, folder, or text snippet securely with end-to-end encryption. Click About for more info.
+          Share files or folders securely with end-to-end encryption. Click About for more info.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -69,7 +69,7 @@ export function SecureSend() {
               <section>
                 <h3 className="font-semibold text-base mb-2">How It Works</h3>
                 <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
-                  <li>Select what you want to share (files, folder, or text)</li>
+                  <li>Select what you want to share (files or folder)</li>
                   <li>Click "Generate PIN & Send" to create a unique 12-character PIN</li>
                   <li>Share the PIN with your recipient through any channel (voice, chat, etc.)</li>
                   <li>Recipient enters the PIN to instantly receive your content</li>
