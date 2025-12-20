@@ -72,6 +72,7 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
       if (content.size > MAX_MESSAGE_SIZE) {
         const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
         setState({ status: 'error', message: `File exceeds ${limitMB}MB limit` })
+        sendingRef.current = false
         return
       }
 
