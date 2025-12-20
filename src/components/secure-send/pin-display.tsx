@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Check, Copy, AlertCircle, Eye, EyeOff, Clock, Hash, MessageSquareText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,10 +15,11 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
   const [isMasked, setIsMasked] = useState(false)
   const [useWords, setUseWords] = useState(false)
   const [hasCopied, setHasCopied] = useState(false)
-  const [timeRemaining, setTimeRemaining] = useState(Math.floor(PIN_DISPLAY_TIMEOUT_MS / 1000))
+  const [timeRemaining, setTimeRemaining] = useState(Math.ceil(PIN_DISPLAY_TIMEOUT_MS / 1000))
+  const [progressPercentage, setProgressPercentage] = useState(100)
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
   const mountedRef = useRef(true)
   const onExpireRef = useRef(onExpire)
 
@@ -30,35 +31,42 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
   useEffect(() => {
     mountedRef.current = true
 
-    // Start countdown timer
-    intervalRef.current = setInterval(() => {
+    // Start high-resolution countdown timer
+    const durationMs = PIN_DISPLAY_TIMEOUT_MS
+    const startTime = performance.now()
+
+    const tick = () => {
       if (!mountedRef.current) return
-      setTimeRemaining((prev) => {
-        if (prev <= 1) {
-          // Timer expired, call onExpire
-          if (intervalRef.current) {
-            clearInterval(intervalRef.current)
-            intervalRef.current = null
-          }
-          onExpireRef.current()
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
+
+      const now = performance.now()
+      const elapsed = now - startTime
+      const remainingMs = Math.max(0, durationMs - elapsed)
+
+      setTimeRemaining(Math.ceil(remainingMs / 1000))
+      setProgressPercentage((remainingMs / durationMs) * 100)
+
+      if (remainingMs <= 0) {
+        onExpireRef.current()
+        return
+      }
+
+      animationFrameRef.current = requestAnimationFrame(tick)
+    }
+
+    animationFrameRef.current = requestAnimationFrame(tick)
 
     return () => {
       mountedRef.current = false
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
       }
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current)
       }
     }
   }, [])
-  const words = pinToWords(pin)
-  const wordsDisplay = words.join(' ')
+  const words = useMemo(() => pinToWords(pin), [pin])
+  const wordsDisplay = useMemo(() => words.join(' '), [words])
 
   const handleCopy = useCallback(async () => {
     // Clear any existing timeout
@@ -106,16 +114,12 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
-  const toggleMode = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
+  const toggleMode = useCallback(() => {
     setUseWords((prev) => !prev)
   }, [])
 
   // Mask PIN with bullet characters
   const maskedPin = pin.replace(/./g, '\u2022')
-
-  // Calculate progress percentage for timer
-  const progressPercentage = (timeRemaining / (PIN_DISPLAY_TIMEOUT_MS / 1000)) * 100
 
   return (
     <div className="flex flex-col gap-4 p-6 rounded-lg bg-muted/50 border">
@@ -135,7 +139,7 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
       {/* Progress bar */}
       <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
         <div
-          className="h-full bg-amber-600 transition-all duration-1000 ease-linear"
+          className="h-full bg-amber-600"
           style={{ width: `${progressPercentage}%` }}
         />
       </div>

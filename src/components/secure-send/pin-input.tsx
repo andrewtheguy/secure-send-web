@@ -74,6 +74,22 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       onPinChange(pin, isPinValid)
     }, [onPinChange])
 
+    const updateWordPin = useCallback((updatedWords: string[]) => {
+      const pin = wordsToPin(updatedWords)
+      const validWordCount = updatedWords.filter(w => isValidPinWord(w)).length
+
+      setWordDisplayLength(validWordCount)
+      wordPinRef.current = pin
+
+      if (validWordCount > 0) {
+        charPinRef.current = ''
+        setCharDisplayLength(0)
+        if (charInputRef.current) charInputRef.current.value = ''
+      }
+
+      notifyPinChange()
+    }, [notifyPinChange])
+
     // Handling character mode changes
     const handleCharChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newValue = e.target.value
@@ -149,19 +165,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         setSuggestions([])
       }
 
-      const pin = wordsToPin(newWords)
-      const validWordCount = newWords.filter(w => isValidPinWord(w)).length
-      setWordDisplayLength(validWordCount)
-      wordPinRef.current = pin
-
-      // Clear character input when word input is used
-      if (validWordCount > 0) {
-        charPinRef.current = ''
-        setCharDisplayLength(0)
-        if (charInputRef.current) charInputRef.current.value = ''
-      }
-
-      notifyPinChange()
+      updateWordPin(newWords)
     }
 
     const selectSuggestion = (wordIndex: number, suggestion: string) => {
@@ -175,19 +179,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         inputRefs.current[wordIndex + 1]?.focus()
       }
 
-      const pin = wordsToPin(newWords)
-      const validWordCount = newWords.filter(w => isValidPinWord(w)).length
-      setWordDisplayLength(validWordCount)
-      wordPinRef.current = pin
-
-      // Clear character input when word input is used
-      if (validWordCount > 0) {
-        charPinRef.current = ''
-        setCharDisplayLength(0)
-        if (charInputRef.current) charInputRef.current.value = ''
-      }
-
-      notifyPinChange()
+      updateWordPin(newWords)
     }
 
     const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>, fieldIndex: number) => {
@@ -228,27 +220,21 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       setWords(newWords)
       setSuggestions([])
 
-      const pin = wordsToPin(newWords)
-      const validWordCount = newWords.filter(w => isValidPinWord(w)).length
-      setWordDisplayLength(validWordCount)
-      wordPinRef.current = pin
-
-      // Clear character input when word input is used
-      if (validWordCount > 0) {
-        charPinRef.current = ''
-        setCharDisplayLength(0)
-        if (charInputRef.current) charInputRef.current.value = ''
-      }
-
-      notifyPinChange()
+      updateWordPin(newWords)
 
       // Focus field after last pasted word
       const nextFocusIndex = Math.min(fieldIndex + validWords.length, 6)
       inputRefs.current[nextFocusIndex]?.focus()
-    }, [words, notifyPinChange])
+    }, [words, notifyPinChange, updateWordPin])
 
     const handlePasteFromClipboard = useCallback(async () => {
       try {
+        if (!navigator.clipboard?.readText) {
+          setError('Clipboard API not available')
+          if (timeoutRef.current) clearTimeout(timeoutRef.current)
+          timeoutRef.current = setTimeout(() => setError(null), 3000)
+          return
+        }
         const text = await navigator.clipboard.readText()
         const potentialWords = text
           .toLowerCase()
@@ -274,27 +260,19 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         setWords(newWords)
         setError(null)
 
-        const pin = wordsToPin(newWords)
-        setWordDisplayLength(potentialWords.length)
-        wordPinRef.current = pin
-
-        // Clear character input when word input is used
-        if (potentialWords.length > 0) {
-          charPinRef.current = ''
-          setCharDisplayLength(0)
-          if (charInputRef.current) charInputRef.current.value = ''
-        }
-
-        notifyPinChange()
+        updateWordPin(newWords)
 
         const nextIndex = potentialWords.length < 7 ? potentialWords.length : 6
         inputRefs.current[nextIndex]?.focus()
       } catch (err) {
-        setError('Failed to read clipboard')
+        const message = err instanceof DOMException && err.name === 'NotAllowedError'
+          ? 'Clipboard access denied'
+          : 'Failed to read clipboard'
+        setError(message)
         if (timeoutRef.current) clearTimeout(timeoutRef.current)
         timeoutRef.current = setTimeout(() => setError(null), 3000)
       }
-    }, [notifyPinChange])
+    }, [notifyPinChange, updateWordPin])
 
     const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
       if (suggestions.length > 0) {
@@ -362,6 +340,10 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
                   onFocus={() => handleFocus(i)}
                   onBlur={() => handleBlur()}
                   placeholder={`Word ${i + 1}`}
+                  aria-expanded={suggestions.length > 0}
+                  aria-haspopup="listbox"
+                  aria-controls={suggestions.length > 0 ? `suggestions-${i}` : undefined}
+                  aria-activedescendant={suggestions.length > 0 ? `suggestion-${i}-${selectedIndex}` : undefined}
                   className={`pr-7 text-center font-mono h-10 ${word === ''
                     ? ''
                     : isValidPinWord(word)
@@ -381,14 +363,21 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
                   </button>
                 )}
                 {activeWordIndex === i && suggestions.length > 0 && (
-                  <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-[200px] overflow-y-auto animate-in fade-in zoom-in duration-200">
+                  <div
+                    id={`suggestions-${i}`}
+                    role="listbox"
+                    className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-[200px] overflow-y-auto animate-in fade-in zoom-in duration-200"
+                  >
                     {suggestions.slice(0, 10).map((s, si) => (
                       <button
                         key={si}
+                        id={`suggestion-${i}-${si}`}
                         className={`w-full text-left px-3 py-1.5 text-sm font-mono transition-colors ${si === selectedIndex
                           ? 'bg-primary text-primary-foreground'
                           : 'hover:bg-muted'
                           }`}
+                        role="option"
+                        aria-selected={si === selectedIndex}
                         onMouseEnter={() => setSelectedIndex(si)}
                         onClick={() => selectSuggestion(i, s)}
                       >
