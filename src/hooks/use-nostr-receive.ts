@@ -201,6 +201,24 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         return
       }
 
+      // Required field: contentType must be present
+      if (!payload.contentType) {
+        setState({ status: 'error', message: 'Transfer missing content type' })
+        return
+      }
+
+      // Required field: fileSize must be present
+      if (payload.fileSize == null) {
+        setState({ status: 'error', message: 'Transfer missing file size' })
+        return
+      }
+
+      // Defensive fallbacks for older/malformed payloads
+      const resolvedContentType = payload.contentType
+      const resolvedFileName = payload.fileName || 'unknown'
+      const resolvedFileSize = payload.fileSize
+      const resolvedMimeType = payload.mimeType || 'application/octet-stream'
+
       // Security check: Enforce MAX_MESSAGE_SIZE to prevent DoS/OOM
       const expectedSize = payload.fileSize || 0
       if (expectedSize > MAX_MESSAGE_SIZE) {
@@ -227,11 +245,11 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       setState({
         status: 'receiving',
         message: 'Receiving file...',
-        contentType: payload.contentType,
+        contentType: resolvedContentType,
         fileMetadata: {
-          fileName: payload.fileName!,
-          fileSize: payload.fileSize!,
-          mimeType: payload.mimeType!,
+          fileName: resolvedFileName,
+          fileSize: resolvedFileSize,
+          mimeType: resolvedMimeType,
         },
         useWebRTC: false,
         currentRelays: client.getRelays(),
@@ -587,20 +605,20 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       // Set received content
       setReceivedContent({
-        contentType: 'file',
+        contentType: resolvedContentType,
         data: contentData,
-        fileName: payload.fileName!,
-        fileSize: payload.fileSize!,
-        mimeType: payload.mimeType!,
+        fileName: resolvedFileName,
+        fileSize: resolvedFileSize,
+        mimeType: resolvedMimeType,
       })
       setState({
         status: 'complete',
         message: webRTCSuccess ? 'File received (P2P)!' : 'File received!',
-        contentType: 'file',
+        contentType: resolvedContentType,
         fileMetadata: {
-          fileName: payload.fileName!,
-          fileSize: payload.fileSize!,
-          mimeType: payload.mimeType!,
+          fileName: resolvedFileName,
+          fileSize: resolvedFileSize,
+          mimeType: resolvedMimeType,
         },
       })
     } catch (error) {
