@@ -259,6 +259,8 @@ export function useQRScanner(options: UseQRScannerOptions) {
 
   // Cleanup on unmount
   useEffect(() => {
+    const videoEl = videoRef.current
+
     return () => {
       isScanningRef.current = false
       const stream = cameraStreamRef.current
@@ -273,12 +275,10 @@ export function useQRScanner(options: UseQRScannerOptions) {
         scanLoopRef.current = null
       }
 
-      const videoEl = videoRef.current
       if (videoEl) {
+        const el = videoEl
         setTimeout(() => {
-          if (videoEl) {
-            videoEl.srcObject = null
-          }
+          el.srcObject = null
         }, 50)
       }
     }
