@@ -1,7 +1,6 @@
 import Peer from 'peerjs'
 import type { DataConnection } from 'peerjs'
 import { computePinHint } from '@/lib/crypto'
-import type { ContentType } from '@/lib/nostr/types'
 
 // PeerJS cloud server configuration
 const PEERJS_HOST = '0.peerjs.com'
@@ -95,7 +94,6 @@ export async function derivePeerId(pin: string): Promise<string> {
 // Protocol message types
 export interface PeerJSMetadata {
   type: 'metadata'
-  contentType: ContentType
   totalBytes: number
   // Milliseconds since epoch when sender created the transfer request.
   // Receiver must enforce TTL before sending "ready".
@@ -105,8 +103,6 @@ export interface PeerJSMetadata {
   fileName?: string
   fileSize?: number
   mimeType?: string
-  // Encrypted payload for text content (small messages)
-  encryptedPayload?: string
 }
 
 export interface PeerJSReady {

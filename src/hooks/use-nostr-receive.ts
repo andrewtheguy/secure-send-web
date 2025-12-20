@@ -201,20 +201,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         return
       }
 
-      // Required field: contentType must be present
-      if (!payload.contentType) {
-        setState({ status: 'error', message: 'Transfer missing content type' })
-        return
-      }
-
       // Required field: fileSize must be present
       if (payload.fileSize == null) {
         setState({ status: 'error', message: 'Transfer missing file size' })
         return
       }
 
-      // Resolved metadata from validated payload
-      const resolvedContentType = payload.contentType
       const resolvedFileName = payload.fileName || 'unknown'
       const resolvedFileSize = payload.fileSize
       const resolvedMimeType = payload.mimeType || 'application/octet-stream'
@@ -245,7 +237,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       setState({
         status: 'receiving',
         message: 'Receiving file...',
-        contentType: resolvedContentType,
+        contentType: 'file',
         fileMetadata: {
           fileName: resolvedFileName,
           fileSize: resolvedFileSize,
@@ -605,7 +597,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       // Set received content
       setReceivedContent({
-        contentType: resolvedContentType,
+        contentType: 'file',
         data: contentData,
         fileName: resolvedFileName,
         fileSize: resolvedFileSize,
@@ -614,7 +606,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       setState({
         status: 'complete',
         message: webRTCSuccess ? 'File received (P2P)!' : 'File received!',
-        contentType: resolvedContentType,
+        contentType: 'file',
         fileMetadata: {
           fileName: resolvedFileName,
           fileSize: resolvedFileSize,

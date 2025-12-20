@@ -16,7 +16,7 @@ import {
   generateMutualClipboardData,
   type SignalingPayload,
 } from '@/lib/manual-signaling'
-import type { TransferState, ContentType } from '@/lib/nostr/types'
+import type { TransferState } from '@/lib/nostr/types'
 import type { ReceivedContent } from '@/lib/types'
 
 // Extended transfer status for Manual Exchange receive mode
@@ -147,7 +147,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       }
 
       // Extract metadata from offer
-      const { contentType, totalBytes, fileName, fileSize, mimeType, salt: saltArray, publicKey: senderPublicKeyArray } = offerPayload
+      const { totalBytes, fileName, fileSize, mimeType, salt: saltArray, publicKey: senderPublicKeyArray } = offerPayload
 
       // Validate required fields
       if (!saltArray) {
@@ -285,7 +285,7 @@ export function useManualReceive(): UseManualReceiveReturn {
         message: 'Show this to sender and wait for connection',
         answerData: answerBinary,
         clipboardData: clipboardBase64,
-        contentType: contentType as ContentType,
+        contentType: 'file',
         fileMetadata: { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! },
       })
 
@@ -313,7 +313,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       setState({
         status: 'receiving',
         message: 'Receiving file...',
-        contentType: contentType as ContentType,
+        contentType: 'file',
         fileMetadata: { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! },
         useWebRTC: true,
         progress: { current: 0, total: totalBytes || 0 },
