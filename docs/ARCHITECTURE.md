@@ -212,7 +212,7 @@ The following structure is revealed *after* successful de-obfuscation using the 
 
 **Verification Process:**
 1. **Identification**: The receiver checks the first 4 bytes for the plaintext `"SS02"` header.
-2. **Seed Testing**: The receiver iterates through candidate seeds for the current and previous 3 hours. 
+2. **Seed Testing**: The receiver iterates through candidate seeds for the current and previous hour (2-hour sliding window). 
 3. **Optimized Check**: For each candidate seed, only the first 4 bytes of the inner buffer are de-obfuscated. If they match the `"mag!"` marker, the correct seed has been found.
 4. **Full Processing**: The rest of the buffer is de-obfuscated, decompressed via deflate, and parsed as JSON.
 
