@@ -10,7 +10,7 @@ Secure Send is a browser-based encrypted file and message transfer application. 
 2. **Protocol-Agnostic Encryption**: All content is encrypted at the application layer using AES-256-GCM in 128KB chunks, regardless of transport encryption. This provides defense in depth and consistent security across all signaling methods.
 3. **Memory-Efficient Streaming**: Content is encrypted/decrypted in streaming chunks. All receivers (P2P and cloud) preallocate buffers and write directly to calculated positions - no intermediate chunk arrays.
 4. **Pluggable Signaling**: Signaling (Nostr, PeerJS, QR) is decoupled from the transfer layer. The same encryption/chunking logic is used regardless of signaling method.
-5. **PIN-Based Security**: A 12-character PIN serves as the shared secret for key derivation.
+5. **Dual PIN Representation**: A 12-character alphanumeric PIN serves as the shared secret. To improve shareability (e.g., via voice), this PIN can be bijectively mapped to a 7-word sequence from the BIP-39 wordlist.
 
 ## Signaling Methods
 
@@ -122,11 +122,53 @@ sequenceDiagram
 
 | Component | Description |
 |-----------|-------------|
-| `pin.ts` | PIN generation and validation (12-char, mixed charset) |
+| `pin.ts` | Alphanumeric (12-char) and Word (7-word) PIN handling, weighted checksums, signaling detection |
 | `kdf.ts` | Key derivation using PBKDF2-SHA256 (600,000 iterations) |
 | `aes-gcm.ts` | AES-256-GCM encryption/decryption |
 | `stream-crypto.ts` | Streaming encryption/decryption (128KB chunks, protocol-agnostic) |
-| `constants.ts` | Crypto parameters, size limits, timeouts |
+| `constants.ts` | Crypto parameters, charsets (69 chars), BIP-39 wordlist (2048 words) |
+
+### PIN Architecture
+
+Secure Send uses a sophisticated PIN system designed for both security and user-friendliness.
+
+#### Alphanumeric Representation (Base-69)
+- **Length**: 12 characters.
+- **Charset**: 69 URL-safe characters (mixed case + digits + symbols).
+- **Entropy**: ~67 bits (11 random chars + 1 checksum).
+- **First Character**: Encodes the signaling method (`A-Z` for Nostr, `a-z` for PeerJS, `'2'` for Manual).
+- **Last Character**: Weighted position-based checksum character.
+
+#### Word-Based Representation (Base-2048)
+- **mapping**: 7 words from the standard English BIP-39 wordlist.
+- **Bijective**: Mapping between alphanumeric and word forms is lossless and 1:1, achieved using BigInt-based base conversion.
+- **Validation**: Each word is individually validated against the 2048-word dictionary.
+
+#### Typo Detection (Weighted Checksum)
+To protect against manual entry errors, the PIN includes a custom checksum:
+- **Algorithm**: `sum(char_index * (position + 1)) % charset_size`.
+- **Detection**: Effectively catches single-character errors and swaps (transpositions).
+- **Independent Validation**: Both characters and word sequences are validated against the same underlying checksum logic.
+
+### User Interface Architecture
+
+#### `PinInput` (Receiver Side)
+The input component is designed for high-performance manual entry:
+- **Independent State**: Alphanumeric and Word modes maintain separate internal buffers (`charPinRef` and `wordPinRef`). Toggling does not convert contents; it switches context.
+- **7-Box Word Grid**: Word entry uses individual inputs for each of the 7 slots.
+- **Smart Focus**: Automatically advances to the next box upon entry of a valid word, space, or enter key.
+- **Real-time Autocomplete**: 
+  - Consults the BIP-39 wordlist starting from the first character.
+  - Supports keyboard navigation (Arrows) and quick selection (Tab/Enter).
+- **Robust Pasting**: 
+  - Handles multi-word strings (comma/space/newline separated).
+  - Validates all words in the pasted sequence before populating the grid.
+
+#### `PinDisplay` (Sender Side)
+The display component focuses on secure and clear communication:
+- **Masking**: Automatically masks the PIN after the first copy operation to prevent shoulder surfing.
+- **Contextual Copy**: The "Copy" button copies whichever format is currently visible (characters or words).
+- **Ephemeral Visibility**: Includes a countdown progress bar showing remaining TTL until the local display expires.
 
 **Key Parameters:**
 - `MAX_MESSAGE_SIZE`: 100MB (maximum file size)
@@ -192,6 +234,9 @@ Signaling method using QR codes or copy/paste for WebRTC offer/answer exchange. 
 - Both offer and answer include a required `createdAt` timestamp; receivers refuse to proceed if the offer is expired or missing TTL
 - Payload is obfuscated using a time-bucketed seed to avoid casual inspection.
 
+> [!IMPORTANT]
+> **Real protection**: Manual signaling confidentiality comes from the 1-hour TTL plus ECDH key exchange and AES-256-GCM on the data channel. Obfuscation is only a secondary deterrent against casual inspection; expired payloads are useless even if seen.
+
 **Binary Payload Format (SS02):**
 
 The payload consists of two distinct layers to balance rapid identification with obfuscation of the content.
@@ -223,8 +268,7 @@ The obfuscation seed changes every hour to ensure the **ephemerality** of signal
 - **Stale Data Prevention**: Prevents the utility of stale signaling data, such as a photograph of a QR code, a screenshot, or lingering clipboard contents.
 - **Payload Randomness**: Ensures that signaling data generated at different times results in significantly different binary outputs.
 
-> [!IMPORTANT]
-> **Real Protection**: The actual security for manual signaling is the inherent **TTL (1 hour)** and the data-layer encryption. Since signaling data is ephemeral, it becomes naturally useless once the window expires. Confidentiality is strictly enforced by ECDH mutual exchange and AES-256-GCM encryption of the WebRTC data channel.
+Primary confidentiality is provided by the 1-hour TTL and ECDH + AES-256-GCM (see note above); obfuscation is additive, not the core control.
 
 - **Bucket Size**: 1 hour (`3600` seconds).
 - **Input (`bucketEpoch`)**: `floor(unix_timestamp_seconds / 3600)`.
@@ -583,3 +627,5 @@ src/
 │       └── qr-input.tsx     # Dual input (scan or paste)
 └── pages/                   # Page components
 ```
+
+**Crypto parameters**: Key tunables like `PBKDF2_ITERATIONS`, `ENCRYPTION_CHUNK_SIZE`, and `CLOUD_CHUNK_SIZE` live in [src/lib/crypto/constants.ts](src/lib/crypto/constants.ts) for quick lookup.

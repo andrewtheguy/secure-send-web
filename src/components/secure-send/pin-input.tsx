@@ -1,6 +1,15 @@
-import { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react'
+import { useState, useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react'
+import { X, CheckCircle2, AlertCircle, Hash, MessageSquareText, ClipboardPaste } from 'lucide-react'
 import { Input } from '@/components/ui/input'
-import { PIN_LENGTH, PIN_CHARSET, isValidPin } from '@/lib/crypto'
+import { Button } from '@/components/ui/button'
+import {
+  PIN_LENGTH,
+  PIN_CHARSET,
+  isValidPin,
+  wordsToPin,
+  isValidPinWord,
+  PIN_WORDLIST,
+} from '@/lib/crypto'
 
 interface PinInputProps {
   onPinChange: (pin: string, isValid: boolean) => void
@@ -14,109 +23,474 @@ export interface PinInputRef {
 
 export const PinInput = forwardRef<PinInputRef, PinInputProps>(
   ({ onPinChange, disabled }, ref) => {
+    const [useWords, setUseWords] = useState(false)
+    const [words, setWords] = useState<string[]>(Array(7).fill(''))
+    const [activeWordIndex, setActiveWordIndex] = useState<number | null>(null)
+    const [suggestions, setSuggestions] = useState<string[]>([])
+    const [selectedIndex, setSelectedIndex] = useState(0)
     const [error, setError] = useState<string | null>(null)
-    const [displayLength, setDisplayLength] = useState(0)
+    const [charDisplayLength, setCharDisplayLength] = useState(0)
+    const [wordDisplayLength, setWordDisplayLength] = useState(0)
+
+    const inputRefs = useRef<(HTMLInputElement | null)[]>(Array(7).fill(null))
+    const charInputRef = useRef<HTMLInputElement>(null)
+    const charPinRef = useRef('')
+    const wordPinRef = useRef('')
     const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const mountedRef = useRef(true)
-    const inputRef = useRef<HTMLInputElement>(null)
-    // Store PIN in ref to avoid React DevTools exposure
-    const pinRef = useRef('')
 
     useImperativeHandle(ref, () => ({
       clear: () => {
-        pinRef.current = ''
-        setDisplayLength(0)
-        if (inputRef.current) {
-          inputRef.current.value = ''
-        }
+        charPinRef.current = ''
+        wordPinRef.current = ''
+        setCharDisplayLength(0)
+        setWordDisplayLength(0)
+        setWords(Array(7).fill(''))
+        if (charInputRef.current) charInputRef.current.value = ''
       },
-      getValue: () => pinRef.current,
+      getValue: () => {
+        // Return whichever PIN is valid, prioritizing character PIN
+        if (isValidPin(charPinRef.current)) return charPinRef.current
+        if (isValidPin(wordPinRef.current)) return wordPinRef.current
+        return charPinRef.current || wordPinRef.current
+      },
     }))
 
     useEffect(() => {
       mountedRef.current = true
       return () => {
         mountedRef.current = false
-        // Clear PIN from memory on unmount
-        pinRef.current = ''
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current)
-          timeoutRef.current = null
-        }
+        if (timeoutRef.current) clearTimeout(timeoutRef.current)
+        if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current)
       }
     }, [])
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const newValue = e.target.value
+    // Notify parent with best available PIN
+    const notifyPinChange = useCallback(() => {
+      // Prioritize character PIN if valid, otherwise use word PIN
+      const pin = isValidPin(charPinRef.current) ? charPinRef.current : wordPinRef.current
+      const isPinValid = isValidPin(pin)
+      onPinChange(pin, isPinValid)
+    }, [onPinChange])
 
-      // Validate each character
+    const updateWordPin = useCallback((updatedWords: string[]) => {
+      const pin = wordsToPin(updatedWords)
+      const validWordCount = updatedWords.filter(w => isValidPinWord(w)).length
+
+      setWordDisplayLength(validWordCount)
+      wordPinRef.current = pin
+
+      if (validWordCount > 0) {
+        charPinRef.current = ''
+        setCharDisplayLength(0)
+        if (charInputRef.current) charInputRef.current.value = ''
+      }
+
+      notifyPinChange()
+    }, [notifyPinChange])
+
+    // Handling character mode changes
+    const handleCharChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newValue = e.target.value
       const validChars = [...newValue].filter((char) => PIN_CHARSET.includes(char))
 
       if (validChars.length !== newValue.length && newValue.length > 0) {
-        // Clear any existing timeout before creating a new one
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current)
-          timeoutRef.current = null
-        }
-
         setError('Invalid character')
-        timeoutRef.current = setTimeout(() => {
-          if (mountedRef.current) {
-            setError(null)
-          }
-          timeoutRef.current = null
-        }, 1500)
+        if (timeoutRef.current) clearTimeout(timeoutRef.current)
+        timeoutRef.current = setTimeout(() => setError(null), 1500)
       }
 
-      // Only allow valid characters and limit length
       const filtered = validChars.slice(0, PIN_LENGTH).join('')
+      setCharDisplayLength(filtered.length)
+      charPinRef.current = filtered
+      if (charInputRef.current) charInputRef.current.value = filtered
 
-      // Store in ref (not state) for security
-      pinRef.current = filtered
-      setDisplayLength(filtered.length)
-
-      // Update input value directly for uncontrolled behavior
-      if (inputRef.current) {
-        inputRef.current.value = filtered
+      // Clear word input when character input is used
+      if (filtered.length > 0) {
+        setWords(Array(7).fill(''))
+        wordPinRef.current = ''
+        setWordDisplayLength(0)
       }
 
-      // Validate checksum when PIN is complete
-      const isPinValid = filtered.length === PIN_LENGTH && isValidPin(filtered)
-
-      // Notify parent of change with validity
-      onPinChange(filtered, isPinValid)
+      notifyPinChange()
     }
 
-    const isComplete = displayLength === PIN_LENGTH
-    const hasChecksumError = isComplete && !isValidPin(pinRef.current)
+    // Handle focus on word input field
+    const handleFocus = useCallback((index: number) => {
+      // Cancel any pending blur timeout to prevent it from clearing suggestions
+      if (blurTimeoutRef.current) {
+        clearTimeout(blurTimeoutRef.current)
+        blurTimeoutRef.current = null
+      }
+
+      setActiveWordIndex(index)
+      const currentWord = words[index]
+
+      if (currentWord === '') {
+        setSuggestions(PIN_WORDLIST)  // Show all words
+        setSelectedIndex(0)
+      } else {
+        const matches = PIN_WORDLIST.filter(w => w.startsWith(currentWord))
+        setSuggestions(matches)
+        setSelectedIndex(0)
+      }
+    }, [words])
+
+    // Handle blur on word input field
+    const handleBlur = useCallback(() => {
+      blurTimeoutRef.current = setTimeout(() => {
+        if (mountedRef.current) {
+          setActiveWordIndex(null)
+          setSuggestions([])
+        }
+      }, 200)
+    }, [])
+
+    // Handling word changes
+    const handleWordChange = (index: number, val: string) => {
+      const newWords = [...words]
+      newWords[index] = val.toLowerCase().replace(/[^a-z]/g, '')
+      setWords(newWords)
+
+      // Filter suggestions - now starts at 1 character
+      if (newWords[index].length >= 1) {
+        const matches = PIN_WORDLIST.filter(w => w.startsWith(newWords[index]))
+        setSuggestions(matches)
+        setSelectedIndex(0)
+      } else if (newWords[index].length === 0 && activeWordIndex === index) {
+        setSuggestions(PIN_WORDLIST)  // Show all when cleared while focused
+        setSelectedIndex(0)
+      } else {
+        setSuggestions([])
+      }
+
+      updateWordPin(newWords)
+    }
+
+    const selectSuggestion = (wordIndex: number, suggestion: string) => {
+      const newWords = [...words]
+      newWords[wordIndex] = suggestion
+      setWords(newWords)
+      setSuggestions([])
+
+      // Focus next box
+      if (wordIndex < 6) {
+        inputRefs.current[wordIndex + 1]?.focus()
+      }
+
+      updateWordPin(newWords)
+    }
+
+    const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>, fieldIndex: number) => {
+      const pastedText = e.clipboardData.getData('text')
+
+      // Split by spaces, newlines, tabs, commas
+      const potentialWords = pastedText
+        .toLowerCase()
+        .split(/[\s,]+/)
+        .map(w => w.replace(/[^a-z]/g, ''))
+        .filter(w => w.length > 0)
+
+      // If only one word, let default paste handle it
+      if (potentialWords.length <= 1) return
+
+      e.preventDefault()
+
+      // Validate all words
+      const validWords = potentialWords.slice(0, 7)
+      const allValid = validWords.every(w => isValidPinWord(w))
+
+      if (!allValid) {
+        setError('Some pasted words are invalid')
+        if (timeoutRef.current) clearTimeout(timeoutRef.current)
+        timeoutRef.current = setTimeout(() => setError(null), 3000)
+        return
+      }
+
+      // Populate fields starting from current field
+      const newWords = [...words]
+      validWords.forEach((word, i) => {
+        const targetIndex = fieldIndex + i
+        if (targetIndex < 7) {
+          newWords[targetIndex] = word
+        }
+      })
+
+      setWords(newWords)
+      setSuggestions([])
+
+      updateWordPin(newWords)
+
+      // Focus field after last pasted word
+      const nextFocusIndex = Math.min(fieldIndex + validWords.length, 6)
+      inputRefs.current[nextFocusIndex]?.focus()
+    }, [words, updateWordPin])
+
+    const handlePasteFromClipboard = useCallback(async () => {
+      try {
+        if (!navigator.clipboard?.readText) {
+          setError('Clipboard API not available')
+          if (timeoutRef.current) clearTimeout(timeoutRef.current)
+          timeoutRef.current = setTimeout(() => setError(null), 3000)
+          return
+        }
+        const text = await navigator.clipboard.readText()
+        const potentialWords = text
+          .toLowerCase()
+          .split(/[\s,]+/)
+          .map(w => w.replace(/[^a-z]/g, ''))
+          .filter(w => w.length > 0)
+          .slice(0, 7)
+
+        const allValid = potentialWords.every(w => isValidPinWord(w))
+
+        if (!allValid) {
+          setError('Clipboard contains invalid words')
+          if (timeoutRef.current) clearTimeout(timeoutRef.current)
+          timeoutRef.current = setTimeout(() => setError(null), 3000)
+          return
+        }
+
+        const newWords = Array(7).fill('')
+        potentialWords.forEach((word, i) => {
+          newWords[i] = word
+        })
+
+        setWords(newWords)
+        setError(null)
+
+        updateWordPin(newWords)
+
+        const nextIndex = potentialWords.length < 7 ? potentialWords.length : 6
+        inputRefs.current[nextIndex]?.focus()
+      } catch (err) {
+        const message = err instanceof DOMException && err.name === 'NotAllowedError'
+          ? 'Clipboard access denied'
+          : 'Failed to read clipboard'
+        setError(message)
+        if (timeoutRef.current) clearTimeout(timeoutRef.current)
+        timeoutRef.current = setTimeout(() => setError(null), 3000)
+      }
+    }, [notifyPinChange, updateWordPin])
+
+    const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (suggestions.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          const maxVisible = Math.min(10, suggestions.length)
+          setSelectedIndex(prev => (prev + 1) % maxVisible)
+          return
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          const maxVisible = Math.min(10, suggestions.length)
+          setSelectedIndex(prev => (prev - 1 + maxVisible) % maxVisible)
+          return
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          selectSuggestion(index, suggestions[selectedIndex])
+          return
+        }
+        if (e.key === 'Tab') {
+          const hasActiveSuggestion = suggestions.length > 0 && selectedIndex !== -1
+          if (hasActiveSuggestion && !e.shiftKey) {
+            e.preventDefault()
+            selectSuggestion(index, suggestions[selectedIndex])
+            return
+          }
+        }
+        if (e.key === 'Escape') {
+          setSuggestions([])
+          return
+        }
+      }
+
+      if (e.key === 'Backspace' && words[index] === '' && index > 0) {
+        inputRefs.current[index - 1]?.focus()
+      } else if ((e.key === ' ' || e.key === 'Enter') && words[index] !== '') {
+        e.preventDefault()
+        if (isValidPinWord(words[index]) && index < 6) {
+          inputRefs.current[index + 1]?.focus()
+        }
+      }
+    }
+
+    const toggleMode = (e: React.MouseEvent) => {
+      e.preventDefault()
+      setUseWords(prev => !prev)
+      // Don't convert between modes - they're independent
+    }
+
+    const charIsComplete = charDisplayLength === PIN_LENGTH
+    const wordIsComplete = words.length === 7 && words.every(w => isValidPinWord(w))
+    const charHasChecksumError = charIsComplete && !isValidPin(charPinRef.current)
+    const wordHasChecksumError = wordIsComplete && !isValidPin(wordPinRef.current)
 
     return (
-      <div className="flex flex-col gap-2">
-        <Input
-          ref={inputRef}
-          type="text"
-          defaultValue=""
-          onChange={handleChange}
-          placeholder={`Enter ${PIN_LENGTH}-character PIN`}
-          className={`font-mono text-xl text-center tracking-wider ${
-            error || hasChecksumError
+      <div className="flex flex-col gap-4">
+        {useWords ? (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {words.map((word, i) => (
+              <div key={i} className="relative group">
+                <Input
+                  ref={el => { inputRefs.current[i] = el }}
+                  value={word}
+                  onChange={e => handleWordChange(i, e.target.value)}
+                  onKeyDown={e => handleKeyDown(i, e)}
+                  onPaste={e => handlePaste(e, i)}
+                  onFocus={() => handleFocus(i)}
+                  onBlur={() => handleBlur()}
+                  placeholder={`Word ${i + 1}`}
+                  aria-expanded={suggestions.length > 0}
+                  aria-haspopup="listbox"
+                  aria-controls={suggestions.length > 0 ? `suggestions-${i}` : undefined}
+                  aria-activedescendant={suggestions.length > 0 ? `suggestion-${i}-${selectedIndex}` : undefined}
+                  className={`pr-7 text-center font-mono h-10 ${word === ''
+                    ? ''
+                    : isValidPinWord(word)
+                      ? 'border-green-500 bg-green-50/50'
+                      : 'border-destructive bg-destructive/5'
+                    }`}
+                  autoComplete="off"
+                  disabled={disabled}
+                />
+                {word && (
+                  <button
+                    onClick={() => handleWordChange(i, '')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                    type="button"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+                {activeWordIndex === i && suggestions.length > 0 && (
+                  <div
+                    id={`suggestions-${i}`}
+                    role="listbox"
+                    className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-[200px] overflow-y-auto animate-in fade-in zoom-in duration-200"
+                  >
+                    {suggestions.slice(0, 10).map((s, si) => (
+                      <button
+                        key={si}
+                        id={`suggestion-${i}-${si}`}
+                        className={`w-full text-left px-3 py-1.5 text-sm font-mono transition-colors ${si === selectedIndex
+                          ? 'bg-primary text-primary-foreground'
+                          : 'hover:bg-muted'
+                          }`}
+                        role="option"
+                        aria-selected={si === selectedIndex}
+                        onMouseEnter={() => setSelectedIndex(si)}
+                        onClick={() => selectSuggestion(i, s)}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                    {suggestions.length > 10 && (
+                      <div className="px-3 py-1.5 text-xs text-muted-foreground border-t">
+                        +{suggestions.length - 10} more matches
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+
+            <div>
+              <Button
+                variant="default"
+                onClick={handlePasteFromClipboard}
+                disabled={disabled}
+                className="h-10 p-0 flex flex-col items-center justify-center gap-0.5"
+                type="button"
+                title="Paste all words from clipboard"
+              >
+                <ClipboardPaste className="h-4 w-4" />
+                <span className="text-[10px] leading-none">Paste</span>
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Input
+            ref={charInputRef}
+            type="text"
+            onChange={handleCharChange}
+            placeholder={`Enter ${PIN_LENGTH}-character PIN`}
+            className={`font-mono text-xl text-center tracking-wider ${error || charHasChecksumError
               ? 'border-destructive'
-              : isComplete
+              : charIsComplete
                 ? 'border-green-500'
                 : ''
-          }`}
-          maxLength={PIN_LENGTH}
-          disabled={disabled}
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck={false}
-        />
-        <div className="flex justify-between text-xs">
-          <span className={error || hasChecksumError ? 'text-destructive' : 'text-muted-foreground'}>
-            {error || (hasChecksumError ? 'Invalid PIN' : `${displayLength}/${PIN_LENGTH} characters (case sensitive)`)}
-          </span>
-          {isComplete && !hasChecksumError && <span className="text-green-500">PIN ready</span>}
+              }`}
+            maxLength={PIN_LENGTH}
+            autoComplete="off"
+            spellCheck={false}
+            disabled={disabled}
+          />
+        )}
+
+        <div className="flex flex-col gap-3">
+          <div className="flex justify-between items-center text-xs">
+            <div className="flex items-center gap-1.5">
+              {useWords ? (
+                <>
+                  {wordIsComplete && !wordHasChecksumError ? (
+                    <span className="text-green-600 flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" /> PIN Valid
+                    </span>
+                  ) : wordHasChecksumError ? (
+                    <span className="text-destructive flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" /> Invalid PIN
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {wordDisplayLength}/7 words validated
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  {charIsComplete && !charHasChecksumError ? (
+                    <span className="text-green-600 flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" /> PIN Valid
+                    </span>
+                  ) : charHasChecksumError ? (
+                    <span className="text-destructive flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" /> Invalid PIN
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {charDisplayLength}/{PIN_LENGTH} characters
+                    </span>
+                  )}
+                </>
+              )}
+              {error && <span className="text-destructive">• {error}</span>}
+            </div>
+          </div>
+
+          <div className="flex justify-center">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleMode}
+              className="gap-2"
+              type="button"
+            >
+              {useWords ? (
+                <>
+                  <Hash className="h-4 w-4" />
+                  Switch to character PIN
+                </>
+              ) : (
+                <>
+                  <MessageSquareText className="h-4 w-4" />
+                  Switch to words
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       </div>
     )

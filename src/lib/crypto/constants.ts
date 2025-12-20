@@ -1,3 +1,5 @@
+import { wordlist as BIP39_EN_WORDLIST } from '@scure/bip39/wordlists/english.js'
+
 // PIN generation
 export const PIN_LENGTH = 12
 export const PIN_CHECKSUM_LENGTH = 1 // Last character is checksum
@@ -5,10 +7,16 @@ export const PIN_CHECKSUM_LENGTH = 1 // Last character is checksum
 // Symbols from iOS 123 layout: - / : ; ( ) $ & @ ? ! . , "
 export const PIN_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789-/:;()$&@?!.,"'
 
+// BIP-39 English wordlist (2048 words) sourced from maintained package
+// Used for compact 7-word representation of the PIN
+export const PIN_WORDLIST = BIP39_EN_WORDLIST
+
 // First character charset split (for signaling method detection)
 // Uppercase = Nostr, Lowercase = PeerJS, '2' = QR, Rest = Reserved for future
+// L is excluded here (kept in PIN_CHARSET) to keep symmetry at 23 symbols and leave room for a future protocol; lowercase l remains excluded everywhere as an ambiguous character
 export const NOSTR_FIRST_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ' // 23 uppercase (excluding I, L, O)
 export const PEERJS_FIRST_CHARSET = 'abcdefghjkmnpqrstuvwxyz' // 23 lowercase (excluding i, l, o)
+
 export const QR_FIRST_CHARSET = '2' // Single digit for QR method
 // Reserved for future protocols: '3456789-/:;()$&@?!.,"' (remaining digits + symbols)
 

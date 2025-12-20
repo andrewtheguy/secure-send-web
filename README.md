@@ -9,6 +9,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 - **100% Static - No Backend Required**: The entire app is a static site that can be hosted on any static hosting service (GitHub Pages, Netlify, Vercel, S3, etc.). No server-side code, no database, no backend infrastructure needed.
 - **PIN-based security**: PIN encrypts signaling payloads so only the PIN holder can establish a connection
 - **Text & file transfer**: Send text messages or files up to 100MB
+- **Word-based PIN representation**: Bijectively map the alphanumeric PIN to 7 words from the BIP-39 wordlist for easier sharing by voice or chat
 - **WebRTC P2P**: Direct peer-to-peer connections for fast, efficient data transfer
 - **Cloud fallback**: Automatic multi-host upload failover (tmpfiles.org, litterbox.catbox.moe, uguu.se, x0.at) if WebRTC connection fails
 - **End-to-end encryption**: All transfers use AES-256-GCM encryption with unique nonces per chunk, in addition to WebRTC DTLS
@@ -24,7 +25,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 1. Select the "Text Message" tab
 2. Enter your message (up to 100MB)
 3. Click "Generate PIN & Send"
-4. Share the generated 12-character PIN with the receiver through another channel (voice, chat, etc.)
+4. Share the generated 12-character PIN or its 7-word equivalent with the receiver through another channel (voice, chat, etc.)
 5. Wait for the receiver to connect and receive the message
 
 ### Sending a File
@@ -32,12 +33,12 @@ A web application for sending encrypted text messages and files using PIN-based 
 1. Select the "File" tab
 2. Drag and drop a file or click to select (max 100MB)
 3. Click "Generate PIN & Send"
-4. Share the generated 12-character PIN with the receiver
+4. Share the generated 12-character PIN (or 7-word equivalent) with the receiver
 5. Wait for the receiver to connect and receive the file
 
 ### Receiving
 
-1. Enter the PIN shared by the sender (signaling method is auto-detected from PIN)
+1. Enter the PIN or the 7-word sequence shared by the sender (signaling method is auto-detected)
 2. Click "Receive"
 3. For text: View and copy the decrypted message
 4. For files: Click "Download File" to save
