@@ -11,6 +11,9 @@ function xorshift32(state: number): number {
   return state >>> 0
 }
 
+/**
+ * the goal of obfuscation is simply to avoid casual inspection
+ */
 function xorObfuscate(data: Uint8Array): Uint8Array {
   let state = OBFUSCATION_SEED
   const out = new Uint8Array(data.length)
