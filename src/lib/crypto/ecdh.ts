@@ -3,10 +3,8 @@ import { AES_KEY_LENGTH } from './constants'
 /**
  * ECDH Key Exchange for Mutual Authentication
  *
- * SECURITY: Private keys are generated as non-extractable to prevent exfiltration.
- * We work around the Web Crypto API limitation (extractability applies to both keys)
- * by generating with extractable=true, exporting and re-importing the private key
- * as non-extractable, then discarding the extractable reference.
+ * SECURITY: Keys are generated as non-extractable to prevent exfiltration.
+ * Public keys can still be exported even when non-extractable.
  */
 
 /**
@@ -34,32 +32,10 @@ export interface ECDHKeyPair {
  * Generate an ephemeral ECDH key pair using P-256 curve.
  * Returns the key pair along with raw public key bytes for transmission.
  *
- * The private key is returned as non-extractable for security:
- * - Generated with extractable=true (required to export public key)
- * - Private key is re-imported as non-extractable
- * - Original extractable private key reference is discarded
+ * Keys are generated as non-extractable for security.
  */
 export async function generateECDHKeyPair(): Promise<ECDHKeyPair> {
-  // Generate with extractable=true so we can export keys
   const keyPair = await crypto.subtle.generateKey(
-    {
-      name: 'ECDH',
-      namedCurve: 'P-256',
-    },
-    true,
-    ['deriveBits']
-  )
-
-  // Export public key to raw format (65 bytes for P-256 uncompressed)
-  const publicKeyBytes = new Uint8Array(
-    await crypto.subtle.exportKey('raw', keyPair.publicKey)
-  )
-
-  // Export private key, then re-import as non-extractable
-  const privateKeyPkcs8 = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey)
-  const nonExtractablePrivateKey = await crypto.subtle.importKey(
-    'pkcs8',
-    privateKeyPkcs8,
     {
       name: 'ECDH',
       namedCurve: 'P-256',
@@ -68,9 +44,14 @@ export async function generateECDHKeyPair(): Promise<ECDHKeyPair> {
     ['deriveBits']
   )
 
+  // Export public key to raw format (65 bytes for P-256 uncompressed)
+  const publicKeyBytes = new Uint8Array(
+    await crypto.subtle.exportKey('raw', keyPair.publicKey)
+  )
+
   return {
     publicKey: keyPair.publicKey,
-    privateKey: nonExtractablePrivateKey,
+    privateKey: keyPair.privateKey,
     publicKeyBytes,
   }
 }
