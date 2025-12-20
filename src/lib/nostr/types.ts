@@ -3,7 +3,7 @@ export const EVENT_KIND_DATA_TRANSFER = 24242
 export const EVENT_KIND_PIN_EXCHANGE = 24243
 
 // Content types
-export type ContentType = 'text' | 'file'
+export type ContentType = 'file'
 
 // Transfer states
 export type TransferStatus =
@@ -52,8 +52,6 @@ export interface PinExchangePayload {
   relays?: string[]
   // tmpfiles.org download URL for encrypted data
   tmpfilesUrl?: string
-  // For text (small inline messages)
-  textMessage?: string
   // For file
   fileName?: string
   fileSize?: number
@@ -87,11 +85,6 @@ export interface TransferMetadata {
 }
 
 // Received content
-export interface ReceivedText {
-  contentType: 'text'
-  message: string
-}
-
 export interface ReceivedFile {
   contentType: 'file'
   data: Uint8Array
@@ -100,7 +93,7 @@ export interface ReceivedFile {
   mimeType: string
 }
 
-export type ReceivedContent = ReceivedText | ReceivedFile
+export type ReceivedContent = ReceivedFile
 
 // WebRTC Signaling
 export type SignalingType = 'offer' | 'answer' | 'candidate'

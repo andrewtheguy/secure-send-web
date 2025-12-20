@@ -147,7 +147,6 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       // Extract metadata from offer
       const { contentType, totalBytes, fileName, fileSize, mimeType, salt: saltArray, publicKey: senderPublicKeyArray } = offerPayload
-      const isFile = contentType === 'file'
 
       // Validate required fields
       if (!saltArray) {
@@ -286,7 +285,7 @@ export function useManualReceive(): UseManualReceiveReturn {
         answerData: answerBinary,
         clipboardData: clipboardBase64,
         contentType: contentType as ContentType,
-        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+        fileMetadata: { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! },
       })
 
       // Wait for data channel to open
@@ -312,9 +311,9 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       setState({
         status: 'receiving',
-        message: `Receiving ${isFile ? 'file' : 'message'}...`,
+        message: 'Receiving file...',
         contentType: contentType as ContentType,
-        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+        fileMetadata: { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! },
         useWebRTC: true,
         progress: { current: 0, total: totalBytes || 0 },
       })
@@ -384,36 +383,23 @@ export function useManualReceive(): UseManualReceiveReturn {
       const receivedData = contentData.slice(0, totalDecryptedBytes)
 
       // Set received content
-      if (contentType === 'file') {
-        setReceivedContent({
-          contentType: 'file',
-          data: receivedData,
+      setReceivedContent({
+        contentType: 'file',
+        data: receivedData,
+        fileName: fileName!,
+        fileSize: fileSize!,
+        mimeType: mimeType!,
+      })
+      setState({
+        status: 'complete',
+        message: 'File received (P2P)!',
+        contentType: 'file',
+        fileMetadata: {
           fileName: fileName!,
           fileSize: fileSize!,
           mimeType: mimeType!,
-        })
-        setState({
-          status: 'complete',
-          message: 'File received (P2P)!',
-          contentType: 'file',
-          fileMetadata: {
-            fileName: fileName!,
-            fileSize: fileSize!,
-            mimeType: mimeType!,
-          },
-        })
-      } else {
-        const message = new TextDecoder().decode(receivedData)
-        setReceivedContent({
-          contentType: 'text',
-          message,
-        })
-        setState({
-          status: 'complete',
-          message: 'Message received (P2P)!',
-          contentType: 'text',
-        })
-      }
+        },
+      })
 
     } catch (error) {
       if (!cancelledRef.current) {

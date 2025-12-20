@@ -3,7 +3,6 @@ import {
   generatePinForMethod,
   generateSalt,
   deriveKeyFromPin,
-  encrypt,
   encryptChunk,
   MAX_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
@@ -21,7 +20,7 @@ import { readFileAsBytes } from '@/lib/file-utils'
 export interface UsePeerJSSendReturn {
   state: TransferState
   pin: string | null
-  send: (content: string | File) => Promise<void>
+  send: (content: File) => Promise<void>
   cancel: () => void
 }
 
@@ -58,45 +57,28 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
     setState({ status: 'idle' })
   }, [clearExpirationTimeout])
 
-  const send = useCallback(async (content: string | File) => {
+  const send = useCallback(async (content: File) => {
     // Guard against concurrent invocations
     if (sendingRef.current) return
     sendingRef.current = true
     cancelledRef.current = false
 
-    const isFile = content instanceof File
-    const contentType: ContentType = isFile ? 'file' : 'text'
+    const contentType: ContentType = 'file'
 
     try {
       // Get content bytes
-      let contentBytes: Uint8Array
-      let fileName: string | undefined
-      let fileSize: number | undefined
-      let mimeType: string | undefined
+      const fileName = content.name
+      const fileSize = content.size
+      const mimeType = content.type || 'application/octet-stream'
 
-      if (isFile) {
-        fileName = content.name
-        fileSize = content.size
-        mimeType = content.type || 'application/octet-stream'
-
-        if (content.size > MAX_MESSAGE_SIZE) {
-          const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
-          setState({ status: 'error', message: `File exceeds ${limitMB}MB limit` })
-          return
-        }
-
-        setState({ status: 'connecting', message: 'Reading file...' })
-        contentBytes = await readFileAsBytes(content)
-      } else {
-        const encoder = new TextEncoder()
-        contentBytes = encoder.encode(content)
-
-        if (contentBytes.length > MAX_MESSAGE_SIZE) {
-          const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
-          setState({ status: 'error', message: `Message exceeds ${limitMB}MB limit` })
-          return
-        }
+      if (content.size > MAX_MESSAGE_SIZE) {
+        const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
+        setState({ status: 'error', message: `File exceeds ${limitMB}MB limit` })
+        return
       }
+
+      setState({ status: 'connecting', message: 'Reading file...' })
+      const contentBytes = await readFileAsBytes(content)
 
       // Generate PIN and derive encryption key
       setState({ status: 'connecting', message: 'Generating secure PIN...' })
@@ -144,7 +126,7 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
         status: 'waiting_for_receiver',
         message: 'Waiting for receiver...',
         contentType,
-        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+        fileMetadata: { fileName, fileSize, mimeType },
         useWebRTC: true,
       })
 
@@ -184,16 +166,10 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
         contentType,
         totalBytes: contentBytes.length,
         createdAt: sessionStartTime,
-        fileName: isFile ? fileName : undefined,
-        fileSize: isFile ? fileSize : undefined,
-        mimeType: isFile ? mimeType : undefined,
+        fileName,
+        fileSize,
+        mimeType,
         salt: Array.from(salt), // Convert Uint8Array to array for JSON transport
-      }
-
-      // For small text messages, include encrypted content in metadata
-      if (!isFile && contentBytes.length < 10 * 1024) { // < 10KB
-        const encryptedText = await encrypt(key, contentBytes)
-        metadata.encryptedPayload = btoa(String.fromCharCode(...encryptedText))
       }
 
       // Send metadata
@@ -201,7 +177,7 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
         status: 'connecting',
         message: 'Sending metadata...',
         contentType,
-        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+        fileMetadata: { fileName, fileSize, mimeType },
       })
 
       peerRef.current!.send(metadata)
@@ -227,43 +203,13 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
         throw new Error('Session expired. Please start a new transfer.')
       }
 
-      // If small text was included in metadata, we're done (just wait for done_ack)
-      if (metadata.encryptedPayload) {
-        // Small text already sent in metadata
-        setState({
-          status: 'transferring',
-          message: 'Sending...',
-          progress: { current: contentBytes.length, total: contentBytes.length },
-          contentType: 'text',
-        })
-
-        peerRef.current!.send({ type: 'done' })
-
-        // Wait for done_ack
-        await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error('Timeout waiting for completion acknowledgment'))
-          }, 30000)
-
-          peerRef.current!.onMessage((message: PeerJSMessage) => {
-            if (message.type === 'done_ack') {
-              clearTimeout(timeout)
-              resolve()
-            }
-          })
-        })
-
-        setState({ status: 'complete', message: 'Message sent via P2P!', contentType: 'text' })
-        return
-      }
-
-      // Transfer file/large text data
+      // Transfer file data
       setState({
         status: 'transferring',
         message: 'Sending via P2P...',
         progress: { current: 0, total: contentBytes.length },
         contentType,
-        fileMetadata: isFile ? { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! } : undefined,
+        fileMetadata: { fileName, fileSize, mimeType },
       })
 
       // Send data in encrypted chunks
@@ -304,8 +250,7 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
         })
       })
 
-      const successMsg = isFile ? 'File sent via P2P!' : 'Message sent via P2P!'
-      setState({ status: 'complete', message: successMsg, contentType })
+      setState({ status: 'complete', message: 'File sent via P2P!', contentType })
 
     } catch (error) {
       if (!cancelledRef.current) {
