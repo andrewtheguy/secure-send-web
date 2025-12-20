@@ -70,9 +70,22 @@ export async function generateECDHKeyPair(): Promise<ECDHKeyPair> {
 }
 
 /**
- * Import a peer's public key from raw bytes
+ * Import a peer's public key from raw bytes.
+ * Expects 65-byte uncompressed P-256 format: 0x04 || X (32 bytes) || Y (32 bytes)
  */
 export async function importECDHPublicKey(publicKeyBytes: Uint8Array): Promise<CryptoKey> {
+  // Validate uncompressed P-256 public key format
+  if (!(publicKeyBytes instanceof Uint8Array) || publicKeyBytes.length !== 65) {
+    throw new TypeError(
+      'Invalid ECDH public key: expected 65-byte uncompressed P-256 key (0x04 || X || Y)'
+    )
+  }
+  if (publicKeyBytes[0] !== 0x04) {
+    throw new TypeError(
+      'Invalid ECDH public key: missing uncompressed point prefix (0x04)'
+    )
+  }
+
   return crypto.subtle.importKey(
     'raw',
     toArrayBuffer(publicKeyBytes),
@@ -108,13 +121,24 @@ export async function deriveSharedSecret(
 }
 
 /**
- * Derive AES-256-GCM key from ECDH shared secret using HKDF
- * Salt ensures different keys even with same shared secret
+ * Derive AES-256-GCM key from ECDH shared secret using HKDF.
+ * Salt ensures different keys even with same shared secret.
+ *
+ * The info label "secure-send-mutual" provides domain separation,
+ * ensuring keys derived here cannot be confused with keys from other protocols.
  */
 export async function deriveAESKeyFromSecret(
   sharedSecret: Uint8Array,
   salt: Uint8Array
 ): Promise<CryptoKey> {
+  // Validate inputs
+  if (sharedSecret.length !== 32) {
+    throw new Error(`Invalid shared secret length: expected 32 bytes, got ${sharedSecret.length}`)
+  }
+  if (salt.length < 16) {
+    throw new Error(`Salt too short: expected at least 16 bytes, got ${salt.length}`)
+  }
+
   // Import shared secret as HKDF key material
   const keyMaterial = await crypto.subtle.importKey(
     'raw',

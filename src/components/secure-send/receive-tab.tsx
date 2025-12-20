@@ -38,18 +38,23 @@ export function ReceiveTab() {
 
   // Determine which hook to use based on mode
   const isManualMode = receiveMode === 'scan'
-  const activeHook = isManualMode
-    ? manualHook
-    : detectedMethod === 'nostr'
-      ? nostrHook
-      : detectedMethod === 'peerjs'
-        ? peerJSHook
-        : nostrHook
+
+  const getActiveHook = () => {
+    if (isManualMode) return manualHook
+    if (detectedMethod === 'nostr') return nostrHook
+    if (detectedMethod === 'peerjs') return peerJSHook
+    return nostrHook // default fallback
+  }
+  const activeHook = getActiveHook()
 
   const { state: rawState, receivedContent, cancel, reset } = activeHook
 
   // Get the right receive function based on mode
-  const pinReceive = !isManualMode ? (activeHook as typeof nostrHook).receive : undefined
+  // nostrHook and peerJSHook have .receive, manualHook does not
+  const pinReceive: ((pin: string) => void) | undefined =
+    !isManualMode && 'receive' in activeHook && typeof activeHook.receive === 'function'
+      ? activeHook.receive
+      : undefined
   const { startReceive, submitOffer } = manualHook
 
   // Use rawState directly for common properties

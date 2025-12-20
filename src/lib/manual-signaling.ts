@@ -45,14 +45,6 @@ function base64ToUint8Array(base64: string): Uint8Array {
 }
 
 /**
- * Parse binary QR data
- * Returns the raw binary payload (pass-through)
- */
-export function parseBinaryQRPayload(bytes: Uint8Array): Uint8Array {
-  return bytes
-}
-
-/**
  * Parse base64 clipboard data to binary payload
  */
 export function parseClipboardPayload(base64: string): Uint8Array | null {
@@ -72,6 +64,9 @@ export function isValidSignalingPayload(payload: unknown): payload is SignalingP
   if (p.type !== 'offer' && p.type !== 'answer') return false
   if (typeof p.sdp !== 'string') return false
   if (!Array.isArray(p.candidates)) return false
+  if (!(p.candidates as unknown[]).every((c) => typeof c === 'string')) return false
+  if (typeof p.createdAt !== 'number') return false
+  if (p.publicKey !== undefined && !Array.isArray(p.publicKey)) return false
   return true
 }
 
@@ -142,13 +137,14 @@ export function generateMutualOfferBinary(
 export function generateMutualAnswerBinary(
   answer: RTCSessionDescriptionInit,
   candidates: RTCIceCandidate[],
-  publicKey: Uint8Array // ECDH public key (65 bytes)
+  publicKey: Uint8Array, // ECDH public key (65 bytes)
+  createdAt: number = Date.now()
 ): Uint8Array {
   const payload: SignalingPayload = {
     type: 'answer',
     sdp: answer.sdp || '',
     candidates: candidates.map((c) => c.candidate),
-    createdAt: Date.now(),
+    createdAt,
     publicKey: Array.from(publicKey),
   }
 
@@ -164,19 +160,20 @@ export function generateMutualAnswerBinary(
 }
 
 /**
+ * Validate publicKey is a valid P-256 uncompressed public key (65 bytes, values 0-255)
+ */
+function isValidPublicKeyArray(arr: unknown): arr is number[] {
+  if (!Array.isArray(arr) || arr.length !== 65) return false
+  return arr.every((b) => typeof b === 'number' && Number.isInteger(b) && b >= 0 && b <= 255)
+}
+
+/**
  * Parse mutual exchange binary payload (offer or answer)
  * Returns null if invalid format or version
  */
 export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null {
   try {
-    // Verify magic header "SS02"
-    if (
-      binary.length < 5 ||
-      binary[0] !== 0x53 ||
-      binary[1] !== 0x53 ||
-      binary[2] !== 0x30 ||
-      binary[3] !== 0x32
-    ) {
+    if (!isMutualPayload(binary)) {
       return null
     }
 
@@ -189,8 +186,8 @@ export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null 
       return null
     }
 
-    // Validate publicKey is present for mutual exchange
-    if (!payload.publicKey || !Array.isArray(payload.publicKey)) {
+    // Validate publicKey is a valid P-256 uncompressed key (65 bytes)
+    if (!isValidPublicKeyArray(payload.publicKey)) {
       return null
     }
 

@@ -51,14 +51,28 @@ export function SendTab() {
   const manualHook = useManualSend()
 
   // Use the appropriate hook based on active method (defaults to nostr before detection)
-  const activeHook = activeMethod === 'peerjs' ? peerJSHook : activeMethod === 'manual' ? manualHook : nostrHook
-  // Only nostr and peerjs hooks have PIN
-  const pin = activeMethod === 'manual' ? null : (activeHook as typeof nostrHook).pin
+  const getActiveHook = () => {
+    if (activeMethod === 'peerjs') return peerJSHook
+    if (activeMethod === 'manual') return manualHook
+    return nostrHook // default
+  }
+  const activeHook = getActiveHook()
+
+  // Only nostr and peerjs hooks have PIN - use runtime check for type safety
+  const pin: string | null =
+    activeMethod !== 'manual' && 'pin' in activeHook && typeof activeHook.pin === 'string'
+      ? activeHook.pin
+      : null
   const { state: rawState, cancel } = activeHook
   const submitAnswer = activeMethod === 'manual' ? manualHook.submitAnswer : undefined
 
-  // Normalize state for different hooks
-  const state = rawState as typeof nostrHook.state & { offerData?: Uint8Array; clipboardData?: string }
+  // Runtime normalization for manual-mode specific properties
+  const state = rawState
+  const rawStateAny = rawState as unknown as Record<string, unknown>
+  const offerData: Uint8Array | undefined =
+    rawStateAny.offerData instanceof Uint8Array ? rawStateAny.offerData : undefined
+  const clipboardData: string | undefined =
+    typeof rawStateAny.clipboardData === 'string' ? rawStateAny.clipboardData : undefined
 
   const encoder = new TextEncoder()
   const messageSize = encoder.encode(message).length
@@ -254,7 +268,7 @@ export function SendTab() {
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
   const showPinDisplay = pin && state.status === 'waiting_for_receiver'
-  const showQRDisplay = activeMethod === 'manual' && state.offerData && state.status === 'showing_offer'
+  const showQRDisplay = activeMethod === 'manual' && offerData && state.status === 'showing_offer'
   const showQRInput = activeMethod === 'manual' && state.status === 'showing_offer'
 
   return (
@@ -608,10 +622,10 @@ export function SendTab() {
           />
 
           {/* QR Code display for sender */}
-          {showQRDisplay && state.offerData && (
+          {showQRDisplay && (
             <QRDisplay
-              data={state.offerData}
-              clipboardData={state.clipboardData}
+              data={offerData!}
+              clipboardData={clipboardData}
               label="Show this QR to receiver"
             />
           )}
