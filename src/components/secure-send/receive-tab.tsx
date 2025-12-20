@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { Download, X, RotateCcw, FileDown, QrCode, KeyRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { PinInput, type PinInputRef } from './pin-input'
+import { PinInput, type PinInputRef, type PinChangePayload } from './pin-input'
 import { TransferStatus } from './transfer-status'
 import { QRDisplay } from './qr-display'
 import { QRInput } from './qr-input'
@@ -10,10 +10,12 @@ import { useNostrReceive } from '@/hooks/use-nostr-receive'
 import { usePeerJSReceive } from '@/hooks/use-peerjs-receive'
 import { useManualReceive } from '@/hooks/use-manual-receive'
 import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
-import { detectSignalingMethod } from '@/lib/crypto'
 import type { SignalingMethod } from '@/lib/nostr/types'
+import type { PinKeyMaterial } from '@/lib/types'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+
+type PinSecret = PinKeyMaterial & { method: SignalingMethod | null }
 
 type ReceiveMode = 'pin' | 'scan'
 
@@ -21,12 +23,14 @@ export function ReceiveTab() {
   const [receiveMode, setReceiveMode] = useState<ReceiveMode>('pin')
 
   // Store PIN in ref to avoid React DevTools exposure
-  const pinRef = useRef('')
+  const pinSecretRef = useRef<PinSecret | null>(null)
+  const pinInputLengthRef = useRef(0)
   const pinInputRef = useRef<PinInputRef>(null)
   const [isPinValid, setIsPinValid] = useState(false)
   const [pinExpired, setPinExpired] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(0)
   const [detectedMethod, setDetectedMethod] = useState<SignalingMethod>('nostr')
+  const [pinFingerprint, setPinFingerprint] = useState<string | null>(null)
 
   // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrReceive()
@@ -48,7 +52,7 @@ export function ReceiveTab() {
 
   // Get the right receive function based on mode
   // nostrHook and peerJSHook have .receive, manualHook does not
-  const pinReceive: ((pin: string) => void) | undefined =
+  const pinReceive: ((secret: PinSecret) => Promise<void>) | undefined =
     !isManualMode && 'receive' in activeHook && typeof activeHook.receive === 'function'
       ? activeHook.receive
       : undefined
@@ -87,12 +91,12 @@ export function ReceiveTab() {
   }, [])
 
   // Reset PIN inactivity timeout (called on each PIN change)
-  const resetPinInactivityTimeout = useCallback(() => {
+  const resetPinInactivityTimeout = useCallback((hasInput: boolean) => {
     clearPinInactivityTimeout()
     setPinExpired(false)
 
     // Only set timeout if there's some PIN input
-    if (pinRef.current.length > 0) {
+    if (hasInput) {
       // Set initial countdown time
       setTimeRemaining(Math.floor(PIN_INACTIVITY_TIMEOUT_MS / 1000))
 
@@ -104,9 +108,10 @@ export function ReceiveTab() {
 
       // Set expiration timeout
       pinInactivityRef.current = setTimeout(() => {
-        if (mountedRef.current && pinRef.current.length > 0) {
+        if (mountedRef.current && (pinSecretRef.current || pinInputLengthRef.current > 0)) {
           // Clear PIN due to inactivity
-          pinRef.current = ''
+          pinSecretRef.current = null
+          pinInputLengthRef.current = 0
           setIsPinValid(false)
           pinInputRef.current?.clear()
           setPinExpired(true)
@@ -125,7 +130,8 @@ export function ReceiveTab() {
     return () => {
       mountedRef.current = false
       // Clear PIN from memory on unmount
-      pinRef.current = ''
+      pinSecretRef.current = null
+      pinInputLengthRef.current = 0
       const timeoutId = timeoutRef.current
       const countdownId = countdownIntervalRef.current
       if (timeoutId) {
@@ -151,16 +157,16 @@ export function ReceiveTab() {
   const canReceiveScan = state.status === 'idle'
 
   const handleReceivePin = () => {
-    if (canReceivePin && pinRef.current && pinReceive) {
+    const secret = pinSecretRef.current
+    if (canReceivePin && secret && pinReceive) {
       clearPinInactivityTimeout()
-      const pin = pinRef.current
-      // Clear PIN immediately after getting it
-      pinRef.current = ''
+      // Clear stored material immediately after retrieving it
+      pinSecretRef.current = null
+      pinInputLengthRef.current = 0
       setIsPinValid(false)
       pinInputRef.current?.clear()
       setPinExpired(false)
-      // Pass PIN to receive function
-      pinReceive(pin)
+      pinReceive(secret)
     }
   }
 
@@ -174,23 +180,38 @@ export function ReceiveTab() {
     reset()
     clearPinInactivityTimeout()
     // Clear PIN from ref and input
-    pinRef.current = ''
+    pinSecretRef.current = null
+    pinInputLengthRef.current = 0
     setIsPinValid(false)
     pinInputRef.current?.clear()
     setPinExpired(false)
   }
 
-  const handlePinChange = useCallback((pin: string, isValid: boolean) => {
-    pinRef.current = pin
-    setIsPinValid(isValid)
-    resetPinInactivityTimeout()
+  const handlePinChange = useCallback((payload: PinChangePayload) => {
+    const { key, hint, method, isValid, length } = payload
+    pinInputLengthRef.current = length
 
-    // Auto-detect signaling method from PIN's first character
-    if (pin.length > 0) {
-      const method = detectSignalingMethod(pin)
-      if (method) {
-        setDetectedMethod(method)
-      }
+    const formatFingerprint = (h: string) => {
+      const compact = h.slice(0, 8).toUpperCase()
+      return `${compact.slice(0, 4)}-${compact.slice(4, 8)}`
+    }
+
+    if (isValid && key && hint) {
+      pinSecretRef.current = { key, hint, method: method ?? null }
+      setIsPinValid(true)
+      setPinFingerprint(formatFingerprint(hint))
+    } else {
+      pinSecretRef.current = null
+      setIsPinValid(false)
+      setPinFingerprint(null)
+    }
+
+    resetPinInactivityTimeout(length > 0)
+
+    if (method) {
+      setDetectedMethod(method)
+    } else if (length === 0) {
+      setDetectedMethod('nostr')
     }
   }, [resetPinInactivityTimeout])
 
@@ -226,6 +247,17 @@ export function ReceiveTab() {
               <div className="space-y-2">
                 <label className="text-sm font-medium">Enter PIN from sender</label>
                 <PinInput ref={pinInputRef} onPinChange={handlePinChange} disabled={isActive} />
+                {pinFingerprint && (
+                  <div className="text-xs text-muted-foreground flex flex-col gap-1">
+                    <div className="flex items-center gap-2 font-mono">
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-semibold">FP</span>
+                      PIN Fingerprint: {pinFingerprint}
+                    </div>
+                    <p>
+                      Compare this short fingerprint with the sender. It should match if you both entered the same PIN.
+                    </p>
+                  </div>
+                )}
                 {timeRemaining > 0 && (
                   <p className="text-xs text-amber-600 font-medium">
                     PIN will be cleared in {formatTime(timeRemaining)}

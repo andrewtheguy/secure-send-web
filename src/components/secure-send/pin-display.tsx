@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Check, Copy, AlertCircle, Eye, EyeOff, Clock, Hash, MessageSquareText } from 'lucide-react'
+import { Check, Copy, AlertCircle, Eye, EyeOff, Clock, Hash, MessageSquareText, Fingerprint } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { PIN_DISPLAY_TIMEOUT_MS, pinToWords } from '@/lib/crypto'
+import { PIN_DISPLAY_TIMEOUT_MS, pinToWords, computePinHint } from '@/lib/crypto'
 
 interface PinDisplayProps {
   pin: string
@@ -17,6 +17,7 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
   const [hasCopied, setHasCopied] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(Math.ceil(PIN_DISPLAY_TIMEOUT_MS / 1000))
   const [progressPercentage, setProgressPercentage] = useState(100)
+  const [fingerprint, setFingerprint] = useState<string>('')
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const animationFrameRef = useRef<number | null>(null)
@@ -120,6 +121,27 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
 
   // Mask PIN with bullet characters
   const maskedPin = pin.replace(/./g, '\u2022')
+
+  useEffect(() => {
+    let cancelled = false
+    const loadHint = async () => {
+      try {
+        const hint = await computePinHint(pin)
+        if (!cancelled) {
+          let formatted = ''
+          if (typeof hint === 'string' && hint.length > 0) {
+            const compact = hint.padEnd(8, '0').slice(0, 8).toUpperCase()
+            formatted = `${compact.slice(0, 4)}-${compact.slice(4, 8)}`
+          }
+          setFingerprint(formatted)
+        }
+      } catch {
+        if (!cancelled) setFingerprint('')
+      }
+    }
+    void loadHint()
+    return () => { cancelled = true }
+  }, [pin])
 
   return (
     <div className="flex flex-col gap-4 p-6 rounded-lg bg-muted/50 border">
@@ -254,6 +276,16 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
           )}
         </Button>
       </div>
+
+      {fingerprint && (
+        <div className="space-y-1 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 font-mono">
+            <Fingerprint className="h-3 w-3" />
+            PIN Fingerprint: {fingerprint}
+          </div>
+          <p>It should match receiver's PIN fingerprint if they entered the same words/PIN.</p>
+        </div>
+      )}
     </div>
   )
 }
