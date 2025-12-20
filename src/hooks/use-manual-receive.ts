@@ -159,6 +159,12 @@ export function useManualReceive(): UseManualReceiveReturn {
         return
       }
 
+      // Validate required metadata
+      if (!fileName || fileSize == null || !mimeType) {
+        setState({ status: 'error', message: 'Invalid offer: missing file metadata' })
+        return
+      }
+
       // Security check: Enforce MAX_MESSAGE_SIZE
       if (totalBytes && totalBytes > MAX_MESSAGE_SIZE) {
         setState({
