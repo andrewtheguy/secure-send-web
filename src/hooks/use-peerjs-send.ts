@@ -142,11 +142,11 @@ export function usePeerJSSend(): UsePeerJSSendReturn {
         )
 
         // Also listen for errors
-        const originalOnError = (peerRef.current as any).onErrorCallback
-          ; (peerRef.current as any).onErrorCallback = (err: Error) => {
-            reject(err)
-            if (originalOnError) originalOnError(err)
-          }
+        const originalOnError = (peerRef.current as any).onErrorCallback;
+        (peerRef.current as any).onErrorCallback = (err: Error) => {
+          reject(err)
+          if (originalOnError) originalOnError(err)
+        }
       })
 
       if (cancelledRef.current) return

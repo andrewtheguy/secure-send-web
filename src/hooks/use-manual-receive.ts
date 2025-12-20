@@ -160,13 +160,13 @@ export function useManualReceive(): UseManualReceiveReturn {
       }
 
       // Validate required metadata
-      if (!fileName || fileSize == null || !mimeType) {
+      if (!fileName || fileSize == null || !mimeType || totalBytes == null) {
         setState({ status: 'error', message: 'Invalid offer: missing file metadata' })
         return
       }
 
       // Security check: Enforce MAX_MESSAGE_SIZE
-      if (totalBytes && totalBytes > MAX_MESSAGE_SIZE) {
+      if (totalBytes > MAX_MESSAGE_SIZE) {
         setState({
           status: 'error',
           message: `Transfer rejected: Size (${Math.round(totalBytes / 1024 / 1024)}MB) exceeds limit (${MAX_MESSAGE_SIZE / 1024 / 1024}MB)`
