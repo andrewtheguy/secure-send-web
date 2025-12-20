@@ -129,15 +129,9 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
         const hint = await computePinHint(pin)
         if (!cancelled) {
           let formatted = ''
-          if (typeof hint === 'string') {
-            if (hint.length >= 8) {
-              const compact = hint.slice(0, 8).toUpperCase()
-              formatted = `${compact.slice(0, 4)}-${compact.slice(4, 8)}`
-            } else {
-              formatted = hint
-            }
-          } else {
-            formatted = "N/A"
+          if (typeof hint === 'string' && hint.length >= 8) {
+            const compact = hint.slice(0, 8).toUpperCase()
+            formatted = `${compact.slice(0, 4)}-${compact.slice(4, 8)}`
           }
           setFingerprint(formatted)
         }
