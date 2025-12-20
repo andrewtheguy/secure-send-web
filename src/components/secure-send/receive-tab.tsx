@@ -248,10 +248,15 @@ export function ReceiveTab() {
                 <label className="text-sm font-medium">Enter PIN from sender</label>
                 <PinInput ref={pinInputRef} onPinChange={handlePinChange} disabled={isActive} />
                 {pinFingerprint && (
-                  <p className="text-xs text-muted-foreground font-mono flex items-center gap-2">
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-semibold">FP</span>
-                    Fingerprint: {pinFingerprint}
-                  </p>
+                  <div className="text-xs text-muted-foreground flex flex-col gap-1">
+                    <div className="flex items-center gap-2 font-mono">
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-semibold">FP</span>
+                      PIN Fingerprint: {pinFingerprint}
+                    </div>
+                    <p>
+                      Compare this short fingerprint with the sender. It should match if you both entered the same PIN.
+                    </p>
+                  </div>
                 )}
                 {timeRemaining > 0 && (
                   <p className="text-xs text-amber-600 font-medium">

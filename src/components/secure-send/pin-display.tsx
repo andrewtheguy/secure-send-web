@@ -274,9 +274,12 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
       </div>
 
       {fingerprint && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Fingerprint className="h-3 w-3" />
-          <span className="font-mono">Fingerprint: {fingerprint}</span>
+        <div className="space-y-1 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 font-mono">
+            <Fingerprint className="h-3 w-3" />
+            PIN Fingerprint: {fingerprint}
+          </div>
+          <p>It should match receiver's PIN fingerprint if they entered the same words/PIN.</p>
         </div>
       )}
     </div>
