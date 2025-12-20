@@ -239,7 +239,8 @@ export function useQRScanner(options: UseQRScannerOptions) {
     } else if (!isScanning && isScanningRef.current) {
       stopCameraScanning()
     }
-  }, [isScanning, startCameraScanning, stopCameraScanning])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isScanning])
 
   // Restart camera when facingMode or preferLowRes changes
   const facingModeRef = useRef(facingMode)
@@ -259,19 +260,26 @@ export function useQRScanner(options: UseQRScannerOptions) {
 
   // Cleanup on unmount
   useEffect(() => {
+    const videoEl = videoRef.current
+
     return () => {
       isScanningRef.current = false
-      if (cameraStreamRef.current) {
-        cameraStreamRef.current.getTracks().forEach((track) => track.stop())
+      const stream = cameraStreamRef.current
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop())
+        cameraStreamRef.current = null
       }
-      if (scanLoopRef.current !== null) {
-        cancelAnimationFrame(scanLoopRef.current)
+
+      const scanLoopId = scanLoopRef.current
+      if (scanLoopId !== null) {
+        cancelAnimationFrame(scanLoopId)
+        scanLoopRef.current = null
       }
-      if (videoRef.current) {
+
+      if (videoEl) {
+        const el = videoEl
         setTimeout(() => {
-          if (videoRef.current) {
-            videoRef.current.srcObject = null
-          }
+          el.srcObject = null
         }, 50)
       }
     }

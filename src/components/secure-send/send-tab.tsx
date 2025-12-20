@@ -21,9 +21,9 @@ type ForcedMethod = 'nostr-only' | 'peerjs-only' | 'manual-only'
 
 // Extend input element to include webkitdirectory attribute
 declare module 'react' {
-  interface InputHTMLAttributes<T> {
-    webkitdirectory?: string
-    directory?: string
+  interface InputHTMLAttributes<T = HTMLInputElement> {
+    webkitdirectory?: T extends HTMLInputElement ? string : never
+    directory?: T extends HTMLInputElement ? string : never
   }
 }
 

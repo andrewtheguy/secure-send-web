@@ -2,6 +2,8 @@ import Peer from 'peerjs'
 import type { DataConnection } from 'peerjs'
 import { computePinHint } from '@/lib/crypto'
 
+type DataConnectionWithDataChannel = DataConnection & { dataChannel?: RTCDataChannel }
+
 // PeerJS cloud server configuration
 const PEERJS_HOST = '0.peerjs.com'
 const PEERJS_PORT = 443
@@ -128,7 +130,7 @@ export class PeerJSSignaling {
   private peer: Peer | null = null
   private connection: DataConnection | null = null
   private onOpenCallback: (() => void) | null = null
-  private onErrorCallback: ((err: Error) => void) | null = null
+  private errorHandlers: Array<(err: Error) => void> = []
   private destroyed = false
 
   constructor(
@@ -137,7 +139,7 @@ export class PeerJSSignaling {
     onError: (err: Error) => void
   ) {
     this.onOpenCallback = onOpen
-    this.onErrorCallback = onError
+    this.errorHandlers.push(onError)
 
     this.peer = new Peer(peerId, {
       host: PEERJS_HOST,
@@ -155,8 +157,8 @@ export class PeerJSSignaling {
 
     this.peer.on('error', (err) => {
       console.error('PeerJS error:', err)
-      if (!this.destroyed && this.onErrorCallback) {
-        this.onErrorCallback(err)
+      if (!this.destroyed) {
+        this.emitError(err)
       }
     })
 
@@ -185,9 +187,9 @@ export class PeerJSSignaling {
     }
 
     timeoutId = setTimeout(() => {
-      if (!resolved && !this.destroyed && this.onErrorCallback) {
+      if (!resolved && !this.destroyed) {
         resolved = true
-        this.onErrorCallback(new Error('Timeout waiting for receiver connection'))
+        this.emitError(new Error('Timeout waiting for receiver connection'))
       }
     }, timeoutMs)
 
@@ -206,8 +208,8 @@ export class PeerJSSignaling {
 
       conn.on('error', (err) => {
         console.error('Data connection error:', err)
-        if (!this.destroyed && this.onErrorCallback) {
-          this.onErrorCallback(err)
+        if (!this.destroyed) {
+          this.emitError(err)
         }
       })
     })
@@ -217,6 +219,16 @@ export class PeerJSSignaling {
         resolved = true
         cleanup()
       }
+    }
+  }
+
+  setOnErrorHandler(handler: (err: Error) => void): () => void {
+    if (!this.errorHandlers.includes(handler)) {
+      this.errorHandlers.push(handler)
+    }
+
+    return () => {
+      this.errorHandlers = this.errorHandlers.filter((h) => h !== handler)
     }
   }
 
@@ -268,7 +280,7 @@ export class PeerJSSignaling {
     }
 
     // PeerJS uses RTCDataChannel internally
-    const dc = (this.connection as any).dataChannel as RTCDataChannel | undefined
+    const dc = (this.connection as DataConnectionWithDataChannel).dataChannel
 
     if (dc) {
       while (dc.bufferedAmount > bufferThreshold) {
@@ -323,5 +335,15 @@ export class PeerJSSignaling {
       this.peer.destroy()
       this.peer = null
     }
+  }
+
+  private emitError(err: Error): void {
+    ;[...this.errorHandlers].forEach((handler) => {
+      try {
+        handler(err)
+      } catch (handlerErr) {
+        console.error('Error handler threw:', handlerErr)
+      }
+    })
   }
 }

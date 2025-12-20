@@ -200,15 +200,19 @@ export function useManualReceive(): UseManualReceiveReturn {
       let transferComplete = false
       let dataChannelResolver: (() => void) | null = null
       let transferResolver: (() => void) | null = null
+      let answerSDPResolver: (() => void) | null = null
 
       const rtc = new WebRTCConnection(
         ICE_CONFIG,
         (signal) => {
           // Collect signals (answer + candidates)
           if (signal.type === 'answer') {
-            answerSDP = signal
+            answerSDP = { type: 'answer', sdp: signal.sdp }
+            if (answerSDPResolver) {
+              answerSDPResolver()
+            }
           } else if (signal.type === 'candidate' && signal.candidate) {
-            iceCandidates.push(signal.candidate)
+            iceCandidates.push(new RTCIceCandidate(signal.candidate))
           }
         },
         () => {
@@ -258,12 +262,27 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       if (cancelledRef.current) return
 
+      // Wait for answer SDP to be generated
+      setState({ status: 'generating_answer', message: 'Generating answer...' })
+
+      await new Promise<void>((resolve) => {
+        if (answerSDP) {
+          resolve()
+        } else {
+          answerSDPResolver = resolve
+          // Timeout after 10 seconds
+          setTimeout(resolve, 10000)
+        }
+      })
+
+      if (cancelledRef.current) return
+
       // Wait for ICE gathering to complete
       setState({ status: 'generating_answer', message: 'Gathering network info...' })
 
       await new Promise<void>((resolve) => {
         const checkIce = () => {
-          const pc = (rtc as any).pc as RTCPeerConnection
+          const pc = rtc.getPeerConnection()
           if (pc.iceGatheringState === 'complete') {
             resolve()
           } else {
@@ -281,8 +300,13 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       if (cancelledRef.current) return
 
+      // Validate answerSDP is available
+      if (!answerSDP) {
+        throw new Error('Failed to generate answer SDP: Answer was not created by WebRTC connection')
+      }
+
       // Generate answer with our public key
-      const answerBinary = generateMutualAnswerBinary(answerSDP!, iceCandidates, ecdhKeyPair.publicKeyBytes)
+      const answerBinary = generateMutualAnswerBinary(answerSDP, iceCandidates, ecdhKeyPair.publicKeyBytes)
       const clipboardBase64 = generateMutualClipboardData(answerBinary)
 
       // Show answer and wait for connection
@@ -307,7 +331,7 @@ export function useManualReceive(): UseManualReceiveReturn {
         }
 
         // Check if already open
-        const dc = (rtc as any).dataChannel as RTCDataChannel
+        const dc = rtc.getDataChannel()
         if (dc && dc.readyState === 'open') {
           clearTimeout(timeout)
           resolve()

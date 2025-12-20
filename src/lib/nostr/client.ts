@@ -40,8 +40,7 @@ export class NostrClient {
       const timeout = setTimeout(() => resolve(), 3000) // Max 3s wait
 
       // Subscribe to a filter that won't match anything, just to trigger connection
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sub = this.pool.subscribeMany(this.relays, [{ kinds: [99999], limit: 1 }] as any, {
+      const sub = this.pool.subscribeMany(this.relays, { kinds: [99999], limit: 1 }, {
         oneose: () => {
           clearTimeout(timeout)
           sub.close()
@@ -98,8 +97,7 @@ export class NostrClient {
     const filter =
       filters.length === 1 ? filters[0] : mergeFilters(...filters)
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sub = this.pool.subscribeMany(this.relays, filter as any, {
+    const sub = this.pool.subscribeMany(this.relays, filter, {
       onevent: onEvent,
       oneose: onEose,
     })

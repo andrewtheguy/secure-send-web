@@ -10,7 +10,9 @@
       "Bash(npm run build:*)",
       "Bash(ls:*)",
       "Bash(cp:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(npm run lint)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

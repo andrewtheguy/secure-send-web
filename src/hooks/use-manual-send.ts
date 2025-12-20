@@ -208,9 +208,9 @@ export function useManualSend(): UseManualSendReturn {
         (signal) => {
           // Collect signals (offer + candidates)
           if (signal.type === 'offer') {
-            offerSDP = signal
+            offerSDP = { type: 'offer', sdp: signal.sdp }
           } else if (signal.type === 'candidate' && signal.candidate) {
-            iceCandidates.push(signal.candidate)
+            iceCandidates.push(new RTCIceCandidate(signal.candidate))
           }
         },
         () => {
@@ -234,7 +234,7 @@ export function useManualSend(): UseManualSendReturn {
 
       await new Promise<void>((resolve) => {
         const checkIce = () => {
-          const pc = (rtc as any).pc as RTCPeerConnection
+          const pc = rtc.getPeerConnection()
           if (pc.iceGatheringState === 'complete') {
             resolve()
           } else {
@@ -332,10 +332,10 @@ export function useManualSend(): UseManualSendReturn {
           reject(new Error('Connection timeout'))
         }, 30000)
 
-        const pc = (rtc as any).pc as RTCPeerConnection
+        const pc = rtc.getPeerConnection()
         const checkConnection = () => {
           if (pc.connectionState === 'connected') {
-            const dc = (rtc as any).dataChannel as RTCDataChannel
+            const dc = rtc.getDataChannel()
             if (dc && dc.readyState === 'open') {
               clearTimeout(timeout)
               resolve()
@@ -347,7 +347,7 @@ export function useManualSend(): UseManualSendReturn {
         }
 
         pc.onconnectionstatechange = checkConnection
-        const dc = (rtc as any).dataChannel as RTCDataChannel
+        const dc = rtc.getDataChannel()
         if (dc) {
           dc.onopen = () => {
             clearTimeout(timeout)
@@ -403,7 +403,12 @@ export function useManualSend(): UseManualSendReturn {
           reject(new Error('Timeout waiting for acknowledgment'))
         }, 30000)
 
-        const dc = (rtc as any).dataChannel as RTCDataChannel
+        const dc = rtc.getDataChannel()
+        if (!dc) {
+          clearTimeout(timeout)
+          reject(new Error('Data channel unavailable'))
+          return
+        }
         dc.onmessage = (event) => {
           if (event.data === 'ACK') {
             clearTimeout(timeout)
