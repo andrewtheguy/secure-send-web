@@ -128,8 +128,12 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
       try {
         const hint = await computePinHint(pin)
         if (!cancelled) {
-          const compact = hint.slice(0, 8).toUpperCase()
-          setFingerprint(`${compact.slice(0, 4)}-${compact.slice(4, 8)}`)
+          let formatted = ''
+          if (typeof hint === 'string' && hint.length > 0) {
+            const compact = hint.padEnd(8, '0').slice(0, 8).toUpperCase()
+            formatted = `${compact.slice(0, 4)}-${compact.slice(4, 8)}`
+          }
+          setFingerprint(formatted)
         }
       } catch {
         if (!cancelled) setFingerprint('')
