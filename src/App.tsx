@@ -1,13 +1,22 @@
-import { ModeToggle } from '@/components/mode-toggle'
-import { SecureSend } from '@/components/secure-send'
+import { Routes, Route } from 'react-router-dom'
+import { Navbar } from '@/components/navbar'
+import { SendPage } from '@/pages/send'
+import { ReceivePage } from '@/pages/receive'
+import { AboutPage } from '@/pages/about'
+import { NotFoundPage } from '@/pages/not-found'
 
 function App() {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-8 relative">
-      <div className="absolute top-4 right-4">
-        <ModeToggle />
-      </div>
-      <SecureSend />
+    <div className="min-h-screen flex flex-col">
+      <Navbar />
+      <main className="flex-1 px-6 py-10">
+        <Routes>
+          <Route path="/" element={<SendPage />} />
+          <Route path="/receive" element={<ReceivePage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </main>
     </div>
   )
 }
