@@ -39,10 +39,23 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
     }
   }, [shareQrUrl])
 
+  const getTitle = () => {
+    switch (view) {
+      case 'send':
+        return 'Secure Send'
+      case 'receive':
+        return 'Secure Receive'
+      case 'about':
+        return 'About Secure Transfer'
+      default:
+        return 'Secure Send'
+    }
+  }
+
   return (
     <Card className="w-full max-w-2xl">
       <CardHeader>
-        <CardTitle className="text-2xl">Secure Send</CardTitle>
+        <CardTitle className="text-2xl">{getTitle()}</CardTitle>
         <CardDescription>
           {view === 'send' && 'Share files or folders securely with end-to-end encryption.'}
           {view === 'receive' && 'Enter a PIN to securely receive files or messages.'}

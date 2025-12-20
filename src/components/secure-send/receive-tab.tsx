@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Download, X, RotateCcw, FileDown, QrCode, KeyRound } from 'lucide-react'
+import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Shield, CheckCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PinInput, type PinInputRef, type PinChangePayload } from './pin-input'
@@ -247,17 +247,6 @@ export function ReceiveTab() {
               <div className="space-y-2">
                 <label className="text-sm font-medium">Enter PIN from sender</label>
                 <PinInput ref={pinInputRef} onPinChange={handlePinChange} disabled={isActive} />
-                {pinFingerprint && (
-                  <div className="text-xs text-muted-foreground flex flex-col gap-1">
-                    <div className="flex items-center gap-2 font-mono">
-                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-semibold">FP</span>
-                      PIN Fingerprint: {pinFingerprint}
-                    </div>
-                    <p>
-                      Compare this short fingerprint with the sender. It should match if you both entered the same PIN.
-                    </p>
-                  </div>
-                )}
                 {timeRemaining > 0 && (
                   <p className="text-xs text-amber-600 font-medium">
                     PIN will be cleared in {formatTime(timeRemaining)}
@@ -268,6 +257,28 @@ export function ReceiveTab() {
                     PIN cleared due to inactivity. Please re-enter.
                   </p>
                 )}
+              </div>
+
+              {isPinValid && pinFingerprint && (
+                <div className="space-y-3 p-4 rounded-lg bg-info/5 border border-info/20">
+                  <div className="flex items-start gap-3">
+                    <Shield className="h-5 w-5 text-info flex-shrink-0 mt-0.5" />
+                    <div className="text-sm space-y-2">
+                      <p className="font-medium text-foreground">Security Check</p>
+                      <p className="text-muted-foreground">
+                        The PIN fingerprint below should match what the sender sees. This confirms you both entered the same PIN correctly.
+                      </p>
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-success/10 border border-success/20">
+                        <CheckCircle className="h-4 w-4 text-success" />
+                        <span className="font-mono text-success font-semibold">{pinFingerprint}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="text-xs text-muted-foreground text-center pb-2">
+                Your connection is encrypted and private. Files are never stored unencrypted.
               </div>
 
               <Button onClick={handleReceivePin} disabled={!canReceivePin} className="w-full">
