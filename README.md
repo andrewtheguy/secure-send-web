@@ -33,7 +33,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 1. Select the "File" tab
 2. Drag and drop a file or click to select (max 100MB)
 3. Click "Generate PIN & Send"
-4. Share the generated 12-character PIN (or word equivalent) with the receiver
+4. Share the generated 12-character PIN (or 7-word equivalent) with the receiver
 5. Wait for the receiver to connect and receive the file
 
 ### Receiving
