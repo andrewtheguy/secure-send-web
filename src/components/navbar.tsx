@@ -16,8 +16,8 @@ export function Navbar() {
   return (
     <header className="w-full border-b bg-background/80 backdrop-blur">
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-4">
-        <Link to="/" className="text-lg font-semibold tracking-tight">
-          Secure Send
+        <Link to="/" className="inline-flex items-center justify-center">
+          <img src="/logo.svg" alt="Secure Send" className="h-10 w-10" />
         </Link>
         <nav className="hidden items-center gap-2 text-sm md:flex">
           <NavLink
