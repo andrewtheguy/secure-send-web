@@ -2,7 +2,16 @@ import pako from 'pako'
 
 // Magic header: "SS02" = Secure Send version 2 (ECDH mutual exchange)
 const MAGIC_HEADER_V2 = new Uint8Array([0x53, 0x53, 0x30, 0x32])
-const OBFUSCATION_SEED = 0x9e3779b9
+const BUCKET_SEC = 3600 // 1 hour
+const BASE_SEED = 0x9e3779b9
+
+function getSeedForBucket(bucketEpoch: number): number {
+  // Simple hash of bucket index
+  let h = BASE_SEED ^ bucketEpoch
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b)
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35)
+  return (h ^ (h >>> 16)) >>> 0
+}
 
 function xorshift32(state: number): number {
   state ^= state << 13
@@ -14,8 +23,8 @@ function xorshift32(state: number): number {
 /**
  * the goal of obfuscation is simply to avoid casual inspection
  */
-function xorObfuscate(data: Uint8Array): Uint8Array {
-  let state = OBFUSCATION_SEED
+function xorObfuscate(data: Uint8Array, seed: number): Uint8Array {
+  let state = seed
   const out = new Uint8Array(data.length)
   for (let i = 0; i < data.length; i++) {
     state = xorshift32(state)
@@ -139,13 +148,15 @@ export function generateMutualOfferBinary(
   const encoder = new TextEncoder()
   const jsonBytes = encoder.encode(JSON.stringify(payload))
   const compressed = pako.deflate(jsonBytes)
-  const obfuscated = xorObfuscate(compressed)
 
-  // Build binary: [SS02][obfuscated]
-  const result = new Uint8Array(4 + obfuscated.length)
+  // Build binary: [SS02][compressed]
+  const result = new Uint8Array(4 + compressed.length)
   result.set(MAGIC_HEADER_V2, 0)
-  result.set(obfuscated, 4)
-  return result
+  result.set(compressed, 4)
+
+  const currentBucket = Math.floor(Date.now() / 1000 / BUCKET_SEC)
+  const seed = getSeedForBucket(currentBucket)
+  return xorObfuscate(result, seed)
 }
 
 /**
@@ -169,13 +180,15 @@ export function generateMutualAnswerBinary(
   const encoder = new TextEncoder()
   const jsonBytes = encoder.encode(JSON.stringify(payload))
   const compressed = pako.deflate(jsonBytes)
-  const obfuscated = xorObfuscate(compressed)
 
-  // Build binary: [SS02][obfuscated]
-  const result = new Uint8Array(4 + obfuscated.length)
+  // Build binary: [SS02][compressed]
+  const result = new Uint8Array(4 + compressed.length)
   result.set(MAGIC_HEADER_V2, 0)
-  result.set(obfuscated, 4)
-  return result
+  result.set(compressed, 4)
+
+  const currentBucket = Math.floor(Date.now() / 1000 / BUCKET_SEC)
+  const seed = getSeedForBucket(currentBucket)
+  return xorObfuscate(result, seed)
 }
 
 /**
@@ -192,29 +205,49 @@ function isValidPublicKeyArray(arr: unknown): arr is number[] {
  */
 export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null {
   try {
-    if (!isMutualPayload(binary)) {
+    if (binary.length <= 4) {
       return null
     }
 
-    const obfuscated = binary.slice(4)
-    const compressed = xorObfuscate(obfuscated)
-    const jsonBytes = pako.inflate(compressed)
-    const json = new TextDecoder().decode(jsonBytes)
-    const payload = JSON.parse(json)
+    const currentBucket = Math.floor(Date.now() / 1000 / BUCKET_SEC)
 
-    if (!isValidSignalingPayload(payload)) {
-      return null
-    }
-    if (typeof payload.createdAt !== 'number' || !Number.isFinite(payload.createdAt)) {
-      return null
+    // Try current and previous 3 buckets (approx 4 hours window)
+    for (let i = 0; i <= 3; i++) {
+      try {
+        const seed = getSeedForBucket(currentBucket - i)
+
+        // Optimization: check magic header first
+        const head = xorObfuscate(binary.subarray(0, 4), seed)
+        if (
+          head[0] !== MAGIC_HEADER_V2[0] ||
+          head[1] !== MAGIC_HEADER_V2[1] ||
+          head[2] !== MAGIC_HEADER_V2[2] ||
+          head[3] !== MAGIC_HEADER_V2[3]
+        ) {
+          continue
+        }
+
+        const deobfuscated = xorObfuscate(binary, seed)
+        const compressed = deobfuscated.slice(4)
+        const jsonBytes = pako.inflate(compressed)
+        const json = new TextDecoder().decode(jsonBytes)
+        const payload = JSON.parse(json)
+
+        if (isValidSignalingPayload(payload)) {
+          if (typeof payload.createdAt === 'number' && Number.isFinite(payload.createdAt)) {
+            // Validate publicKey is a valid P-256 uncompressed key (65 bytes)
+            if (isValidPublicKeyArray(payload.publicKey)) {
+              return payload
+            }
+          }
+        }
+      } catch {
+        // Continue to next bucket if this one fails
+        continue
+      }
     }
 
-    // Validate publicKey is a valid P-256 uncompressed key (65 bytes)
-    if (!isValidPublicKeyArray(payload.publicKey)) {
-      return null
-    }
-
-    return payload
+    return null
   } catch {
     return null
   }
@@ -224,13 +257,7 @@ export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null 
  * Check if binary payload is mutual exchange format (SS02)
  */
 export function isMutualPayload(binary: Uint8Array): boolean {
-  return (
-    binary.length > 4 &&
-    binary[0] === 0x53 &&
-    binary[1] === 0x53 &&
-    binary[2] === 0x30 &&
-    binary[3] === 0x32
-  )
+  return binary.length > 4
 }
 
 /**
