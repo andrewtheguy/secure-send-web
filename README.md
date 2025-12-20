@@ -73,6 +73,20 @@ npm run dev
 npm run build
 ```
 
+### Hash Routing (Static Hosting)
+
+For hosts that require hash-based routing (e.g. no server rewrites), build with:
+
+```bash
+VITE_USE_HASH=true npm run build
+```
+
+You can also create `.env.production` (or `.env.hash` with `npm run build -- --mode hash`) containing:
+
+```
+VITE_USE_HASH=true
+```
+
 ## Transport Layer
 
 All signaling methods share a **unified encryption layer**: content is encrypted in 128KB AES-256-GCM chunks before transmission, regardless of transport. Receivers preallocate buffers and write directly to position for memory efficiency.
