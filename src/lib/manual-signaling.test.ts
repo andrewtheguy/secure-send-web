@@ -7,7 +7,8 @@ import {
     generateMutualClipboardData,
     parseClipboardPayload,
     isValidSignalingPayload,
-    estimatePayloadSize
+    estimatePayloadSize,
+    type SignalingPayload
 } from './manual-signaling'
 
 describe('Manual Signaling Utils', () => {
@@ -118,7 +119,7 @@ describe('Manual Signaling Utils', () => {
     })
 
     it('should estimate payload size', () => {
-        const payload: any = {
+        const payload: SignalingPayload = {
             type: 'offer',
             sdp: 'sdp',
             candidates: [],

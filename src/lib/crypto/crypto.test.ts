@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { generateNonce, encrypt, decrypt, encryptMessage, decryptMessage } from './aes-gcm'
-import { generateECDHKeyPair, importECDHPublicKey, deriveSharedSecret, deriveAESKeyFromSecret } from './ecdh'
+import { generateECDHKeyPair, deriveSharedSecret, deriveAESKeyFromSecret } from './ecdh'
 import { encryptChunk, decryptChunk, parseChunkMessage, calculateEncryptionOverhead, ENCRYPTED_CHUNK_OVERHEAD } from './stream-crypto'
 import { AES_KEY_LENGTH } from './constants'
 
