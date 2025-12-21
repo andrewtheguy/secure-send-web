@@ -15,7 +15,6 @@ A web application for sending encrypted text messages and files using PIN-based 
 - **End-to-end encryption**: All transfers use AES-256-GCM encryption with unique nonces per chunk, in addition to WebRTC DTLS
 - **No accounts required**: Ephemeral keypairs are generated for each transfer
 - **Multiple signaling methods**: Choose between Nostr relays (with cloud fallback), PeerJS (simpler P2P), or Manual Exchange (works without internet on local network)
-- **Auto-detection**: Receiver automatically detects signaling method from PIN format
 - **PWA Support**: Install as a Progressive Web App for offline access (QR scanning works offline after install)
 
 ## How It Works
