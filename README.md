@@ -7,15 +7,13 @@ A web application for sending encrypted text messages and files using PIN-based 
 ## Features
 
 - **100% Static - No Backend Required**: The entire app is a static site that can be hosted on any static hosting service (GitHub Pages, Netlify, Vercel, S3, etc.). No server-side code, no database, no backend infrastructure needed.
-- **PIN-based security**: PIN encrypts signaling payloads so only the PIN holder can establish a connection
+- **Works offline**: No internet required after page load when using Manual Exchange on same local network
+- **Flexible signaling**: Nostr (default), PeerJS, or Manual Exchange (QR/copy-paste). Manual Exchange works across networks with internet, or on same local network without internet.
+- **PIN-based security**: All signaling payloads are encrypted with the PIN
 - **File or folder transfer**: Send files or folders up to 100MB
-- **Word-based PIN representation**: Bijectively map the alphanumeric PIN to 7 words from the BIP-39 wordlist for easier sharing by voice or chat
-- **WebRTC P2P**: Direct peer-to-peer connections for fast, efficient data transfer
-- **Cloud fallback**: Automatic multi-host upload failover (tmpfiles.org, litterbox.catbox.moe, uguu.se, x0.at) if WebRTC connection fails
-- **End-to-end encryption**: All transfers use AES-256-GCM encryption with unique nonces per chunk, in addition to WebRTC DTLS
-- **No accounts required**: Ephemeral keypairs are generated for each transfer
-- **Multiple signaling methods**: Choose between Nostr relays (with cloud fallback), PeerJS (simpler P2P), or Manual Exchange (works without internet on local network)
-- **PWA Support**: Install as a Progressive Web App for offline access (QR scanning works offline after install)
+- **End-to-end encryption**: All transfers use AES-256-GCM encryption
+- **No accounts required**: Ephemeral keypairs generated per transfer
+- **PWA Support**: Install as a Progressive Web App for offline access
 
 ## How It Works
 
