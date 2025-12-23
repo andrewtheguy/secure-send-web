@@ -153,6 +153,15 @@ interface ServiceTestResult {
   supportsPost?: boolean
 }
 
+interface ConfigMismatch {
+  type: 'corsProxy' | 'uploadServer'
+  name: string
+  field: string
+  hardcodedValue: unknown
+  testedValue: unknown
+  recommendation: string
+}
+
 interface TestAllServicesResult {
   corsProxies: ServiceTestResult[]
   uploadServers: ServiceTestResult[]
@@ -163,21 +172,88 @@ interface TestAllServicesResult {
     workingServers: number
     totalServers: number
   }
+  configMismatches: ConfigMismatch[]
 }
 
 /**
  * Test all CORS proxies and upload servers, returning detailed results
  * Call from browser console: window.testCloudServices()
+ *
+ * Test order:
+ * 1. Test CORS proxies POST support first
+ * 2. Test CORS proxies GET support
+ * 3. Test upload servers without CORS proxy (direct) - discover actual requirements
+ * 4. Test upload servers with CORS proxy for those that need it
+ * 5. Compare findings with hardcoded config
+ * 6. Report any mismatches
  */
 export async function testAllServices(): Promise<TestAllServicesResult> {
-  console.log('%c🔍 Testing Cloud Services...', 'font-size: 14px; font-weight: bold; color: #3b82f6;')
+  console.log('%c Testing Cloud Services...', 'font-size: 14px; font-weight: bold; color: #3b82f6;')
   console.log('')
 
   const proxyResults: ServiceTestResult[] = []
   const serverResults: ServiceTestResult[] = []
+  const configMismatches: ConfigMismatch[] = []
 
-  // Test all CORS proxies (try multiple test URLs for redundancy)
-  console.log('%c📡 Testing CORS Proxies (GET):', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
+  // Track tested values for config comparison
+  const testedProxyPostSupport: Map<string, boolean> = new Map()
+  const testedServerNeedsCors: Map<string, boolean> = new Map()
+
+  // ==========================================================================
+  // PHASE 1: Test CORS Proxies POST support first
+  // ==========================================================================
+  console.log('%c Testing CORS Proxies (POST):', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
+
+  let firstWorkingPostProxy: CorsProxy | null = null
+
+  for (const proxy of CORS_PROXIES) {
+    const start = Date.now()
+    let postWorks = false
+
+    try {
+      const proxyUrl = proxy.buildUrl(CORS_POST_TEST_URL)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+      const response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ test: 'post_support' }),
+        signal: controller.signal,
+      })
+      clearTimeout(timeoutId)
+
+      if (response.ok) {
+        const json = await response.json()
+        if (json.data?.test === 'post_support') {
+          postWorks = true
+        }
+      }
+    } catch {
+      // POST failed
+    }
+
+    const latency = Date.now() - start
+    testedProxyPostSupport.set(proxy.name, postWorks)
+
+    if (postWorks) {
+      if (!firstWorkingPostProxy) {
+        firstWorkingPostProxy = proxy
+      }
+      console.log(`   %c✓ ${proxy.name}%c - ${latency}ms`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
+    } else {
+      console.log(`   %c✗ ${proxy.name}%c - POST not supported`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+    }
+  }
+
+  // ==========================================================================
+  // PHASE 2: Test CORS Proxies GET support
+  // ==========================================================================
+  console.log('')
+  console.log('%c Testing CORS Proxies (GET):', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
+
+  let firstWorkingGetProxy: CorsProxy | null = null
+
   for (const proxy of CORS_PROXIES) {
     const start = Date.now()
     let success = false
@@ -194,9 +270,6 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
         if (response.ok) {
           const text = await response.text()
           if (text.includes(CORS_TEST_EXPECTED)) {
-            const latency = Date.now() - start
-            proxyResults.push({ name: proxy.name, status: 'ok', latency })
-            console.log(`   %c✓ ${proxy.name}%c - ${latency}ms`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
             success = true
             break
           }
@@ -206,81 +279,126 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
       }
     }
 
-    if (!success) {
-      proxyResults.push({ name: proxy.name, status: 'failed', error: 'All test URLs failed' })
+    const latency = Date.now() - start
+    const postSupported = testedProxyPostSupport.get(proxy.name) ?? false
+
+    if (success) {
+      proxyResults.push({ name: proxy.name, status: 'ok', latency, supportsPost: postSupported })
+      if (!firstWorkingGetProxy) {
+        firstWorkingGetProxy = proxy
+      }
+      console.log(`   %c✓ ${proxy.name}%c - ${latency}ms`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
+    } else {
+      proxyResults.push({ name: proxy.name, status: 'failed', error: 'All test URLs failed', supportsPost: postSupported })
       console.log(`   %c✗ ${proxy.name}%c - All test URLs failed`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
     }
   }
 
-  // Test POST support for working proxies
+  // ==========================================================================
+  // PHASE 3: Test Upload Servers - Direct Upload (no CORS proxy)
+  // ==========================================================================
   console.log('')
-  console.log('%c📡 Testing CORS Proxies (POST):', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
-  for (const result of proxyResults) {
-    if (result.status !== 'ok') {
-      console.log(`   %c⊘ ${result.name}%c - skipped (GET failed)`, 'color: #6b7280;', 'color: #6b7280;')
-      continue
-    }
+  console.log('%c Testing Upload Servers (Direct - No CORS Proxy):', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
 
-    const proxy = CORS_PROXIES.find((p) => p.name === result.name)!
+  const testData = crypto.getRandomValues(new Uint8Array(32))
+  const directUploadResults: Map<string, { success: boolean; url?: string; error?: string }> = new Map()
+
+  // Test direct upload for ALL servers to discover actual CORS requirements
+  for (const server of UPLOAD_SERVERS) {
+    const start = Date.now()
+
     try {
-      const proxyUrl = proxy.buildUrl(CORS_POST_TEST_URL)
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10000)
+      // Attempt direct upload (bypassing CORS proxy logic)
+      const url = await uploadToUrl(server.url, server, testData, 'test.bin')
+      const latency = Date.now() - start
 
-      const response = await fetch(proxyUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ test: 'post_support' }),
-        signal: controller.signal,
-      })
-      clearTimeout(timeoutId)
+      directUploadResults.set(server.name, { success: true, url })
+      testedServerNeedsCors.set(server.name, false) // Direct upload worked!
 
-      if (response.ok) {
-        const json = await response.json()
-        // postman-echo echoes back the data in json.data
-        if (json.data?.test === 'post_support') {
-          result.supportsPost = true
-          console.log(`   %c✓ ${proxy.name}%c - POST supported`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
-        } else {
-          result.supportsPost = false
-          console.log(`   %c✗ ${proxy.name}%c - POST response invalid`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
-        }
-      } else {
-        result.supportsPost = false
-        console.log(`   %c✗ ${proxy.name}%c - POST HTTP ${response.status}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
-      }
+      console.log(`   %c✓ ${server.name}%c - ${latency}ms (direct upload works!)`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
     } catch (err) {
-      result.supportsPost = false
-      const errMsg = err instanceof Error ? err.message : 'Unknown error'
-      console.log(`   %c✗ ${proxy.name}%c - POST failed: ${errMsg}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+      directUploadResults.set(server.name, { success: false, error: errorMsg })
+      testedServerNeedsCors.set(server.name, true) // Needs CORS proxy
+
+      console.log(`   %c✗ ${server.name}%c - ${errorMsg} (needs CORS proxy)`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
     }
   }
 
-  // Find first working proxy for upload tests
-  const workingProxy = CORS_PROXIES.find((p) => proxyResults.find((r) => r.name === p.name && r.status === 'ok'))
-
+  // ==========================================================================
+  // PHASE 4: Test Upload Servers - Via CORS Proxy (end-to-end verification)
+  // ==========================================================================
   console.log('')
-  console.log('%c📤 Testing Upload Servers:', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
+  console.log('%c Testing Upload Servers (End-to-End Verification):', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
 
-  if (!workingProxy) {
+  if (!firstWorkingPostProxy && !firstWorkingGetProxy) {
     console.log('   %c⚠ Skipped - No working CORS proxy available', 'color: #f59e0b;')
     for (const server of UPLOAD_SERVERS) {
       serverResults.push({ name: server.name, status: 'failed', error: 'No CORS proxy' })
     }
   } else {
-    const testData = crypto.getRandomValues(new Uint8Array(32))
-
     for (const server of UPLOAD_SERVERS) {
+      const directResult = directUploadResults.get(server.name)
       const start = Date.now()
-      try {
-        // Upload
-        const uploadUrl = await uploadToServer(server, testData, 'test.bin')
 
-        // Download and verify
-        const proxyUrl = workingProxy.buildUrl(uploadUrl)
+      // If direct upload worked, verify download and record success
+      if (directResult?.success && directResult.url) {
+        try {
+          // Verify download (may need proxy for download even if upload is direct)
+          let downloadUrl = directResult.url
+          const needsProxyForDownload = !server.corsDownload
+
+          if (needsProxyForDownload && firstWorkingGetProxy) {
+            downloadUrl = firstWorkingGetProxy.buildUrl(directResult.url)
+          }
+
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 15000)
+          const response = await fetch(downloadUrl, { signal: controller.signal })
+          clearTimeout(timeoutId)
+
+          if (response.ok) {
+            const downloaded = new Uint8Array(await response.arrayBuffer())
+            if (downloaded.length === testData.length && downloaded.every((b, i) => b === testData[i])) {
+              const latency = Date.now() - start
+              serverResults.push({ name: server.name, status: 'ok', latency })
+              console.log(`   %c✓ ${server.name}%c - ${latency}ms (direct upload + download verified)`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
+              continue
+            }
+          }
+
+          serverResults.push({ name: server.name, status: 'failed', error: 'Download verification failed' })
+          console.log(`   %c✗ ${server.name}%c - Download verification failed`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+          serverResults.push({ name: server.name, status: 'failed', error: errorMsg })
+          console.log(`   %c✗ ${server.name}%c - ${errorMsg}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+        }
+        continue
+      }
+
+      // Direct upload failed, try via CORS proxy
+      if (!firstWorkingPostProxy) {
+        serverResults.push({ name: server.name, status: 'failed', error: 'No POST CORS proxy available' })
+        console.log(`   %c✗ ${server.name}%c - No POST CORS proxy available`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+        continue
+      }
+
+      try {
+        const proxyUrl = firstWorkingPostProxy.buildUrl(server.url)
+        const uploadUrl = await uploadToUrl(proxyUrl, server, testData, 'test.bin')
+
+        // Verify download
+        let downloadUrl = uploadUrl
+        const needsProxyForDownload = !server.corsDownload
+
+        if (needsProxyForDownload && firstWorkingGetProxy) {
+          downloadUrl = firstWorkingGetProxy.buildUrl(uploadUrl)
+        }
+
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), 15000)
-        const response = await fetch(proxyUrl, { signal: controller.signal })
+        const response = await fetch(downloadUrl, { signal: controller.signal })
         clearTimeout(timeoutId)
 
         if (response.ok) {
@@ -288,20 +406,75 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
           if (downloaded.length === testData.length && downloaded.every((b, i) => b === testData[i])) {
             const latency = Date.now() - start
             serverResults.push({ name: server.name, status: 'ok', latency })
-            console.log(`   %c✓ ${server.name}%c - ${latency}ms (upload + download verified)`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
-          } else {
-            serverResults.push({ name: server.name, status: 'failed', error: 'Content mismatch' })
-            console.log(`   %c✗ ${server.name}%c - Content mismatch`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+            console.log(`   %c✓ ${server.name}%c - ${latency}ms (via ${firstWorkingPostProxy.name})`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
+            continue
           }
-        } else {
-          serverResults.push({ name: server.name, status: 'failed', error: `Download HTTP ${response.status}` })
-          console.log(`   %c✗ ${server.name}%c - Download failed: HTTP ${response.status}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
         }
+
+        serverResults.push({ name: server.name, status: 'failed', error: 'Download verification failed' })
+        console.log(`   %c✗ ${server.name}%c - Download verification failed`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Unknown error'
         serverResults.push({ name: server.name, status: 'failed', error: errorMsg })
         console.log(`   %c✗ ${server.name}%c - ${errorMsg}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
       }
+    }
+  }
+
+  // ==========================================================================
+  // PHASE 5: Compare findings with hardcoded config
+  // ==========================================================================
+
+  // Check CORS proxy supportsPost mismatches
+  for (const proxy of CORS_PROXIES) {
+    const testedPost = testedProxyPostSupport.get(proxy.name)
+    if (testedPost !== undefined && testedPost !== proxy.supportsPost) {
+      configMismatches.push({
+        type: 'corsProxy',
+        name: proxy.name,
+        field: 'supportsPost',
+        hardcodedValue: proxy.supportsPost,
+        testedValue: testedPost,
+        recommendation: testedPost
+          ? `Set supportsPost: true for ${proxy.name}`
+          : `Set supportsPost: false for ${proxy.name}`,
+      })
+    }
+  }
+
+  // Check upload server needsCorsProxy mismatches
+  for (const server of UPLOAD_SERVERS) {
+    const testedNeedsCors = testedServerNeedsCors.get(server.name)
+    const hardcodedNeedsCors = server.needsCorsProxy ?? false // defaults to false
+
+    if (testedNeedsCors !== undefined && testedNeedsCors !== hardcodedNeedsCors) {
+      configMismatches.push({
+        type: 'uploadServer',
+        name: server.name,
+        field: 'needsCorsProxy',
+        hardcodedValue: hardcodedNeedsCors,
+        testedValue: testedNeedsCors,
+        recommendation: testedNeedsCors
+          ? `Add needsCorsProxy: true to ${server.name}`
+          : `Remove needsCorsProxy (or set to false) for ${server.name}`,
+      })
+    }
+  }
+
+  // ==========================================================================
+  // PHASE 6: Report config mismatches
+  // ==========================================================================
+  console.log('')
+  console.log('%c Config Validation:', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
+
+  if (configMismatches.length === 0) {
+    console.log('   %c✓ All hardcoded config values match test findings', 'color: #22c55e;')
+  } else {
+    console.log(`   %c⚠ Found ${configMismatches.length} config mismatch(es):`, 'color: #f59e0b;')
+    for (const mismatch of configMismatches) {
+      console.log(`     - ${mismatch.type} %c"${mismatch.name}"%c: ${mismatch.field}`, 'color: #3b82f6;', 'color: inherit;')
+      console.log(`       Hardcoded: %c${mismatch.hardcodedValue}%c, Tested: %c${mismatch.testedValue}`, 'color: #ef4444;', 'color: inherit;', 'color: #22c55e;')
+      console.log(`       Recommendation: %c${mismatch.recommendation}`, 'color: #f59e0b;')
     }
   }
 
@@ -311,13 +484,14 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
   const workingServers = serverResults.filter((r) => r.status === 'ok').length
 
   console.log('')
-  console.log('%c📊 Summary:', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
+  console.log('%c Summary:', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
   console.log(`   CORS Proxies (GET): %c${workingProxies}/${CORS_PROXIES.length} working`, workingProxies > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
-  console.log(`   CORS Proxies (POST): %c${postProxies}/${workingProxies} working`, postProxies > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
+  console.log(`   CORS Proxies (POST): %c${postProxies}/${CORS_PROXIES.length} working`, postProxies > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
   console.log(`   Upload Servers: %c${workingServers}/${UPLOAD_SERVERS.length} working`, workingServers > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
+  console.log(`   Config Mismatches: %c${configMismatches.length}`, configMismatches.length === 0 ? 'color: #22c55e;' : 'color: #f59e0b;')
   console.log('')
 
-  const result: TestAllServicesResult = {
+  return {
     corsProxies: proxyResults,
     uploadServers: serverResults,
     summary: {
@@ -327,9 +501,8 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
       workingServers,
       totalServers: UPLOAD_SERVERS.length,
     },
+    configMismatches,
   }
-
-  return result
 }
 
 /**
