@@ -117,7 +117,7 @@ const CORS_PROXIES: CorsProxy[] = [
   {
     name: 'cors-anywhere',
     buildUrl: (url) => `https://cors-anywhere.com/${url}`,
-    supportsPost: true,
+    supportsPost: false,
   },
   {
     name: 'allorigins',
