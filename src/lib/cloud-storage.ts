@@ -118,11 +118,11 @@ const CORS_PROXIES: CorsProxy[] = [
     buildUrl: (url) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`,
     supportsPost: false,
   },
-  {
-    name: 'cors-anywhere',
-    buildUrl: (url) => `https://cors-anywhere.com/${url}`,
-    supportsPost: true,
-  },
+  // {
+  //   name: 'cors-anywhere',
+  //   buildUrl: (url) => `https://cors-anywhere.com/${url}`,
+  //   supportsPost: true,
+  // },
   {
     name: 'allorigins',
     buildUrl: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
