@@ -600,7 +600,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         fileSize: resolvedFileSize,
         mimeType: resolvedMimeType,
       })
-      setState({
+      setState(prevState => ({
         status: 'complete',
         message: webRTCSuccess ? 'File received (P2P)!' : 'File received!',
         contentType: 'file',
@@ -609,7 +609,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           fileSize: resolvedFileSize,
           mimeType: resolvedMimeType,
         },
-      })
+        currentRelays: prevState.currentRelays, // Preserve for debugging
+        useWebRTC: prevState.useWebRTC,
+      }))
     } catch (error) {
       if (!cancelledRef.current) {
         setState(prevState => ({

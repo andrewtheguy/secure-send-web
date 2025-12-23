@@ -40,7 +40,8 @@ export function TransferStatus({ state, betweenProgressAndChunks }: TransferStat
       ? (state.progress.current / state.progress.total) * 100
       : 0
 
-  const showRelays = state.currentRelays && state.currentRelays.length > 0 && !state.useWebRTC
+  // Show relays whenever Nostr was used (for debugging), regardless of P2P or cloud transfer
+  const showRelays = state.currentRelays && state.currentRelays.length > 0
 
   return (
     <div className="space-y-3">

@@ -270,7 +270,11 @@ export function useNostrSend(): UseNostrSendReturn {
 
       if (!options?.relayOnly) {
         try {
-          setState({ status: 'connecting', message: 'Attempting P2P connection...' })
+          setState(prevState => ({
+            ...prevState,
+            status: 'connecting',
+            message: 'Attempting P2P connection...',
+          }))
 
           await new Promise<void>((resolve, reject) => {
             let connectionTimeout: ReturnType<typeof setTimeout> | null = null
@@ -353,13 +357,15 @@ export function useNostrSend(): UseNostrSendReturn {
                 p2pConnectionEstablished = true
 
                 console.log('WebRTC connected, sending data...')
-                setState({
+                setState(prevState => ({
                   status: 'transferring',
                   message: 'Sending via P2P...',
                   progress: { current: 0, total: contentBytes.length },
                   contentType,
                   fileMetadata: { fileName, fileSize, mimeType },
-                })
+                  currentRelays: prevState.currentRelays, // Preserve for debugging
+                  useWebRTC: true,
+                }))
 
                 try {
                   // Encrypt and send content in 64KB chunks on-the-fly
@@ -602,7 +608,13 @@ export function useNostrSend(): UseNostrSendReturn {
         ? 'File sent via P2P!'
         : 'File sent successfully!'
 
-      setState({ status: 'complete', message: successMsg, contentType })
+      setState(prevState => ({
+        status: 'complete',
+        message: successMsg,
+        contentType,
+        currentRelays: prevState.currentRelays, // Preserve for debugging
+        useWebRTC: prevState.useWebRTC,
+      }))
     } catch (error) {
       if (!cancelledRef.current) {
         setPin(null)
