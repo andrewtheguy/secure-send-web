@@ -27,8 +27,8 @@ interface UploadServer {
   formField: string
   extraFields?: Record<string, string> // additional form fields
   parseResponse: (text: string) => string // returns download URL
-  corsDownload?: boolean // if true, downloads support CORS directly (no proxy needed)
-  needsCorsProxy?: boolean // if true, upload needs to go through a CORS proxy
+  corsUpload: boolean // if true, uploads support CORS directly (no proxy needed)
+  corsDownload: boolean // if true, downloads support CORS directly (no proxy needed)
 }
 
 const UPLOAD_SERVERS: UploadServer[] = [
@@ -44,6 +44,8 @@ const UPLOAD_SERVERS: UploadServer[] = [
       }
       throw new Error(json.error || 'Upload failed')
     },
+    corsUpload: true,
+    corsDownload: false,
   },
   {
     // litterbox doesn't have CORS headers on upload, but downloads work directly
@@ -57,8 +59,8 @@ const UPLOAD_SERVERS: UploadServer[] = [
       }
       throw new Error(text || 'Upload failed')
     },
+    corsUpload: false,
     corsDownload: true,
-    needsCorsProxy: true,
   },
   {
     name: 'uguu.se',
@@ -71,7 +73,8 @@ const UPLOAD_SERVERS: UploadServer[] = [
       }
       throw new Error('Upload failed')
     },
-    needsCorsProxy: true,
+    corsUpload: false,
+    corsDownload: false,
   },
   {
     name: 'x0.at',
@@ -84,7 +87,8 @@ const UPLOAD_SERVERS: UploadServer[] = [
       }
       throw new Error(text || 'Upload failed')
     },
-    needsCorsProxy: true,
+    corsUpload: false,
+    corsDownload: false,
   },
 ]
 
@@ -197,7 +201,7 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
 
   // Track tested values for config comparison
   const testedProxyPostSupport: Map<string, boolean> = new Map()
-  const testedServerNeedsCors: Map<string, boolean> = new Map()
+  const testedServerCorsUpload: Map<string, boolean> = new Map()
 
   // ==========================================================================
   // PHASE 1: Test CORS Proxies POST support first
@@ -313,13 +317,13 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
       const latency = Date.now() - start
 
       directUploadResults.set(server.name, { success: true, url })
-      testedServerNeedsCors.set(server.name, false) // Direct upload worked!
+      testedServerCorsUpload.set(server.name, true) // Direct upload worked = CORS supported
 
       console.log(`   %c✓ ${server.name}%c - ${latency}ms (direct upload works!)`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error'
       directUploadResults.set(server.name, { success: false, error: errorMsg })
-      testedServerNeedsCors.set(server.name, true) // Needs CORS proxy
+      testedServerCorsUpload.set(server.name, false) // Needs CORS proxy = CORS not supported
 
       console.log(`   %c✗ ${server.name}%c - ${errorMsg} (needs CORS proxy)`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
     }
@@ -442,21 +446,20 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
     }
   }
 
-  // Check upload server needsCorsProxy mismatches
+  // Check upload server corsUpload mismatches
   for (const server of UPLOAD_SERVERS) {
-    const testedNeedsCors = testedServerNeedsCors.get(server.name)
-    const hardcodedNeedsCors = server.needsCorsProxy ?? false // defaults to false
+    const testedCorsUpload = testedServerCorsUpload.get(server.name)
 
-    if (testedNeedsCors !== undefined && testedNeedsCors !== hardcodedNeedsCors) {
+    if (testedCorsUpload !== undefined && testedCorsUpload !== server.corsUpload) {
       configMismatches.push({
         type: 'uploadServer',
         name: server.name,
-        field: 'needsCorsProxy',
-        hardcodedValue: hardcodedNeedsCors,
-        testedValue: testedNeedsCors,
-        recommendation: testedNeedsCors
-          ? `Add needsCorsProxy: true to ${server.name}`
-          : `Remove needsCorsProxy (or set to false) for ${server.name}`,
+        field: 'corsUpload',
+        hardcodedValue: server.corsUpload,
+        testedValue: testedCorsUpload,
+        recommendation: testedCorsUpload
+          ? `Set corsUpload: true for ${server.name}`
+          : `Set corsUpload: false for ${server.name}`,
       })
     }
   }
@@ -639,8 +642,8 @@ async function uploadToServer(
   filename: string,
   onProgress?: (progress: number) => void
 ): Promise<string> {
-  // If server doesn't need CORS proxy, upload directly
-  if (!server.needsCorsProxy) {
+  // If server supports CORS uploads, upload directly
+  if (server.corsUpload) {
     return uploadToUrl(server.url, server, data, filename, onProgress)
   }
 
