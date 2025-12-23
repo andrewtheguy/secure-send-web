@@ -121,7 +121,7 @@ const CORS_PROXIES: CorsProxy[] = [
   {
     name: 'cors-anywhere',
     buildUrl: (url) => `https://cors-anywhere.com/${url}`,
-    supportsPost: false,
+    supportsPost: true,
   },
   {
     name: 'allorigins',
@@ -209,10 +209,13 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
   console.log('%c Testing CORS Proxies (POST):', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
 
   let firstWorkingPostProxy: CorsProxy | null = null
+  // Track POST failure reasons: 'ok' | 'no-post' (4xx) | 'error' (5xx/network)
+  const proxyPostStatus: Map<string, 'ok' | 'no-post' | 'error'> = new Map()
 
   for (const proxy of CORS_PROXIES) {
     const start = Date.now()
     let postWorks = false
+    let failureReason: 'no-post' | 'error' = 'error'
 
     try {
       const proxyUrl = proxy.buildUrl(CORS_POST_TEST_URL)
@@ -231,22 +234,31 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
         const json = await response.json()
         if (json.data?.test === 'post_support') {
           postWorks = true
+        } else {
+          failureReason = 'no-post' // Got response but POST not properly supported
         }
+      } else if (response.status >= 400 && response.status < 500) {
+        failureReason = 'no-post' // 4xx = POST not supported by design
+      } else {
+        failureReason = 'error' // 5xx = server error
       }
     } catch {
-      // POST failed
+      failureReason = 'error' // Network/CORS error
     }
 
     const latency = Date.now() - start
     testedProxyPostSupport.set(proxy.name, postWorks)
+    proxyPostStatus.set(proxy.name, postWorks ? 'ok' : failureReason)
 
     if (postWorks) {
       if (!firstWorkingPostProxy) {
         firstWorkingPostProxy = proxy
       }
       console.log(`   %c✓ ${proxy.name}%c - ${latency}ms`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
+    } else if (failureReason === 'no-post') {
+      console.log(`   %c✗ ${proxy.name}%c - POST not supported`, 'color: #f59e0b; font-weight: bold;', 'color: #6b7280;')
     } else {
-      console.log(`   %c✗ ${proxy.name}%c - POST not supported`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+      console.log(`   %c✗ ${proxy.name}%c - POST failed (error)`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
     }
   }
 
@@ -482,15 +494,48 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
   }
 
   // Summary
-  const workingProxies = proxyResults.filter((r) => r.status === 'ok').length
-  const postProxies = proxyResults.filter((r) => r.supportsPost === true).length
-  const workingServers = serverResults.filter((r) => r.status === 'ok').length
+  const workingGetProxies = proxyResults.filter((r) => r.status === 'ok')
+  const failedGetProxies = proxyResults.filter((r) => r.status === 'failed')
+  const workingPostProxies = proxyResults.filter((r) => r.supportsPost === true)
+  const workingServersArr = serverResults.filter((r) => r.status === 'ok')
+  const failedServers = serverResults.filter((r) => r.status === 'failed')
 
   console.log('')
   console.log('%c Summary:', 'font-size: 12px; font-weight: bold; color: #8b5cf6;')
-  console.log(`   CORS Proxies (GET): %c${workingProxies}/${CORS_PROXIES.length} working`, workingProxies > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
-  console.log(`   CORS Proxies (POST): %c${postProxies}/${CORS_PROXIES.length} working`, postProxies > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
-  console.log(`   Upload Servers: %c${workingServers}/${UPLOAD_SERVERS.length} working`, workingServers > 0 ? 'color: #22c55e;' : 'color: #ef4444;')
+
+  // CORS Proxies GET summary
+  if (failedGetProxies.length === 0) {
+    console.log(`   CORS Proxies (GET): %c${workingGetProxies.length}/${CORS_PROXIES.length} working`, 'color: #22c55e;')
+  } else {
+    console.log(`   CORS Proxies (GET): %c${workingGetProxies.length}/${CORS_PROXIES.length} working`, 'color: #f59e0b;')
+    console.log(`     Failed: %c${failedGetProxies.map((r) => r.name).join(', ')}`, 'color: #ef4444;')
+  }
+
+  // CORS Proxies POST summary
+  const postNotSupported = CORS_PROXIES.filter((p) => proxyPostStatus.get(p.name) === 'no-post').map((p) => p.name)
+  const postFailed = CORS_PROXIES.filter((p) => proxyPostStatus.get(p.name) === 'error').map((p) => p.name)
+
+  if (postNotSupported.length === 0 && postFailed.length === 0) {
+    console.log(`   CORS Proxies (POST): %c${workingPostProxies.length}/${CORS_PROXIES.length} working`, 'color: #22c55e;')
+  } else {
+    console.log(`   CORS Proxies (POST): %c${workingPostProxies.length}/${CORS_PROXIES.length} working`, 'color: #f59e0b;')
+    if (postNotSupported.length > 0) {
+      console.log(`     No POST support: %c${postNotSupported.join(', ')}`, 'color: #f59e0b;')
+    }
+    if (postFailed.length > 0) {
+      console.log(`     POST failed: %c${postFailed.join(', ')}`, 'color: #ef4444;')
+    }
+  }
+
+  // Upload Servers summary
+  if (failedServers.length === 0) {
+    console.log(`   Upload Servers: %c${workingServersArr.length}/${UPLOAD_SERVERS.length} working`, 'color: #22c55e;')
+  } else {
+    console.log(`   Upload Servers: %c${workingServersArr.length}/${UPLOAD_SERVERS.length} working`, 'color: #f59e0b;')
+    console.log(`     Failed: %c${failedServers.map((r) => r.name).join(', ')}`, 'color: #ef4444;')
+  }
+
+  // Config mismatches
   console.log(`   Config Mismatches: %c${configMismatches.length}`, configMismatches.length === 0 ? 'color: #22c55e;' : 'color: #f59e0b;')
   console.log('')
 
@@ -498,10 +543,10 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
     corsProxies: proxyResults,
     uploadServers: serverResults,
     summary: {
-      workingProxies,
-      postProxies,
+      workingProxies: workingGetProxies.length,
+      postProxies: workingPostProxies.length,
       totalProxies: CORS_PROXIES.length,
-      workingServers,
+      workingServers: workingServersArr.length,
       totalServers: UPLOAD_SERVERS.length,
     },
     configMismatches,
