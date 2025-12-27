@@ -27,55 +27,254 @@ Both: Derive shared secret via ECDH
 
 ## Approach Comparison
 
-| Feature | WebAuthn | NIP-07 | NIP-46 | Ephemeral |
-|---------|----------|--------|--------|-----------|
-| Private key location | Authenticator | Browser extension | External app | Browser |
-| Cross-device signing | No | No | Yes | No |
-| Persistent identity | No | Yes (npub) | Yes (npub) | No |
-| Mobile support | Yes* | No | Yes | Yes |
-| Offline capable | Yes | Yes | No** | Yes |
-| Setup required | Authenticator | Extension | Signer app | None |
-| Identity format | Device-bound | Nostr npub | Nostr npub | None |
+| Feature | WebAuthn/Passkeys | NIP-07 | NIP-46 | Ephemeral |
+|---------|-------------------|--------|--------|-----------|
+| **Ecosystem** | **Mainstream** (billions of devices) | Niche (~thousands) | Very niche | Universal |
+| Private key location | Platform/1Password/Security Key | Browser extension | External app | Browser |
+| Cross-device sync | **Yes** (iCloud/Google/1Password) | No | Yes | No |
+| Persistent identity | Credential ID | Yes (npub) | Yes (npub) | No |
+| Mobile support | **Yes** (native) | No | Yes | Yes |
+| Desktop support | **Yes** (native) | Yes (extension) | Yes | Yes |
+| Offline capable | Yes | Yes | No* | Yes |
+| Setup required | **None** (built-in) | Extension install | Signer app | None |
 
-*Platform authenticator or security key
-**Can work offline with local signer via NIP-55
+*Can work offline with local signer via NIP-55
+
+### Ecosystem Reality
+
+| Platform | WebAuthn/Passkeys | Nostr |
+|----------|-------------------|-------|
+| iOS/iPadOS | Native (Keychain, Face ID, Touch ID) | No built-in support |
+| macOS | Native (Keychain, Touch ID) | No built-in support |
+| Windows | Native (Windows Hello) | No built-in support |
+| Android | Native (biometrics, Google Password Manager) | Amber app only |
+| Chrome | Built-in + extension support | Extension required (nos2x, Alby) |
+| Safari | Built-in | Extension required |
+| 1Password | Full passkey support with sync | None |
+| Bitwarden | Full passkey support | None |
 
 ---
 
-# Option 1: WebAuthn Session Signing
+# Option 1: WebAuthn/Passkey Session Signing (Recommended)
 
 ## Concept
 
-Use WebAuthn (FIDO2) to create ephemeral credentials that sign session data. Provides hardware-backed authentication without external dependencies.
+Use WebAuthn (FIDO2) passkeys to sign session data. Provides hardware-backed authentication with the widest ecosystem support - works on virtually every modern device without any setup.
+
+## Supported Authenticators
+
+**Platform Authenticators (Zero Setup):**
+- **iOS/iPadOS**: Face ID, Touch ID via iCloud Keychain
+- **macOS**: Touch ID, iCloud Keychain passkeys
+- **Windows**: Windows Hello (face, fingerprint, PIN)
+- **Android**: Fingerprint, face unlock, Google Password Manager
+
+**Password Managers (Cross-Device Sync):**
+- **1Password**: Full passkey support, syncs across all devices
+- **Bitwarden**: Passkey storage and sync
+- **Dashlane**: Passkey support
+
+**Security Keys:**
+- YubiKey, Google Titan, Feitian, SoloKeys
 
 ## Flow
 
 ```
-Sender: WebAuthn credential → Sign(ECDH pubkey + timestamp) → QR(sig + cred + ECDH + SDP)
-Receiver: Verify sig → Create credential → Sign → QR(sig + cred + ECDH + SDP)
-Sender: Verify receiver sig → Derive shared secret via ECDH
+┌─────────────────────────────────────────────────────────────────┐
+│ SENDER                                                          │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. Generate ephemeral ECDH keypair                              │
+│ 2. Create WebAuthn credential                                   │
+│    → Prompts: Touch ID / Face ID / 1Password / Windows Hello    │
+│ 3. Sign session data via navigator.credentials.get():           │
+│    challenge = SHA-256(ECDH pubkey + timestamp + nonce)         │
+│ 4. Create QR: SS03(ECDH + signature + authenticatorData +       │
+│               clientDataJSON + credentialPublicKey + SDP)       │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓ Show QR / Paste
+┌─────────────────────────────────────────────────────────────────┐
+│ RECEIVER                                                        │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. Scan QR, extract signature + authenticatorData + publicKey   │
+│ 2. Reconstruct clientDataJSON, verify signature                 │
+│ 3. Display: "Session signed by [authenticator]"                 │
+│ 4. User confirms sender identity (out-of-band if needed)        │
+│ 5. Create own credential, sign answer with same flow            │
+│ 6. Return signed answer QR                                      │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ SENDER                                                          │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. Verify receiver's signature                                  │
+│ 2. Derive shared secret via ECDH                                │
+│ 3. Begin encrypted file transfer                                │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Pros
-- Hardware-backed (secure enclave, security key)
-- Works offline
-- No external dependencies
-- Ephemeral credentials (no identity linkage)
+- **Widest availability**: Works on billions of devices out of the box
+- **Zero setup**: No extensions, apps, or accounts needed
+- **Hardware-backed**: Secure enclave, TPM, or security key
+- **Cross-device sync**: 1Password/iCloud/Google sync passkeys
+- **Works offline**: No network required for signing
+- **Privacy-preserving**: Ephemeral credentials, no tracking
 
 ## Cons
-- Requires authenticator hardware
-- Device-bound only (can't verify "who", just "same device")
-- No persistent identity
+- No persistent "social" identity (unlike Nostr npub)
+- Credential ID is opaque (can verify "same credential" but not "who")
+- PRF extension support varies by authenticator
+
+## WebAuthn PRF Extension
+
+The PRF (Pseudo-Random Function) extension allows deriving deterministic secrets from passkeys:
+
+```typescript
+const assertion = await navigator.credentials.get({
+  publicKey: {
+    challenge: sessionChallenge,
+    allowCredentials: [{ id: credentialId, type: "public-key" }],
+    extensions: {
+      prf: {
+        eval: {
+          first: new TextEncoder().encode("secure-send-session-v1")
+        }
+      }
+    }
+  }
+});
+// assertion.getClientExtensionResults().prf.results.first → 32-byte secret
+```
+
+This can be used to derive session-specific encryption keys bound to the passkey.
+
+## Implementation
+
+```typescript
+// Step 1: Create credential for this session
+const credential = await navigator.credentials.create({
+  publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    rp: { name: "Secure Send", id: location.hostname },
+    user: {
+      id: crypto.getRandomValues(new Uint8Array(16)),
+      name: "session",
+      displayName: "Session Signer"
+    },
+    pubKeyCredParams: [
+      { alg: -7, type: "public-key" },   // ES256 (P-256)
+      { alg: -257, type: "public-key" }  // RS256 fallback
+    ],
+    authenticatorSelection: {
+      residentKey: "discouraged",        // Don't clutter passkey list
+      userVerification: "preferred"
+    },
+    attestation: "none"                  // No attestation needed
+  }
+});
+
+// Extract public key for signature verification
+const publicKeyBytes = credential.response.getPublicKey();
+
+// Step 2: Sign session data (ECDH pubkey + metadata)
+const sessionData = {
+  ecdhPublicKey: ecdhPubKeyBase64,
+  timestamp: Date.now(),
+  nonce: crypto.getRandomValues(new Uint8Array(16))
+};
+const sessionBytes = new TextEncoder().encode(JSON.stringify(sessionData));
+const sessionHash = await crypto.subtle.digest("SHA-256", sessionBytes);
+
+const assertion = await navigator.credentials.get({
+  publicKey: {
+    challenge: new Uint8Array(sessionHash),
+    allowCredentials: [{
+      id: credential.rawId,
+      type: "public-key"
+    }],
+    userVerification: "preferred"
+  }
+});
+
+// Step 3: Package for QR
+const signedPayload = {
+  version: "SS03",
+  ecdh: ecdhPubKeyBase64,
+  sdp: offerSDP,
+  webauthn: {
+    credentialId: base64url(credential.rawId),
+    publicKey: base64url(publicKeyBytes),
+    signature: base64url(assertion.response.signature),
+    authenticatorData: base64url(assertion.response.authenticatorData),
+    clientDataJSON: base64url(assertion.response.clientDataJSON)
+  }
+};
+```
+
+## Verification (Receiver Side)
+
+```typescript
+async function verifyWebAuthnSignature(payload: SignedPayload): Promise<boolean> {
+  const { webauthn, ecdh } = payload;
+
+  // Reconstruct what was signed
+  const clientData = JSON.parse(
+    new TextDecoder().decode(base64urlDecode(webauthn.clientDataJSON))
+  );
+
+  // Verify challenge matches session data hash
+  const expectedSessionData = {
+    ecdhPublicKey: ecdh,
+    timestamp: clientData.timestamp,
+    nonce: clientData.nonce
+  };
+  const expectedHash = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(JSON.stringify(expectedSessionData))
+  );
+
+  if (base64url(new Uint8Array(expectedHash)) !== clientData.challenge) {
+    return false; // Challenge mismatch
+  }
+
+  // Import public key and verify signature
+  const publicKey = await crypto.subtle.importKey(
+    "spki",
+    base64urlDecode(webauthn.publicKey),
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["verify"]
+  );
+
+  // WebAuthn signature is over: authenticatorData || SHA-256(clientDataJSON)
+  const clientDataHash = await crypto.subtle.digest(
+    "SHA-256",
+    base64urlDecode(webauthn.clientDataJSON)
+  );
+  const signedData = concatenate(
+    base64urlDecode(webauthn.authenticatorData),
+    new Uint8Array(clientDataHash)
+  );
+
+  return crypto.subtle.verify(
+    { name: "ECDSA", hash: "SHA-256" },
+    publicKey,
+    base64urlDecode(webauthn.signature),
+    signedData
+  );
+}
+```
 
 ## Implementation Notes
 - Payload format: SS03
-- Use `attestation: 'none'`, `residentKey: 'discouraged'`
-- ES256 algorithm for P-256 compatibility
-- All keys `extractable: false`
+- Use `attestation: 'none'` - we don't need to verify authenticator make/model
+- Use `residentKey: 'discouraged'` - don't clutter user's passkey list
+- ES256 (P-256) algorithm for Web Crypto compatibility
+- All keys `extractable: false` per CLAUDE.md
 
 ---
 
-# Option 2: NIP-07 Extension Signing
+# Option 2: NIP-07 Extension Signing (Nostr - Niche)
 
 ## Concept
 
@@ -119,7 +318,7 @@ if (window.nostr) {
 
 ---
 
-# Option 3: NIP-46 Remote Signing
+# Option 3: NIP-46 Remote Signing (Nostr - Niche)
 
 ## Concept
 
@@ -164,7 +363,7 @@ await nostrConnect.signEvent({ kind: 24244, content: sessionDataJSON })
 
 ---
 
-# Option 4: NIP-55 Android Intent Signing
+# Option 4: NIP-55 Android Intent Signing (Nostr - Niche)
 
 ## Concept
 
@@ -191,7 +390,7 @@ Web App → Android Intent → Signer App
 
 ---
 
-# Enhancement A: Nostr-Signed QR Exchange
+# Enhancement A: Nostr-Signed QR Exchange (Nostr - Niche)
 
 ## Goal
 
@@ -228,7 +427,7 @@ Keep QR/manual exchange flow, add Nostr signature for identity verification.
 
 ---
 
-# Enhancement B: Nostr Relay Push
+# Enhancement B: Nostr Relay Push (Nostr - Niche)
 
 ## Goal
 
@@ -306,9 +505,12 @@ interface SessionSigner {
 
 async function detectSigners(): Promise<SessionSigner[]> {
   const signers: SessionSigner[] = []
-  if (window.nostr) signers.push(new NIP07Signer())
+  // WebAuthn first - widest availability
   if (isWebAuthnAvailable()) signers.push(new WebAuthnSigner())
-  signers.push(new EphemeralSigner()) // always available
+  // Nostr for users with extensions
+  if (window.nostr) signers.push(new NIP07Signer())
+  // Ephemeral always available as fallback
+  signers.push(new EphemeralSigner())
   return signers
 }
 ```
@@ -323,9 +525,10 @@ async function detectSigners(): Promise<SessionSigner[]> {
 - Compromise of signing key doesn't reveal past session content
 
 ## Identity Verification
-- Display `npub1...` or NIP-05 for user verification
-- Out-of-band confirmation ("Is your npub xyz...?")
-- Optional: web-of-trust / contact list
+- **WebAuthn**: Display credential ID fingerprint or "Signed by [authenticator type]"
+- **Nostr**: Display `npub1...` or NIP-05 for user verification
+- Out-of-band confirmation ("Is your credential/npub xyz...?")
+- Optional: web-of-trust / contact list (Nostr only)
 
 ## Replay Prevention
 - Timestamp in signed data
@@ -346,14 +549,26 @@ Session signing is additive to existing SS02 flow: generate ECDH keypair first, 
 
 ---
 
-# Implementation Priority (Suggested)
+# Implementation Priority
 
-1. **NIP-07 Extension** - Simplest, leverages existing Nostr ecosystem. Start here because the browser extension ecosystem (Alby, nos2x) already exists, enabling fast integration with minimal new code.
+1. **WebAuthn/Passkeys** - Recommended first choice. Widest ecosystem availability (billions of devices), zero user setup required, hardware-backed security. Works with Touch ID, Face ID, Windows Hello, 1Password, security keys out of the box. Password managers like 1Password provide cross-device sync, solving the "device-bound" limitation.
 
-2. **Nostr-Signed QR (Enhancement A)** - Identity verification with familiar QR flow. Prioritize next because it reuses the existing QR UX users already understand, requiring only payload extension rather than new infrastructure.
+2. **Ephemeral (current SS02)** - Always available fallback. No identity verification but works everywhere. Continue supporting for users who decline or can't use WebAuthn.
 
-3. **NIP-46 Remote Signing** - Cross-device, mobile support. Worth the added protocol complexity because it unlocks mobile signer apps (Amber) and cross-device workflows that NIP-07 cannot provide.
+3. **NIP-07 Extension** - For Nostr-native users. If the user already has nos2x or Alby installed, this provides npub-based identity. Niche but valuable for the Nostr community.
 
-4. **Nostr Relay Push (Enhancement B)** - Remote transfers without QR. Useful for transferring to known contacts remotely, but requires relay coordination and recipient npub discovery, making it a later addition.
+4. **NIP-46 Remote Signing** - For advanced Nostr users. Cross-device signing via relay for users with Amber or nsec.app. More complex setup but enables mobile signing for desktop sessions.
 
-5. **WebAuthn** - Hardware-backed, but lower priority due to setup friction. Deferred because it requires authenticator hardware, provides only device-bound identity (not portable npub), and offers less ecosystem integration than Nostr-based options.
+5. **Nostr Relay Push (Enhancement B)** - Future enhancement. Remote transfers to known npubs without QR scanning. Requires relay infrastructure and recipient discovery.
+
+## Why WebAuthn First?
+
+| Consideration | WebAuthn | Nostr (NIP-07/46) |
+|---------------|----------|-------------------|
+| User base | Billions (every modern device) | Thousands (niche) |
+| Setup required | None | Extension/app install |
+| Mobile support | Native | Limited (NIP-46 only) |
+| Cross-device | Yes (1Password, iCloud, Google) | Yes (NIP-46) |
+| Identity type | Credential ID (opaque) | npub (social) |
+
+WebAuthn is the pragmatic choice for maximum reach. Nostr options remain for users who value npub-based social identity.
