@@ -572,3 +572,324 @@ Session signing is additive to existing SS02 flow: generate ECDH keypair first, 
 | Identity type | Credential ID (opaque) | npub (social) |
 
 WebAuthn is the pragmatic choice for maximum reach. Nostr options remain for users who value npub-based social identity.
+
+---
+
+# Enhancement C: Passkey as PIN Alternative for Encryption
+
+## Concept
+
+Use WebAuthn PRF extension to derive encryption keys instead of requiring users to enter a PIN or password. The passkey becomes the "something you have + something you are" factor that unlocks encryption.
+
+## Comparison: PIN vs Passkey
+
+| Aspect | PIN/Password | Passkey (PRF) |
+|--------|--------------|---------------|
+| User experience | Type characters | Touch ID / Face ID / tap |
+| Phishing resistance | Low (can be stolen) | High (bound to origin) |
+| Brute force resistance | Depends on length | Hardware-backed |
+| Key derivation | PBKDF2/Argon2 from PIN | PRF from authenticator |
+| Cross-device | Yes (memorized) | Yes (synced passkeys) |
+| Offline access | Yes | Yes |
+| Recovery | Remember PIN | Passkey recovery flow |
+
+## Use Cases in Secure-Send
+
+### 1. Encrypt Saved Sessions
+```
+Without passkey: Enter PIN → PBKDF2 → AES key → Encrypt session data
+With passkey:    Touch ID → PRF → AES key → Encrypt session data
+```
+
+### 2. Protect QR Payload (Offline Transfer)
+```
+Sender: Passkey PRF → Encrypt(ECDH pubkey + SDP) → QR
+Receiver: Scan QR → Own passkey PRF → Decrypt → Establish connection
+```
+
+### 3. Encrypt Files Before Transfer
+```
+Sender: Passkey PRF → AES key → Encrypt file → Transfer
+Receiver: Own passkey PRF → Derive same key (via key exchange) → Decrypt
+```
+
+## Flow: Passkey Replaces PIN
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ TRADITIONAL PIN FLOW                                            │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. User enters PIN: "1234"                                      │
+│ 2. Derive key: PBKDF2(PIN, salt, 100000) → 256-bit key         │
+│ 3. Encrypt/decrypt data with derived key                        │
+│                                                                  │
+│ Problems:                                                        │
+│ - Weak PINs are common                                          │
+│ - Shoulder surfing                                               │
+│ - Phishing (fake PIN prompt)                                    │
+│ - Brute force if salt is known                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ PASSKEY PRF FLOW                                                │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. User authenticates: Touch ID / Face ID / Windows Hello       │
+│ 2. PRF derives key: PRF(credentialKey, salt) → 256-bit key     │
+│ 3. Encrypt/decrypt data with derived key                        │
+│                                                                  │
+│ Advantages:                                                      │
+│ - No weak passwords                                              │
+│ - Biometric or hardware token required                          │
+│ - Phishing-resistant (origin-bound)                             │
+│ - Hardware-backed key derivation                                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Implementation
+
+### Create Encryption Credential
+
+```typescript
+// One-time setup: create a passkey for encryption
+async function createEncryptionPasskey(): Promise<PublicKeyCredential> {
+  const credential = await navigator.credentials.create({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rp: { name: "Secure Send", id: location.hostname },
+      user: {
+        id: crypto.getRandomValues(new Uint8Array(16)),
+        name: "encryption-key",
+        displayName: "Secure Send Encryption"
+      },
+      pubKeyCredParams: [{ alg: -7, type: "public-key" }],
+      authenticatorSelection: {
+        residentKey: "required",        // Discoverable for convenience
+        userVerification: "required"    // Always require biometric/PIN
+      },
+      extensions: {
+        prf: {}  // Enable PRF extension
+      }
+    }
+  });
+
+  // Check if PRF is supported
+  const extResults = credential.getClientExtensionResults();
+  if (!extResults.prf?.enabled) {
+    throw new Error("Authenticator does not support PRF extension");
+  }
+
+  // Store credential ID for future use
+  localStorage.setItem("encryptionCredentialId",
+    base64url(credential.rawId));
+
+  return credential;
+}
+```
+
+### Derive Encryption Key
+
+```typescript
+// Derive AES-256-GCM key from passkey
+async function deriveEncryptionKey(
+  salt: string = "secure-send-encryption-v1"
+): Promise<CryptoKey> {
+  const credentialId = localStorage.getItem("encryptionCredentialId");
+  if (!credentialId) {
+    throw new Error("No encryption passkey configured");
+  }
+
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      allowCredentials: [{
+        id: base64urlDecode(credentialId),
+        type: "public-key"
+      }],
+      userVerification: "required",
+      extensions: {
+        prf: {
+          eval: {
+            first: new TextEncoder().encode(salt)
+          }
+        }
+      }
+    }
+  });
+
+  const prfResult = assertion.getClientExtensionResults().prf;
+  if (!prfResult?.results?.first) {
+    throw new Error("PRF evaluation failed");
+  }
+
+  // Import as AES-256-GCM key
+  return crypto.subtle.importKey(
+    "raw",
+    prfResult.results.first,
+    { name: "AES-GCM" },
+    false,  // extractable: false per CLAUDE.md
+    ["encrypt", "decrypt"]
+  );
+}
+```
+
+### Encrypt/Decrypt Data
+
+```typescript
+async function encryptWithPasskey(data: Uint8Array): Promise<Uint8Array> {
+  const key = await deriveEncryptionKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    data
+  );
+
+  // Prepend IV to ciphertext
+  const result = new Uint8Array(iv.length + ciphertext.byteLength);
+  result.set(iv);
+  result.set(new Uint8Array(ciphertext), iv.length);
+  return result;
+}
+
+async function decryptWithPasskey(encrypted: Uint8Array): Promise<Uint8Array> {
+  const key = await deriveEncryptionKey();
+  const iv = encrypted.slice(0, 12);
+  const ciphertext = encrypted.slice(12);
+
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv },
+    key,
+    ciphertext
+  );
+
+  return new Uint8Array(plaintext);
+}
+```
+
+## Multiple Salts for Key Separation
+
+Use different salts to derive separate keys for different purposes:
+
+```typescript
+const SALTS = {
+  sessionEncryption: "secure-send-session-v1",
+  fileEncryption: "secure-send-file-v1",
+  localStorage: "secure-send-storage-v1",
+  keyWrapping: "secure-send-wrap-v1"
+};
+
+// Each salt produces a different 256-bit key from the same passkey
+const sessionKey = await deriveEncryptionKey(SALTS.sessionEncryption);
+const fileKey = await deriveEncryptionKey(SALTS.fileEncryption);
+```
+
+## Fallback to PIN
+
+For authenticators without PRF support, fall back to traditional PIN:
+
+```typescript
+async function getEncryptionKey(): Promise<CryptoKey> {
+  // Try passkey first
+  if (await hasPasskeyWithPRF()) {
+    try {
+      return await deriveEncryptionKey();
+    } catch (e) {
+      console.warn("Passkey failed, falling back to PIN", e);
+    }
+  }
+
+  // Fallback: prompt for PIN
+  const pin = await promptForPIN();
+  const salt = getSavedSalt() || crypto.getRandomValues(new Uint8Array(16));
+
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(pin),
+    "PBKDF2",
+    false,
+    ["deriveBits", "deriveKey"]
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations: 100000,
+      hash: "SHA-256"
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+```
+
+## PRF Support Detection
+
+```typescript
+async function checkPRFSupport(): Promise<boolean> {
+  // Check if WebAuthn is available
+  if (!window.PublicKeyCredential) {
+    return false;
+  }
+
+  // Check if PRF extension is supported by creating a test credential
+  try {
+    const credential = await navigator.credentials.create({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rp: { name: "PRF Test", id: location.hostname },
+        user: {
+          id: crypto.getRandomValues(new Uint8Array(16)),
+          name: "test",
+          displayName: "PRF Test"
+        },
+        pubKeyCredParams: [{ alg: -7, type: "public-key" }],
+        authenticatorSelection: {
+          residentKey: "discouraged",
+          userVerification: "discouraged"
+        },
+        extensions: { prf: {} }
+      }
+    });
+
+    const extResults = credential.getClientExtensionResults();
+    return extResults.prf?.enabled === true;
+  } catch {
+    return false;
+  }
+}
+```
+
+## Security Considerations
+
+### Advantages over PIN
+- **No weak secrets**: Key derived from hardware, not user-chosen password
+- **Phishing resistant**: PRF bound to origin, can't be replayed elsewhere
+- **No keyboard logging**: Biometric or hardware token, nothing to intercept
+- **Hardware-backed**: Key derivation happens in secure enclave/TPM
+
+### Considerations
+- **Recovery**: If passkey is lost, data encrypted with it is unrecoverable
+  - Mitigation: Allow multiple passkeys, or backup key escrow
+- **Device binding**: Passkeys may be device-specific (unless synced)
+  - Mitigation: Use synced passkeys (1Password, iCloud, Google)
+- **PRF support**: Not all authenticators support PRF
+  - Mitigation: Detect and fall back to PIN
+
+### Key Rotation
+To rotate the encryption key (e.g., after device compromise):
+1. Decrypt all data with old passkey
+2. Create new passkey with PRF
+3. Re-encrypt all data with new passkey
+4. Delete old passkey from authenticator
+
+## UX Recommendations
+
+1. **First-time setup**: "Protect with Face ID" button alongside traditional "Set PIN"
+2. **Clear labeling**: "Unlock with passkey" vs "Enter PIN"
+3. **Graceful fallback**: If passkey auth fails, offer PIN as backup
+4. **Multiple passkeys**: Allow registering passkeys from multiple devices
+5. **Recovery flow**: Clear instructions for passkey recovery via platform (iCloud, Google, 1Password)
