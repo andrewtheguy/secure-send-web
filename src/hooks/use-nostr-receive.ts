@@ -17,15 +17,14 @@ import {
   generateEphemeralKeys,
   parsePinExchangeEvent,
   createAckEvent,
-  discoverBackupRelays,
   parseChunkNotifyEvent,
   DEFAULT_RELAYS,
   type TransferState,
   type PinExchangePayload,
   type ChunkNotifyPayload,
+  type NostrClient,
   EVENT_KIND_PIN_EXCHANGE,
   EVENT_KIND_DATA_TRANSFER,
-  type NostrClient,
   createSignalingEvent,
   parseSignalingEvent,
 } from '@/lib/nostr'
@@ -33,33 +32,6 @@ import type { PinKeyMaterial, ReceivedContent } from '@/lib/types'
 import { downloadFromCloud } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { WebRTCConnection } from '@/lib/webrtc'
-
-/**
- * Publish with backup relay fallback.
- * If primary publish fails, discovers backup relays and retries.
- */
-async function publishWithBackup(
-  client: NostrClient,
-  event: Event,
-  maxRetries: number = 3
-): Promise<void> {
-  try {
-    await client.publish(event, maxRetries)
-  } catch (err) {
-    // Primary relays failed, try to discover backup relays
-    console.log('Primary relays failed, discovering backup relays...')
-    const currentRelays = client.getRelays()
-    const backupRelays = await discoverBackupRelays(currentRelays, 5)
-
-    if (backupRelays.length === 0) {
-      throw err // No backup relays found, propagate original error
-    }
-
-    // Add backup relays and retry
-    await client.addRelays(backupRelays)
-    await client.publish(event, maxRetries)
-  }
-}
 
 export interface ReceiveOptions {
   usePasskey?: boolean
@@ -270,7 +242,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Send ready ACK (seq=0) with hint so sender knows which key to use
       console.log(`Sending ready ACK (seq=0) for transfer ${transferId}`)
       const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0, pinHint)
-      await publishWithBackup(client, readyAck)
+      await client.publish(readyAck)
       console.log(`✓ Ready ACK sent successfully`)
 
       if (cancelledRef.current) return
@@ -519,7 +491,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               transferId!,
               chunkPayload.chunkIndex + 1
             )
-            await publishWithBackup(client, chunkAck)
+            await client.publish(chunkAck)
             console.log(`Chunk ${chunkPayload.chunkIndex + 1} ACK sent`)
 
             // Check if all chunks received
@@ -634,7 +606,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Send completion ACK
       console.log(`Sending completion ACK (seq=-1) for transfer ${transferId}`)
       const completeAck = createAckEvent(secretKey, senderPubkey, transferId, -1)
-      await publishWithBackup(client, completeAck)
+      await client.publish(completeAck)
       console.log(`✓ Completion ACK sent successfully`)
 
       // Set received content

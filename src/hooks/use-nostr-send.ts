@@ -20,7 +20,6 @@ import {
   generateEphemeralKeys,
   createPinExchangeEvent,
   parseAckEvent,
-  discoverBackupRelays,
   createSignalingEvent,
   parseSignalingEvent,
   createChunkNotifyEvent,
@@ -36,33 +35,6 @@ import { uploadToCloud, splitIntoChunks } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { readFileAsBytes } from '@/lib/file-utils'
 import { WebRTCConnection } from '@/lib/webrtc'
-
-/**
- * Publish with backup relay fallback.
- * If primary publish fails, discovers backup relays and retries.
- */
-async function publishWithBackup(
-  client: NostrClient,
-  event: Event,
-  maxRetries: number = 3
-): Promise<void> {
-  try {
-    await client.publish(event, maxRetries)
-  } catch (err) {
-    // Primary relays failed, try to discover backup relays
-    console.log('Primary relays failed, discovering backup relays...')
-    const currentRelays = client.getRelays()
-    const backupRelays = await discoverBackupRelays(currentRelays, 5)
-
-    if (backupRelays.length === 0) {
-      throw err // No backup relays found, propagate original error
-    }
-
-    // Add backup relays and retry
-    await client.addRelays(backupRelays)
-    await client.publish(event, maxRetries)
-  }
-}
 
 export interface UseNostrSendReturn {
   state: TransferState
@@ -275,7 +247,7 @@ export function useNostrSend(): UseNostrSendReturn {
       })
 
       const pinExchangeEvent = createPinExchangeEvent(secretKey, encryptedPayload, salt, transferId, pinHint)
-      await publishWithBackup(client, pinExchangeEvent)
+      await client.publish(pinExchangeEvent)
 
       // If dual mode (passkey enabled), publish second event for passkey receivers
       if (passkeyKeyRef.current && passkeyHintRef.current) {
@@ -287,7 +259,7 @@ export function useNostrSend(): UseNostrSendReturn {
           transferId,
           passkeyHintRef.current
         )
-        await publishWithBackup(client, passkeyExchangeEvent)
+        await client.publish(passkeyExchangeEvent)
       }
 
       if (cancelledRef.current) return
