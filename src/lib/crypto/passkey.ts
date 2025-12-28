@@ -243,7 +243,7 @@ function base64urlEncode(data: Uint8Array): string {
   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-async function credentialIdToFingerprint(credentialId: Uint8Array): Promise<string> {
+export async function credentialIdToFingerprint(credentialId: Uint8Array): Promise<string> {
   const credentialBytes = new Uint8Array(credentialId)
   const hash = await crypto.subtle.digest('SHA-256', credentialBytes as BufferSource)
   const hashArray = new Uint8Array(hash)
