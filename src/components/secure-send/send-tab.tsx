@@ -63,6 +63,11 @@ export function SendTab() {
     activeMethod !== 'manual' && 'pin' in activeHook && typeof activeHook.pin === 'string'
       ? activeHook.pin
       : null
+  // Only nostr hook has passkeyFingerprint for dual mode
+  const passkeyFingerprint: string | null =
+    activeMethod === 'nostr' && 'passkeyFingerprint' in activeHook && typeof activeHook.passkeyFingerprint === 'string'
+      ? activeHook.passkeyFingerprint
+      : null
   const { state: rawState, cancel } = activeHook
   const submitAnswer = activeMethod === 'manual' ? manualHook.submitAnswer : undefined
 
@@ -636,7 +641,7 @@ export function SendTab() {
 
           <TransferStatus
             state={state}
-            betweenProgressAndChunks={showPinDisplay ? <PinDisplay pin={pin} onExpire={cancel} /> : undefined}
+            betweenProgressAndChunks={showPinDisplay ? <PinDisplay pin={pin} passkeyFingerprint={passkeyFingerprint} onExpire={cancel} /> : undefined}
           />
 
           {/* QR Code display for sender */}

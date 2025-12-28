@@ -78,23 +78,32 @@ export function parsePinExchangeEvent(event: Event): {
 /**
  * Create ACK event (kind 24242)
  * seq=0 for ready ACK, seq=-1 for completion ACK
+ * hint is optional - used in dual mode to indicate which key the receiver used
  */
 export function createAckEvent(
   secretKey: Uint8Array,
   senderPubkey: string,
   transferId: string,
-  seq: number
+  seq: number,
+  hint?: string
 ): Event {
+  const tags: string[][] = [
+    ['p', senderPubkey],
+    ['t', transferId],
+    ['seq', seq.toString()],
+    ['type', 'ack'],
+  ]
+
+  // Add hint tag if provided (for dual mode key selection)
+  if (hint) {
+    tags.push(['h', hint])
+  }
+
   const event = finalizeEvent(
     {
       kind: EVENT_KIND_DATA_TRANSFER,
       content: '',
-      tags: [
-        ['p', senderPubkey],
-        ['t', transferId],
-        ['seq', seq.toString()],
-        ['type', 'ack'],
-      ],
+      tags,
       created_at: Math.floor(Date.now() / 1000),
     },
     secretKey
@@ -110,6 +119,7 @@ export function parseAckEvent(event: Event): {
   senderPubkey: string
   transferId: string
   seq: number
+  hint?: string
 } | null {
   if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null
 
@@ -119,6 +129,7 @@ export function parseAckEvent(event: Event): {
   const senderPubkey = event.tags.find((t) => t[0] === 'p')?.[1]
   const transferId = event.tags.find((t) => t[0] === 't')?.[1]
   const seqStr = event.tags.find((t) => t[0] === 'seq')?.[1]
+  const hint = event.tags.find((t) => t[0] === 'h')?.[1]
 
   if (!senderPubkey || !transferId || !seqStr) return null
 
@@ -127,7 +138,7 @@ export function parseAckEvent(event: Event): {
   // Validate: seq must be integer, valid values are -1 (complete), 0 (ready), or > 0 (chunk ack)
   if (!Number.isInteger(seq) || seq < -1) return null
 
-  return { senderPubkey, transferId, seq }
+  return { senderPubkey, transferId, seq, hint }
 }
 
 /**

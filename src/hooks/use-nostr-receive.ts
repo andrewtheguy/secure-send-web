@@ -261,9 +261,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Generate receiver keypair
       const { secretKey } = generateEphemeralKeys()
 
-      // Send ready ACK (seq=0)
+      // Send ready ACK (seq=0) with hint so sender knows which key to use
       console.log(`Sending ready ACK (seq=0) for transfer ${transferId}`)
-      const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0)
+      const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0, pinHint)
       await publishWithBackup(client, readyAck)
       console.log(`✓ Ready ACK sent successfully`)
 
