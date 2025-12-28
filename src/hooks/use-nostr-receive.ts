@@ -9,8 +9,8 @@ import {
   ENCRYPTION_CHUNK_SIZE,
   CLOUD_CHUNK_SIZE,
   TRANSFER_EXPIRATION_MS,
-  getCredentialFingerprint,
-  deriveKeyFromPasskeyWithSalt,
+  deriveKeyFromPasskeyMasterKey,
+  getPasskeyMasterKeyAndFingerprint,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -109,12 +109,15 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
     try {
       let pinHint: string
+      let passkeyMaster: CryptoKey | null = null
 
       if (isPasskeyMode) {
-        // Passkey mode: authenticate and get fingerprint
+        // Passkey mode: authenticate once to get master key + fingerprint
         setState({ status: 'connecting', message: 'Authenticate with passkey...' })
         try {
-          pinHint = await getCredentialFingerprint()
+          const { masterKey, fingerprint } = await getPasskeyMasterKeyAndFingerprint()
+          passkeyMaster = masterKey
+          pinHint = fingerprint
         } catch (err) {
           setState({ status: 'error', message: err instanceof Error ? err.message : 'Passkey authentication failed' })
           receivingRef.current = false
@@ -191,8 +194,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           // Derive key with this salt
           let derivedKey: CryptoKey
           if (isPasskeyMode) {
-            // Passkey mode: derive key from passkey with salt (prompts for auth again)
-            derivedKey = await deriveKeyFromPasskeyWithSalt(parsed.salt)
+            if (!passkeyMaster) {
+              setState({ status: 'error', message: 'Passkey authentication unavailable' })
+              return
+            }
+            // Passkey mode: derive key from master key with salt (no prompt)
+            derivedKey = await deriveKeyFromPasskeyMasterKey(passkeyMaster, parsed.salt)
           } else {
             // PIN mode: derive key from PIN key material
             derivedKey = await deriveKeyFromPinKey(pinMaterial!.key, parsed.salt)

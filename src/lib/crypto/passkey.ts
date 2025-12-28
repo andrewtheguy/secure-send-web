@@ -12,6 +12,7 @@ import { encrypt, decrypt } from './aes-gcm'
 const RP_NAME = 'Secure Send'
 const CREDENTIAL_STORAGE_KEY = 'passkey-encryption-credential'
 const PRF_SALT_PREFIX = 'secure-send-passkey-encryption-v1'
+const PASSKEY_MASTER_PRF_LABEL = 'secure-send-passkey-master-v1'
 
 // Minimum encrypted blob length: salt + nonce + tag
 const MIN_BLOB_LENGTH = SALT_LENGTH + AES_NONCE_LENGTH + 16
@@ -275,6 +276,72 @@ export async function deriveKeyAndFingerprintFromPasskey(
 
   const fingerprint = await credentialIdToFingerprint(new Uint8Array(assertion.rawId))
   return { key, fingerprint }
+}
+
+/**
+ * Derive a master key and fingerprint in one passkey assertion (single prompt).
+ * Use the master key with HKDF + per-transfer salt to derive the AES key.
+ */
+export async function getPasskeyMasterKeyAndFingerprint(): Promise<{
+  masterKey: CryptoKey
+  fingerprint: string
+}> {
+  const prfInput = new TextEncoder().encode(PASSKEY_MASTER_PRF_LABEL)
+
+  const assertion = (await navigator.credentials.get({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      userVerification: 'required',
+      extensions: {
+        prf: {
+          eval: {
+            first: prfInput,
+          },
+        },
+      },
+    },
+  })) as PublicKeyCredential
+
+  const extResults = assertion.getClientExtensionResults() as {
+    prf?: { results?: { first?: ArrayBuffer } }
+  }
+
+  if (!extResults.prf?.results?.first) {
+    throw new Error('PRF evaluation failed - authenticator may not support PRF extension')
+  }
+
+  const masterKey = await crypto.subtle.importKey(
+    'raw',
+    extResults.prf.results.first,
+    'HKDF',
+    false, // extractable: false per CLAUDE.md
+    ['deriveKey']
+  )
+
+  const fingerprint = await credentialIdToFingerprint(new Uint8Array(assertion.rawId))
+  return { masterKey, fingerprint }
+}
+
+/**
+ * Derive per-transfer AES key from passkey master key and salt (no prompt).
+ */
+export async function deriveKeyFromPasskeyMasterKey(
+  masterKey: CryptoKey,
+  salt: Uint8Array
+): Promise<CryptoKey> {
+  const info = new TextEncoder().encode(PRF_SALT_PREFIX)
+  return crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: salt as BufferSource,
+      info,
+    },
+    masterKey,
+    { name: 'AES-GCM', length: 256 },
+    false, // extractable: false per CLAUDE.md
+    ['encrypt', 'decrypt']
+  )
 }
 
 /**
