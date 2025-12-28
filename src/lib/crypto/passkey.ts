@@ -15,17 +15,26 @@ const PASSKEY_ECDH_LABEL = 'secure-send-passkey-ecdh-v1'
  * Derive deterministic ECDH keypair from passkey master key.
  * Same passkey will always derive the same keypair across devices.
  *
- * SECURITY: The private key is returned as a non-extractable CryptoKey.
- * Seed bytes are zeroed immediately after deriving the keypair.
+ * SECURITY NOTE - Why raw bytes are temporarily needed:
+ *
+ * Web Crypto API cannot compute P-256 public key from private key material,
+ * so we use @noble/curves (p256.getPublicKey) which requires raw bytes.
+ * The seed bytes exist in memory only during this function call (~milliseconds)
+ * and are zeroed in a finally block before returning.
+ *
+ * Residual risk (standard JS limitation):
+ * - V8/browser may retain copies during GC
+ *
+ * @see https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/deriveBits
  */
 export async function deriveECDHKeypairFromMasterKey(masterKey: CryptoKey): Promise<{
   publicKeyBytes: Uint8Array // 65 bytes uncompressed P-256 (0x04 || X || Y)
   privateKey: CryptoKey // Non-extractable ECDH private key
 }> {
-  // Derive 32 bytes of seed from master key using HKDF
-  // Note: We must temporarily extract bytes to compute public key with noble/curves
+  // Derive 32 bytes (256 bits) of seed from master key using HKDF deriveBits
+  // This is cleaner than deriveKey+export - directly gets raw bytes
   const info = new TextEncoder().encode(PASSKEY_ECDH_LABEL)
-  const seedKey = await crypto.subtle.deriveKey(
+  const seedBits = await crypto.subtle.deriveBits(
     {
       name: 'HKDF',
       hash: 'SHA-256',
@@ -33,24 +42,22 @@ export async function deriveECDHKeypairFromMasterKey(masterKey: CryptoKey): Prom
       info,
     },
     masterKey,
-    { name: 'AES-GCM', length: 256 },
-    true, // Temporarily extractable to get raw bytes
-    ['encrypt'] // Dummy usage
+    256 // 32 bytes = 256 bits for P-256 private key
   )
 
-  // Export seed bytes (temporarily in memory)
-  const seedBytes = new Uint8Array(await crypto.subtle.exportKey('raw', seedKey))
+  const seedBytes = new Uint8Array(seedBits)
 
   try {
-    // Derive public key from seed using noble/curves (uncompressed format = 65 bytes)
+    // Compute public key using noble/curves (Web Crypto can't do this)
     const publicKeyBytes = p256.getPublicKey(seedBytes, false)
 
-    // Import as non-extractable CryptoKey for ECDH operations
+    // Import as non-extractable CryptoKey for all future ECDH operations
     const privateKey = await importECDHPrivateKey(seedBytes)
 
     return { publicKeyBytes, privateKey }
   } finally {
-    // SECURITY: Zero out seed bytes immediately after use
+    // SECURITY: Zero out seed bytes immediately - best effort cleanup
+    // Note: JS/V8 may retain copies but this prevents casual inspection
     seedBytes.fill(0)
   }
 }
