@@ -3,7 +3,7 @@ import { publicKeyToFingerprint } from './ecdh'
 
 describe('Passkey Utilities', () => {
   describe('publicKeyToFingerprint', () => {
-    test('should generate deterministic 11-character uppercase fingerprint', async () => {
+    test('should generate deterministic 16-character uppercase hex fingerprint', async () => {
       // 65-byte P-256 uncompressed public key (0x04 prefix + X + Y)
       const publicKey = new Uint8Array(65)
       publicKey[0] = 0x04
@@ -11,8 +11,8 @@ describe('Passkey Utilities', () => {
       publicKey.fill(0x02, 33, 65) // Y coordinate
       const fingerprint = await publicKeyToFingerprint(publicKey)
 
-      expect(fingerprint.length).toBe(11)
-      expect(fingerprint).toMatch(/^[0-9A-Z]+$/)
+      expect(fingerprint.length).toBe(16)
+      expect(fingerprint).toMatch(/^[0-9A-F]+$/)
     })
 
     test('should generate same fingerprint for same public key', async () => {
@@ -48,8 +48,8 @@ describe('Passkey Utilities', () => {
       const data = new Uint8Array([1, 2, 3, 4, 5])
       const fingerprint = await publicKeyToFingerprint(data)
 
-      expect(fingerprint.length).toBe(11)
-      expect(fingerprint).toMatch(/^[0-9A-Z]+$/)
+      expect(fingerprint.length).toBe(16)
+      expect(fingerprint).toMatch(/^[0-9A-F]+$/)
     })
   })
 })

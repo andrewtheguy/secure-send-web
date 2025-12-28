@@ -11,16 +11,13 @@ import {
   createPasskeyCredential,
   getPasskeyECDHKeypair,
 } from '@/lib/crypto/passkey'
+import { formatFingerprint } from '@/lib/crypto/ecdh'
 
 type PageState = 'idle' | 'checking' | 'creating' | 'getting_key'
 
 // Helper to convert Uint8Array to base64
 function uint8ArrayToBase64(bytes: Uint8Array): string {
-  let binary = ''
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i])
-  }
-  return btoa(binary)
+  return btoa(Array.from(bytes, (c) => String.fromCharCode(c)).join(''))
 }
 
 export function PasskeyPage() {
@@ -34,15 +31,14 @@ export function PasskeyPage() {
   const [copied, setCopied] = useState(false)
   const [copiedKey, setCopiedKey] = useState(false)
 
-  // Format fingerprint for display: XXXX-XXXX-XXX
-  const formattedFingerprint = fingerprint
-    ? `${fingerprint.slice(0, 4)}-${fingerprint.slice(4, 8)}-${fingerprint.slice(8, 11)}`
-    : null
+  // Format fingerprint for display: XXXX-XXXX-XXXX-XXXX
+  const formattedFingerprint = fingerprint ? formatFingerprint(fingerprint) : null
 
   const handleCreatePasskey = async () => {
     setError(null)
     setSuccess(null)
     setFingerprint(null)
+    setPublicKeyBase64(null)
     setPrfSupported(null)
     setPageState('checking')
 
@@ -58,12 +54,16 @@ export function PasskeyPage() {
       setPageState('creating')
 
       // Create the passkey
-      const result = await createPasskeyCredential(userName || 'Secure Transfer User')
-      setPrfSupported(result.prfSupported)
+      const { credentialId } = await createPasskeyCredential(userName || 'Secure Transfer User')
       setUserName('') // Clear display name input after successful creation
-      setSuccess(
-        'Passkey created successfully! Click "Authenticate & Get Public Key" above to retrieve your public key for sharing.'
-      )
+
+      // Immediately authenticate with the new credential to get the public key (skips picker)
+      setPageState('getting_key')
+      const keypair = await getPasskeyECDHKeypair(credentialId)
+      setFingerprint(keypair.publicKeyFingerprint)
+      setPublicKeyBase64(uint8ArrayToBase64(keypair.publicKeyBytes))
+      setPrfSupported(keypair.prfSupported)
+      setSuccess('Passkey created! Your public key is now available for sharing.')
       setPageState('idle')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create passkey')
@@ -80,7 +80,7 @@ export function PasskeyPage() {
       const result = await getPasskeyECDHKeypair()
       setFingerprint(result.publicKeyFingerprint)
       setPublicKeyBase64(uint8ArrayToBase64(result.publicKeyBytes))
-      setPrfSupported(true)
+      setPrfSupported(result.prfSupported)
       setSuccess('Public key retrieved! Share this with your contacts for secure file transfers.')
       setPageState('idle')
     } catch (err) {
@@ -89,20 +89,22 @@ export function PasskeyPage() {
     }
   }
 
-  const handleCopyPublicKey = async () => {
-    if (!publicKeyBase64) return
-
+  const copyToClipboard = async (
+    text: string,
+    onSuccess: () => void,
+    onError: () => void
+  ) => {
     try {
+      // Try modern clipboard API first (requires secure context)
       if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        await navigator.clipboard.writeText(publicKeyBase64)
-        setCopiedKey(true)
-        setTimeout(() => setCopiedKey(false), 2000)
+        await navigator.clipboard.writeText(text)
+        onSuccess()
         return
       }
 
       // Fallback: use legacy execCommand method
       const textarea = document.createElement('textarea')
-      textarea.value = publicKeyBase64
+      textarea.value = text
       textarea.style.position = 'fixed'
       textarea.style.left = '-9999px'
       textarea.style.top = '-9999px'
@@ -114,54 +116,43 @@ export function PasskeyPage() {
       document.body.removeChild(textarea)
 
       if (successful) {
+        onSuccess()
+      } else {
+        onError()
+      }
+    } catch {
+      onError()
+    }
+  }
+
+  const handleCopyPublicKey = async () => {
+    if (!publicKeyBase64) return
+    await copyToClipboard(
+      publicKeyBase64,
+      () => {
         setCopiedKey(true)
         setTimeout(() => setCopiedKey(false), 2000)
-      } else {
+      },
+      () => {
         setError('Failed to copy to clipboard')
         setTimeout(() => setError(null), 3000)
       }
-    } catch {
-      setError('Failed to copy to clipboard')
-      setTimeout(() => setError(null), 3000)
-    }
+    )
   }
 
   const handleCopyFingerprint = async () => {
     if (!formattedFingerprint) return
-
-    try {
-      // Try modern clipboard API first (requires secure context)
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        await navigator.clipboard.writeText(formattedFingerprint)
+    await copyToClipboard(
+      formattedFingerprint,
+      () => {
         setCopied(true)
         setTimeout(() => setCopied(false), 2000)
-        return
-      }
-
-      // Fallback: use legacy execCommand method
-      const textarea = document.createElement('textarea')
-      textarea.value = formattedFingerprint
-      textarea.style.position = 'fixed'
-      textarea.style.left = '-9999px'
-      textarea.style.top = '-9999px'
-      document.body.appendChild(textarea)
-      textarea.focus()
-      textarea.select()
-
-      const successful = document.execCommand('copy')
-      document.body.removeChild(textarea)
-
-      if (successful) {
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-      } else {
+      },
+      () => {
         setError('Failed to copy to clipboard')
         setTimeout(() => setError(null), 3000)
       }
-    } catch {
-      setError('Failed to copy to clipboard')
-      setTimeout(() => setError(null), 3000)
-    }
+    )
   }
 
   const isLoading = pageState !== 'idle'
@@ -330,8 +321,10 @@ export function PasskeyPage() {
               Register New Passkey
             </h3>
             <p className="text-sm text-muted-foreground">
-              Create a new passkey for this app. The passkey will be stored in your
-              browser or password manager and can be synced across devices.
+              Create a passkey to generate your unique public key.
+              Your passkey will be saved to your password manager (1Password, iCloud Keychain, etc.).
+              You'll be prompted twice: once to create the passkey, then once more to verify and
+              retrieve your public key.
             </p>
             <div className="space-y-2">
               <Label htmlFor="userName">Display Name (optional)</Label>
@@ -351,10 +344,12 @@ export function PasskeyPage() {
               disabled={isLoading}
               className="w-full"
             >
-              {pageState === 'creating' || pageState === 'checking' ? (
+              {pageState !== 'idle' ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  {pageState === 'checking' ? 'Checking support...' : 'Creating passkey...'}
+                  {pageState === 'checking' && 'Checking support...'}
+                  {pageState === 'creating' && 'Creating passkey...'}
+                  {pageState === 'getting_key' && 'Getting public key...'}
                 </>
               ) : (
                 <>

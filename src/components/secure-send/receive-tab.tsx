@@ -15,7 +15,7 @@ import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file
 import type { SignalingMethod } from '@/lib/nostr/types'
 import type { PinKeyMaterial } from '@/lib/types'
 import { Link } from 'react-router-dom'
-import { publicKeyToFingerprint } from '@/lib/crypto/ecdh'
+import { publicKeyToFingerprint, formatFingerprint } from '@/lib/crypto/ecdh'
 
 // Helper to convert base64 to Uint8Array
 function base64ToUint8Array(base64: string): Uint8Array {
@@ -28,6 +28,12 @@ function base64ToUint8Array(base64: string): Uint8Array {
 }
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+
+// Helper to format PIN hint as XXXX-XXXX
+function formatPinHint(h: string): string {
+  const compact = h.slice(0, 8).toUpperCase()
+  return `${compact.slice(0, 4)}-${compact.slice(4, 8)}`
+}
 
 type PinSecret = PinKeyMaterial & { method: SignalingMethod | null }
 
@@ -82,7 +88,7 @@ export function ReceiveTab() {
     let cancelled = false
     publicKeyToFingerprint(senderPublicKeyBytes).then(fp => {
       if (!cancelled) {
-        setSenderPublicKeyFingerprint(`${fp.slice(0, 4)}-${fp.slice(4, 8)}-${fp.slice(8, 11)}`)
+        setSenderPublicKeyFingerprint(formatFingerprint(fp))
       }
     })
 
@@ -244,15 +250,10 @@ export function ReceiveTab() {
     const { key, hint, method, isValid, length } = payload
     pinInputLengthRef.current = length
 
-    const formatFingerprint = (h: string) => {
-      const compact = h.slice(0, 8).toUpperCase()
-      return `${compact.slice(0, 4)}-${compact.slice(4, 8)}`
-    }
-
     if (isValid && key && hint) {
       pinSecretRef.current = { key, hint, method: method ?? null }
       setIsPinValid(true)
-      setPinFingerprint(formatFingerprint(hint))
+      setPinFingerprint(formatPinHint(hint))
     } else {
       pinSecretRef.current = null
       setIsPinValid(false)
@@ -567,9 +568,7 @@ export function ReceiveTab() {
                 <Fingerprint className="h-3 w-3 text-cyan-600" />
                 <span>Your fingerprint: </span>
                 <span className="font-medium text-cyan-600">
-                  {receiverOwnFingerprint.slice(0, 4)}-
-                  {receiverOwnFingerprint.slice(4, 8)}-
-                  {receiverOwnFingerprint.slice(8, 11)}
+                  {formatFingerprint(receiverOwnFingerprint)}
                 </span>
               </div>
               <p className="mt-1 ml-5">Sender should verify this matches your public key.</p>

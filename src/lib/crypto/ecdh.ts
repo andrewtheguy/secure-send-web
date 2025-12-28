@@ -19,20 +19,39 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 /**
- * Generate fingerprint from public key bytes (11-char base36).
+ * Generate fingerprint from public key bytes.
+ * Returns 16 uppercase hex characters (64 bits from SHA-256 hash).
  * Used for event filtering and verification display.
  */
 export async function publicKeyToFingerprint(publicKeyBytes: Uint8Array): Promise<string> {
   const hash = await crypto.subtle.digest('SHA-256', publicKeyBytes as BufferSource)
   const hashArray = new Uint8Array(hash)
 
-  let value = 0n
-  for (let i = 0; i < 8; i++) {
-    value = (value << 8n) | BigInt(hashArray[i])
-  }
-  const fingerprint = value.toString(36).padStart(11, '0').toUpperCase().slice(0, 11)
+  // Take first 8 bytes (64 bits) and convert to uppercase hex
+  return Array.from(hashArray.slice(0, 8), (b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .toUpperCase()
+}
 
-  return fingerprint
+/**
+ * Format a fingerprint for human-readable display.
+ * Input: 16 hex chars (e.g., "A1B2C3D4E5F67890")
+ * Output: "A1B2-C3D4-E5F6-7890"
+ * @throws TypeError if input is not exactly 16 hex characters
+ */
+export function formatFingerprint(fingerprint: string): string {
+  if (typeof fingerprint !== 'string' || fingerprint.length !== 16) {
+    throw new TypeError(
+      `Invalid fingerprint: expected 16-character hex string, got ${typeof fingerprint === 'string' ? `${fingerprint.length} characters` : typeof fingerprint}`
+    )
+  }
+  if (!/^[0-9A-Fa-f]+$/.test(fingerprint)) {
+    throw new TypeError(
+      `Invalid fingerprint: contains non-hex characters`
+    )
+  }
+  const fp = fingerprint.toUpperCase()
+  return `${fp.slice(0, 4)}-${fp.slice(4, 8)}-${fp.slice(8, 12)}-${fp.slice(12, 16)}`
 }
 
 /**

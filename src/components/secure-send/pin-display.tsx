@@ -3,6 +3,7 @@ import { Check, Copy, AlertCircle, Eye, EyeOff, Clock, Hash, MessageSquareText, 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PIN_DISPLAY_TIMEOUT_MS, pinToWords, computePinHint } from '@/lib/crypto'
+import { formatFingerprint } from '@/lib/crypto/ecdh'
 
 interface PinDisplayProps {
   pin: string
@@ -144,14 +145,10 @@ export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProp
     return () => { cancelled = true }
   }, [pin])
 
-  // Format passkey fingerprint for display (e.g., "ABCD-EFGH-IJK")
+  // Format passkey fingerprint for display (e.g., "A1B2-C3D4-E5F6-7890")
   const formattedPasskeyFingerprint = useMemo(() => {
     if (!passkeyFingerprint) return ''
-    const fp = passkeyFingerprint.toUpperCase()
-    if (fp.length >= 11) {
-      return `${fp.slice(0, 4)}-${fp.slice(4, 8)}-${fp.slice(8, 11)}`
-    }
-    return fp
+    return formatFingerprint(passkeyFingerprint)
   }, [passkeyFingerprint])
 
   // Dual mode: side-by-side layout
