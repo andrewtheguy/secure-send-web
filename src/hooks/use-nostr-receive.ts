@@ -286,6 +286,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         },
         useWebRTC: false,
         currentRelays: client.getRelays(),
+        totalRelays: DEFAULT_RELAYS.length,
       })
 
       // Unified listener for both P2P and chunked cloud transfer
@@ -654,6 +655,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           mimeType: resolvedMimeType,
         },
         currentRelays: prevState.currentRelays, // Preserve for debugging
+        totalRelays: prevState.totalRelays,
         useWebRTC: prevState.useWebRTC,
       }))
     } catch (error) {

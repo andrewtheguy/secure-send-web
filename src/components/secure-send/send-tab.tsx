@@ -175,6 +175,8 @@ export function SendTab() {
 
   const handleRetryNostr = () => {
     setNostrUnavailable(false)
+    // Re-trigger send which will re-check availability
+    handleSend()
   }
 
   const addFiles = useCallback((files: File[]) => {

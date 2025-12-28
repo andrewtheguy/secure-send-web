@@ -271,6 +271,7 @@ export function useNostrSend(): UseNostrSendReturn {
         fileMetadata: { fileName, fileSize, mimeType },
         useWebRTC: !options?.relayOnly,
         currentRelays: client.getRelays(),
+        totalRelays: DEFAULT_RELAYS.length,
       })
 
       const pinExchangeEvent = createPinExchangeEvent(secretKey, encryptedPayload, salt, transferId, pinHint)
@@ -456,6 +457,7 @@ export function useNostrSend(): UseNostrSendReturn {
                   contentType,
                   fileMetadata: { fileName, fileSize, mimeType },
                   currentRelays: prevState.currentRelays, // Preserve for debugging
+                  totalRelays: prevState.totalRelays,
                   useWebRTC: true,
                 }))
 
@@ -605,6 +607,7 @@ export function useNostrSend(): UseNostrSendReturn {
           contentType,
           fileMetadata: { fileName, fileSize, mimeType },
           currentRelays: client.getRelays(),
+          totalRelays: DEFAULT_RELAYS.length,
         })
 
         const encryptedContent = await encrypt(key, contentBytes)
@@ -705,6 +708,7 @@ export function useNostrSend(): UseNostrSendReturn {
         message: successMsg,
         contentType,
         currentRelays: prevState.currentRelays, // Preserve for debugging
+        totalRelays: prevState.totalRelays,
         useWebRTC: prevState.useWebRTC,
       }))
     } catch (error) {

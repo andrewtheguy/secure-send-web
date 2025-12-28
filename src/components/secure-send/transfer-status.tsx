@@ -67,7 +67,10 @@ export function TransferStatus({ state, betweenProgressAndChunks }: TransferStat
           </button>
           {showDebug && (
             <div className="pl-4 space-y-1">
-              <p className="font-medium text-muted-foreground">Active Relays:</p>
+              <p className="font-medium text-muted-foreground">
+                Connected Relays: {state.currentRelays!.length}
+                {state.totalRelays !== undefined && ` / ${state.totalRelays}`}
+              </p>
               <ul className="space-y-0.5 pl-3">
                 {state.currentRelays!.map((relay, idx) => (
                   <li key={idx} className="text-muted-foreground truncate" title={relay}>
