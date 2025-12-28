@@ -13,7 +13,7 @@ export const PIN_WORDLIST = BIP39_EN_WORDLIST
 
 // First character charset split (for signaling method detection)
 // Uppercase = Nostr, '2' = QR/Manual, Rest = Reserved for future
-// L is excluded here (kept in PIN_CHARSET) to keep symmetry at 23 symbols and leave room for a future protocol
+// I, L, O are excluded (ambiguous chars) to keep symmetry at 23 symbols and leave room for a future protocol
 export const NOSTR_FIRST_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ' // 23 uppercase (excluding I, L, O)
 
 export const QR_FIRST_CHARSET = '2' // Single digit for QR method

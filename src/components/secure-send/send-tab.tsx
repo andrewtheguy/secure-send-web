@@ -499,7 +499,7 @@ export function SendTab() {
                       <div className="flex items-center gap-2">
                         <Fingerprint className="h-4 w-4 text-muted-foreground" />
                         <Label htmlFor="use-passkey" className="text-sm font-medium cursor-pointer">
-                          Use Passkey instead of PIN
+                          Enable Passkey
                         </Label>
                       </div>
                       <Switch
@@ -510,8 +510,8 @@ export function SendTab() {
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
                       {usePasskey
-                        ? 'Receiver must have the same synced passkey (1Password, iCloud, Google).'
-                        : 'Use your passkey for encryption instead of a PIN. Great for personal cross-device transfers.'}
+                        ? 'Receiver can use the same synced passkey (1Password, iCloud, Google) or fall back to PIN.'
+                        : 'Add passkey as an option for receivers. PIN will still work as a fallback.'}
                     </p>
                   </div>
                 )}
@@ -529,7 +529,7 @@ export function SendTab() {
           {usePasskey && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
               <Fingerprint className="h-3 w-3" />
-              <span>Passkey mode enabled</span>
+              <span>Passkey enabled (PIN fallback available)</span>
             </div>
           )}
 

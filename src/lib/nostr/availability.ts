@@ -14,13 +14,19 @@ export interface RelayAvailabilityResult {
  */
 async function probeRelay(url: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const timeout = setTimeout(() => resolve(null), RELAY_PROBE_TIMEOUT)
+    let ws: WebSocket | null = null
+    const timeout = setTimeout(() => {
+      if (ws) {
+        ws.close()
+      }
+      resolve(null)
+    }, RELAY_PROBE_TIMEOUT)
 
     try {
-      const ws = new WebSocket(url)
+      ws = new WebSocket(url)
       ws.onopen = () => {
         clearTimeout(timeout)
-        ws.close()
+        ws?.close()
         resolve(url)
       }
       ws.onerror = () => {

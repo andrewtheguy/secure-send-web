@@ -47,8 +47,8 @@ export function ReceiveTab() {
 
   const { state: rawState, receivedContent, cancel, reset } = activeHook
 
-  // Get passkey fingerprint from nostr hook for verification display
-  const receiverPasskeyFingerprint = nostrHook.passkeyFingerprint
+  // Get passkey fingerprint from nostr hook for verification display (only in nostr mode)
+  const receiverPasskeyFingerprint = !isManualMode ? nostrHook.passkeyFingerprint : null
 
   // Get the right receive function based on mode
   // nostrHook has .receive, manualHook does not
