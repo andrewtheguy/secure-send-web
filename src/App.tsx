@@ -4,6 +4,7 @@ import { Footer } from '@/components/footer'
 import { SendPage } from '@/pages/send'
 import { ReceivePage } from '@/pages/receive'
 import { AboutPage } from '@/pages/about'
+import { PasskeyPage } from '@/pages/passkey'
 import { NotFoundPage } from '@/pages/not-found'
 
 function App() {
@@ -14,6 +15,7 @@ function App() {
         <Routes>
           <Route path="/" element={<SendPage />} />
           <Route path="/receive" element={<ReceivePage />} />
+          <Route path="/passkey" element={<PasskeyPage />} />
           <Route path="/about" element={<AboutPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>

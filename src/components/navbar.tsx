@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
-import { Download, Info, Menu, Send, X } from 'lucide-react'
+import { Download, Fingerprint, Info, Menu, Send, X } from 'lucide-react'
 import { ModeToggle } from '@/components/mode-toggle'
 import { Logo } from '@/components/logo'
 
@@ -50,6 +50,15 @@ export function Navbar() {
             <Info className="h-4 w-4" />
             About
           </NavLink>
+          <NavLink
+            to="/passkey"
+            className={({ isActive }) =>
+              `${linkBase} ${isActive ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`
+            }
+          >
+            <Fingerprint className="h-4 w-4" />
+            Passkey
+          </NavLink>
         </nav>
         <div className="flex items-center gap-2">
           <ModeToggle />
@@ -97,6 +106,16 @@ export function Navbar() {
             >
               <Info className="h-4 w-4" />
               About
+            </NavLink>
+            <NavLink
+              to="/passkey"
+              onClick={closeMobileMenu}
+              className={({ isActive }) =>
+                `${linkBase} ${isActive ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`
+              }
+            >
+              <Fingerprint className="h-4 w-4" />
+              Passkey
             </NavLink>
           </div>
         </div>

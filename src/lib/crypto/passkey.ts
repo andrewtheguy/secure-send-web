@@ -233,6 +233,181 @@ export function extractPasskeyFingerprint(pin: string): string {
   return pin.slice(1)
 }
 
+/**
+ * Check if WebAuthn and PRF extension are supported.
+ *
+ * Note: PRF support is assumed (not verified) if a platform authenticator exists.
+ * Actual PRF support can only be confirmed during credential creation/assertion.
+ * This is a best-effort pre-check to provide early feedback to users.
+ */
+export async function checkWebAuthnSupport(): Promise<{
+  webauthnSupported: boolean
+  prfSupported: boolean
+  error?: string
+}> {
+  // Check basic WebAuthn support
+  if (!window.PublicKeyCredential) {
+    return {
+      webauthnSupported: false,
+      prfSupported: false,
+      error: 'WebAuthn is not supported in this browser',
+    }
+  }
+
+  // Check if platform authenticator is available
+  const platformAuthAvailable = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+  if (!platformAuthAvailable) {
+    return {
+      webauthnSupported: true,
+      prfSupported: false,
+      error: 'No platform authenticator available (e.g., Touch ID, Face ID, Windows Hello)',
+    }
+  }
+
+  // PRF support can only be confirmed by attempting credential creation/get
+  // Assume PRF is supported if platform authenticator exists (best-effort check)
+  return {
+    webauthnSupported: true,
+    prfSupported: true,
+  }
+}
+
+/**
+ * Check if a hostname is an IP address (IPv4 or IPv6).
+ * WebAuthn does not allow IP addresses as rpId per spec.
+ */
+function isIpAddress(hostname: string): boolean {
+  // More robust IPv4 pattern
+  const ipv4Pattern = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
+  
+  // IPv6 pattern (supports full, compressed, and IPv4-mapped forms)
+  const ipv6Pattern = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|::([fF]{4}:)?((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))$/
+  
+  return ipv4Pattern.test(hostname) || ipv6Pattern.test(hostname)
+}
+
+/**
+ * Create a new passkey credential for this app.
+ * Uses navigator.credentials.create() with PRF extension.
+ * Returns the fingerprint of the newly created credential and PRF support status.
+ *
+ * Note: WebAuthn requires a valid domain name as rpId. IP addresses are not allowed
+ * per the WebAuthn spec. Use localhost or a proper domain name for development.
+ */
+export async function createPasskeyCredential(
+  userName: string
+): Promise<{ fingerprint: string; credentialId: string; prfSupported: boolean }> {
+  // Generate random user ID (we don't persist this - it's just for WebAuthn ceremony)
+  const userId = crypto.getRandomValues(new Uint8Array(32))
+
+  // Get relying party ID from current domain
+  const rpId = window.location.hostname
+
+  // Validate rpId - WebAuthn does not allow IP addresses
+  if (isIpAddress(rpId)) {
+    throw new Error(
+      `Cannot create passkey: IP addresses are not allowed as WebAuthn rpId. ` +
+      `Current host "${rpId}" is an IP address. ` +
+      `Please access this app via "localhost" or a domain name instead.`
+    )
+  }
+
+  const createOptions: PublicKeyCredentialCreationOptions = {
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    rp: {
+      name: 'Secure Transfer',
+      id: rpId,
+    },
+    user: {
+      id: userId,
+      name: userName,
+      displayName: userName,
+    },
+    pubKeyCredParams: [
+      { alg: -7, type: 'public-key' }, // ES256
+      { alg: -257, type: 'public-key' }, // RS256
+    ],
+    authenticatorSelection: {
+      authenticatorAttachment: 'platform',
+      residentKey: 'required',
+      userVerification: 'required',
+    },
+    timeout: 60000,
+    attestation: 'none', // We don't need attestation
+    extensions: {
+      prf: {}, // Enable PRF extension (empty object signals intent)
+    },
+  }
+
+  const credential = await navigator.credentials.create({
+    publicKey: createOptions,
+  }) as PublicKeyCredential | null
+
+  if (!credential) {
+    throw new Error('User cancelled passkey creation or no credential returned')
+  }
+
+  // Check if PRF is enabled for this credential
+  const extResults = credential.getClientExtensionResults() as {
+    prf?: { enabled?: boolean }
+  }
+
+  const prfSupported = extResults.prf?.enabled === true
+
+  if (!prfSupported) {
+    throw new Error(
+      'PRF extension not supported by this authenticator. ' +
+      'Passkey encryption requires PRF support (available in 1Password, iCloud Keychain, etc.)'
+    )
+  }
+
+  const credentialIdBytes = new Uint8Array(credential.rawId)
+  const fingerprint = await credentialIdToFingerprint(credentialIdBytes)
+  const credentialIdBase64 = base64urlEncode(credentialIdBytes)
+
+  return { fingerprint, credentialId: credentialIdBase64, prfSupported }
+}
+
+/**
+ * Test an existing passkey and return its fingerprint
+ * Uses the same flow as getPasskeyMasterKeyAndFingerprint but discards the key
+ */
+export async function testPasskeyAndGetFingerprint(): Promise<{
+  fingerprint: string
+  prfSupported: boolean
+}> {
+  const prfInput = new TextEncoder().encode(PASSKEY_MASTER_PRF_LABEL)
+
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      userVerification: 'required',
+      extensions: {
+        prf: {
+          eval: {
+            first: prfInput,
+          },
+        },
+      },
+    },
+  })
+
+  if (!assertion) {
+    throw new Error('User cancelled passkey authentication or no credentials available')
+  }
+
+  const credential = assertion as PublicKeyCredential
+
+  const extResults = credential.getClientExtensionResults() as {
+    prf?: { results?: { first?: ArrayBuffer } }
+  }
+
+  const prfSupported = !!extResults.prf?.results?.first
+  const fingerprint = await credentialIdToFingerprint(new Uint8Array(credential.rawId))
+
+  return { fingerprint, prfSupported }
+}
+
 // Base64url encoding/decoding utilities
 function base64urlEncode(data: Uint8Array): string {
   let binary = ''

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ChevronDown, ChevronRight } from 'lucide-react'
+import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ChevronDown, ChevronRight, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
@@ -13,6 +13,7 @@ import { useManualReceive } from '@/hooks/use-manual-receive'
 import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
 import type { SignalingMethod } from '@/lib/nostr/types'
 import type { PinKeyMaterial } from '@/lib/types'
+import { Link } from 'react-router-dom'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -418,6 +419,22 @@ export function ReceiveTab() {
       ) : (
         <>
           <TransferStatus state={state} />
+
+          {/* Passkey authentication help */}
+          {state.status === 'connecting' && state.message?.toLowerCase().includes('passkey') && (
+            <div className="text-xs text-muted-foreground border border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 px-3 py-2 rounded space-y-1">
+              <p>A passkey prompt should appear from your browser or password manager.</p>
+              <p className="text-amber-700 dark:text-amber-400">
+                If no prompt appears, you may not have a passkey registered for this app yet.
+              </p>
+              <p>
+                <Link to="/passkey" className="text-primary hover:underline inline-flex items-center gap-1">
+                  Set up a passkey first <ArrowRight className="h-3 w-3" />
+                </Link>
+                {' '}— you'll need the same passkey synced from the sender (via 1Password, iCloud, Google, etc.)
+              </p>
+            </div>
+          )}
 
           {/* Show passkey fingerprint during transfer for verification */}
           {receiverPasskeyFingerprint && (
