@@ -50,13 +50,21 @@ export async function deriveECDHKeypairFromMasterKey(masterKey: CryptoKey): Prom
 /**
  * Get passkey master key (HKDF base key) from passkey authentication.
  * Returns the master key for subsequent ECDH keypair derivation.
+ *
+ * @param credentialId - Optional base64url credential ID to use specific passkey (skips picker)
  */
-export async function getPasskeyMasterKey(): Promise<CryptoKey> {
+export async function getPasskeyMasterKey(credentialId?: string): Promise<CryptoKey> {
   const prfInput = new TextEncoder().encode(PASSKEY_ECDH_LABEL)
+
+  // Build allowCredentials if a specific credential is requested
+  const allowCredentials = credentialId
+    ? [{ type: 'public-key' as const, id: base64urlDecode(credentialId) }]
+    : undefined
 
   const assertion = await navigator.credentials.get({
     publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)),
+      allowCredentials,
       userVerification: 'required',
       extensions: {
         prf: {
@@ -95,13 +103,15 @@ export async function getPasskeyMasterKey(): Promise<CryptoKey> {
 /**
  * Single call: authenticate with passkey and get ECDH keypair with fingerprint.
  * This is the main entry point for passkey-based ECDH.
+ *
+ * @param credentialId - Optional base64url credential ID to use specific passkey (skips picker)
  */
-export async function getPasskeyECDHKeypair(): Promise<{
+export async function getPasskeyECDHKeypair(credentialId?: string): Promise<{
   publicKeyBytes: Uint8Array
   privateKeyBytes: Uint8Array
   publicKeyFingerprint: string
 }> {
-  const masterKey = await getPasskeyMasterKey()
+  const masterKey = await getPasskeyMasterKey(credentialId)
   const { publicKeyBytes, privateKeyBytes } = await deriveECDHKeypairFromMasterKey(masterKey)
   const publicKeyFingerprint = await publicKeyToFingerprint(publicKeyBytes)
 
@@ -258,4 +268,20 @@ function base64urlEncode(data: Uint8Array): string {
   }
   const base64 = btoa(binary)
   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+// Base64url decoding utility
+function base64urlDecode(str: string): ArrayBuffer {
+  // Add padding if needed
+  let base64 = str.replace(/-/g, '+').replace(/_/g, '/')
+  const pad = base64.length % 4
+  if (pad) {
+    base64 += '='.repeat(4 - pad)
+  }
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes.buffer
 }

@@ -43,6 +43,7 @@ export function PasskeyPage() {
     setError(null)
     setSuccess(null)
     setFingerprint(null)
+    setPublicKeyBase64(null)
     setPrfSupported(null)
     setPageState('checking')
 
@@ -58,12 +59,16 @@ export function PasskeyPage() {
       setPageState('creating')
 
       // Create the passkey
-      const result = await createPasskeyCredential(userName || 'Secure Transfer User')
-      setPrfSupported(result.prfSupported)
+      const { credentialId } = await createPasskeyCredential(userName || 'Secure Transfer User')
       setUserName('') // Clear display name input after successful creation
-      setSuccess(
-        'Passkey created successfully! Click "Authenticate & Get Public Key" above to retrieve your public key for sharing.'
-      )
+
+      // Immediately authenticate with the new credential to get the public key (skips picker)
+      setPageState('getting_key')
+      const keypair = await getPasskeyECDHKeypair(credentialId)
+      setFingerprint(keypair.publicKeyFingerprint)
+      setPublicKeyBase64(uint8ArrayToBase64(keypair.publicKeyBytes))
+      setPrfSupported(true)
+      setSuccess('Passkey created! Your public key is now available for sharing.')
       setPageState('idle')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create passkey')
