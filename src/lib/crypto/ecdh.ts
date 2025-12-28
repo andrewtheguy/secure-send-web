@@ -246,3 +246,112 @@ export async function deriveAESKeyFromSecret(
     ['encrypt', 'decrypt']
   )
 }
+
+/**
+ * Derive key confirmation value from shared secret.
+ * Uses HKDF with separate info label for domain separation.
+ * Returns 16 bytes that can be hashed for commitment.
+ *
+ * This allows both parties to prove they derived the same shared secret
+ * without revealing the secret itself.
+ */
+export async function deriveKeyConfirmation(
+  sharedSecret: Uint8Array,
+  salt: Uint8Array
+): Promise<Uint8Array> {
+  if (sharedSecret.length !== 32) {
+    throw new Error(`Invalid shared secret length: expected 32 bytes, got ${sharedSecret.length}`)
+  }
+  if (salt.length < 16) {
+    throw new Error(`Salt too short: expected at least 16 bytes, got ${salt.length}`)
+  }
+
+  // Import shared secret as HKDF key material
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    toArrayBuffer(sharedSecret),
+    'HKDF',
+    false, // extractable: false per CLAUDE.md
+    ['deriveBits']
+  )
+
+  // Derive 16 bytes using HKDF with key-confirm label
+  const confirmBits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: toArrayBuffer(salt),
+      info: new TextEncoder().encode('secure-send-key-confirm'),
+    },
+    keyMaterial,
+    128 // 16 bytes = 128 bits
+  )
+
+  return new Uint8Array(confirmBits)
+}
+
+/**
+ * Compute hash of key confirmation value for commitment.
+ * Returns hex-encoded SHA-256 hash truncated to 32 chars (16 bytes).
+ */
+export async function hashKeyConfirmation(confirmValue: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest('SHA-256', confirmValue as BufferSource)
+  const hashArray = new Uint8Array(hash)
+  // Take first 16 bytes (32 hex chars) for the commitment
+  return Array.from(hashArray.slice(0, 16), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * Compute public key commitment (first 16 bytes of SHA-256 hash).
+ * Used to prevent relay MITM attacks by committing to receiver's identity.
+ * Returns 32 hex characters.
+ */
+export async function computePublicKeyCommitment(publicKeyBytes: Uint8Array): Promise<string> {
+  if (publicKeyBytes.length !== 65) {
+    throw new TypeError(
+      `Invalid public key length: expected 65 bytes, got ${publicKeyBytes.length}`
+    )
+  }
+
+  const hash = await crypto.subtle.digest('SHA-256', publicKeyBytes as BufferSource)
+  const hashArray = new Uint8Array(hash)
+  // Take first 16 bytes (32 hex chars)
+  return Array.from(hashArray.slice(0, 16), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * Verify public key matches commitment.
+ * Uses constant-time comparison to prevent timing attacks.
+ */
+export async function verifyPublicKeyCommitment(
+  publicKeyBytes: Uint8Array,
+  commitment: string
+): Promise<boolean> {
+  const computed = await computePublicKeyCommitment(publicKeyBytes)
+  return constantTimeEqual(computed, commitment.toLowerCase())
+}
+
+/**
+ * Constant-time string comparison to prevent timing attacks.
+ * Returns true only if strings are equal, false otherwise.
+ * Comparison time is constant regardless of where strings differ.
+ */
+export function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) {
+    // Still need to do some work to avoid length-based timing
+    // Use a dummy comparison to prevent timing attacks based on early return
+    const maxLen = Math.max(a.length, b.length)
+    let dummy = 0
+    for (let i = 0; i < maxLen; i++) {
+      dummy |= (a.charCodeAt(i % (a.length || 1)) || 0) ^ (b.charCodeAt(i % (b.length || 1)) || 0)
+    }
+    // Use dummy in a way that prevents optimization but always returns false
+    return dummy < 0 // Always false since dummy >= 0, but uses the variable
+  }
+
+  let result = 0
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  }
+  return result === 0
+}

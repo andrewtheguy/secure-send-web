@@ -90,6 +90,9 @@ export function parsePinExchangeEvent(event: Event): {
  * @param transferId - Unique transfer identifier
  * @param receiverFingerprint - Receiver's public key fingerprint (for event filtering)
  * @param senderFingerprint - Sender's public key fingerprint (for verification)
+ * @param keyConfirmHash - Hash of HKDF-derived key confirmation value (MITM detection)
+ * @param receiverPkCommitment - Hash of receiver's public key (relay MITM prevention)
+ * @param nonce - Base64-encoded 16-byte random nonce (replay protection)
  */
 export function createMutualTrustEvent(
   secretKey: Uint8Array,
@@ -97,7 +100,10 @@ export function createMutualTrustEvent(
   salt: Uint8Array,
   transferId: string,
   receiverFingerprint: string,
-  senderFingerprint: string
+  senderFingerprint: string,
+  keyConfirmHash: string,
+  receiverPkCommitment: string,
+  nonce: string
 ): Event {
   const expiration = Math.floor((Date.now() + TRANSFER_EXPIRATION_MS) / 1000)
 
@@ -108,6 +114,9 @@ export function createMutualTrustEvent(
       tags: [
         ['h', receiverFingerprint], // For receiver to find the event
         ['spk', senderFingerprint], // Sender's public key fingerprint for verification
+        ['kc', keyConfirmHash], // Key confirmation hash (MITM detection)
+        ['rpkc', receiverPkCommitment], // Receiver public key commitment (relay MITM prevention)
+        ['n', nonce], // Replay nonce (16 bytes, base64)
         ['s', uint8ArrayToBase64(salt)],
         ['t', transferId],
         ['type', 'mutual_trust'],
@@ -123,11 +132,14 @@ export function createMutualTrustEvent(
 
 /**
  * Parse Mutual Trust event tags.
- * @returns Object with receiver/sender fingerprints, salt, transferId, and encryptedPayload
+ * @returns Object with receiver/sender fingerprints, security tags, salt, transferId, and encryptedPayload
  */
 export function parseMutualTrustEvent(event: Event): {
   receiverFingerprint: string
   senderFingerprint: string
+  keyConfirmHash: string
+  receiverPkCommitment: string
+  nonce: string
   salt: Uint8Array
   transferId: string
   encryptedPayload: Uint8Array
@@ -139,14 +151,21 @@ export function parseMutualTrustEvent(event: Event): {
 
   const receiverFingerprint = event.tags.find((t) => t[0] === 'h')?.[1]
   const senderFingerprint = event.tags.find((t) => t[0] === 'spk')?.[1]
+  const keyConfirmHash = event.tags.find((t) => t[0] === 'kc')?.[1]
+  const receiverPkCommitment = event.tags.find((t) => t[0] === 'rpkc')?.[1]
+  const nonce = event.tags.find((t) => t[0] === 'n')?.[1]
   const saltB64 = event.tags.find((t) => t[0] === 's')?.[1]
   const transferId = event.tags.find((t) => t[0] === 't')?.[1]
 
-  if (!receiverFingerprint || !senderFingerprint || !saltB64 || !transferId) return null
+  if (!receiverFingerprint || !senderFingerprint || !keyConfirmHash ||
+      !receiverPkCommitment || !nonce || !saltB64 || !transferId) return null
 
   return {
     receiverFingerprint,
     senderFingerprint,
+    keyConfirmHash,
+    receiverPkCommitment,
+    nonce,
     salt: base64ToUint8Array(saltB64),
     transferId,
     encryptedPayload: base64ToUint8Array(event.content),
@@ -157,13 +176,15 @@ export function parseMutualTrustEvent(event: Event): {
  * Create ACK event (kind 24242)
  * seq=0 for ready ACK, seq=-1 for completion ACK
  * hint is optional - used in dual mode to indicate which key the receiver used
+ * nonce is optional - echoed from sender's mutual trust event for replay protection
  */
 export function createAckEvent(
   secretKey: Uint8Array,
   senderPubkey: string,
   transferId: string,
   seq: number,
-  hint?: string
+  hint?: string,
+  nonce?: string
 ): Event {
   const tags: string[][] = [
     ['p', senderPubkey],
@@ -175,6 +196,11 @@ export function createAckEvent(
   // Add hint tag if provided (for dual mode key selection)
   if (hint) {
     tags.push(['h', hint])
+  }
+
+  // Add nonce tag for replay protection (echoed from sender's mutual trust event)
+  if (nonce) {
+    tags.push(['n', nonce])
   }
 
   const event = finalizeEvent(
@@ -198,6 +224,7 @@ export function parseAckEvent(event: Event): {
   transferId: string
   seq: number
   hint?: string
+  nonce?: string
 } | null {
   if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null
 
@@ -208,6 +235,7 @@ export function parseAckEvent(event: Event): {
   const transferId = event.tags.find((t) => t[0] === 't')?.[1]
   const seqStr = event.tags.find((t) => t[0] === 'seq')?.[1]
   const hint = event.tags.find((t) => t[0] === 'h')?.[1]
+  const nonce = event.tags.find((t) => t[0] === 'n')?.[1]
 
   if (!senderPubkey || !transferId || !seqStr) return null
 
@@ -216,7 +244,7 @@ export function parseAckEvent(event: Event): {
   // Validate: seq must be integer, valid values are -1 (complete), 0 (ready), or > 0 (chunk ack)
   if (!Number.isInteger(seq) || seq < -1) return null
 
-  return { senderPubkey, transferId, seq, hint }
+  return { senderPubkey, transferId, seq, hint, nonce }
 }
 
 /**
