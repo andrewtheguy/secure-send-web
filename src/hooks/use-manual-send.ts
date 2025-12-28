@@ -2,14 +2,15 @@ import { useState, useCallback, useRef } from 'react'
 import {
   generateSalt,
   generateECDHKeyPair,
-  deriveSharedSecret,
-  deriveAESKeyFromSecret,
+  deriveSharedSecretKey,
+  deriveAESKeyFromSecretKey,
   encryptChunk,
   MAX_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
   ENCRYPTION_CHUNK_SIZE,
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
+import { getWebRTCConfig } from '@/lib/webrtc-config'
 import {
   generateMutualOfferBinary,
   generateMutualClipboardData,
@@ -43,9 +44,6 @@ export interface UseManualSendReturn {
   cancel: () => void
 }
 
-const ICE_CONFIG: RTCConfiguration = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-}
 
 export function useManualSend(): UseManualSendReturn {
   const [state, setState] = useState<ManualTransferState>({ status: 'idle' })
@@ -204,7 +202,7 @@ export function useManualSend(): UseManualSendReturn {
       let offerSDP: RTCSessionDescriptionInit | null = null
 
       const rtc = new WebRTCConnection(
-        ICE_CONFIG,
+        getWebRTCConfig(),
         (signal) => {
           // Collect signals (offer + candidates)
           if (signal.type === 'offer') {
@@ -309,8 +307,9 @@ export function useManualSend(): UseManualSendReturn {
       }
 
       const receiverPublicKey = new Uint8Array(answerPayload.publicKey!)
-      const sharedSecret = await deriveSharedSecret(ecdhPrivateKeyRef.current, receiverPublicKey)
-      const key = await deriveAESKeyFromSecret(sharedSecret, saltRef.current)
+      // Derive shared secret as non-extractable CryptoKey
+      const sharedSecretKey = await deriveSharedSecretKey(ecdhPrivateKeyRef.current, receiverPublicKey)
+      const key = await deriveAESKeyFromSecretKey(sharedSecretKey, saltRef.current)
 
       // Clear ECDH private key - no longer needed
       ecdhPrivateKeyRef.current = null

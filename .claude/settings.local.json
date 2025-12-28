@@ -16,7 +16,8 @@
       "Bash(rsvg-convert:*)",
       "Bash(npm ls:*)",
       "mcp__brave-search__brave_web_search",
-      "Bash(npm run test:*)"
+      "Bash(npm run test:*)",
+      "WebSearch"
     ]
   }
 }

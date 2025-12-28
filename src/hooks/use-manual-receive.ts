@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef } from 'react'
 import {
   generateECDHKeyPair,
-  deriveSharedSecret,
-  deriveAESKeyFromSecret,
+  deriveSharedSecretKey,
+  deriveAESKeyFromSecretKey,
   parseChunkMessage,
   decryptChunk,
   MAX_MESSAGE_SIZE,
@@ -10,6 +10,7 @@ import {
   TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
+import { getWebRTCConfig } from '@/lib/webrtc-config'
 import {
   parseMutualPayload,
   generateMutualAnswerBinary,
@@ -45,9 +46,6 @@ export interface UseManualReceiveReturn {
   reset: () => void
 }
 
-const ICE_CONFIG: RTCConfiguration = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-}
 
 export function useManualReceive(): UseManualReceiveReturn {
   const [state, setState] = useState<ManualReceiveState>({ status: 'idle' })
@@ -183,8 +181,9 @@ export function useManualReceive(): UseManualReceiveReturn {
       const senderPublicKey = new Uint8Array(senderPublicKeyArray)
       const salt = new Uint8Array(saltArray)
 
-      const sharedSecret = await deriveSharedSecret(ecdhKeyPair.privateKey, senderPublicKey)
-      const key = await deriveAESKeyFromSecret(sharedSecret, salt)
+      // Derive shared secret as non-extractable CryptoKey
+      const sharedSecretKey = await deriveSharedSecretKey(ecdhKeyPair.privateKey, senderPublicKey)
+      const key = await deriveAESKeyFromSecretKey(sharedSecretKey, salt)
 
       if (cancelledRef.current) return
 
@@ -203,7 +202,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       let answerSDPResolver: (() => void) | null = null
 
       const rtc = new WebRTCConnection(
-        ICE_CONFIG,
+        getWebRTCConfig(),
         (signal) => {
           // Collect signals (answer + candidates)
           if (signal.type === 'answer') {

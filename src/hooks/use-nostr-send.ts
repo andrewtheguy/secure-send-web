@@ -34,9 +34,9 @@ import { uploadToCloud, splitIntoChunks } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { readFileAsBytes } from '@/lib/file-utils'
 import { WebRTCConnection } from '@/lib/webrtc'
+import { getWebRTCConfig } from '@/lib/webrtc-config'
 import { getPasskeyECDHKeypair } from '@/lib/crypto/passkey'
 import {
-  importECDHPrivateKey,
   deriveSharedSecretKey,
   deriveAESKeyFromSecretKey,
   publicKeyToFingerprint,
@@ -156,10 +156,10 @@ export function useNostrSend(): UseNostrSendReturn {
           setState({ status: 'connecting', message: 'Authenticate with passkey...' })
 
           try {
-            // Authenticate and get our ECDH keypair
+            // Authenticate and get our ECDH keypair (privateKey is non-extractable CryptoKey)
             const {
               publicKeyBytes,
-              privateKeyBytes,
+              privateKey,
               publicKeyFingerprint,
             } = await getPasskeyECDHKeypair()
 
@@ -167,9 +167,6 @@ export function useNostrSend(): UseNostrSendReturn {
             setOwnPublicKey(publicKeyBytes)
             setOwnFingerprint(publicKeyFingerprint)
             senderFingerprint = publicKeyFingerprint
-
-            // Import our private key for ECDH
-            const privateKey = await importECDHPrivateKey(privateKeyBytes)
 
             // Derive shared secret as non-extractable HKDF CryptoKey
             // SECURITY: Raw shared secret bytes are never exposed to JavaScript
@@ -418,7 +415,7 @@ export function useNostrSend(): UseNostrSendReturn {
               }
 
               const rtc = new WebRTCConnection(
-                { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
+                getWebRTCConfig(),
                 async (signal) => {
                   if (cancelledRef.current) return
                   const signalPayload = { type: 'signal', signal }

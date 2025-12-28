@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { generateNonce, encrypt, decrypt, encryptMessage, decryptMessage } from './aes-gcm'
-import { generateECDHKeyPair, deriveSharedSecret, deriveAESKeyFromSecret } from './ecdh'
+import { generateECDHKeyPair, deriveSharedSecretKey, deriveAESKeyFromSecretKey } from './ecdh'
 import { encryptChunk, decryptChunk, parseChunkMessage, calculateEncryptionOverhead, ENCRYPTED_CHUNK_OVERHEAD } from './stream-crypto'
 import { AES_KEY_LENGTH } from './constants'
 
@@ -15,7 +15,7 @@ describe('AES-GCM Utils', () => {
     it('should encrypt and decrypt data correctly', async () => {
         const key = await crypto.subtle.generateKey(
             { name: 'AES-GCM', length: 256 },
-            true,
+            false,
             ['encrypt', 'decrypt']
         )
         const plaintext = new TextEncoder().encode('Hello World')
@@ -30,7 +30,7 @@ describe('AES-GCM Utils', () => {
     it('should encrypt and decrypt string messages', async () => {
         const key = await crypto.subtle.generateKey(
             { name: 'AES-GCM', length: 256 },
-            true,
+            false,
             ['encrypt', 'decrypt']
         )
         const message = "Secret Message 🚀"
@@ -44,12 +44,12 @@ describe('AES-GCM Utils', () => {
     it('should fail to decrypt with wrong key', async () => {
         const key1 = await crypto.subtle.generateKey(
             { name: 'AES-GCM', length: 256 },
-            true,
+            false,
             ['encrypt', 'decrypt']
         )
         const key2 = await crypto.subtle.generateKey(
             { name: 'AES-GCM', length: 256 },
-            true,
+            false,
             ['encrypt', 'decrypt']
         )
 
@@ -70,25 +70,47 @@ describe('ECDH Utils', () => {
         expect(keyPair.publicKeyBytes[0]).toBe(0x04)
     })
 
-    it('should derive the same shared secret for two peers', async () => {
-        const alice = await generateECDHKeyPair()
-        const bob = await generateECDHKeyPair()
+    // Helper to generate ECDH key pair with deriveKey usage for testing deriveSharedSecretKey
+    async function generateTestECDHKeyPair() {
+        const keyPair = await crypto.subtle.generateKey(
+            { name: 'ECDH', namedCurve: 'P-256' },
+            false,
+            ['deriveKey', 'deriveBits']
+        )
+        const publicKeyBytes = new Uint8Array(
+            await crypto.subtle.exportKey('raw', keyPair.publicKey)
+        )
+        return { ...keyPair, publicKeyBytes }
+    }
 
-        const aliceShared = await deriveSharedSecret(alice.privateKey, bob.publicKeyBytes)
-        const bobShared = await deriveSharedSecret(bob.privateKey, alice.publicKeyBytes)
-
-        expect(aliceShared).toEqual(bobShared)
-        expect(aliceShared.length).toBe(32)
-    })
-
-    it('should derive working AES keys from shared secret', async () => {
-        const alice = await generateECDHKeyPair()
-        const bob = await generateECDHKeyPair()
-
-        const sharedSecret = await deriveSharedSecret(alice.privateKey, bob.publicKeyBytes)
+    it('should derive equivalent shared secrets for two peers (non-extractable)', async () => {
+        const alice = await generateTestECDHKeyPair()
+        const bob = await generateTestECDHKeyPair()
         const salt = crypto.getRandomValues(new Uint8Array(16))
 
-        const aesKey = await deriveAESKeyFromSecret(sharedSecret, salt)
+        // Both parties derive shared secret keys (non-extractable CryptoKeys)
+        const aliceSharedKey = await deriveSharedSecretKey(alice.privateKey, bob.publicKeyBytes)
+        const bobSharedKey = await deriveSharedSecretKey(bob.privateKey, alice.publicKeyBytes)
+
+        // Derive AES keys from both shared secrets
+        const aliceAesKey = await deriveAESKeyFromSecretKey(aliceSharedKey, salt)
+        const bobAesKey = await deriveAESKeyFromSecretKey(bobSharedKey, salt)
+
+        // Verify both parties can encrypt/decrypt to each other (proves same shared secret)
+        const testMessage = new TextEncoder().encode('ECDH test message')
+        const encrypted = await encrypt(aliceAesKey, testMessage)
+        const decrypted = await decrypt(bobAesKey, encrypted)
+        expect(decrypted).toEqual(testMessage)
+    })
+
+    it('should derive working AES keys from shared secret key', async () => {
+        const alice = await generateTestECDHKeyPair()
+        const bob = await generateTestECDHKeyPair()
+
+        const sharedSecretKey = await deriveSharedSecretKey(alice.privateKey, bob.publicKeyBytes)
+        const salt = crypto.getRandomValues(new Uint8Array(16))
+
+        const aesKey = await deriveAESKeyFromSecretKey(sharedSecretKey, salt)
 
         expect(aesKey.algorithm.name).toBe('AES-GCM')
         // @ts-expect-error length property exists on AesKeyAlgorithm
@@ -102,7 +124,7 @@ describe('Stream Crypto', () => {
     it('should encrypt and decrypt chunks', async () => {
         const key = await crypto.subtle.generateKey(
             { name: 'AES-GCM', length: 256 },
-            true,
+            false,
             ['encrypt', 'decrypt']
         )
         const chunkData = new Uint8Array([1, 2, 3, 4, 5])
@@ -129,7 +151,7 @@ describe('Stream Crypto', () => {
     it('should throw on invalid chunk index', async () => {
         const key = await crypto.subtle.generateKey(
             { name: 'AES-GCM', length: 256 },
-            true,
+            false,
             ['encrypt', 'decrypt']
         )
         const chunkData = new Uint8Array([1])

@@ -6,7 +6,7 @@
  */
 
 import { p256 } from '@noble/curves/nist.js'
-import { publicKeyToFingerprint } from './ecdh'
+import { publicKeyToFingerprint, importECDHPrivateKey } from './ecdh'
 
 // Constants
 const PASSKEY_ECDH_LABEL = 'secure-send-passkey-ecdh-v1'
@@ -14,14 +14,32 @@ const PASSKEY_ECDH_LABEL = 'secure-send-passkey-ecdh-v1'
 /**
  * Derive deterministic ECDH keypair from passkey master key.
  * Same passkey will always derive the same keypair across devices.
+ *
+ * SECURITY NOTE - Why raw bytes are temporarily needed:
+ *
+ * Web Crypto API cannot compute P-256 public key from private key material,
+ * so we use @noble/curves (p256.getPublicKey) which requires raw bytes.
+ * The seed bytes exist in memory only during this function call (~milliseconds)
+ * and are zeroed in a finally block before returning.
+ *
+ * Residual risk (standard JS limitation):
+ * - V8/browser may retain copies during GC
+ *
+ * Impact if raw bytes are exfiltrated:
+ * - High: PRF output / derived seed == ECDH private key material.
+ * - An attacker could derive the same shared secret and decrypt transfers
+ *   tied to this passkey (past/future within protocol limits).
+ *
+ * @see https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/deriveBits
  */
 export async function deriveECDHKeypairFromMasterKey(masterKey: CryptoKey): Promise<{
   publicKeyBytes: Uint8Array // 65 bytes uncompressed P-256 (0x04 || X || Y)
-  privateKeyBytes: Uint8Array // 32 bytes private scalar
+  privateKey: CryptoKey // Non-extractable ECDH private key
 }> {
-  // Derive 32 bytes of seed from master key using HKDF
+  // Derive 32 bytes (256 bits) of seed from master key using HKDF deriveBits
+  // This is cleaner than deriveKey+export - directly gets raw bytes
   const info = new TextEncoder().encode(PASSKEY_ECDH_LABEL)
-  const seedKey = await crypto.subtle.deriveKey(
+  const seedBits = await crypto.subtle.deriveBits(
     {
       name: 'HKDF',
       hash: 'SHA-256',
@@ -29,22 +47,24 @@ export async function deriveECDHKeypairFromMasterKey(masterKey: CryptoKey): Prom
       info,
     },
     masterKey,
-    { name: 'AES-GCM', length: 256 },
-    true, // Extractable to get raw bytes
-    ['encrypt'] // Dummy usage
+    256 // 32 bytes = 256 bits for P-256 private key
   )
 
-  // Export seed bytes
-  const seedBytes = new Uint8Array(await crypto.subtle.exportKey('raw', seedKey))
+  const seedBytes = new Uint8Array(seedBits)
 
-  // Use @noble/curves to derive P-256 keypair from seed
-  // The seed bytes are used directly as the private key
-  const privateKeyBytes = seedBytes
+  try {
+    // Compute public key using noble/curves (Web Crypto can't do this)
+    const publicKeyBytes = p256.getPublicKey(seedBytes, false)
 
-  // Derive public key from private key (uncompressed format = 65 bytes)
-  const publicKeyBytes = p256.getPublicKey(privateKeyBytes, false)
+    // Import as non-extractable CryptoKey for all future ECDH operations
+    const privateKey = await importECDHPrivateKey(seedBytes)
 
-  return { publicKeyBytes, privateKeyBytes }
+    return { publicKeyBytes, privateKey }
+  } finally {
+    // SECURITY: Zero out seed bytes immediately - best effort cleanup
+    // Note: JS/V8 may retain copies but this prevents casual inspection
+    seedBytes.fill(0)
+  }
 }
 
 /**
@@ -98,7 +118,9 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<Crypto
     throw new Error('PRF evaluation failed - authenticator may not support PRF extension')
   }
 
-  // Import PRF output as HKDF master key
+  // Import PRF output as HKDF master key.
+  // SECURITY: This PRF output is sensitive key material. If exposed, it can be
+  // used to deterministically re-derive the ECDH private key and decrypt data.
   return crypto.subtle.importKey(
     'raw',
     extResults.prf.results.first,
@@ -112,21 +134,23 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<Crypto
  * Single call: authenticate with passkey and get ECDH keypair with fingerprint.
  * This is the main entry point for passkey-based ECDH.
  *
+ * SECURITY: Returns non-extractable CryptoKey for private key operations.
+ *
  * @param credentialId - Optional base64url credential ID to use specific passkey (skips picker)
  * @returns Keypair with prfSupported flag (true if we got here, throws otherwise)
  */
 export async function getPasskeyECDHKeypair(credentialId?: string): Promise<{
   publicKeyBytes: Uint8Array
-  privateKeyBytes: Uint8Array
+  privateKey: CryptoKey // Non-extractable ECDH private key
   publicKeyFingerprint: string
   prfSupported: boolean
 }> {
   const masterKey = await getPasskeyMasterKey(credentialId)
-  const { publicKeyBytes, privateKeyBytes } = await deriveECDHKeypairFromMasterKey(masterKey)
+  const { publicKeyBytes, privateKey } = await deriveECDHKeypairFromMasterKey(masterKey)
   const publicKeyFingerprint = await publicKeyToFingerprint(publicKeyBytes)
 
   // If we got here, PRF worked (getPasskeyMasterKey throws if PRF fails)
-  return { publicKeyBytes, privateKeyBytes, publicKeyFingerprint, prfSupported: true }
+  return { publicKeyBytes, privateKey, publicKeyFingerprint, prfSupported: true }
 }
 
 // publicKeyToFingerprint is used from ecdh.ts
