@@ -174,6 +174,37 @@ When passkey mode is enabled, the sender generates BOTH:
 
 Two PIN exchange events are published to Nostr (one for each mode). Receiver chooses their preferred authentication method, and the ACK includes a hint indicating which key was used.
 
+#### Mutual Trust Security Enhancements
+
+When using passkey mode, additional cryptographic protections are applied:
+
+| Enhancement | Event Tag | Purpose |
+|-------------|-----------|---------|
+| Key Confirmation | `kc` | HKDF-derived hash proves both parties derived same shared secret (MITM detection) |
+| Receiver PK Commitment | `rpkc` | SHA-256 of receiver's public key prevents relay substitution attacks |
+| Replay Nonce | `n` | 16-byte random nonce echoed in ACK prevents replay attacks within TTL |
+| Constant-Time Comparison | N/A | All security-critical string comparisons use timing-attack-resistant comparison |
+
+**Mutual Trust Event Tags:**
+```
+['h', receiverFingerprint]     // For event filtering
+['spk', senderFingerprint]     // Sender verification
+['kc', keyConfirmHash]         // Key confirmation (MITM detection)
+['rpkc', receiverPkCommitment] // Receiver PK commitment (relay MITM prevention)
+['n', nonce]                   // Replay nonce (base64, 16 bytes)
+['s', salt]                    // Per-transfer salt
+['t', transferId]              // Transfer ID
+['type', 'mutual_trust']       // Event type
+['expiration', timestamp]      // TTL (NIP-40)
+```
+
+**Verification Flow:**
+1. Sender computes key confirmation hash, receiver PK commitment, and random nonce
+2. Receiver verifies RPKC matches own public key (prevents relay MITM)
+3. Receiver verifies key confirmation hash matches (detects shared secret mismatch)
+4. Receiver echoes nonce in ready ACK
+5. Sender verifies nonce match using constant-time comparison (prevents replay)
+
 #### Security Properties
 
 | Property | PIN Mode | Passkey Mode |
@@ -183,6 +214,10 @@ Two PIN exchange events are published to Nostr (one for each mode). Receiver cho
 | Phishing Resistance | None | Origin-bound credentials |
 | Sync Method | Out-of-band sharing | Password manager sync |
 | Verification | PIN match | Fingerprint comparison |
+| Key Confirmation | N/A | HKDF-derived hash proves same shared secret |
+| Relay MITM Protection | N/A | Public key commitment binding |
+| Replay Protection | TTL only | TTL + cryptographic nonce |
+| Timing Attack Prevention | N/A | Constant-time string comparisons |
 
 ### User Interface Architecture
 
