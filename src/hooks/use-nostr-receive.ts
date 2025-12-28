@@ -68,6 +68,7 @@ export interface ReceiveOptions {
 export interface UseNostrReceiveReturn {
   state: TransferState
   receivedContent: ReceivedContent | null
+  passkeyFingerprint: string | null
   receive: (pinMaterial: PinKeyMaterial | ReceiveOptions) => Promise<void>
   cancel: () => void
   reset: () => void
@@ -76,6 +77,7 @@ export interface UseNostrReceiveReturn {
 export function useNostrReceive(): UseNostrReceiveReturn {
   const [state, setState] = useState<TransferState>({ status: 'idle' })
   const [receivedContent, setReceivedContent] = useState<ReceivedContent | null>(null)
+  const [passkeyFingerprint, setPasskeyFingerprint] = useState<string | null>(null)
 
   const clientRef = useRef<NostrClient | null>(null)
   const cancelledRef = useRef(false)
@@ -88,12 +90,14 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       clientRef.current.close()
       clientRef.current = null
     }
+    setPasskeyFingerprint(null)
     setState({ status: 'idle' })
   }, [])
 
   const reset = useCallback(() => {
     cancel()
     setReceivedContent(null)
+    setPasskeyFingerprint(null)
   }, [cancel])
 
   const receive = useCallback(async (arg: PinKeyMaterial | ReceiveOptions) => {
@@ -118,6 +122,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           const { masterKey, fingerprint } = await getPasskeyMasterKeyAndFingerprint()
           passkeyMaster = masterKey
           pinHint = fingerprint
+          // Store fingerprint for UI display (verification)
+          setPasskeyFingerprint(fingerprint)
         } catch (err) {
           setState({ status: 'error', message: err instanceof Error ? err.message : 'Passkey authentication failed' })
           receivingRef.current = false
@@ -668,5 +674,5 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     }
   }, [])
 
-  return { state, receivedContent, receive, cancel, reset }
+  return { state, receivedContent, passkeyFingerprint, receive, cancel, reset }
 }

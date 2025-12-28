@@ -274,36 +274,35 @@ export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProp
               Receiver with same synced passkey can authenticate directly
             </p>
 
-            {/* Passkey fingerprint display */}
-            <div className="flex items-center justify-center h-10 bg-background rounded-md border border-cyan-500">
-              <span className="font-mono text-cyan-600 font-medium tracking-wider">
-                {formattedPasskeyFingerprint}
-              </span>
+            <div className="flex items-center justify-center h-10 bg-background rounded-md border border-dashed border-cyan-500/50">
+              <span className="text-cyan-600 font-medium">No PIN needed</span>
             </div>
 
             <p className="text-xs text-muted-foreground text-center">
-              No PIN needed - receiver selects &quot;Use Passkey&quot;
+              Receiver selects &quot;Use Passkey&quot; and authenticates
             </p>
-
-            <div className="text-xs text-muted-foreground space-y-1 mt-auto">
-              <p className="flex items-center gap-1">
-                <Fingerprint className="h-3 w-3" />
-                Passkey Fingerprint: {formattedPasskeyFingerprint}
-              </p>
-            </div>
           </div>
         </div>
 
-        {/* PIN fingerprint for verification */}
-        {fingerprint && (
-          <div className="text-xs text-muted-foreground border-t pt-3">
-            <div className="flex items-center gap-2 font-mono">
-              <Hash className="h-3 w-3" />
-              PIN Fingerprint: {fingerprint}
+        {/* Fingerprints for verification */}
+        <div className="text-xs text-muted-foreground border-t pt-3 space-y-2">
+          {fingerprint && (
+            <div>
+              <div className="flex items-center gap-2 font-mono">
+                <Hash className="h-3 w-3" />
+                PIN Fingerprint: {fingerprint}
+              </div>
+              <p className="mt-0.5 ml-5">Compare with receiver to verify same PIN was entered.</p>
             </div>
-            <p className="mt-1">Compare with receiver to verify same PIN was entered.</p>
+          )}
+          <div>
+            <div className="flex items-center gap-2 font-mono">
+              <Fingerprint className="h-3 w-3" />
+              Passkey Fingerprint: {formattedPasskeyFingerprint}
+            </div>
+            <p className="mt-0.5 ml-5">Compare with receiver to verify same passkey is used.</p>
           </div>
-        )}
+        </div>
       </div>
     )
   }
