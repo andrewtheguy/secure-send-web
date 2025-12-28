@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ChevronDown, ChevronRight, ArrowRight, ScanLine } from 'lucide-react'
+import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ChevronDown, ChevronRight, ArrowRight, Keyboard } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
@@ -41,7 +41,7 @@ export function ReceiveTab() {
   const [senderPublicKeyInput, setSenderPublicKeyInput] = useState('')
   const [senderPublicKeyFingerprint, setSenderPublicKeyFingerprint] = useState<string | null>(null)
   const [senderPublicKeyError, setSenderPublicKeyError] = useState<string | null>(null)
-  const [showQRScanner, setShowQRScanner] = useState(false)
+  const [showPublicKeyModal, setShowPublicKeyModal] = useState(false)
 
   // Store PIN in ref to avoid React DevTools exposure
   const pinSecretRef = useRef<PinSecret | null>(null)
@@ -344,11 +344,11 @@ export function ReceiveTab() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setShowQRScanner(true)}
+                        onClick={() => setShowPublicKeyModal(true)}
                         className="flex-shrink-0"
-                        title="Scan QR code"
+                        title="Enter public key"
                       >
-                        <ScanLine className="h-4 w-4" />
+                        <Keyboard className="h-4 w-4" />
                       </Button>
                     </div>
                     {senderPublicKeyError && (
@@ -369,13 +369,13 @@ export function ReceiveTab() {
                     </p>
                   </div>
 
-                  {/* QR Scanner dialog */}
-                  {showQRScanner && (
+                  {/* Public key entry modal */}
+                  {showPublicKeyModal && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                       <div className="bg-background rounded-lg p-4 max-w-md w-full mx-4 space-y-4">
                         <div className="flex items-center justify-between">
                           <h3 className="font-medium">Enter Sender&apos;s Public Key</h3>
-                          <Button variant="ghost" size="sm" onClick={() => setShowQRScanner(false)}>
+                          <Button variant="ghost" size="sm" onClick={() => setShowPublicKeyModal(false)}>
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
@@ -387,8 +387,9 @@ export function ReceiveTab() {
                           value={senderPublicKeyInput}
                           onChange={(e) => setSenderPublicKeyInput(e.target.value)}
                           className="font-mono text-xs min-h-[100px]"
+                          autoFocus
                         />
-                        <Button onClick={() => setShowQRScanner(false)} className="w-full">
+                        <Button onClick={() => setShowPublicKeyModal(false)} className="w-full">
                           Done
                         </Button>
                       </div>

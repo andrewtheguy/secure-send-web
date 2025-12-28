@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
-import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, AlertTriangle, Info, Fingerprint, ArrowRight, ScanLine } from 'lucide-react'
+import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, AlertTriangle, Info, Fingerprint, ArrowRight, Keyboard } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
@@ -56,7 +56,7 @@ export function SendTab() {
   const [receiverPublicKeyInput, setReceiverPublicKeyInput] = useState('')
   const [receiverPublicKeyFingerprint, setReceiverPublicKeyFingerprint] = useState<string | null>(null)
   const [receiverPublicKeyError, setReceiverPublicKeyError] = useState<string | null>(null)
-  const [showQRScanner, setShowQRScanner] = useState(false)
+  const [showPublicKeyModal, setShowPublicKeyModal] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
@@ -596,11 +596,11 @@ export function SendTab() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => setShowQRScanner(true)}
+                            onClick={() => setShowPublicKeyModal(true)}
                             className="flex-shrink-0"
-                            title="Scan QR code"
+                            title="Enter public key"
                           >
-                            <ScanLine className="h-4 w-4" />
+                            <Keyboard className="h-4 w-4" />
                           </Button>
                         </div>
                         {receiverPublicKeyError && (
@@ -643,13 +643,13 @@ export function SendTab() {
             </div>
           )}
 
-          {/* QR Scanner dialog for receiver public key */}
-          {showQRScanner && (
+          {/* Public key entry modal */}
+          {showPublicKeyModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
               <div className="bg-background rounded-lg p-4 max-w-md w-full mx-4 space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="font-medium">Enter Receiver&apos;s Public Key</h3>
-                  <Button variant="ghost" size="sm" onClick={() => setShowQRScanner(false)}>
+                  <Button variant="ghost" size="sm" onClick={() => setShowPublicKeyModal(false)}>
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
@@ -661,8 +661,9 @@ export function SendTab() {
                   value={receiverPublicKeyInput}
                   onChange={(e) => setReceiverPublicKeyInput(e.target.value)}
                   className="font-mono text-xs min-h-[100px]"
+                  autoFocus
                 />
-                <Button onClick={() => setShowQRScanner(false)} className="w-full">
+                <Button onClick={() => setShowPublicKeyModal(false)} className="w-full">
                   Done
                 </Button>
               </div>
