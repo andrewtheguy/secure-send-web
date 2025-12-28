@@ -36,10 +36,6 @@ export async function deriveKeyFromPasskey(salt: Uint8Array): Promise<CryptoKey>
     throw new Error('User cancelled passkey authentication or no credentials available')
   }
 
-  if (!assertion) {
-    throw new Error('User cancelled passkey authentication or no credentials available')
-  }
-
   const credential = assertion as PublicKeyCredential
 
   const extResults = credential.getClientExtensionResults() as {
