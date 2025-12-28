@@ -37,10 +37,10 @@ import { WebRTCConnection } from '@/lib/webrtc'
 import { getPasskeyECDHKeypair } from '@/lib/crypto/passkey'
 import {
   importECDHPrivateKey,
-  deriveSharedSecret,
-  deriveAESKeyFromSecret,
+  deriveSharedSecretKey,
+  deriveAESKeyFromSecretKey,
   publicKeyToFingerprint,
-  deriveKeyConfirmation,
+  deriveKeyConfirmationFromSecretKey,
   hashKeyConfirmation,
   computePublicKeyCommitment,
   constantTimeEqual,
@@ -171,17 +171,18 @@ export function useNostrSend(): UseNostrSendReturn {
             // Import our private key for ECDH
             const privateKey = await importECDHPrivateKey(privateKeyBytes)
 
-            // Derive shared secret with receiver's public key
-            const sharedSecret = await deriveSharedSecret(privateKey, options.receiverPublicKey)
+            // Derive shared secret as non-extractable HKDF CryptoKey
+            // SECURITY: Raw shared secret bytes are never exposed to JavaScript
+            const sharedSecretKey = await deriveSharedSecretKey(privateKey, options.receiverPublicKey)
 
-            // Derive AES key from shared secret
-            key = await deriveAESKeyFromSecret(sharedSecret, salt)
+            // Derive AES key from shared secret key
+            key = await deriveAESKeyFromSecretKey(sharedSecretKey, salt)
 
             // === SECURITY ENHANCEMENTS ===
 
             // 1. Key Confirmation: Derive confirmation value and hash it
             // This proves both parties derived the same shared secret
-            const confirmValue = await deriveKeyConfirmation(sharedSecret, salt)
+            const confirmValue = await deriveKeyConfirmationFromSecretKey(sharedSecretKey, salt)
             keyConfirmHash = await hashKeyConfirmation(confirmValue)
 
             // 2. Receiver Public Key Commitment: Prevents relay MITM attacks

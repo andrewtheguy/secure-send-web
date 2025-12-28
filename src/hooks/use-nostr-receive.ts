@@ -34,10 +34,10 @@ import { WebRTCConnection } from '@/lib/webrtc'
 import { getPasskeyECDHKeypair } from '@/lib/crypto/passkey'
 import {
   importECDHPrivateKey,
-  deriveSharedSecret,
-  deriveAESKeyFromSecret,
+  deriveSharedSecretKey,
+  deriveAESKeyFromSecretKey,
   publicKeyToFingerprint,
-  deriveKeyConfirmation,
+  deriveKeyConfirmationFromSecretKey,
   hashKeyConfirmation,
   verifyPublicKeyCommitment,
   constantTimeEqual,
@@ -101,7 +101,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
     // Closure variables for mutual trust mode - keeps sensitive data scoped
     let ownPublicKeyBytes: Uint8Array | null = null
-    let sharedSecret: Uint8Array | null = null
+    // SECURITY: sharedSecretKey is a non-extractable CryptoKey - raw secret bytes never exposed to JS
+    let sharedSecretKey: CryptoKey | null = null
     let deriveKeyWithSalt: ((salt: Uint8Array) => Promise<CryptoKey>) | null = null
 
     try {
@@ -135,16 +136,17 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           // Import our private key for ECDH
           const privateKey = await importECDHPrivateKey(privateKeyBytes)
 
-          // Derive shared secret with sender's public key
-          sharedSecret = await deriveSharedSecret(privateKey, opts.senderPublicKey!)
+          // Derive shared secret as non-extractable HKDF CryptoKey
+          // SECURITY: Raw shared secret bytes are never exposed to JavaScript
+          sharedSecretKey = await deriveSharedSecretKey(privateKey, opts.senderPublicKey!)
 
           // Hint is our own public key fingerprint (sender addresses events to us)
           hint = publicKeyFingerprint
 
           // Store key derivation function in closure for event processing
-          const secret = sharedSecret // Capture for closure
+          const secretKey = sharedSecretKey // Capture for closure
           deriveKeyWithSalt = async (salt: Uint8Array) => {
-            return deriveAESKeyFromSecret(secret, salt)
+            return deriveAESKeyFromSecretKey(secretKey, salt)
           }
         } catch (err) {
           setState({
@@ -253,8 +255,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             console.error('Key derivation function not available')
             continue
           }
-          if (!sharedSecret) {
-            console.error('Shared secret not available for key confirmation')
+          if (!sharedSecretKey) {
+            console.error('Shared secret key not available for key confirmation')
             continue
           }
 
@@ -270,7 +272,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
             // === SECURITY VERIFICATION 3: Key confirmation ===
             // Verify we derived the same shared secret (detects MITM)
-            const confirmValue = await deriveKeyConfirmation(sharedSecret, parsed.salt)
+            const confirmValue = await deriveKeyConfirmationFromSecretKey(sharedSecretKey, parsed.salt)
             const computedKcHash = await hashKeyConfirmation(confirmValue)
             if (!constantTimeEqual(computedKcHash, parsed.keyConfirmHash)) {
               console.error('Key confirmation mismatch - potential MITM attack')

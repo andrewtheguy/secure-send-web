@@ -185,6 +185,8 @@ export async function importECDHPublicKey(publicKeyBytes: Uint8Array): Promise<C
 /**
  * Derive shared secret from our private key and peer's public key
  * Returns 32 bytes of shared secret
+ *
+ * @deprecated Use deriveSharedSecretKey() for better security - keeps secret as non-extractable CryptoKey
  */
 export async function deriveSharedSecret(
   privateKey: CryptoKey,
@@ -205,11 +207,46 @@ export async function deriveSharedSecret(
 }
 
 /**
+ * Derive shared secret as a non-extractable HKDF CryptoKey.
+ * This is more secure than deriveSharedSecret() because the raw shared secret
+ * bytes are never exposed to JavaScript - they remain inside the crypto module.
+ *
+ * The returned key can be used with deriveAESKeyFromSecretKey() and
+ * deriveKeyConfirmationFromSecretKey() to derive further keys.
+ *
+ * SECURITY: The shared secret never leaves the Web Crypto module as raw bytes,
+ * preventing exfiltration via XSS or memory inspection.
+ */
+export async function deriveSharedSecretKey(
+  privateKey: CryptoKey,
+  peerPublicKeyBytes: Uint8Array
+): Promise<CryptoKey> {
+  const peerPublicKey = await importECDHPublicKey(peerPublicKeyBytes)
+
+  // Use deriveKey to get HKDF key material directly from ECDH
+  // The shared secret stays inside Web Crypto as non-extractable key
+  return crypto.subtle.deriveKey(
+    {
+      name: 'ECDH',
+      public: peerPublicKey,
+    },
+    privateKey,
+    {
+      name: 'HKDF',
+    },
+    false, // non-extractable
+    ['deriveKey', 'deriveBits']
+  )
+}
+
+/**
  * Derive AES-256-GCM key from ECDH shared secret using HKDF.
  * Salt ensures different keys even with same shared secret.
  *
  * The info label "secure-send-mutual" provides domain separation,
  * ensuring keys derived here cannot be confused with keys from other protocols.
+ *
+ * @deprecated Use deriveAESKeyFromSecretKey() for better security - accepts non-extractable CryptoKey
  */
 export async function deriveAESKeyFromSecret(
   sharedSecret: Uint8Array,
@@ -248,12 +285,43 @@ export async function deriveAESKeyFromSecret(
 }
 
 /**
+ * Derive AES-256-GCM key from HKDF CryptoKey (from deriveSharedSecretKey).
+ * This is the secure version that never exposes raw shared secret bytes.
+ *
+ * @param sharedSecretKey - Non-extractable HKDF CryptoKey from deriveSharedSecretKey()
+ * @param salt - Per-transfer salt for key derivation (at least 16 bytes)
+ */
+export async function deriveAESKeyFromSecretKey(
+  sharedSecretKey: CryptoKey,
+  salt: Uint8Array
+): Promise<CryptoKey> {
+  if (salt.length < 16) {
+    throw new Error(`Salt too short: expected at least 16 bytes, got ${salt.length}`)
+  }
+
+  return crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: toArrayBuffer(salt),
+      info: new TextEncoder().encode('secure-send-mutual'),
+    },
+    sharedSecretKey,
+    { name: 'AES-GCM', length: AES_KEY_LENGTH },
+    false,
+    ['encrypt', 'decrypt']
+  )
+}
+
+/**
  * Derive key confirmation value from shared secret.
  * Uses HKDF with separate info label for domain separation.
  * Returns 16 bytes that can be hashed for commitment.
  *
  * This allows both parties to prove they derived the same shared secret
  * without revealing the secret itself.
+ *
+ * @deprecated Use deriveKeyConfirmationFromSecretKey() for better security - accepts non-extractable CryptoKey
  */
 export async function deriveKeyConfirmation(
   sharedSecret: Uint8Array,
@@ -284,6 +352,36 @@ export async function deriveKeyConfirmation(
       info: new TextEncoder().encode('secure-send-key-confirm'),
     },
     keyMaterial,
+    128 // 16 bytes = 128 bits
+  )
+
+  return new Uint8Array(confirmBits)
+}
+
+/**
+ * Derive key confirmation value from HKDF CryptoKey (from deriveSharedSecretKey).
+ * This is the secure version that never exposes raw shared secret bytes.
+ *
+ * @param sharedSecretKey - Non-extractable HKDF CryptoKey from deriveSharedSecretKey()
+ * @param salt - Per-transfer salt for key derivation (at least 16 bytes)
+ */
+export async function deriveKeyConfirmationFromSecretKey(
+  sharedSecretKey: CryptoKey,
+  salt: Uint8Array
+): Promise<Uint8Array> {
+  if (salt.length < 16) {
+    throw new Error(`Salt too short: expected at least 16 bytes, got ${salt.length}`)
+  }
+
+  // Derive 16 bytes using HKDF with key-confirm label
+  const confirmBits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: toArrayBuffer(salt),
+      info: new TextEncoder().encode('secure-send-key-confirm'),
+    },
+    sharedSecretKey,
     128 // 16 bytes = 128 bits
   )
 
