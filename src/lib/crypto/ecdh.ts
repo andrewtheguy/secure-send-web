@@ -37,8 +37,19 @@ export async function publicKeyToFingerprint(publicKeyBytes: Uint8Array): Promis
  * Format a fingerprint for human-readable display.
  * Input: 16 hex chars (e.g., "A1B2C3D4E5F67890")
  * Output: "A1B2-C3D4-E5F6-7890"
+ * @throws TypeError if input is not exactly 16 hex characters
  */
 export function formatFingerprint(fingerprint: string): string {
+  if (typeof fingerprint !== 'string' || fingerprint.length !== 16) {
+    throw new TypeError(
+      `Invalid fingerprint: expected 16-character hex string, got ${typeof fingerprint === 'string' ? `${fingerprint.length} characters` : typeof fingerprint}`
+    )
+  }
+  if (!/^[0-9A-Fa-f]+$/.test(fingerprint)) {
+    throw new TypeError(
+      `Invalid fingerprint: contains non-hex characters`
+    )
+  }
   const fp = fingerprint.toUpperCase()
   return `${fp.slice(0, 4)}-${fp.slice(4, 8)}-${fp.slice(8, 12)}-${fp.slice(12, 16)}`
 }
