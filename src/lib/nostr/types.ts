@@ -74,10 +74,15 @@ export interface ChunkNotifyPayload {
   chunkSize: number     // Size of this chunk in bytes
 }
 
-// Transfer metadata
+/**
+ * Transfer metadata for both PIN and passkey modes.
+ * @property hint - Identifier for Nostr event filtering:
+ *   - PIN mode: SHA-256(PIN) truncated to 8 hex chars
+ *   - Passkey mode: Fingerprint from credential ID (11 base36 chars)
+ */
 export interface TransferMetadata {
   pin: string
-  pinHint: string
+  hint: string
   salt: Uint8Array
   key: CryptoKey
   transferId: string

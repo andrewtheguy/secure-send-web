@@ -57,9 +57,12 @@ export async function deriveKeyFromPasskey(salt: Uint8Array): Promise<CryptoKey>
 }
 
 /**
- * Get credential fingerprint for identification
- * Used as the "hint" in passkey mode (like PIN hint in regular mode)
- * Returns 11 alphanumeric chars to fit PIN format: 'P' + fingerprint
+ * Get credential fingerprint for identification.
+ * Returns an 11-character alphanumeric identifier derived from the credential ID.
+ *
+ * Note: This is NOT related to PINs. The fingerprint serves a similar purpose
+ * to PIN hint (for Nostr event filtering), but is derived from the WebAuthn
+ * credential ID, not from any user-entered PIN.
  */
 export async function getCredentialFingerprint(): Promise<string> {
   // Authenticate to get credential ID
@@ -209,8 +212,11 @@ export async function deriveKeyFromPasskeyMasterKey(
 }
 
 /**
- * Generate a "passkey PIN" for display and signaling
- * Format: 'P' + 11-char fingerprint = 12 chars (same as regular PIN)
+ * Generate a passkey identifier formatted like a PIN for display compatibility.
+ * Format: 'P' + 11-char fingerprint = 12 chars (same length as regular PIN)
+ *
+ * Note: This is NOT a PIN - it's the passkey fingerprint with a 'P' prefix
+ * to distinguish it from actual PINs and maintain consistent display length.
  */
 export function generatePasskeyPin(fingerprint: string): string {
   if (fingerprint.length < 11) {

@@ -279,8 +279,9 @@ export function PasskeyPage() {
           <div className="text-xs text-muted-foreground space-y-1 border-t pt-4">
             <p>
               <span className="font-medium text-foreground">How it works:</span> Passkeys use
-              the WebAuthn PRF extension to derive encryption keys. The fingerprint is a
-              SHA-256 hash of the credential ID, displayed as an 11-character identifier.
+              the WebAuthn PRF extension to derive encryption keys directly from your device's
+              secure hardware. The fingerprint is derived from your credential ID (not from any PIN),
+              displayed as an 11-character identifier for verification.
             </p>
             <p>
               <span className="font-medium text-foreground">Sync requirements:</span> Both
