@@ -223,19 +223,7 @@ export async function getCredentialFingerprint(): Promise<string> {
     },
   })) as PublicKeyCredential
 
-  // Hash the credential ID
-  const credentialId = new Uint8Array(assertion.rawId)
-  const hash = await crypto.subtle.digest('SHA-256', credentialId)
-  const hashArray = new Uint8Array(hash)
-
-  // Convert first 8 bytes to alphanumeric (base36-ish)
-  // This gives us ~11 chars which fits nicely after 'P' prefix
-  let fingerprint = ''
-  for (let i = 0; i < 8 && fingerprint.length < 11; i++) {
-    fingerprint += hashArray[i].toString(36)
-  }
-
-  return fingerprint.slice(0, 11).toUpperCase()
+  return credentialIdToFingerprint(new Uint8Array(assertion.rawId))
 }
 
 /**
@@ -245,6 +233,48 @@ export async function getCredentialFingerprint(): Promise<string> {
  */
 export async function deriveKeyFromPasskeyWithSalt(salt: Uint8Array): Promise<CryptoKey> {
   return deriveKeyFromPasskey(salt)
+}
+
+/**
+ * Derive key and fingerprint in one passkey assertion (single prompt)
+ */
+export async function deriveKeyAndFingerprintFromPasskey(
+  salt: Uint8Array
+): Promise<{ key: CryptoKey; fingerprint: string }> {
+  const prfInput = new TextEncoder().encode(PRF_SALT_PREFIX + base64urlEncode(salt))
+
+  const assertion = (await navigator.credentials.get({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      userVerification: 'required',
+      extensions: {
+        prf: {
+          eval: {
+            first: prfInput,
+          },
+        },
+      },
+    },
+  })) as PublicKeyCredential
+
+  const extResults = assertion.getClientExtensionResults() as {
+    prf?: { results?: { first?: ArrayBuffer } }
+  }
+
+  if (!extResults.prf?.results?.first) {
+    throw new Error('PRF evaluation failed - authenticator may not support PRF extension')
+  }
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    extResults.prf.results.first,
+    { name: 'AES-GCM' },
+    false, // extractable: false per CLAUDE.md
+    ['encrypt', 'decrypt']
+  )
+
+  const fingerprint = await credentialIdToFingerprint(new Uint8Array(assertion.rawId))
+  return { key, fingerprint }
 }
 
 /**
@@ -273,6 +303,24 @@ export function extractPasskeyFingerprint(pin: string): string {
 function base64urlEncode(data: Uint8Array): string {
   const base64 = btoa(String.fromCharCode(...data))
   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+async function credentialIdToFingerprint(credentialId: Uint8Array): Promise<string> {
+  const credentialBytes = credentialId.buffer.slice(
+    credentialId.byteOffset,
+    credentialId.byteOffset + credentialId.byteLength
+  )
+  const hash = await crypto.subtle.digest('SHA-256', credentialBytes)
+  const hashArray = new Uint8Array(hash)
+
+  // Convert first 8 bytes to alphanumeric (base36-ish)
+  // This gives us ~11 chars which fits nicely after 'P' prefix
+  let fingerprint = ''
+  for (let i = 0; i < 8 && fingerprint.length < 11; i++) {
+    fingerprint += hashArray[i].toString(36)
+  }
+
+  return fingerprint.slice(0, 11).toUpperCase()
 }
 
 export function base64urlDecode(str: string): Uint8Array {

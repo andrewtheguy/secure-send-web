@@ -12,8 +12,7 @@ import {
   TRANSFER_EXPIRATION_MS,
   CLOUD_CHUNK_SIZE,
   ENCRYPTION_CHUNK_SIZE,
-  getCredentialFingerprint,
-  deriveKeyFromPasskeyWithSalt,
+  deriveKeyAndFingerprintFromPasskey,
   generatePasskeyPin,
 } from '@/lib/crypto'
 import {
@@ -156,10 +155,9 @@ export function useNostrSend(): UseNostrSendReturn {
         // Passkey mode: authenticate and derive key from passkey
         setState({ status: 'connecting', message: 'Authenticate with passkey...' })
         try {
-          // Get credential fingerprint (prompts for passkey authentication)
-          const fingerprint = await getCredentialFingerprint()
-          // Derive key from passkey (prompts again - this is the PRF derivation)
-          key = await deriveKeyFromPasskeyWithSalt(salt)
+          // Derive key and fingerprint in one passkey assertion (single prompt)
+          const { key: derivedKey, fingerprint } = await deriveKeyAndFingerprintFromPasskey(salt)
+          key = derivedKey
           // Generate passkey "PIN" for display ('P' + fingerprint)
           newPin = generatePasskeyPin(fingerprint)
           // For passkey, pinHint is just the fingerprint (receiver identifies by 'P' prefix)
