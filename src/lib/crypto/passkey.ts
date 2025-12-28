@@ -250,26 +250,6 @@ export async function createPasskeyCredential(
   return { credentialId, prfSupported }
 }
 
-/**
- * Test an existing passkey and return its ECDH public key fingerprint
- */
-export async function testPasskeyAndGetFingerprint(): Promise<{
-  fingerprint: string
-  prfSupported: boolean
-  publicKeyBytes: Uint8Array
-}> {
-  try {
-    const { publicKeyBytes, publicKeyFingerprint } = await getPasskeyECDHKeypair()
-    return {
-      fingerprint: publicKeyFingerprint,
-      prfSupported: true,
-      publicKeyBytes,
-    }
-  } catch (e) {
-    throw new Error('PRF extension not supported or passkey authentication failed', { cause: e })
-  }
-}
-
 // Base64url encoding utility
 function base64urlEncode(data: Uint8Array): string {
   let binary = ''

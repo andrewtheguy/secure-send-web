@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Fingerprint, Plus, TestTube, AlertCircle, CheckCircle2, Loader2, Info, Copy, Check, Key, QrCode } from 'lucide-react'
+import { Fingerprint, Plus, AlertCircle, CheckCircle2, Loader2, Info, Copy, Check, Key, QrCode } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,11 +9,10 @@ import { QRCodeSVG } from 'qrcode.react'
 import {
   checkWebAuthnSupport,
   createPasskeyCredential,
-  testPasskeyAndGetFingerprint,
   getPasskeyECDHKeypair,
 } from '@/lib/crypto/passkey'
 
-type PageState = 'idle' | 'checking' | 'creating' | 'testing' | 'getting_key'
+type PageState = 'idle' | 'checking' | 'creating' | 'getting_key'
 
 // Helper to convert Uint8Array to base64
 function uint8ArrayToBase64(bytes: Uint8Array): string {
@@ -67,31 +66,6 @@ export function PasskeyPage() {
       setPageState('idle')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create passkey')
-      setPageState('idle')
-    }
-  }
-
-  const handleTestPasskey = async () => {
-    setError(null)
-    setSuccess(null)
-    setFingerprint(null)
-    setPublicKeyBase64(null)
-    setPrfSupported(null)
-    setPageState('testing')
-
-    try {
-      const result = await testPasskeyAndGetFingerprint()
-      setFingerprint(result.fingerprint)
-      setPublicKeyBase64(uint8ArrayToBase64(result.publicKeyBytes))
-      setPrfSupported(result.prfSupported)
-      setSuccess(
-        result.prfSupported
-          ? 'Passkey verified! Your public key is now available for sharing.'
-          : 'Passkey found but PRF extension is not supported. This passkey cannot be used for encryption.'
-      )
-      setPageState('idle')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to test passkey')
       setPageState('idle')
     }
   }
@@ -385,36 +359,6 @@ export function PasskeyPage() {
                 <>
                   <Plus className="mr-2 h-4 w-4" />
                   Create Passkey
-                </>
-              )}
-            </Button>
-          </div>
-
-          {/* Test passkey section */}
-          <div className="space-y-4 p-4 rounded-lg border">
-            <h3 className="font-medium flex items-center gap-2">
-              <TestTube className="h-4 w-4" />
-              Test Existing Passkey
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Verify your passkey works and view its fingerprint. Use this to confirm
-              you and your recipient have the same synced passkey.
-            </p>
-            <Button
-              onClick={handleTestPasskey}
-              disabled={isLoading}
-              variant="outline"
-              className="w-full"
-            >
-              {pageState === 'testing' ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Testing passkey...
-                </>
-              ) : (
-                <>
-                  <TestTube className="mr-2 h-4 w-4" />
-                  Test Passkey
                 </>
               )}
             </Button>
