@@ -277,26 +277,13 @@ export async function checkWebAuthnSupport(): Promise<{
  * WebAuthn does not allow IP addresses as rpId per spec.
  */
 function isIpAddress(hostname: string): boolean {
-  // IPv4 pattern
-  const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/
-  // IPv6 pattern (simplified - checks for colons which aren't in domain names)
-  const ipv6Pattern = /^[\da-fA-F:]+$/
-
-  if (ipv4Pattern.test(hostname)) {
-    // Validate each octet is 0-255
-    const octets = hostname.split('.')
-    return octets.every(o => {
-      const num = parseInt(o, 10)
-      return num >= 0 && num <= 255
-    })
-  }
-
-  // Check for IPv6 (contains colons, no dots except in IPv4-mapped addresses)
-  if (hostname.includes(':') && ipv6Pattern.test(hostname.replace(/\./g, ''))) {
-    return true
-  }
-
-  return false
+  // More robust IPv4 pattern
+  const ipv4Pattern = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
+  
+  // IPv6 pattern (supports full, compressed, and IPv4-mapped forms)
+  const ipv6Pattern = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|::([fF]{4}:)?((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))$/
+  
+  return ipv4Pattern.test(hostname) || ipv6Pattern.test(hostname)
 }
 
 /**

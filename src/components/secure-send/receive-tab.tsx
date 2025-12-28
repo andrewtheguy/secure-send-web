@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
+import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ChevronDown, ChevronRight, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
@@ -429,7 +429,7 @@ export function ReceiveTab() {
               </p>
               <p>
                 <Link to="/passkey" className="text-primary hover:underline inline-flex items-center gap-1">
-                  Set up a passkey first <ExternalLink className="h-3 w-3" />
+                  Set up a passkey first <ArrowRight className="h-3 w-3" />
                 </Link>
                 {' '}— you'll need the same passkey synced from the sender (via 1Password, iCloud, Google, etc.)
               </p>

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react'
-import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, AlertTriangle, Info, Fingerprint, ExternalLink } from 'lucide-react'
+import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, AlertTriangle, Info, Fingerprint, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
@@ -603,7 +603,7 @@ export function SendTab() {
               <p>
                 Don't have a passkey yet?{' '}
                 <Link to="/passkey" className="text-primary hover:underline inline-flex items-center gap-1">
-                  Create one here <ExternalLink className="h-3 w-3" />
+                  Create one here <ArrowRight className="h-3 w-3" />
                 </Link>
               </p>
             </div>
