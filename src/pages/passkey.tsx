@@ -288,8 +288,8 @@ export function PasskeyPage() {
               {/* QR Code */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
-                  <QrCode className="h-5 w-5 text-cyan-600" />
-                  <span className="text-sm font-medium">Your Public Key</span>
+                  <QrCode className="h-5 w-5 text-primary" />
+                  <span className="text-sm font-semibold text-primary">Your Public Key</span>
                 </div>
                 <div className="flex flex-col items-center gap-4">
                   <div className="bg-white p-4 rounded-lg">
@@ -304,11 +304,11 @@ export function PasskeyPage() {
               {/* Copy Public Key */}
               <div className="pt-4 border-t">
                 <div className="flex items-center gap-2 mb-2">
-                  <Key className="h-5 w-5 text-cyan-600" />
-                  <span className="text-sm font-medium">Public Key (base64)</span>
+                  <Key className="h-5 w-5 text-primary" />
+                  <span className="text-sm font-semibold text-primary">Public Key (base64)</span>
                 </div>
                 <div className="flex gap-2">
-                  <code className="flex-1 text-sm bg-muted p-2 rounded font-mono break-all max-h-20 overflow-y-auto">
+                  <code className="flex-1 text-sm bg-primary/10 border border-primary/20 p-2 rounded font-mono break-all max-h-20 overflow-y-auto text-primary">
                     {publicKeyBase64}
                   </code>
                   <Button
@@ -329,11 +329,11 @@ export function PasskeyPage() {
               {/* Fingerprint */}
               <div className="pt-4 border-t">
                 <div className="flex items-center gap-2">
-                  <Fingerprint className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-xs font-medium text-muted-foreground">Fingerprint</span>
+                  <Fingerprint className="h-4 w-4 text-cyan-600" />
+                  <span className="text-xs font-medium text-cyan-600">Fingerprint</span>
                 </div>
                 <div className="mt-1 flex items-center gap-2">
-                  <span className="font-mono text-sm text-muted-foreground">
+                  <span className="font-mono text-sm font-medium text-cyan-600">
                     {formattedFingerprint}
                   </span>
                   <Button
