@@ -319,10 +319,10 @@ export function PasskeyPage() {
                     variant="outline"
                     size="sm"
                     onClick={handleCopyPublicKey}
-                    className="flex-shrink-0"
+                    className={`flex-shrink-0 ${copiedKey ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-primary/10'}`}
                   >
                     {copiedKey ? (
-                      <Check className="h-4 w-4 text-green-600" />
+                      <Check className="h-4 w-4 text-white" />
                     ) : (
                       <Copy className="h-4 w-4" />
                     )}
@@ -344,10 +344,10 @@ export function PasskeyPage() {
                     variant="ghost"
                     size="sm"
                     onClick={handleCopyFingerprint}
-                    className="h-8"
+                    className={`h-8 ${copied ? 'bg-emerald-500 hover:bg-emerald-500' : 'hover:bg-cyan-500/10'}`}
                   >
                     {copied ? (
-                      <Check className="h-4 w-4 text-green-600" />
+                      <Check className="h-4 w-4 text-white" />
                     ) : (
                       <Copy className="h-4 w-4" />
                     )}
