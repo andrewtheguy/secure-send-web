@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef } from 'react'
 import {
   generateECDHKeyPair,
-  deriveSharedSecret,
-  deriveAESKeyFromSecret,
+  deriveSharedSecretKey,
+  deriveAESKeyFromSecretKey,
   parseChunkMessage,
   decryptChunk,
   MAX_MESSAGE_SIZE,
@@ -183,8 +183,9 @@ export function useManualReceive(): UseManualReceiveReturn {
       const senderPublicKey = new Uint8Array(senderPublicKeyArray)
       const salt = new Uint8Array(saltArray)
 
-      const sharedSecret = await deriveSharedSecret(ecdhKeyPair.privateKey, senderPublicKey)
-      const key = await deriveAESKeyFromSecret(sharedSecret, salt)
+      // Derive shared secret as non-extractable CryptoKey
+      const sharedSecretKey = await deriveSharedSecretKey(ecdhKeyPair.privateKey, senderPublicKey)
+      const key = await deriveAESKeyFromSecretKey(sharedSecretKey, salt)
 
       if (cancelledRef.current) return
 

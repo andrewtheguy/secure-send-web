@@ -2,8 +2,8 @@ import { useState, useCallback, useRef } from 'react'
 import {
   generateSalt,
   generateECDHKeyPair,
-  deriveSharedSecret,
-  deriveAESKeyFromSecret,
+  deriveSharedSecretKey,
+  deriveAESKeyFromSecretKey,
   encryptChunk,
   MAX_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
@@ -309,8 +309,9 @@ export function useManualSend(): UseManualSendReturn {
       }
 
       const receiverPublicKey = new Uint8Array(answerPayload.publicKey!)
-      const sharedSecret = await deriveSharedSecret(ecdhPrivateKeyRef.current, receiverPublicKey)
-      const key = await deriveAESKeyFromSecret(sharedSecret, saltRef.current)
+      // Derive shared secret as non-extractable CryptoKey
+      const sharedSecretKey = await deriveSharedSecretKey(ecdhPrivateKeyRef.current, receiverPublicKey)
+      const key = await deriveAESKeyFromSecretKey(sharedSecretKey, saltRef.current)
 
       // Clear ECDH private key - no longer needed
       ecdhPrivateKeyRef.current = null

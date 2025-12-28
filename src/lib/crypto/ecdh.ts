@@ -183,33 +183,9 @@ export async function importECDHPublicKey(publicKeyBytes: Uint8Array): Promise<C
 }
 
 /**
- * Derive shared secret from our private key and peer's public key
- * Returns 32 bytes of shared secret
- *
- * @deprecated Use deriveSharedSecretKey() for better security - keeps secret as non-extractable CryptoKey
- */
-export async function deriveSharedSecret(
-  privateKey: CryptoKey,
-  peerPublicKeyBytes: Uint8Array
-): Promise<Uint8Array> {
-  const peerPublicKey = await importECDHPublicKey(peerPublicKeyBytes)
-
-  const sharedBits = await crypto.subtle.deriveBits(
-    {
-      name: 'ECDH',
-      public: peerPublicKey,
-    },
-    privateKey,
-    256 // 32 bytes
-  )
-
-  return new Uint8Array(sharedBits)
-}
-
-/**
  * Derive shared secret as a non-extractable HKDF CryptoKey.
- * This is more secure than deriveSharedSecret() because the raw shared secret
- * bytes are never exposed to JavaScript - they remain inside the crypto module.
+ * The raw shared secret bytes are never exposed to JavaScript - they remain
+ * inside the crypto module.
  *
  * The returned key can be used with deriveAESKeyFromSecretKey() and
  * deriveKeyConfirmationFromSecretKey() to derive further keys.
