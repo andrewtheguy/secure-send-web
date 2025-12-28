@@ -99,6 +99,11 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       'usePasskey' in arg && arg.usePasskey === true && 'senderPublicKey' in arg && arg.senderPublicKey
     const pinMaterial = !('usePasskey' in arg) ? (arg as PinKeyMaterial) : null
 
+    // Closure variables for mutual trust mode - keeps sensitive data scoped
+    let ownPublicKeyBytes: Uint8Array | null = null
+    let sharedSecret: Uint8Array | null = null
+    let deriveKeyWithSalt: ((salt: Uint8Array) => Promise<CryptoKey>) | null = null
+
     try {
       let hint: string
       let key: CryptoKey | null = null
@@ -121,6 +126,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           setOwnPublicKey(publicKeyBytes)
           setOwnFingerprint(publicKeyFingerprint)
 
+          // Store in closure for event processing
+          ownPublicKeyBytes = publicKeyBytes
+
           // Calculate expected sender fingerprint for verification
           expectedSenderFingerprint = await publicKeyToFingerprint(opts.senderPublicKey!)
 
@@ -128,24 +136,16 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           const privateKey = await importECDHPrivateKey(privateKeyBytes)
 
           // Derive shared secret with sender's public key
-          const sharedSecret = await deriveSharedSecret(privateKey, opts.senderPublicKey!)
-
-          // We'll derive the AES key later with the salt from the event
-          // For now, store the shared secret in a ref-like pattern
-          // Actually, we need to use HKDF with the event's salt, so we'll do it per-event
+          sharedSecret = await deriveSharedSecret(privateKey, opts.senderPublicKey!)
 
           // Hint is our own public key fingerprint (sender addresses events to us)
           hint = publicKeyFingerprint
 
-          // Store shared secret and salt derivation for later
-          const deriveKeyWithSalt = async (salt: Uint8Array) => {
-            return deriveAESKeyFromSecret(sharedSecret, salt)
+          // Store key derivation function in closure for event processing
+          const secret = sharedSecret // Capture for closure
+          deriveKeyWithSalt = async (salt: Uint8Array) => {
+            return deriveAESKeyFromSecret(secret, salt)
           }
-
-          // Store this function, shared secret, and public key for use in event processing
-          ;(window as unknown as Record<string, unknown>).__deriveKeyWithSalt = deriveKeyWithSalt
-          ;(window as unknown as Record<string, unknown>).__sharedSecret = sharedSecret
-          ;(window as unknown as Record<string, unknown>).__ownPublicKey = publicKeyBytes
         } catch (err) {
           setState({
             status: 'error',
@@ -238,20 +238,15 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
           // === SECURITY VERIFICATION 2: Receiver public key commitment ===
           // Verify this event was addressed to us (prevents relay MITM)
-          // Use the local publicKeyBytes from passkey authentication (stored in state for display)
-          const getOwnPublicKey = (window as unknown as Record<string, unknown>).__ownPublicKey as Uint8Array
-          const rpkcValid = await verifyPublicKeyCommitment(getOwnPublicKey, parsed.receiverPkCommitment)
+          const rpkcValid = await verifyPublicKeyCommitment(ownPublicKeyBytes!, parsed.receiverPkCommitment)
           if (!rpkcValid) {
             console.log('Receiver public key commitment mismatch - event not addressed to us')
             continue
           }
 
           try {
-            // Derive key using stored function
-            const deriveKeyWithSalt = (window as unknown as Record<string, unknown>).__deriveKeyWithSalt as (
-              salt: Uint8Array
-            ) => Promise<CryptoKey>
-            const derivedKey = await deriveKeyWithSalt(parsed.salt)
+            // Derive key using closure function
+            const derivedKey = await deriveKeyWithSalt!(parsed.salt)
 
             // Try to decrypt
             const decrypted = await decrypt(derivedKey, parsed.encryptedPayload)
@@ -261,8 +256,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
             // === SECURITY VERIFICATION 3: Key confirmation ===
             // Verify we derived the same shared secret (detects MITM)
-            const getSharedSecret = (window as unknown as Record<string, unknown>).__sharedSecret as Uint8Array
-            const confirmValue = await deriveKeyConfirmation(getSharedSecret, parsed.salt)
+            const confirmValue = await deriveKeyConfirmation(sharedSecret!, parsed.salt)
             const computedKcHash = await hashKeyConfirmation(confirmValue)
             if (!constantTimeEqual(computedKcHash, parsed.keyConfirmHash)) {
               console.error('Key confirmation mismatch - potential MITM attack')
@@ -300,13 +294,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             continue
           }
         }
-      }
-
-      // Clean up global references
-      if (isMutualTrustMode) {
-        delete (window as unknown as Record<string, unknown>).__deriveKeyWithSalt
-        delete (window as unknown as Record<string, unknown>).__sharedSecret
-        delete (window as unknown as Record<string, unknown>).__ownPublicKey
       }
 
       if (!payload || !transferId || !senderPubkey || !key) {

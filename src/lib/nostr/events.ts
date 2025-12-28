@@ -153,22 +153,52 @@ export function parseMutualTrustEvent(event: Event): {
   const senderFingerprint = event.tags.find((t) => t[0] === 'spk')?.[1]
   const keyConfirmHash = event.tags.find((t) => t[0] === 'kc')?.[1]
   const receiverPkCommitment = event.tags.find((t) => t[0] === 'rpkc')?.[1]
-  const nonce = event.tags.find((t) => t[0] === 'n')?.[1]
+  const nonceB64 = event.tags.find((t) => t[0] === 'n')?.[1]
   const saltB64 = event.tags.find((t) => t[0] === 's')?.[1]
   const transferId = event.tags.find((t) => t[0] === 't')?.[1]
 
   if (!receiverFingerprint || !senderFingerprint || !keyConfirmHash ||
-      !receiverPkCommitment || !nonce || !saltB64 || !transferId) return null
+      !receiverPkCommitment || !nonceB64 || !saltB64 || !transferId) return null
+
+  // Validate nonce: must be valid base64 and decode to exactly 16 bytes
+  let nonceBytes: Uint8Array
+  try {
+    nonceBytes = base64ToUint8Array(nonceB64)
+    if (nonceBytes.length !== 16) {
+      return null
+    }
+  } catch {
+    return null
+  }
+
+  // Validate salt: must be valid base64
+  let salt: Uint8Array
+  try {
+    salt = base64ToUint8Array(saltB64)
+    if (salt.length < 16) {
+      return null
+    }
+  } catch {
+    return null
+  }
+
+  // Validate encrypted payload: must be valid base64
+  let encryptedPayload: Uint8Array
+  try {
+    encryptedPayload = base64ToUint8Array(event.content)
+  } catch {
+    return null
+  }
 
   return {
     receiverFingerprint,
     senderFingerprint,
     keyConfirmHash,
     receiverPkCommitment,
-    nonce,
-    salt: base64ToUint8Array(saltB64),
+    nonce: nonceB64,
+    salt,
     transferId,
-    encryptedPayload: base64ToUint8Array(event.content),
+    encryptedPayload,
   }
 }
 

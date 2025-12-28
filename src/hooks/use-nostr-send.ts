@@ -330,6 +330,8 @@ export function useNostrSend(): UseNostrSendReturn {
                 if (replayNonce) {
                   if (!ack.nonce || !constantTimeEqual(ack.nonce, replayNonce)) {
                     console.error('Nonce mismatch in ready ACK - potential replay attack')
+                    if (timeout) clearTimeout(timeout)
+                    if (subId) client.unsubscribe(subId)
                     reject(new Error('Security check failed: nonce mismatch'))
                     return
                   }

@@ -293,8 +293,21 @@ export async function deriveKeyConfirmation(
 /**
  * Compute hash of key confirmation value for commitment.
  * Returns hex-encoded SHA-256 hash truncated to 32 chars (16 bytes).
+ * @param confirmValue - 16-byte key confirmation value from deriveKeyConfirmation
+ * @throws TypeError if input is not a 16-byte Uint8Array
  */
 export async function hashKeyConfirmation(confirmValue: Uint8Array): Promise<string> {
+  if (!(confirmValue instanceof Uint8Array)) {
+    throw new TypeError(
+      `Invalid key confirmation value: expected Uint8Array, got ${typeof confirmValue}`
+    )
+  }
+  if (confirmValue.length !== 16) {
+    throw new TypeError(
+      `Invalid key confirmation value length: expected 16 bytes, got ${confirmValue.length}`
+    )
+  }
+
   const hash = await crypto.subtle.digest('SHA-256', confirmValue as BufferSource)
   const hashArray = new Uint8Array(hash)
   // Take first 16 bytes (32 hex chars) for the commitment
@@ -333,25 +346,25 @@ export async function verifyPublicKeyCommitment(
 
 /**
  * Constant-time string comparison to prevent timing attacks.
- * Returns true only if strings are equal, false otherwise.
- * Comparison time is constant regardless of where strings differ.
+ * Returns true only if strings are equal (same length and content), false otherwise.
+ *
+ * Note: This is a best-effort constant-time mitigation in JavaScript.
+ * True constant-time guarantees are not possible in JS due to JIT optimization,
+ * garbage collection, and string implementation details. However, this approach
+ * avoids obvious timing leaks from early returns or variable iteration counts.
  */
 export function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    // Still need to do some work to avoid length-based timing
-    // Use a dummy comparison to prevent timing attacks based on early return
-    const maxLen = Math.max(a.length, b.length)
-    let dummy = 0
-    for (let i = 0; i < maxLen; i++) {
-      dummy |= (a.charCodeAt(i % (a.length || 1)) || 0) ^ (b.charCodeAt(i % (b.length || 1)) || 0)
-    }
-    // Use dummy in a way that prevents optimization but always returns false
-    return dummy < 0 // Always false since dummy >= 0, but uses the variable
+  const maxLen = Math.max(a.length, b.length)
+
+  // XOR lengths to detect mismatch (will be non-zero if different)
+  let result = a.length ^ b.length
+
+  // Compare all characters up to maxLen, using 0 for out-of-bounds access
+  for (let i = 0; i < maxLen; i++) {
+    const charA = i < a.length ? a.charCodeAt(i) : 0
+    const charB = i < b.length ? b.charCodeAt(i) : 0
+    result |= charA ^ charB
   }
 
-  let result = 0
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i)
-  }
   return result === 0
 }
