@@ -275,22 +275,6 @@ export function ReceiveTab() {
                     <span>Passkey mode enabled - no PIN needed</span>
                   </div>
 
-                  {/* Show passkey fingerprint after authentication for verification */}
-                  {receiverPasskeyFingerprint && (
-                    <div className="text-xs text-muted-foreground border border-cyan-500/30 bg-cyan-50/30 dark:bg-cyan-950/20 px-3 py-2 rounded">
-                      <div className="flex items-center gap-2 font-mono">
-                        <Fingerprint className="h-3 w-3 text-cyan-600" />
-                        <span>Passkey Fingerprint: </span>
-                        <span className="font-medium text-cyan-600">
-                          {receiverPasskeyFingerprint.toUpperCase().slice(0, 4)}-
-                          {receiverPasskeyFingerprint.toUpperCase().slice(4, 8)}-
-                          {receiverPasskeyFingerprint.toUpperCase().slice(8, 11)}
-                        </span>
-                      </div>
-                      <p className="mt-1 ml-5">Compare with sender&apos;s passkey fingerprint to verify same passkey is used.</p>
-                    </div>
-                  )}
-
                   <div className="text-xs text-muted-foreground text-center pb-2">
                     Make sure you have the same synced passkey as the sender (1Password, iCloud, Google).
                   </div>
@@ -442,6 +426,22 @@ export function ReceiveTab() {
       ) : (
         <>
           <TransferStatus state={state} />
+
+          {/* Show passkey fingerprint during transfer for verification */}
+          {receiverPasskeyFingerprint && (
+            <div className="text-xs text-muted-foreground border border-cyan-500/30 bg-cyan-50/30 dark:bg-cyan-950/20 px-3 py-2 rounded">
+              <div className="flex items-center gap-2 font-mono">
+                <Fingerprint className="h-3 w-3 text-cyan-600" />
+                <span>Your Passkey Fingerprint: </span>
+                <span className="font-medium text-cyan-600">
+                  {receiverPasskeyFingerprint.toUpperCase().slice(0, 4)}-
+                  {receiverPasskeyFingerprint.toUpperCase().slice(4, 8)}-
+                  {receiverPasskeyFingerprint.toUpperCase().slice(8, 11)}
+                </span>
+              </div>
+              <p className="mt-1 ml-5">Compare with sender&apos;s passkey fingerprint to verify same passkey is used.</p>
+            </div>
+          )}
 
           {/* QR Input for receiving offer */}
           {showQRInput && (
