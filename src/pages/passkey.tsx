@@ -308,9 +308,13 @@ export function PasskeyPage() {
                   <span className="text-sm font-semibold text-primary">Public Key (base64)</span>
                 </div>
                 <div className="flex gap-2">
-                  <code className="flex-1 text-sm bg-primary/10 border border-primary/20 p-2 rounded font-mono break-all max-h-20 overflow-y-auto text-primary">
-                    {publicKeyBase64}
-                  </code>
+                  <textarea
+                    readOnly
+                    value={publicKeyBase64}
+                    onClick={(e) => e.currentTarget.select()}
+                    rows={2}
+                    className="flex-1 text-sm bg-primary/10 border border-primary/20 p-2 rounded font-mono text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+                  />
                   <Button
                     variant="outline"
                     size="sm"
