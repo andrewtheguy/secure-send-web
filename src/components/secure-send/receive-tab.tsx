@@ -233,7 +233,7 @@ export function ReceiveTab() {
 
     try {
       // Start receive with passkey mode
-      nostrHook.receive({ usePasskey: true })
+      await nostrHook.receive({ usePasskey: true })
     } catch {
       // Error will be handled by the hook
     } finally {

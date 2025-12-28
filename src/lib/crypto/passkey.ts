@@ -18,7 +18,7 @@ export async function deriveKeyFromPasskey(salt: Uint8Array): Promise<CryptoKey>
   const prfInput = new TextEncoder().encode(PRF_SALT_PREFIX + base64urlEncode(salt))
 
   // Use discoverable credential flow - passkey picker will appear
-  const assertion = (await navigator.credentials.get({
+  const assertion = await navigator.credentials.get({
     publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)),
       userVerification: 'required',
@@ -30,9 +30,15 @@ export async function deriveKeyFromPasskey(salt: Uint8Array): Promise<CryptoKey>
         },
       },
     },
-  })) as PublicKeyCredential
+  })
 
-  const extResults = assertion.getClientExtensionResults() as {
+  if (!assertion) {
+    throw new Error('Passkey authentication cancelled or unavailable')
+  }
+
+  const credential = assertion as PublicKeyCredential
+
+  const extResults = credential.getClientExtensionResults() as {
     prf?: { results?: { first?: ArrayBuffer } }
   }
 
@@ -57,14 +63,20 @@ export async function deriveKeyFromPasskey(salt: Uint8Array): Promise<CryptoKey>
  */
 export async function getCredentialFingerprint(): Promise<string> {
   // Authenticate to get credential ID
-  const assertion = (await navigator.credentials.get({
+  const assertion = await navigator.credentials.get({
     publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)),
       userVerification: 'required',
     },
-  })) as PublicKeyCredential
+  })
 
-  return credentialIdToFingerprint(new Uint8Array(assertion.rawId))
+  if (!assertion) {
+    throw new Error('Passkey authentication cancelled or unavailable')
+  }
+
+  const credential = assertion as PublicKeyCredential
+
+  return credentialIdToFingerprint(new Uint8Array(credential.rawId))
 }
 
 /**
@@ -84,7 +96,7 @@ export async function deriveKeyAndFingerprintFromPasskey(
 ): Promise<{ key: CryptoKey; fingerprint: string }> {
   const prfInput = new TextEncoder().encode(PRF_SALT_PREFIX + base64urlEncode(salt))
 
-  const assertion = (await navigator.credentials.get({
+  const assertion = await navigator.credentials.get({
     publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)),
       userVerification: 'required',
@@ -96,9 +108,15 @@ export async function deriveKeyAndFingerprintFromPasskey(
         },
       },
     },
-  })) as PublicKeyCredential
+  })
 
-  const extResults = assertion.getClientExtensionResults() as {
+  if (!assertion) {
+    throw new Error('Passkey authentication cancelled or unavailable')
+  }
+
+  const credential = assertion as PublicKeyCredential
+
+  const extResults = credential.getClientExtensionResults() as {
     prf?: { results?: { first?: ArrayBuffer } }
   }
 
@@ -114,7 +132,7 @@ export async function deriveKeyAndFingerprintFromPasskey(
     ['encrypt', 'decrypt']
   )
 
-  const fingerprint = await credentialIdToFingerprint(new Uint8Array(assertion.rawId))
+  const fingerprint = await credentialIdToFingerprint(new Uint8Array(credential.rawId))
   return { key, fingerprint }
 }
 
@@ -128,7 +146,7 @@ export async function getPasskeyMasterKeyAndFingerprint(): Promise<{
 }> {
   const prfInput = new TextEncoder().encode(PASSKEY_MASTER_PRF_LABEL)
 
-  const assertion = (await navigator.credentials.get({
+  const assertion = await navigator.credentials.get({
     publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)),
       userVerification: 'required',
@@ -140,9 +158,15 @@ export async function getPasskeyMasterKeyAndFingerprint(): Promise<{
         },
       },
     },
-  })) as PublicKeyCredential
+  })
 
-  const extResults = assertion.getClientExtensionResults() as {
+  if (!assertion) {
+    throw new Error('Passkey authentication cancelled or unavailable')
+  }
+
+  const credential = assertion as PublicKeyCredential
+
+  const extResults = credential.getClientExtensionResults() as {
     prf?: { results?: { first?: ArrayBuffer } }
   }
 
@@ -158,7 +182,7 @@ export async function getPasskeyMasterKeyAndFingerprint(): Promise<{
     ['deriveKey']
   )
 
-  const fingerprint = await credentialIdToFingerprint(new Uint8Array(assertion.rawId))
+  const fingerprint = await credentialIdToFingerprint(new Uint8Array(credential.rawId))
   return { masterKey, fingerprint }
 }
 
@@ -208,7 +232,11 @@ export function extractPasskeyFingerprint(pin: string): string {
 
 // Base64url encoding/decoding utilities
 function base64urlEncode(data: Uint8Array): string {
-  const base64 = btoa(String.fromCharCode(...data))
+  let binary = ''
+  for (let i = 0; i < data.length; i++) {
+    binary += String.fromCharCode(data[i])
+  }
+  const base64 = btoa(binary)
   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
