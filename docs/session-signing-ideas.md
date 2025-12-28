@@ -570,8 +570,20 @@ Session signing is additive to existing SS02 flow: generate ECDH keypair first, 
 | Mobile support | Native | Limited (NIP-46 only) |
 | Cross-device | Yes (1Password, iCloud, Google) | Yes (NIP-46) |
 | Identity type | Credential ID (opaque) | npub (social) |
+| **Key export** | **No** (locked in platform) | **Yes** (nsec portable) |
 
-WebAuthn is the pragmatic choice for maximum reach. Nostr options remain for users who value npub-based social identity.
+WebAuthn is the pragmatic choice for maximum reach. Nostr options remain for users who value npub-based social identity or need portable keys.
+
+### Passkey Export Limitation
+
+**Important caveat**: Almost all passkey providers (iCloud Keychain, Google Password Manager, Windows Hello, 1Password, Bitwarden) do **not allow exporting passkeys**. This is by design for security, but means:
+
+- You cannot move a passkey from one provider to another
+- If you lose access to your provider account, you lose the passkey
+- Passkeys are effectively locked to the ecosystem where they were created
+- No standard "backup" format exists (unlike Nostr's nsec which is just a hex string)
+
+**Nostr advantage**: Nostr private keys (nsec) are fully portable - you can export, backup, and import them anywhere. This gives users complete control and avoids vendor lock-in. For users who prioritize key sovereignty and portability, Nostr remains the better choice despite its smaller ecosystem.
 
 ---
 
@@ -878,6 +890,10 @@ async function checkPRFSupport(): Promise<boolean> {
   - Mitigation: Use synced passkeys (1Password, iCloud, Google)
 - **PRF support**: Not all authenticators support PRF
   - Mitigation: Detect and fall back to PIN
+- **No export**: Almost all passkey providers do NOT allow exporting passkeys
+  - You cannot backup or migrate passkeys to another provider
+  - Locked to the ecosystem where created (iCloud, Google, 1Password, etc.)
+  - Nostr keys (nsec) are fully portable in comparison
 
 ### Key Rotation
 To rotate the encryption key (e.g., after device compromise):
