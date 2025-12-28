@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Check, Copy, AlertCircle, Eye, EyeOff, Clock, Hash, MessageSquareText, Fingerprint } from 'lucide-react'
+import { Check, Copy, AlertCircle, Eye, EyeOff, Clock, Hash, MessageSquareText, Fingerprint, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PIN_DISPLAY_TIMEOUT_MS, pinToWords, computePinHint, isPasskeyPin } from '@/lib/crypto'
@@ -178,6 +178,13 @@ export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProp
             className="h-full bg-amber-600"
             style={{ width: `${progressPercentage}%` }}
           />
+        </div>
+
+        {/* Mobile-only hint for Option 2 */}
+        <div className="md:hidden flex items-center gap-2 text-xs font-medium text-cyan-600 bg-cyan-50 dark:bg-cyan-950/30 px-3 py-2 rounded-lg border border-cyan-500/30 animate-pulse">
+          <Fingerprint className="h-3.5 w-3.5" />
+          <span>Passkey available as Option 2</span>
+          <ArrowRight className="h-3 w-3 ml-auto rotate-90" />
         </div>
 
         {/* Side-by-side options */}
@@ -362,9 +369,8 @@ export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProp
             value={isMasked ? maskedPin : pin}
             readOnly
             aria-label="Alphanumeric PIN"
-            className={`text-center font-mono text-xl tracking-wider h-12 bg-background cursor-default select-all ${
-              isPasskey ? 'border-cyan-500' : 'border-green-500'
-            }`}
+            className={`text-center font-mono text-xl tracking-wider h-12 bg-background cursor-default select-all ${isPasskey ? 'border-cyan-500' : 'border-green-500'
+              }`}
           />
         </div>
       )}
