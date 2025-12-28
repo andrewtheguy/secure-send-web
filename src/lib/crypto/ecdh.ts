@@ -99,7 +99,7 @@ export async function importECDHPrivateKey(privateKeyBytes: Uint8Array): Promise
       namedCurve: 'P-256',
     },
     false, // non-extractable
-    ['deriveBits']
+    ['deriveBits', 'deriveKey']
   )
 }
 
@@ -138,7 +138,7 @@ export async function generateECDHKeyPair(): Promise<ECDHKeyPair> {
       namedCurve: 'P-256',
     },
     false, // non-extractable
-    ['deriveBits']
+    ['deriveBits', 'deriveKey']
   )
 
   // Export public key to raw format (65 bytes for P-256 uncompressed)
