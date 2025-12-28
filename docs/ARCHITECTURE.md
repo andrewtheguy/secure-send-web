@@ -178,8 +178,10 @@ flowchart TD
     DeriveKey --> SharedSecretKey[Shared Secret<br/>non-extractable HKDF CryptoKey]
     SharedSecretKey --> AES[deriveKey → AES-256-GCM]
     SharedSecretKey --> KC[deriveBits → Key Confirmation]
+    SharedSecretKey --> EphBind[deriveBits → Session Binding]
     Salt[Random Salt] --> AES
     Salt --> KC
+    EphPub[Ephemeral Public Key] --> EphBind
 ```
 
 **Security benefit**: The raw ECDH shared secret (32 bytes) never appears as a `Uint8Array` in JavaScript memory. Instead, Web Crypto's `deriveKey` chains ECDH directly to HKDF, producing a non-extractable `CryptoKey`. This prevents:
@@ -188,6 +190,42 @@ flowchart TD
 - Side-channel attacks on the raw secret bytes
 
 **Implementation**: `deriveSharedSecretKey()`, `deriveAESKeyFromSecretKey()`, and `deriveKeyConfirmationFromSecretKey()` in `src/lib/crypto/ecdh.ts`
+
+#### Perfect Forward Secrecy (PFS)
+
+Passkey mutual trust mode provides **Perfect Forward Secrecy** via ephemeral session keys, similar to TLS/HTTPS ECDHE:
+
+```mermaid
+sequenceDiagram
+    participant Sender
+    participant Receiver
+    Note over Sender: Passkey auth → Identity keypair
+    Note over Sender: Generate ephemeral keypair<br/>(Web Crypto - raw bytes NEVER exposed)
+    Sender->>Receiver: Mutual Trust Event<br/>(epk: ephemeral pub, esb: session binding)
+    Note over Receiver: Passkey auth → Identity keypair
+    Note over Receiver: Verify sender's session binding
+    Note over Receiver: Generate ephemeral keypair
+    Receiver-->>Sender: Ready ACK<br/>(epk: ephemeral pub, esb: session binding)
+    Note over Sender: Verify receiver's session binding
+    Note over Sender,Receiver: Both derive: ECDH(ownEphemeralPriv, peerEphemeralPub) = sessionKey
+    Note over Sender,Receiver: File encryption uses sessionKey (PFS protected)
+```
+
+**How it works:**
+
+1. **Identity Keys**: Passkey PRF derives deterministic identity keypair (for fingerprint verification)
+2. **Ephemeral Keys**: Each session generates fresh ECDH keypairs using `crypto.subtle.generateKey()` - raw private key material is **NEVER** exposed to JavaScript
+3. **Session Binding**: `HKDF(identitySharedSecret, ephemeralPub)` proves ephemeral keys are authorized by the passkey identity
+4. **Session Key**: `ECDH(ownEphemeralPriv, peerEphemeralPub)` derives the actual encryption key
+
+**Security benefit**: Compromising identity key material (the passkey PRF output) does NOT help decrypt past or future sessions because:
+- Ephemeral private keys are generated via Web Crypto and never exposed as raw bytes
+- Each session uses unique ephemeral keys that are discarded after use
+- Even memory inspection during one session only reveals that session's ephemeral keys
+
+**PFS is mandatory**: In passkey mode, both sender and receiver MUST provide ephemeral keys. Events/ACKs without ephemeral keys are rejected.
+
+**Implementation**: `generateEphemeralSessionKeypair()`, `verifySessionBinding()`, `deriveSessionEncryptionKey()`, `getPasskeySessionKeypair()` in `src/lib/crypto/passkey.ts`
 
 #### Dual Mode (Sender)
 
@@ -220,6 +258,14 @@ When using passkey mode, additional cryptographic protections are applied:
 ['t', transferId]              // Transfer ID
 ['type', 'mutual_trust']       // Event type
 ['expiration', timestamp]      // TTL (NIP-40)
+['epk', ephemeralPubKey]       // PFS: Ephemeral public key (base64, 65 bytes)
+['esb', sessionBinding]        // PFS: Session binding proof (base64, 32 bytes)
+```
+
+**Ready ACK Tags (PFS):**
+```
+['epk', ephemeralPubKey]       // PFS: Receiver's ephemeral public key
+['esb', sessionBinding]        // PFS: Receiver's session binding proof
 ```
 
 **Verification Flow:**
@@ -261,6 +307,7 @@ Security-critical functions validate inputs before cryptographic operations:
 | Replay Protection | TTL only | TTL + cryptographic nonce |
 | Timing Attack Prevention | N/A | Constant-time string comparisons |
 | Shared Secret Protection | Raw bytes in memory | Non-extractable CryptoKey (never exposed to JS) |
+| Perfect Forward Secrecy | No | Yes - ephemeral session keys (Web Crypto generateKey) |
 
 ### User Interface Architecture
 
@@ -662,6 +709,7 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 12. **Resource Cleanup**: All error paths properly clean up timeouts and subscriptions to prevent resource leaks
 13. **Input Validation**: Cryptographic functions validate inputs (nonce length, key confirmation size) before operations to provide deterministic errors
 14. **Non-Extractable Shared Secret**: In passkey mutual trust mode, the ECDH shared secret is kept as a non-extractable `CryptoKey` throughout the derivation chain - raw bytes never exposed to JavaScript, preventing exfiltration via XSS or memory inspection
+15. **Perfect Forward Secrecy (PFS)**: Passkey mode uses ephemeral session keys generated via Web Crypto's `generateKey()` - raw private key material is NEVER exposed to JavaScript. Compromising identity keys does not help decrypt past or future sessions. PFS is mandatory in passkey mode.
 
 ## File Structure
 
