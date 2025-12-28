@@ -11,6 +11,7 @@ import {
   createPasskeyCredential,
   getPasskeyECDHKeypair,
 } from '@/lib/crypto/passkey'
+import { formatFingerprint } from '@/lib/crypto/ecdh'
 
 type PageState = 'idle' | 'checking' | 'creating' | 'getting_key'
 
@@ -30,10 +31,8 @@ export function PasskeyPage() {
   const [copied, setCopied] = useState(false)
   const [copiedKey, setCopiedKey] = useState(false)
 
-  // Format fingerprint for display: XXXX-XXXX-XXX
-  const formattedFingerprint = fingerprint
-    ? `${fingerprint.slice(0, 4)}-${fingerprint.slice(4, 8)}-${fingerprint.slice(8, 11)}`
-    : null
+  // Format fingerprint for display: XXXX-XXXX-XXXX-XXXX
+  const formattedFingerprint = fingerprint ? formatFingerprint(fingerprint) : null
 
   const handleCreatePasskey = async () => {
     setError(null)

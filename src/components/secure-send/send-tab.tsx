@@ -17,7 +17,7 @@ import { formatFileSize } from '@/lib/file-utils'
 import { compressFilesToZip, getFolderName, getTotalSize, supportsFolderSelection } from '@/lib/folder-utils'
 import type { SignalingMethod } from '@/lib/nostr/types'
 import { Link } from 'react-router-dom'
-import { publicKeyToFingerprint } from '@/lib/crypto/ecdh'
+import { publicKeyToFingerprint, formatFingerprint } from '@/lib/crypto/ecdh'
 
 // Helper to convert base64 to Uint8Array
 function base64ToUint8Array(base64: string): Uint8Array {
@@ -90,7 +90,7 @@ export function SendTab() {
     let cancelled = false
     publicKeyToFingerprint(receiverPublicKeyBytes).then(fp => {
       if (!cancelled) {
-        setReceiverPublicKeyFingerprint(`${fp.slice(0, 4)}-${fp.slice(4, 8)}-${fp.slice(8, 11)}`)
+        setReceiverPublicKeyFingerprint(formatFingerprint(fp))
       }
     })
 
@@ -739,7 +739,7 @@ export function SendTab() {
                 <Fingerprint className="h-3 w-3 text-cyan-600" />
                 <span>Your fingerprint: </span>
                 <span className="font-medium text-cyan-600">
-                  {senderFingerprint.slice(0, 4)}-{senderFingerprint.slice(4, 8)}-{senderFingerprint.slice(8, 11)}
+                  {formatFingerprint(senderFingerprint)}
                 </span>
               </div>
               <p className="mt-1 ml-5">Receiver should verify this matches your public key.</p>
