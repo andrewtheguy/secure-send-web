@@ -271,11 +271,11 @@ export async function checkWebAuthnSupport(): Promise<{
 /**
  * Create a new passkey credential for this app
  * Uses navigator.credentials.create() with PRF extension
- * Returns the fingerprint of the newly created credential
+ * Returns the fingerprint of the newly created credential and PRF support status
  */
 export async function createPasskeyCredential(
   userName: string
-): Promise<{ fingerprint: string; credentialId: string }> {
+): Promise<{ fingerprint: string; credentialId: string; prfSupported: boolean }> {
   // Generate random user ID (we don't persist this - it's just for WebAuthn ceremony)
   const userId = crypto.getRandomValues(new Uint8Array(32))
 
@@ -322,7 +322,9 @@ export async function createPasskeyCredential(
     prf?: { enabled?: boolean }
   }
 
-  if (!extResults.prf?.enabled) {
+  const prfSupported = extResults.prf?.enabled === true
+
+  if (!prfSupported) {
     throw new Error(
       'PRF extension not supported by this authenticator. ' +
       'Passkey encryption requires PRF support (available in 1Password, iCloud Keychain, etc.)'
@@ -333,7 +335,7 @@ export async function createPasskeyCredential(
   const fingerprint = await credentialIdToFingerprint(credentialIdBytes)
   const credentialIdBase64 = base64urlEncode(credentialIdBytes)
 
-  return { fingerprint, credentialId: credentialIdBase64 }
+  return { fingerprint, credentialId: credentialIdBase64, prfSupported }
 }
 
 /**

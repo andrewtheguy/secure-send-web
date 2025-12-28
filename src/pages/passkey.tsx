@@ -48,7 +48,7 @@ export function PasskeyPage() {
       // Create the passkey
       const result = await createPasskeyCredential(userName || 'Secure Transfer User')
       setFingerprint(result.fingerprint)
-      setPrfSupported(true)
+      setPrfSupported(result.prfSupported ?? false)
       setSuccess('Passkey created successfully! It should now be available in your password manager.')
       setPageState('idle')
     } catch (err) {
@@ -81,10 +81,40 @@ export function PasskeyPage() {
   }
 
   const handleCopyFingerprint = async () => {
-    if (formattedFingerprint) {
-      await navigator.clipboard.writeText(formattedFingerprint)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+    if (!formattedFingerprint) return
+
+    try {
+      // Try modern clipboard API first (requires secure context)
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(formattedFingerprint)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+        return
+      }
+
+      // Fallback: use legacy execCommand method
+      const textarea = document.createElement('textarea')
+      textarea.value = formattedFingerprint
+      textarea.style.position = 'fixed'
+      textarea.style.left = '-9999px'
+      textarea.style.top = '-9999px'
+      document.body.appendChild(textarea)
+      textarea.focus()
+      textarea.select()
+
+      const successful = document.execCommand('copy')
+      document.body.removeChild(textarea)
+
+      if (successful) {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      } else {
+        setError('Failed to copy to clipboard')
+        setTimeout(() => setError(null), 3000)
+      }
+    } catch {
+      setError('Failed to copy to clipboard')
+      setTimeout(() => setError(null), 3000)
     }
   }
 
