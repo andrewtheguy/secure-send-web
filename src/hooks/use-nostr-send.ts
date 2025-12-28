@@ -136,6 +136,12 @@ export function useNostrSend(): UseNostrSendReturn {
         let hint: string
         let senderFingerprint: string | undefined
 
+        if (options?.usePasskey && !options.receiverPublicKey) {
+          setState({ status: 'error', message: 'Receiver public key required for passkey mode' })
+          sendingRef.current = false
+          return
+        }
+
         if (options?.usePasskey && options.receiverPublicKey) {
           // MUTUAL TRUST MODE: Use passkey ECDH with receiver's public key
           setState({ status: 'connecting', message: 'Authenticate with passkey...' })
