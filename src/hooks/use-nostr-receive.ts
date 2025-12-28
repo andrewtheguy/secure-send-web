@@ -32,9 +32,13 @@ import { downloadFromCloud } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { WebRTCConnection } from '@/lib/webrtc'
 import { getWebRTCConfig } from '@/lib/webrtc-config'
-import { getPasskeyECDHKeypair } from '@/lib/crypto/passkey'
 import {
-  deriveSharedSecretKey,
+  getPasskeySessionKeypair,
+  verifySessionBinding,
+  deriveSessionEncryptionKey,
+  type EphemeralSessionKeypair,
+} from '@/lib/crypto/passkey'
+import {
   deriveAESKeyFromSecretKey,
   publicKeyToFingerprint,
   deriveKeyConfirmationFromSecretKey,
@@ -104,6 +108,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     // SECURITY: sharedSecretKey is a non-extractable CryptoKey - raw secret bytes never exposed to JS
     let sharedSecretKey: CryptoKey | null = null
     let deriveKeyWithSalt: ((salt: Uint8Array) => Promise<CryptoKey>) | null = null
+    // PFS: Ephemeral session keypair for Perfect Forward Secrecy
+    let receiverEphemeral: EphemeralSessionKeypair | null = null
+    let identitySharedSecretKey: CryptoKey | null = null
 
     try {
       let hint: string
@@ -112,33 +119,38 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       if (isMutualTrustMode) {
         // MUTUAL TRUST MODE: Use passkey ECDH with sender's public key
+        // NOW WITH PERFECT FORWARD SECRECY via ephemeral session keys
         const opts = arg as ReceiveOptions
         setState({ status: 'connecting', message: 'Authenticate with passkey...' })
 
         try {
-          // Authenticate and get our ECDH keypair (privateKey is non-extractable CryptoKey)
+          // Authenticate and get ephemeral session keypair with identity binding
+          // SECURITY: Ephemeral private key is NEVER exposed as raw bytes (Web Crypto generateKey)
           const {
-            publicKeyBytes,
-            privateKey,
-            publicKeyFingerprint,
-          } = await getPasskeyECDHKeypair()
+            ephemeral,
+            identitySharedSecretKey: sharedSecret,
+          } = await getPasskeySessionKeypair(opts.senderPublicKey!)
 
-          // Store for UI display
-          setOwnPublicKey(publicKeyBytes)
-          setOwnFingerprint(publicKeyFingerprint)
+          // Store identity info for display
+          setOwnPublicKey(ephemeral.identityPublicKeyBytes)
+          setOwnFingerprint(ephemeral.identityFingerprint)
 
           // Store in closure for event processing
-          ownPublicKeyBytes = publicKeyBytes
+          ownPublicKeyBytes = ephemeral.identityPublicKeyBytes
+
+          // Store for later use (creating ACK with ephemeral key)
+          receiverEphemeral = ephemeral
+          identitySharedSecretKey = sharedSecret
 
           // Calculate expected sender fingerprint for verification
           expectedSenderFingerprint = await publicKeyToFingerprint(opts.senderPublicKey!)
 
-          // Derive shared secret as non-extractable HKDF CryptoKey
+          // Store identity shared secret for key derivation and binding verification
           // SECURITY: Raw shared secret bytes are never exposed to JavaScript
-          sharedSecretKey = await deriveSharedSecretKey(privateKey, opts.senderPublicKey!)
+          sharedSecretKey = sharedSecret
 
           // Hint is our own public key fingerprint (sender addresses events to us)
-          hint = publicKeyFingerprint
+          hint = ephemeral.identityFingerprint
 
           // Store key derivation function in closure for event processing
           const ecdhSharedSecret = sharedSecretKey // Capture for closure
@@ -208,6 +220,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       let selectedCreatedAtSec: number | null = null
       // Security: Store nonce for ready ACK echo
       let eventNonce: string | undefined
+      // PFS: Store sender's ephemeral public key and salt for session key derivation
+      let senderEphemeralPub: Uint8Array | undefined
+      let eventSalt: Uint8Array | undefined
 
       const sortedEvents = [...events].sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
 
@@ -276,12 +291,38 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               continue
             }
 
+            // === PFS VERIFICATION: Verify sender's ephemeral key binding ===
+            // In passkey mode, PFS is mandatory - sender MUST provide ephemeral keys
+            if (!parsed.senderEphemeralPub || !parsed.senderSessionBinding) {
+              console.error('Sender did not provide ephemeral keys - PFS is mandatory in passkey mode')
+              continue
+            }
+
+            if (!identitySharedSecretKey) {
+              console.error('Identity shared secret not available for ephemeral key verification')
+              continue
+            }
+
+            const bindingValid = await verifySessionBinding(
+              identitySharedSecretKey,
+              parsed.senderEphemeralPub,
+              parsed.senderSessionBinding
+            )
+            if (!bindingValid) {
+              console.error('Sender ephemeral key binding invalid - potential MITM')
+              continue
+            }
+            // Store sender's ephemeral key for session key derivation
+            senderEphemeralPub = parsed.senderEphemeralPub
+
             transferId = parsed.transferId
             senderPubkey = event.pubkey
             key = derivedKey
             selectedCreatedAtSec = event.created_at || null
             // Store nonce for ready ACK echo (replay protection)
             eventNonce = parsed.nonce
+            // Store salt for session key derivation
+            eventSalt = parsed.salt
             break
           } catch {
             continue
@@ -351,8 +392,31 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Generate receiver keypair
       const { secretKey } = generateEphemeralKeys()
 
+      // PFS: Derive session encryption key from ephemeral ECDH
+      // In passkey mode, this is mandatory - we already verified sender has ephemeral keys
+      if (receiverEphemeral && senderEphemeralPub && eventSalt) {
+        // Derive session key from ephemeral ECDH
+        // SECURITY: This key is derived from ephemeral keys whose private material
+        // was NEVER exposed as raw bytes, providing true Perfect Forward Secrecy
+        key = await deriveSessionEncryptionKey(
+          receiverEphemeral.ephemeralPrivateKey,
+          senderEphemeralPub,
+          eventSalt
+        )
+      }
+
       // Send ready ACK (seq=0) - include nonce for replay protection in mutual trust mode
-      const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0, hint, eventNonce)
+      // Include receiver's ephemeral key and binding for PFS
+      const readyAck = createAckEvent(
+        secretKey,
+        senderPubkey,
+        transferId,
+        0,
+        hint,
+        eventNonce,
+        receiverEphemeral?.ephemeralPublicKeyBytes,
+        receiverEphemeral?.sessionBinding
+      )
       await client.publish(readyAck)
 
       if (cancelledRef.current) return

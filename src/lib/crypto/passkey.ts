@@ -6,10 +6,16 @@
  */
 
 import { p256 } from '@noble/curves/nist.js'
-import { publicKeyToFingerprint, importECDHPrivateKey } from './ecdh'
+import {
+  publicKeyToFingerprint,
+  importECDHPrivateKey,
+  generateECDHKeyPair,
+  deriveSharedSecretKey,
+} from './ecdh'
 
 // Constants
 const PASSKEY_ECDH_LABEL = 'secure-send-passkey-ecdh-v1'
+const SESSION_BINDING_LABEL = 'secure-send-session-bind-v1'
 
 /**
  * Derive deterministic ECDH keypair from passkey master key.
@@ -324,4 +330,223 @@ function base64urlDecode(str: string): ArrayBuffer {
     bytes[i] = binary.charCodeAt(i)
   }
   return bytes.buffer
+}
+
+// ============================================================================
+// EPHEMERAL SESSION KEYS FOR PERFECT FORWARD SECRECY
+// ============================================================================
+
+/**
+ * Result of ephemeral session keypair generation with identity binding.
+ */
+export interface EphemeralSessionKeypair {
+  /** Ephemeral public key bytes (65 bytes uncompressed P-256) for transmission */
+  ephemeralPublicKeyBytes: Uint8Array
+  /** Ephemeral private key - non-extractable CryptoKey, raw bytes NEVER exposed */
+  ephemeralPrivateKey: CryptoKey
+  /** Identity public key bytes from passkey derivation (for fingerprint display) */
+  identityPublicKeyBytes: Uint8Array
+  /** Identity fingerprint (16 hex chars) for UI verification */
+  identityFingerprint: string
+  /**
+   * Session binding - cryptographic proof that this ephemeral key is authorized
+   * by the passkey identity. Computed as: HKDF(identitySharedSecret, ephemeralPub)
+   * Both parties can verify this because they share the identity-level ECDH secret.
+   */
+  sessionBinding: Uint8Array
+}
+
+/**
+ * Generate ephemeral session ECDH keypair with identity binding for Perfect Forward Secrecy.
+ *
+ * SECURITY: Unlike deriveECDHKeypairFromMasterKey, this function provides PFS:
+ * - Uses Web Crypto's generateKey which NEVER exposes raw private key material
+ * - Each session uses fresh ephemeral keys
+ * - Compromising one session's memory doesn't affect past/future sessions
+ * - Similar to how TLS/HTTPS uses ephemeral ECDHE for forward secrecy
+ *
+ * The passkey-derived identity is still used for:
+ * - Identity verification (fingerprint display to users)
+ * - Session binding (proving ephemeral keys are authorized by this identity)
+ *
+ * Protocol flow:
+ * 1. Sender generates ephemeral keypair with binding
+ * 2. Sender includes ephemralPub + sessionBinding in initial event
+ * 3. Receiver verifies binding using their copy of identitySharedSecret
+ * 4. Receiver generates their ephemeral keypair with binding
+ * 5. Receiver includes ephemeralPub + sessionBinding in ACK
+ * 6. Sender verifies receiver's binding
+ * 7. Both compute: ECDH(ownEphemeralPriv, peerEphemeralPub) = sessionSecret
+ * 8. File encryption uses sessionSecret (PFS protected)
+ *
+ * @param identitySharedSecretKey - HKDF CryptoKey from passkey-level ECDH (deriveSharedSecretKey)
+ * @param ownIdentityPublicKeyBytes - Own passkey-derived public key (for fingerprint)
+ * @returns Ephemeral session keypair with identity binding
+ */
+export async function generateEphemeralSessionKeypair(
+  identitySharedSecretKey: CryptoKey,
+  ownIdentityPublicKeyBytes: Uint8Array
+): Promise<EphemeralSessionKeypair> {
+  // Generate ephemeral ECDH keypair using Web Crypto
+  // SECURITY: Raw private key material is NEVER exposed to JavaScript
+  const ephemeralKeypair = await generateECDHKeyPair()
+
+  // Compute identity fingerprint for UI display
+  const identityFingerprint = await publicKeyToFingerprint(ownIdentityPublicKeyBytes)
+
+  // Create session binding: HKDF(identitySharedSecret, salt=ephemeralPub, info=label)
+  // This proves the ephemeral key is authorized by the passkey identity pair.
+  // Both parties can compute and verify this because they share identitySharedSecretKey.
+  const bindingBits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: ephemeralKeypair.publicKeyBytes as BufferSource,
+      info: new TextEncoder().encode(SESSION_BINDING_LABEL),
+    },
+    identitySharedSecretKey,
+    256 // 32 bytes
+  )
+
+  return {
+    ephemeralPublicKeyBytes: ephemeralKeypair.publicKeyBytes,
+    ephemeralPrivateKey: ephemeralKeypair.privateKey,
+    identityPublicKeyBytes: ownIdentityPublicKeyBytes,
+    identityFingerprint,
+    sessionBinding: new Uint8Array(bindingBits),
+  }
+}
+
+/**
+ * Verify that an ephemeral public key is bound to a passkey identity.
+ * This prevents ephemeral key substitution attacks (MITM).
+ *
+ * @param identitySharedSecretKey - HKDF CryptoKey from passkey-level ECDH
+ * @param ephemeralPublicKeyBytes - Peer's ephemeral public key to verify
+ * @param expectedBinding - Session binding provided by peer
+ * @returns true if binding is valid, false otherwise
+ */
+export async function verifySessionBinding(
+  identitySharedSecretKey: CryptoKey,
+  ephemeralPublicKeyBytes: Uint8Array,
+  expectedBinding: Uint8Array
+): Promise<boolean> {
+  // Recompute the binding using shared identity secret
+  const computedBits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: ephemeralPublicKeyBytes as BufferSource,
+      info: new TextEncoder().encode(SESSION_BINDING_LABEL),
+    },
+    identitySharedSecretKey,
+    256 // 32 bytes
+  )
+
+  const computed = new Uint8Array(computedBits)
+
+  // Constant-time comparison to prevent timing attacks
+  if (computed.length !== expectedBinding.length) return false
+  let result = 0
+  for (let i = 0; i < computed.length; i++) {
+    result |= computed[i] ^ expectedBinding[i]
+  }
+  return result === 0
+}
+
+/**
+ * Complete passkey authentication and generate ephemeral session keypair.
+ * This is the main entry point for passkey-based transfers with PFS.
+ *
+ * SECURITY: Provides Perfect Forward Secrecy:
+ * - Identity keypair derived from passkey (for fingerprint, temporarily exposes raw bytes)
+ * - Ephemeral keypair generated via Web Crypto (raw bytes NEVER exposed)
+ * - Actual encryption uses ephemeral keys, not identity keys
+ * - Compromising identity raw bytes doesn't help decrypt past sessions
+ *
+ * @param peerIdentityPublicKeyBytes - Peer's passkey-derived public key
+ * @param credentialId - Optional credential ID to use specific passkey
+ * @returns Session keypair with identity info and binding for verification
+ */
+export async function getPasskeySessionKeypair(
+  peerIdentityPublicKeyBytes: Uint8Array,
+  credentialId?: string
+): Promise<{
+  ephemeral: EphemeralSessionKeypair
+  identityPrivateKey: CryptoKey // For legacy compatibility, may be removed
+  identitySharedSecretKey: CryptoKey // Non-extractable HKDF key for session binding
+}> {
+  // Get passkey master key
+  const masterKey = await getPasskeyMasterKey(credentialId)
+
+  // Derive identity keypair (temporarily exposes raw bytes for public key computation)
+  const { publicKeyBytes: identityPublicKeyBytes, privateKey: identityPrivateKey } =
+    await deriveECDHKeypairFromMasterKey(masterKey)
+
+  // Derive identity-level shared secret (for session binding verification)
+  // SECURITY: Raw shared secret bytes stay inside Web Crypto as non-extractable key
+  const identitySharedSecretKey = await deriveSharedSecretKey(
+    identityPrivateKey,
+    peerIdentityPublicKeyBytes
+  )
+
+  // Generate ephemeral session keypair with identity binding
+  // SECURITY: Ephemeral private key is NEVER exposed as raw bytes
+  const ephemeral = await generateEphemeralSessionKeypair(
+    identitySharedSecretKey,
+    identityPublicKeyBytes
+  )
+
+  return {
+    ephemeral,
+    identityPrivateKey,
+    identitySharedSecretKey,
+  }
+}
+
+/**
+ * Derive session encryption key from ephemeral ECDH.
+ * This is the key used for actual file encryption (PFS protected).
+ *
+ * @param ephemeralPrivateKey - Own ephemeral private key (non-extractable)
+ * @param peerEphemeralPublicKeyBytes - Peer's ephemeral public key
+ * @param salt - Per-transfer salt for key derivation
+ * @returns Non-extractable AES-GCM key for encryption/decryption
+ */
+export async function deriveSessionEncryptionKey(
+  ephemeralPrivateKey: CryptoKey,
+  peerEphemeralPublicKeyBytes: Uint8Array,
+  salt: Uint8Array
+): Promise<CryptoKey> {
+  // Import the peer's ephemeral public key and compute shared secret
+  const { importECDHPublicKey } = await import('./ecdh')
+  const peerEphemeralPublicKey = await importECDHPublicKey(peerEphemeralPublicKeyBytes)
+
+  // Derive shared secret as HKDF key (never exposed as raw bytes)
+  const ephemeralSharedSecretKey = await crypto.subtle.deriveKey(
+    {
+      name: 'ECDH',
+      public: peerEphemeralPublicKey,
+    },
+    ephemeralPrivateKey,
+    {
+      name: 'HKDF',
+    },
+    false, // non-extractable
+    ['deriveKey', 'deriveBits']
+  )
+
+  // Derive AES-256-GCM key from ephemeral shared secret
+  return crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: salt as BufferSource,
+      info: new TextEncoder().encode('secure-send-session-key-v1'),
+    },
+    ephemeralSharedSecretKey,
+    { name: 'AES-GCM', length: 256 },
+    false, // non-extractable
+    ['encrypt', 'decrypt']
+  )
 }
