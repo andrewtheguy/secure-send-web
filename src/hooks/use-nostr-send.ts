@@ -36,7 +36,6 @@ import { readFileAsBytes } from '@/lib/file-utils'
 import { WebRTCConnection } from '@/lib/webrtc'
 import { getPasskeyECDHKeypair } from '@/lib/crypto/passkey'
 import {
-  importECDHPrivateKey,
   deriveSharedSecretKey,
   deriveAESKeyFromSecretKey,
   publicKeyToFingerprint,
@@ -156,10 +155,10 @@ export function useNostrSend(): UseNostrSendReturn {
           setState({ status: 'connecting', message: 'Authenticate with passkey...' })
 
           try {
-            // Authenticate and get our ECDH keypair
+            // Authenticate and get our ECDH keypair (privateKey is non-extractable CryptoKey)
             const {
               publicKeyBytes,
-              privateKeyBytes,
+              privateKey,
               publicKeyFingerprint,
             } = await getPasskeyECDHKeypair()
 
@@ -167,9 +166,6 @@ export function useNostrSend(): UseNostrSendReturn {
             setOwnPublicKey(publicKeyBytes)
             setOwnFingerprint(publicKeyFingerprint)
             senderFingerprint = publicKeyFingerprint
-
-            // Import our private key for ECDH
-            const privateKey = await importECDHPrivateKey(privateKeyBytes)
 
             // Derive shared secret as non-extractable HKDF CryptoKey
             // SECURITY: Raw shared secret bytes are never exposed to JavaScript

@@ -6,7 +6,7 @@
  */
 
 import { p256 } from '@noble/curves/nist.js'
-import { publicKeyToFingerprint } from './ecdh'
+import { publicKeyToFingerprint, importECDHPrivateKey } from './ecdh'
 
 // Constants
 const PASSKEY_ECDH_LABEL = 'secure-send-passkey-ecdh-v1'
@@ -14,12 +14,16 @@ const PASSKEY_ECDH_LABEL = 'secure-send-passkey-ecdh-v1'
 /**
  * Derive deterministic ECDH keypair from passkey master key.
  * Same passkey will always derive the same keypair across devices.
+ *
+ * SECURITY: The private key is returned as a non-extractable CryptoKey.
+ * Seed bytes are zeroed immediately after deriving the keypair.
  */
 export async function deriveECDHKeypairFromMasterKey(masterKey: CryptoKey): Promise<{
   publicKeyBytes: Uint8Array // 65 bytes uncompressed P-256 (0x04 || X || Y)
-  privateKeyBytes: Uint8Array // 32 bytes private scalar
+  privateKey: CryptoKey // Non-extractable ECDH private key
 }> {
   // Derive 32 bytes of seed from master key using HKDF
+  // Note: We must temporarily extract bytes to compute public key with noble/curves
   const info = new TextEncoder().encode(PASSKEY_ECDH_LABEL)
   const seedKey = await crypto.subtle.deriveKey(
     {
@@ -30,21 +34,25 @@ export async function deriveECDHKeypairFromMasterKey(masterKey: CryptoKey): Prom
     },
     masterKey,
     { name: 'AES-GCM', length: 256 },
-    true, // Extractable to get raw bytes
+    true, // Temporarily extractable to get raw bytes
     ['encrypt'] // Dummy usage
   )
 
-  // Export seed bytes
+  // Export seed bytes (temporarily in memory)
   const seedBytes = new Uint8Array(await crypto.subtle.exportKey('raw', seedKey))
 
-  // Use @noble/curves to derive P-256 keypair from seed
-  // The seed bytes are used directly as the private key
-  const privateKeyBytes = seedBytes
+  try {
+    // Derive public key from seed using noble/curves (uncompressed format = 65 bytes)
+    const publicKeyBytes = p256.getPublicKey(seedBytes, false)
 
-  // Derive public key from private key (uncompressed format = 65 bytes)
-  const publicKeyBytes = p256.getPublicKey(privateKeyBytes, false)
+    // Import as non-extractable CryptoKey for ECDH operations
+    const privateKey = await importECDHPrivateKey(seedBytes)
 
-  return { publicKeyBytes, privateKeyBytes }
+    return { publicKeyBytes, privateKey }
+  } finally {
+    // SECURITY: Zero out seed bytes immediately after use
+    seedBytes.fill(0)
+  }
 }
 
 /**
@@ -112,21 +120,23 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<Crypto
  * Single call: authenticate with passkey and get ECDH keypair with fingerprint.
  * This is the main entry point for passkey-based ECDH.
  *
+ * SECURITY: Returns non-extractable CryptoKey for private key operations.
+ *
  * @param credentialId - Optional base64url credential ID to use specific passkey (skips picker)
  * @returns Keypair with prfSupported flag (true if we got here, throws otherwise)
  */
 export async function getPasskeyECDHKeypair(credentialId?: string): Promise<{
   publicKeyBytes: Uint8Array
-  privateKeyBytes: Uint8Array
+  privateKey: CryptoKey // Non-extractable ECDH private key
   publicKeyFingerprint: string
   prfSupported: boolean
 }> {
   const masterKey = await getPasskeyMasterKey(credentialId)
-  const { publicKeyBytes, privateKeyBytes } = await deriveECDHKeypairFromMasterKey(masterKey)
+  const { publicKeyBytes, privateKey } = await deriveECDHKeypairFromMasterKey(masterKey)
   const publicKeyFingerprint = await publicKeyToFingerprint(publicKeyBytes)
 
   // If we got here, PRF worked (getPasskeyMasterKey throws if PRF fails)
-  return { publicKeyBytes, privateKeyBytes, publicKeyFingerprint, prfSupported: true }
+  return { publicKeyBytes, privateKey, publicKeyFingerprint, prfSupported: true }
 }
 
 // publicKeyToFingerprint is used from ecdh.ts
