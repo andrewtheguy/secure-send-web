@@ -138,7 +138,7 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                 <li><span className="text-foreground">PIN format:</span> 12 characters with built-in checksum for typo detection</li>
                 <li><span className="text-foreground">Max size:</span> 100 MB per transfer</li>
                 <li><span className="text-foreground">PIN expiry:</span> 1 hour</li>
-                <li><span className="text-foreground">Signaling:</span> Auto-detected from PIN (uppercase = Nostr, lowercase = PeerJS, "2" = QR)</li>
+                <li><span className="text-foreground">Signaling:</span> Auto-detected from PIN (uppercase = Nostr, "2" = QR/Manual)</li>
               </ul>
             </section>
 
@@ -149,10 +149,6 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                 <div>
                   <p className="text-foreground font-medium">Nostr (Default) — PIN starts with uppercase</p>
                   <p className="text-sm">Requires internet. Uses decentralized Nostr relays for signaling. Devices can be on different networks. If P2P connection fails, automatically falls back to encrypted cloud transfer.</p>
-                </div>
-                <div>
-                  <p className="text-foreground font-medium">PeerJS — PIN starts with lowercase</p>
-                  <p className="text-sm">Requires internet. Uses PeerJS cloud server for simpler P2P signaling. Devices can be on different networks. No cloud fallback - transfer fails if P2P connection cannot be established.</p>
                 </div>
                 <div>
                   <p className="text-foreground font-medium">Manual Exchange — PIN starts with "2"</p>

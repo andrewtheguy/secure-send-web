@@ -39,7 +39,8 @@ export interface TransferState {
   contentType?: ContentType
   fileMetadata?: FileMetadata
   useWebRTC?: boolean
-  currentRelays?: string[] // Current relay URLs being used (for signaling)
+  currentRelays?: string[] // Connected relay URLs being used (for signaling)
+  totalRelays?: number     // Total relays attempted to connect
 }
 
 // PIN Exchange payload (encrypted in the event)
@@ -98,7 +99,8 @@ export interface SignalingPayload {
 
 export interface WebRTCOptions {
   relayOnly?: boolean
+  usePasskey?: boolean
 }
 
 // Signaling method for P2P connection
-export type SignalingMethod = 'nostr' | 'peerjs' | 'manual'
+export type SignalingMethod = 'nostr' | 'manual'

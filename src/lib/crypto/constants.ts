@@ -12,10 +12,9 @@ export const PIN_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456
 export const PIN_WORDLIST = BIP39_EN_WORDLIST
 
 // First character charset split (for signaling method detection)
-// Uppercase = Nostr, Lowercase = PeerJS, '2' = QR, Rest = Reserved for future
-// L is excluded here (kept in PIN_CHARSET) to keep symmetry at 23 symbols and leave room for a future protocol; lowercase l remains excluded everywhere as an ambiguous character
+// Uppercase = Nostr, '2' = QR/Manual, Rest = Reserved for future
+// I, L, O are excluded (ambiguous chars) to keep symmetry at 23 symbols and leave room for a future protocol
 export const NOSTR_FIRST_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ' // 23 uppercase (excluding I, L, O)
-export const PEERJS_FIRST_CHARSET = 'abcdefghjkmnpqrstuvwxyz' // 23 lowercase (excluding i, l, o)
 
 export const QR_FIRST_CHARSET = '2' // Single digit for QR method
 // Reserved for future protocols: '3456789-/:;()$&@?!.,"' (remaining digits + symbols)

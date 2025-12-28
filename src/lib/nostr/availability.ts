@@ -1,4 +1,6 @@
-import { DEFAULT_RELAYS, RELAY_CONNECT_TIMEOUT_MS } from './relays'
+import { DEFAULT_RELAYS } from './relays'
+
+const RELAY_PROBE_TIMEOUT = 3000
 
 export interface RelayAvailabilityResult {
   available: boolean
@@ -7,58 +9,52 @@ export interface RelayAvailabilityResult {
 }
 
 /**
+ * Simple probe - just check if relay is reachable via WebSocket
+ * Closes connection immediately after success
+ */
+async function probeRelay(url: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    let ws: WebSocket | null = null
+    const timeout = setTimeout(() => {
+      if (ws) {
+        ws.close()
+      }
+      resolve(null)
+    }, RELAY_PROBE_TIMEOUT)
+
+    try {
+      ws = new WebSocket(url)
+      ws.onopen = () => {
+        clearTimeout(timeout)
+        ws?.close()
+        resolve(url)
+      }
+      ws.onerror = () => {
+        clearTimeout(timeout)
+        resolve(null)
+      }
+    } catch {
+      clearTimeout(timeout)
+      resolve(null)
+    }
+  })
+}
+
+/**
  * Test Nostr relay availability by attempting WebSocket connections.
- * Returns quickly with availability status.
+ * Probes all relays in parallel and returns which ones are available.
  *
  * @param relays - Relay URLs to test (defaults to DEFAULT_RELAYS)
- * @param minConnections - Minimum connections required for "available" (default: 1)
- * @param timeoutMs - Timeout in milliseconds (default: RELAY_CONNECT_TIMEOUT_MS)
  */
 export async function testRelayAvailability(
-  relays: string[] = [...DEFAULT_RELAYS],
-  minConnections: number = 1,
-  timeoutMs: number = RELAY_CONNECT_TIMEOUT_MS
+  relays: string[] = [...DEFAULT_RELAYS]
 ): Promise<RelayAvailabilityResult> {
-  const connectedRelays: string[] = []
-  const sockets: WebSocket[] = []
-
   try {
-    const connectionPromises = relays.map(async (relay) => {
-      return new Promise<string | null>((resolve) => {
-        try {
-          const ws = new WebSocket(relay)
-          sockets.push(ws)
-
-          const timeout = setTimeout(() => {
-            ws.close()
-            resolve(null)
-          }, timeoutMs)
-
-          ws.onopen = () => {
-            clearTimeout(timeout)
-            resolve(relay)
-          }
-
-          ws.onerror = () => {
-            clearTimeout(timeout)
-            resolve(null)
-          }
-        } catch {
-          resolve(null)
-        }
-      })
-    })
-
-    const results = await Promise.allSettled(connectionPromises)
-
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value) {
-        connectedRelays.push(result.value)
-      }
-    }
+    const results = await Promise.all(relays.map(url => probeRelay(url)))
+    const connectedRelays = results.filter((r): r is string => r !== null)
 
     return {
-      available: connectedRelays.length >= minConnections,
+      available: connectedRelays.length > 0,
       connectedRelays,
     }
   } catch (error) {
@@ -66,15 +62,6 @@ export async function testRelayAvailability(
       available: false,
       connectedRelays: [],
       error: error instanceof Error ? error.message : 'Unknown error',
-    }
-  } finally {
-    // Clean up all WebSocket connections
-    for (const ws of sockets) {
-      try {
-        ws.close()
-      } catch {
-        // Ignore close errors
-      }
     }
   }
 }

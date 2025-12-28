@@ -15,7 +15,8 @@
       "Bash(npx tsc:*)",
       "Bash(rsvg-convert:*)",
       "Bash(npm ls:*)",
-      "mcp__brave-search__brave_web_search"
+      "mcp__brave-search__brave_web_search",
+      "Bash(npm run test:*)"
     ]
   }
 }

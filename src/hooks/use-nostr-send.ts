@@ -12,13 +12,14 @@ import {
   TRANSFER_EXPIRATION_MS,
   CLOUD_CHUNK_SIZE,
   ENCRYPTION_CHUNK_SIZE,
+  deriveKeyFromPasskeyMasterKey,
+  getPasskeyMasterKeyAndFingerprint,
 } from '@/lib/crypto'
 import {
   createNostrClient,
   generateEphemeralKeys,
   createPinExchangeEvent,
   parseAckEvent,
-  discoverBackupRelays,
   createSignalingEvent,
   parseSignalingEvent,
   createChunkNotifyEvent,
@@ -35,36 +36,10 @@ import type { Event } from 'nostr-tools'
 import { readFileAsBytes } from '@/lib/file-utils'
 import { WebRTCConnection } from '@/lib/webrtc'
 
-/**
- * Publish with backup relay fallback.
- * If primary publish fails, discovers backup relays and retries.
- */
-async function publishWithBackup(
-  client: NostrClient,
-  event: Event,
-  maxRetries: number = 3
-): Promise<void> {
-  try {
-    await client.publish(event, maxRetries)
-  } catch (err) {
-    // Primary relays failed, try to discover backup relays
-    console.log('Primary relays failed, discovering backup relays...')
-    const currentRelays = client.getRelays()
-    const backupRelays = await discoverBackupRelays(currentRelays, 5)
-
-    if (backupRelays.length === 0) {
-      throw err // No backup relays found, propagate original error
-    }
-
-    // Add backup relays and retry
-    await client.addRelays(backupRelays)
-    await client.publish(event, maxRetries)
-  }
-}
-
 export interface UseNostrSendReturn {
   state: TransferState
   pin: string | null
+  passkeyFingerprint: string | null
   send: (content: File, options?: WebRTCOptions) => Promise<void>
   cancel: () => void
 }
@@ -72,11 +47,17 @@ export interface UseNostrSendReturn {
 export function useNostrSend(): UseNostrSendReturn {
   const [state, setState] = useState<TransferState>({ status: 'idle' })
   const [pin, setPin] = useState<string | null>(null)
+  const [passkeyFingerprint, setPasskeyFingerprint] = useState<string | null>(null)
 
   const clientRef = useRef<NostrClient | null>(null)
   const cancelledRef = useRef(false)
   const sendingRef = useRef(false)
   const expirationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Refs for dual-mode passkey support
+  const passkeyKeyRef = useRef<CryptoKey | null>(null)
+  const passkeyHintRef = useRef<string | null>(null)
+  const pinKeyRef = useRef<CryptoKey | null>(null)
+  const pinHintRef = useRef<string | null>(null)
 
   const clearExpirationTimeout = useCallback(() => {
     if (expirationTimeoutRef.current) {
@@ -94,6 +75,11 @@ export function useNostrSend(): UseNostrSendReturn {
       clientRef.current = null
     }
     setPin(null)
+    setPasskeyFingerprint(null)
+    passkeyKeyRef.current = null
+    passkeyHintRef.current = null
+    pinKeyRef.current = null
+    pinHintRef.current = null
     setState({ status: 'idle' })
   }, [clearExpirationTimeout])
 
@@ -142,17 +128,68 @@ export function useNostrSend(): UseNostrSendReturn {
       setState({ status: 'connecting', message: 'Reading file...' })
       const contentBytes = await readFileAsBytes(content)
 
-      // Generate PIN and derive key
-      setState({ status: 'connecting', message: 'Generating secure PIN...' })
-      const newPin = generatePinForMethod('nostr')
+      // Generate PIN/passkey and derive key
       const sessionStartTime = Date.now()
-      setPin(newPin)
+      const salt = generateSalt()
+      let newPin: string
+      let key: CryptoKey
+      let pinHint: string
+
+      if (options?.usePasskey) {
+        // DUAL MODE: Generate BOTH normal PIN and passkey credentials
+        setState({ status: 'connecting', message: 'Generating secure credentials...' })
+
+        // 1. Generate normal PIN and key
+        newPin = generatePinForMethod('nostr')
+        pinHint = await computePinHint(newPin)
+        const normalPinKey = await deriveKeyFromPin(newPin, salt)
+
+        // Store PIN key and hint in refs for later
+        pinKeyRef.current = normalPinKey
+        pinHintRef.current = pinHint
+
+        // 2. Authenticate with passkey
+        setState({ status: 'connecting', message: 'Authenticate with passkey...' })
+        try {
+          const { masterKey, fingerprint } = await getPasskeyMasterKeyAndFingerprint()
+          const passkeyKey = await deriveKeyFromPasskeyMasterKey(masterKey, salt)
+
+          // Store passkey key and hint in refs
+          passkeyKeyRef.current = passkeyKey
+          passkeyHintRef.current = fingerprint
+
+          // Set PIN and passkey fingerprint for display
+          setPin(newPin)
+          setPasskeyFingerprint(fingerprint)
+
+          // Use PIN key as default (receiver chooses mode)
+          key = normalPinKey
+        } catch (err) {
+          setState({ status: 'error', message: err instanceof Error ? err.message : 'Passkey authentication failed' })
+          sendingRef.current = false
+          return
+        }
+      } else {
+        // Regular PIN mode (single key)
+        setState({ status: 'connecting', message: 'Generating secure PIN...' })
+        newPin = generatePinForMethod('nostr')
+        pinHint = await computePinHint(newPin)
+        key = await deriveKeyFromPin(newPin, salt)
+        pinKeyRef.current = key
+        pinHintRef.current = pinHint
+        setPin(newPin)
+      }
 
       // Best-effort cleanup: clear PIN state after expiration
       clearExpirationTimeout()
       expirationTimeoutRef.current = setTimeout(() => {
         if (!cancelledRef.current && sendingRef.current) {
           setPin(null)
+          setPasskeyFingerprint(null)
+          passkeyKeyRef.current = null
+          passkeyHintRef.current = null
+          pinKeyRef.current = null
+          pinHintRef.current = null
           setState({ status: 'error', message: 'Session expired. Please try again.' })
           sendingRef.current = false
           if (clientRef.current) {
@@ -161,9 +198,6 @@ export function useNostrSend(): UseNostrSendReturn {
           }
         }
       }, TRANSFER_EXPIRATION_MS)
-
-      const [pinHint, salt] = await Promise.all([computePinHint(newPin), Promise.resolve(generateSalt())])
-      const key = await deriveKeyFromPin(newPin, salt)
 
       if (cancelledRef.current) return
 
@@ -209,10 +243,24 @@ export function useNostrSend(): UseNostrSendReturn {
         fileMetadata: { fileName, fileSize, mimeType },
         useWebRTC: !options?.relayOnly,
         currentRelays: client.getRelays(),
+        totalRelays: DEFAULT_RELAYS.length,
       })
 
       const pinExchangeEvent = createPinExchangeEvent(secretKey, encryptedPayload, salt, transferId, pinHint)
-      await publishWithBackup(client, pinExchangeEvent)
+      await client.publish(pinExchangeEvent)
+
+      // If dual mode (passkey enabled), publish second event for passkey receivers
+      if (passkeyKeyRef.current && passkeyHintRef.current) {
+        const encryptedPayloadPasskey = await encrypt(passkeyKeyRef.current, payloadBytes)
+        const passkeyExchangeEvent = createPinExchangeEvent(
+          secretKey,
+          encryptedPayloadPasskey,
+          salt,
+          transferId,
+          passkeyHintRef.current
+        )
+        await client.publish(passkeyExchangeEvent)
+      }
 
       if (cancelledRef.current) return
 
@@ -220,7 +268,7 @@ export function useNostrSend(): UseNostrSendReturn {
       await client.waitForConnection()
 
       // Wait for receiver ready ACK (seq=0)
-      const receiverPubkey = await new Promise<string>((resolve, reject) => {
+      const { receiverPubkey, receiverHint } = await new Promise<{ receiverPubkey: string; receiverHint?: string }>((resolve, reject) => {
         const timeout = setTimeout(() => {
           client.unsubscribe(subId)
           if (!cancelledRef.current) {
@@ -248,7 +296,7 @@ export function useNostrSend(): UseNostrSendReturn {
             if (ack && ack.transferId === transferId && ack.seq === 0) {
               clearTimeout(timeout)
               client.unsubscribe(subId)
-              resolve(event.pubkey)
+              resolve({ receiverPubkey: event.pubkey, receiverHint: ack.hint })
             }
           }
         )
@@ -258,6 +306,23 @@ export function useNostrSend(): UseNostrSendReturn {
 
       // Receiver connected - PIN no longer needed
       setPin(null)
+      setPasskeyFingerprint(null)
+
+      // In dual mode, select the correct key based on receiver's hint
+      if (receiverHint && passkeyHintRef.current && receiverHint === passkeyHintRef.current) {
+        // Receiver used passkey mode
+        if (passkeyKeyRef.current) {
+          key = passkeyKeyRef.current
+          console.log('Using passkey-derived key for transfer')
+        }
+      } else if (receiverHint && pinHintRef.current && receiverHint === pinHintRef.current) {
+        // Receiver used PIN mode
+        if (pinKeyRef.current) {
+          key = pinKeyRef.current
+          console.log('Using PIN-derived key for transfer')
+        }
+      }
+      // If no hint match, continue with default key (already set)
 
       // Enforce TTL: reject if session has expired
       if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
@@ -364,6 +429,7 @@ export function useNostrSend(): UseNostrSendReturn {
                   contentType,
                   fileMetadata: { fileName, fileSize, mimeType },
                   currentRelays: prevState.currentRelays, // Preserve for debugging
+                  totalRelays: prevState.totalRelays,
                   useWebRTC: true,
                 }))
 
@@ -513,6 +579,7 @@ export function useNostrSend(): UseNostrSendReturn {
           contentType,
           fileMetadata: { fileName, fileSize, mimeType },
           currentRelays: client.getRelays(),
+          totalRelays: DEFAULT_RELAYS.length,
         })
 
         const encryptedContent = await encrypt(key, contentBytes)
@@ -613,6 +680,7 @@ export function useNostrSend(): UseNostrSendReturn {
         message: successMsg,
         contentType,
         currentRelays: prevState.currentRelays, // Preserve for debugging
+        totalRelays: prevState.totalRelays,
         useWebRTC: prevState.useWebRTC,
       }))
     } catch (error) {
@@ -635,7 +703,7 @@ export function useNostrSend(): UseNostrSendReturn {
     }
   }, [clearExpirationTimeout])
 
-  return { state, pin, send, cancel }
+  return { state, pin, passkeyFingerprint, send, cancel }
 }
 
 /**

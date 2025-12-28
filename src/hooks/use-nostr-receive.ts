@@ -9,21 +9,22 @@ import {
   ENCRYPTION_CHUNK_SIZE,
   CLOUD_CHUNK_SIZE,
   TRANSFER_EXPIRATION_MS,
+  deriveKeyFromPasskeyMasterKey,
+  getPasskeyMasterKeyAndFingerprint,
 } from '@/lib/crypto'
 import {
   createNostrClient,
   generateEphemeralKeys,
   parsePinExchangeEvent,
   createAckEvent,
-  discoverBackupRelays,
   parseChunkNotifyEvent,
   DEFAULT_RELAYS,
   type TransferState,
   type PinExchangePayload,
   type ChunkNotifyPayload,
+  type NostrClient,
   EVENT_KIND_PIN_EXCHANGE,
   EVENT_KIND_DATA_TRANSFER,
-  type NostrClient,
   createSignalingEvent,
   parseSignalingEvent,
 } from '@/lib/nostr'
@@ -32,37 +33,15 @@ import { downloadFromCloud } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { WebRTCConnection } from '@/lib/webrtc'
 
-/**
- * Publish with backup relay fallback.
- * If primary publish fails, discovers backup relays and retries.
- */
-async function publishWithBackup(
-  client: NostrClient,
-  event: Event,
-  maxRetries: number = 3
-): Promise<void> {
-  try {
-    await client.publish(event, maxRetries)
-  } catch (err) {
-    // Primary relays failed, try to discover backup relays
-    console.log('Primary relays failed, discovering backup relays...')
-    const currentRelays = client.getRelays()
-    const backupRelays = await discoverBackupRelays(currentRelays, 5)
-
-    if (backupRelays.length === 0) {
-      throw err // No backup relays found, propagate original error
-    }
-
-    // Add backup relays and retry
-    await client.addRelays(backupRelays)
-    await client.publish(event, maxRetries)
-  }
+export interface ReceiveOptions {
+  usePasskey?: boolean
 }
 
 export interface UseNostrReceiveReturn {
   state: TransferState
   receivedContent: ReceivedContent | null
-  receive: (pinMaterial: PinKeyMaterial) => Promise<void>
+  passkeyFingerprint: string | null
+  receive: (pinMaterial: PinKeyMaterial | ReceiveOptions) => Promise<void>
   cancel: () => void
   reset: () => void
 }
@@ -70,6 +49,7 @@ export interface UseNostrReceiveReturn {
 export function useNostrReceive(): UseNostrReceiveReturn {
   const [state, setState] = useState<TransferState>({ status: 'idle' })
   const [receivedContent, setReceivedContent] = useState<ReceivedContent | null>(null)
+  const [passkeyFingerprint, setPasskeyFingerprint] = useState<string | null>(null)
 
   const clientRef = useRef<NostrClient | null>(null)
   const cancelledRef = useRef(false)
@@ -82,30 +62,55 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       clientRef.current.close()
       clientRef.current = null
     }
+    setPasskeyFingerprint(null)
     setState({ status: 'idle' })
   }, [])
 
   const reset = useCallback(() => {
     cancel()
     setReceivedContent(null)
+    setPasskeyFingerprint(null)
   }, [cancel])
 
-  const receive = useCallback(async (pinMaterial: PinKeyMaterial) => {
+  const receive = useCallback(async (arg: PinKeyMaterial | ReceiveOptions) => {
     // Guard against concurrent invocations
     if (receivingRef.current) return
     receivingRef.current = true
     cancelledRef.current = false
     setReceivedContent(null)
 
-    try {
-      if (!pinMaterial?.key || !pinMaterial?.hint) {
-        setState({ status: 'error', message: 'PIN unavailable. Please re-enter.' })
-        return
-      }
+    // Determine if this is passkey mode or PIN mode
+    const isPasskeyMode = 'usePasskey' in arg && arg.usePasskey === true
+    const pinMaterial = isPasskeyMode ? null : (arg as PinKeyMaterial)
 
-      // Derive key from PIN
-      setState({ status: 'connecting', message: 'Deriving encryption key...' })
-      const pinHint = pinMaterial.hint
+    try {
+      let pinHint: string
+      let passkeyMaster: CryptoKey | null = null
+
+      if (isPasskeyMode) {
+        // Passkey mode: authenticate once to get master key + fingerprint
+        setState({ status: 'connecting', message: 'Authenticate with passkey...' })
+        try {
+          const { masterKey, fingerprint } = await getPasskeyMasterKeyAndFingerprint()
+          passkeyMaster = masterKey
+          pinHint = fingerprint
+          // Store fingerprint for UI display (verification)
+          setPasskeyFingerprint(fingerprint)
+        } catch (err) {
+          setState({ status: 'error', message: err instanceof Error ? err.message : 'Passkey authentication failed' })
+          receivingRef.current = false
+          return
+        }
+      } else {
+        // PIN mode: use provided material
+        if (!pinMaterial?.key || !pinMaterial?.hint) {
+          setState({ status: 'error', message: 'PIN unavailable. Please re-enter.' })
+          receivingRef.current = false
+          return
+        }
+        setState({ status: 'connecting', message: 'Deriving encryption key...' })
+        pinHint = pinMaterial.hint
+      }
 
       if (cancelledRef.current) return
 
@@ -131,7 +136,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       if (cancelledRef.current) return
 
       if (events.length === 0) {
-        setState({ status: 'error', message: 'No transfer found for this PIN' })
+        setState({ status: 'error', message: isPasskeyMode ? 'No transfer found for this passkey' : 'No transfer found for this PIN' })
         return
       }
 
@@ -165,7 +170,18 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
         try {
           // Derive key with this salt
-          const derivedKey = await deriveKeyFromPinKey(pinMaterial.key, parsed.salt)
+          let derivedKey: CryptoKey
+          if (isPasskeyMode) {
+            if (!passkeyMaster) {
+              setState({ status: 'error', message: 'Passkey authentication unavailable' })
+              return
+            }
+            // Passkey mode: derive key from master key with salt (no prompt)
+            derivedKey = await deriveKeyFromPasskeyMasterKey(passkeyMaster, parsed.salt)
+          } else {
+            // PIN mode: derive key from PIN key material
+            derivedKey = await deriveKeyFromPinKey(pinMaterial!.key, parsed.salt)
+          }
 
           // Try to decrypt
           const decrypted = await decrypt(derivedKey, parsed.encryptedPayload)
@@ -186,10 +202,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       if (!payload || !transferId || !senderPubkey || !key) {
         if (!sawNonExpiredCandidate && sawExpiredCandidate) {
-          setState({ status: 'error', message: 'Transfer expired. Ask sender to generate a new PIN.' })
+          setState({ status: 'error', message: 'Transfer expired. Ask sender to start a new transfer.' })
           return
         }
-        setState({ status: 'error', message: 'Could not decrypt transfer. Wrong PIN?' })
+        setState({ status: 'error', message: isPasskeyMode ? 'Could not decrypt transfer. Different passkey?' : 'Could not decrypt transfer. Wrong PIN?' })
         return
       }
 
@@ -223,10 +239,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Generate receiver keypair
       const { secretKey } = generateEphemeralKeys()
 
-      // Send ready ACK (seq=0)
+      // Send ready ACK (seq=0) with hint so sender knows which key to use
       console.log(`Sending ready ACK (seq=0) for transfer ${transferId}`)
-      const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0)
-      await publishWithBackup(client, readyAck)
+      const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0, pinHint)
+      await client.publish(readyAck)
       console.log(`✓ Ready ACK sent successfully`)
 
       if (cancelledRef.current) return
@@ -242,6 +258,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         },
         useWebRTC: false,
         currentRelays: client.getRelays(),
+        totalRelays: DEFAULT_RELAYS.length,
       })
 
       // Unified listener for both P2P and chunked cloud transfer
@@ -474,7 +491,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               transferId!,
               chunkPayload.chunkIndex + 1
             )
-            await publishWithBackup(client, chunkAck)
+            await client.publish(chunkAck)
             console.log(`Chunk ${chunkPayload.chunkIndex + 1} ACK sent`)
 
             // Check if all chunks received
@@ -589,7 +606,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Send completion ACK
       console.log(`Sending completion ACK (seq=-1) for transfer ${transferId}`)
       const completeAck = createAckEvent(secretKey, senderPubkey, transferId, -1)
-      await publishWithBackup(client, completeAck)
+      await client.publish(completeAck)
       console.log(`✓ Completion ACK sent successfully`)
 
       // Set received content
@@ -610,6 +627,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           mimeType: resolvedMimeType,
         },
         currentRelays: prevState.currentRelays, // Preserve for debugging
+        totalRelays: prevState.totalRelays,
         useWebRTC: prevState.useWebRTC,
       }))
     } catch (error) {
@@ -630,5 +648,5 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     }
   }, [])
 
-  return { state, receivedContent, receive, cancel, reset }
+  return { state, receivedContent, passkeyFingerprint, receive, cancel, reset }
 }
