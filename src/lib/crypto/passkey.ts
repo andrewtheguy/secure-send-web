@@ -306,11 +306,8 @@ function base64urlEncode(data: Uint8Array): string {
 }
 
 async function credentialIdToFingerprint(credentialId: Uint8Array): Promise<string> {
-  const credentialBytes = credentialId.buffer.slice(
-    credentialId.byteOffset,
-    credentialId.byteOffset + credentialId.byteLength
-  )
-  const hash = await crypto.subtle.digest('SHA-256', credentialBytes)
+  const credentialBytes = new Uint8Array(credentialId)
+  const hash = await crypto.subtle.digest('SHA-256', credentialBytes as BufferSource)
   const hashArray = new Uint8Array(hash)
 
   // Convert first 8 bytes to alphanumeric (base36-ish)
