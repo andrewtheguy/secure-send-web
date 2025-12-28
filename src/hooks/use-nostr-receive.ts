@@ -144,9 +144,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           hint = publicKeyFingerprint
 
           // Store key derivation function in closure for event processing
-          const secretKey = sharedSecretKey // Capture for closure
+          const ecdhSharedSecret = sharedSecretKey // Capture for closure
           deriveKeyWithSalt = async (salt: Uint8Array) => {
-            return deriveAESKeyFromSecretKey(secretKey, salt)
+            return deriveAESKeyFromSecretKey(ecdhSharedSecret, salt)
           }
         } catch (err) {
           setState({
