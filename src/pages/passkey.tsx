@@ -60,6 +60,7 @@ export function PasskeyPage() {
       // Create the passkey
       const result = await createPasskeyCredential(userName || 'Secure Transfer User')
       setPrfSupported(result.prfSupported)
+      setUserName('') // Clear display name input after successful creation
       setSuccess(
         'Passkey created successfully! Click "Authenticate & Get Public Key" above to retrieve your public key for sharing.'
       )
