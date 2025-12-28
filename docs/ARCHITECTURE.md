@@ -109,6 +109,7 @@ sequenceDiagram
 | `pin.ts` | Alphanumeric (12-char) and Word (7-word) PIN handling, weighted checksums, signaling detection |
 | `kdf.ts` | Key derivation using PBKDF2-SHA256 (600,000 iterations) |
 | `passkey.ts` | WebAuthn PRF extension for passkey-based key derivation |
+| `ecdh.ts` | ECDH key exchange (non-extractable keys), fingerprints, key confirmation, public key commitment, constant-time comparison |
 | `aes-gcm.ts` | AES-256-GCM encryption/decryption |
 | `stream-crypto.ts` | Streaming encryption/decryption (128KB chunks, protocol-agnostic) |
 | `constants.ts` | Crypto parameters, charsets (69 chars), BIP-39 wordlist (2048 words) |
@@ -166,6 +167,28 @@ flowchart TD
 2. **Per-Transfer Key**: HKDF with random salt derives unique AES key per transfer
 3. **No PIN Required**: Biometric/device unlock replaces PIN entry
 
+#### Mutual Trust Key Derivation (Non-Extractable Keys)
+
+When using passkey mutual trust mode, the ECDH shared secret is kept as a **non-extractable CryptoKey** throughout the entire derivation chain:
+
+```mermaid
+flowchart TD
+    PrivKey[ECDH Private Key] --> DeriveKey[Web Crypto deriveKey]
+    PeerPubKey[Peer's Public Key] --> DeriveKey
+    DeriveKey --> SharedSecretKey[Shared Secret<br/>non-extractable HKDF CryptoKey]
+    SharedSecretKey --> AES[deriveKey → AES-256-GCM]
+    SharedSecretKey --> KC[deriveBits → Key Confirmation]
+    Salt[Random Salt] --> AES
+    Salt --> KC
+```
+
+**Security benefit**: The raw ECDH shared secret (32 bytes) never appears as a `Uint8Array` in JavaScript memory. Instead, Web Crypto's `deriveKey` chains ECDH directly to HKDF, producing a non-extractable `CryptoKey`. This prevents:
+- XSS attacks from reading the shared secret via memory inspection
+- Accidental logging or serialization of the secret
+- Side-channel attacks on the raw secret bytes
+
+**Implementation**: `deriveSharedSecretKey()`, `deriveAESKeyFromSecretKey()`, and `deriveKeyConfirmationFromSecretKey()` in `src/lib/crypto/ecdh.ts`
+
 #### Dual Mode (Sender)
 
 When passkey mode is enabled, the sender generates BOTH:
@@ -173,6 +196,56 @@ When passkey mode is enabled, the sender generates BOTH:
 - Passkey fingerprint + passkey-derived key
 
 Two PIN exchange events are published to Nostr (one for each mode). Receiver chooses their preferred authentication method, and the ACK includes a hint indicating which key was used.
+
+#### Mutual Trust Security Enhancements
+
+When using passkey mode, additional cryptographic protections are applied:
+
+| Enhancement | Event Tag | Purpose |
+|-------------|-----------|---------|
+| Key Confirmation | `kc` | HKDF-derived hash proves both parties derived same shared secret (MITM detection) |
+| Receiver PK Commitment | `rpkc` | SHA-256 of receiver's public key prevents relay substitution attacks |
+| Replay Nonce | `n` | 16-byte random nonce (base64) echoed in ACK prevents replay attacks within TTL |
+| Constant-Time Comparison | N/A | All security-critical string comparisons use timing-attack-resistant comparison |
+| Input Validation | N/A | Nonce must decode to exactly 16 bytes; key confirmation input validated as 16-byte Uint8Array |
+
+**Mutual Trust Event Tags:**
+```
+['h', receiverFingerprint]     // For event filtering
+['spk', senderFingerprint]     // Sender verification
+['kc', keyConfirmHash]         // Key confirmation (MITM detection)
+['rpkc', receiverPkCommitment] // Receiver PK commitment (relay MITM prevention)
+['n', nonce]                   // Replay nonce (base64, 16 bytes)
+['s', salt]                    // Per-transfer salt
+['t', transferId]              // Transfer ID
+['type', 'mutual_trust']       // Event type
+['expiration', timestamp]      // TTL (NIP-40)
+```
+
+**Verification Flow:**
+1. Sender computes key confirmation hash, receiver PK commitment, and random nonce
+2. Receiver verifies RPKC matches own public key (prevents relay MITM)
+3. Receiver verifies key confirmation hash matches (detects shared secret mismatch)
+4. Receiver echoes nonce in ready ACK
+5. Sender verifies nonce match using constant-time comparison (prevents replay)
+
+**Constant-Time Comparison Implementation:**
+
+The `constantTimeEqual()` function in `src/lib/crypto/ecdh.ts` provides timing-attack-resistant string comparison:
+
+- **Single loop**: Always iterates `maxLen = Math.max(a.length, b.length)` times
+- **No early returns**: Length mismatch is detected via XOR (`a.length ^ b.length`) accumulated into result
+- **Bounds checking**: Uses `i < a.length ? a.charCodeAt(i) : 0` instead of modulo indexing
+- **Bitwise accumulation**: All differences accumulated with `result |= charA ^ charB`
+
+> **Note:** This is a best-effort constant-time mitigation in JavaScript. True constant-time guarantees are not possible in JS due to JIT optimization, garbage collection, and string implementation details. However, this approach avoids obvious timing leaks from early returns or variable iteration counts.
+
+**Input Validation:**
+
+Security-critical functions validate inputs before cryptographic operations:
+
+- `hashKeyConfirmation()`: Validates input is exactly 16-byte Uint8Array before SHA-256 digest
+- `parseMutualTrustEvent()`: Validates nonce decodes to exactly 16 bytes, salt decodes to at least 16 bytes
 
 #### Security Properties
 
@@ -183,6 +256,11 @@ Two PIN exchange events are published to Nostr (one for each mode). Receiver cho
 | Phishing Resistance | None | Origin-bound credentials |
 | Sync Method | Out-of-band sharing | Password manager sync |
 | Verification | PIN match | Fingerprint comparison |
+| Key Confirmation | N/A | HKDF-derived hash proves same shared secret |
+| Relay MITM Protection | N/A | Public key commitment binding |
+| Replay Protection | TTL only | TTL + cryptographic nonce |
+| Timing Attack Prevention | N/A | Constant-time string comparisons |
+| Shared Secret Protection | Raw bytes in memory | Non-extractable CryptoKey (never exposed to JS) |
 
 ### User Interface Architecture
 
@@ -580,6 +658,10 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 8. **Protocol-Agnostic Security**: Same encryption layer used regardless of signaling method - no security difference between Nostr or Manual Exchange
 9. **Passkey Security**: WebAuthn PRF extension provides hardware-backed key derivation with origin-bound credentials and phishing resistance
 10. **Passkey Sync**: Requires same passkey synced via password manager (1Password, iCloud Keychain, Google Password Manager) - no out-of-band PIN sharing needed
+11. **XSS Protection**: Sensitive cryptographic material (shared secrets, key derivation functions) stored in closure scope, not on global `window` object
+12. **Resource Cleanup**: All error paths properly clean up timeouts and subscriptions to prevent resource leaks
+13. **Input Validation**: Cryptographic functions validate inputs (nonce length, key confirmation size) before operations to provide deterministic errors
+14. **Non-Extractable Shared Secret**: In passkey mutual trust mode, the ECDH shared secret is kept as a non-extractable `CryptoKey` throughout the derivation chain - raw bytes never exposed to JavaScript, preventing exfiltration via XSS or memory inspection
 
 ## File Structure
 

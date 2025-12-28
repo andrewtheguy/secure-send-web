@@ -37,10 +37,15 @@ import { WebRTCConnection } from '@/lib/webrtc'
 import { getPasskeyECDHKeypair } from '@/lib/crypto/passkey'
 import {
   importECDHPrivateKey,
-  deriveSharedSecret,
-  deriveAESKeyFromSecret,
+  deriveSharedSecretKey,
+  deriveAESKeyFromSecretKey,
   publicKeyToFingerprint,
+  deriveKeyConfirmationFromSecretKey,
+  hashKeyConfirmation,
+  computePublicKeyCommitment,
+  constantTimeEqual,
 } from '@/lib/crypto/ecdh'
+import { uint8ArrayToBase64 } from '@/lib/nostr/events'
 
 export interface UseNostrSendReturn {
   state: TransferState
@@ -135,6 +140,10 @@ export function useNostrSend(): UseNostrSendReturn {
         let key: CryptoKey
         let hint: string
         let senderFingerprint: string | undefined
+        // Security: Key confirmation, receiver PK commitment, and replay nonce
+        let keyConfirmHash: string | undefined
+        let receiverPkCommitment: string | undefined
+        let replayNonce: string | undefined
 
         if (options?.usePasskey && !options.receiverPublicKey) {
           setState({ status: 'error', message: 'Receiver public key required for passkey mode' })
@@ -162,11 +171,28 @@ export function useNostrSend(): UseNostrSendReturn {
             // Import our private key for ECDH
             const privateKey = await importECDHPrivateKey(privateKeyBytes)
 
-            // Derive shared secret with receiver's public key
-            const sharedSecret = await deriveSharedSecret(privateKey, options.receiverPublicKey)
+            // Derive shared secret as non-extractable HKDF CryptoKey
+            // SECURITY: Raw shared secret bytes are never exposed to JavaScript
+            const sharedSecretKey = await deriveSharedSecretKey(privateKey, options.receiverPublicKey)
 
-            // Derive AES key from shared secret
-            key = await deriveAESKeyFromSecret(sharedSecret, salt)
+            // Derive AES key from shared secret key
+            key = await deriveAESKeyFromSecretKey(sharedSecretKey, salt)
+
+            // === SECURITY ENHANCEMENTS ===
+
+            // 1. Key Confirmation: Derive confirmation value and hash it
+            // This proves both parties derived the same shared secret
+            const confirmValue = await deriveKeyConfirmationFromSecretKey(sharedSecretKey, salt)
+            keyConfirmHash = await hashKeyConfirmation(confirmValue)
+
+            // 2. Receiver Public Key Commitment: Prevents relay MITM attacks
+            // Sender commits to the receiver's public key
+            receiverPkCommitment = await computePublicKeyCommitment(options.receiverPublicKey)
+
+            // 3. Replay Nonce: Prevents replay attacks within TTL window
+            // Receiver must echo this nonce in their ready ACK
+            const nonceBytes = crypto.getRandomValues(new Uint8Array(16))
+            replayNonce = uint8ArrayToBase64(nonceBytes)
 
             // Hint is receiver's public key fingerprint (for event filtering)
             hint = await publicKeyToFingerprint(options.receiverPublicKey)
@@ -246,15 +272,18 @@ export function useNostrSend(): UseNostrSendReturn {
 
         // Choose event type based on mode
         let exchangeEvent
-        if (options?.usePasskey && senderFingerprint) {
-          // Mutual trust mode: include sender's fingerprint
+        if (options?.usePasskey && senderFingerprint && keyConfirmHash && receiverPkCommitment && replayNonce) {
+          // Mutual trust mode: include sender's fingerprint and security tags
           exchangeEvent = createMutualTrustEvent(
             secretKey,
             encryptedPayload,
             salt,
             transferId,
             hint, // receiver's public key fingerprint
-            senderFingerprint // sender's public key fingerprint
+            senderFingerprint, // sender's public key fingerprint
+            keyConfirmHash, // key confirmation hash (MITM detection)
+            receiverPkCommitment, // receiver public key commitment (relay MITM prevention)
+            replayNonce // replay nonce (replay protection)
           )
         } else {
           // PIN mode
@@ -298,6 +327,17 @@ export function useNostrSend(): UseNostrSendReturn {
 
               const ack = parseAckEvent(event)
               if (ack && ack.transferId === transferId && ack.seq === 0) {
+                // For mutual trust mode, verify nonce to prevent replay attacks
+                if (replayNonce) {
+                  if (!ack.nonce || !constantTimeEqual(ack.nonce, replayNonce)) {
+                    console.error('Nonce mismatch in ready ACK - potential replay attack')
+                    clearTimeout(timeout)
+                    client.unsubscribe(subId)
+                    reject(new Error('Security check failed: nonce mismatch'))
+                    return
+                  }
+                }
+
                 clearTimeout(timeout)
                 client.unsubscribe(subId)
                 resolve({ receiverPubkey: event.pubkey, receiverHint: ack.hint })

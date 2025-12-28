@@ -288,8 +288,8 @@ export function PasskeyPage() {
               {/* QR Code */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
-                  <QrCode className="h-5 w-5 text-cyan-600" />
-                  <span className="text-sm font-medium">Your Public Key</span>
+                  <QrCode className="h-5 w-5 text-primary" />
+                  <span className="text-sm font-semibold text-primary">Your Public Key</span>
                 </div>
                 <div className="flex flex-col items-center gap-4">
                   <div className="bg-white p-4 rounded-lg">
@@ -304,21 +304,25 @@ export function PasskeyPage() {
               {/* Copy Public Key */}
               <div className="pt-4 border-t">
                 <div className="flex items-center gap-2 mb-2">
-                  <Key className="h-5 w-5 text-cyan-600" />
-                  <span className="text-sm font-medium">Public Key (base64)</span>
+                  <Key className="h-5 w-5 text-primary" />
+                  <span className="text-sm font-semibold text-primary">Public Key (base64)</span>
                 </div>
                 <div className="flex gap-2">
-                  <code className="flex-1 text-sm bg-muted p-2 rounded font-mono break-all max-h-20 overflow-y-auto">
-                    {publicKeyBase64}
-                  </code>
+                  <textarea
+                    readOnly
+                    value={publicKeyBase64}
+                    onClick={(e) => e.currentTarget.select()}
+                    rows={2}
+                    className="flex-1 text-sm bg-primary/10 border border-primary/20 p-2 rounded font-mono text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+                  />
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={handleCopyPublicKey}
-                    className="flex-shrink-0"
+                    className={`flex-shrink-0 ${copiedKey ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-primary/10'}`}
                   >
                     {copiedKey ? (
-                      <Check className="h-4 w-4 text-green-600" />
+                      <Check className="h-4 w-4 text-white" />
                     ) : (
                       <Copy className="h-4 w-4" />
                     )}
@@ -329,21 +333,21 @@ export function PasskeyPage() {
               {/* Fingerprint */}
               <div className="pt-4 border-t">
                 <div className="flex items-center gap-2">
-                  <Fingerprint className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-xs font-medium text-muted-foreground">Fingerprint</span>
+                  <Fingerprint className="h-4 w-4 text-cyan-600" />
+                  <span className="text-xs font-medium text-cyan-600">Fingerprint</span>
                 </div>
                 <div className="mt-1 flex items-center gap-2">
-                  <span className="font-mono text-sm text-muted-foreground">
+                  <span className="font-mono text-sm font-medium text-cyan-600">
                     {formattedFingerprint}
                   </span>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={handleCopyFingerprint}
-                    className="h-8"
+                    className={`h-8 ${copied ? 'bg-emerald-500 hover:bg-emerald-500' : 'hover:bg-cyan-500/10'}`}
                   >
                     {copied ? (
-                      <Check className="h-4 w-4 text-green-600" />
+                      <Check className="h-4 w-4 text-white" />
                     ) : (
                       <Copy className="h-4 w-4" />
                     )}

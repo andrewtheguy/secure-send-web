@@ -185,6 +185,8 @@ export async function importECDHPublicKey(publicKeyBytes: Uint8Array): Promise<C
 /**
  * Derive shared secret from our private key and peer's public key
  * Returns 32 bytes of shared secret
+ *
+ * @deprecated Use deriveSharedSecretKey() for better security - keeps secret as non-extractable CryptoKey
  */
 export async function deriveSharedSecret(
   privateKey: CryptoKey,
@@ -205,11 +207,46 @@ export async function deriveSharedSecret(
 }
 
 /**
+ * Derive shared secret as a non-extractable HKDF CryptoKey.
+ * This is more secure than deriveSharedSecret() because the raw shared secret
+ * bytes are never exposed to JavaScript - they remain inside the crypto module.
+ *
+ * The returned key can be used with deriveAESKeyFromSecretKey() and
+ * deriveKeyConfirmationFromSecretKey() to derive further keys.
+ *
+ * SECURITY: The shared secret never leaves the Web Crypto module as raw bytes,
+ * preventing exfiltration via XSS or memory inspection.
+ */
+export async function deriveSharedSecretKey(
+  privateKey: CryptoKey,
+  peerPublicKeyBytes: Uint8Array
+): Promise<CryptoKey> {
+  const peerPublicKey = await importECDHPublicKey(peerPublicKeyBytes)
+
+  // Use deriveKey to get HKDF key material directly from ECDH
+  // The shared secret stays inside Web Crypto as non-extractable key
+  return crypto.subtle.deriveKey(
+    {
+      name: 'ECDH',
+      public: peerPublicKey,
+    },
+    privateKey,
+    {
+      name: 'HKDF',
+    },
+    false, // non-extractable
+    ['deriveKey', 'deriveBits']
+  )
+}
+
+/**
  * Derive AES-256-GCM key from ECDH shared secret using HKDF.
  * Salt ensures different keys even with same shared secret.
  *
  * The info label "secure-send-mutual" provides domain separation,
  * ensuring keys derived here cannot be confused with keys from other protocols.
+ *
+ * @deprecated Use deriveAESKeyFromSecretKey() for better security - accepts non-extractable CryptoKey
  */
 export async function deriveAESKeyFromSecret(
   sharedSecret: Uint8Array,
@@ -245,4 +282,187 @@ export async function deriveAESKeyFromSecret(
     false,
     ['encrypt', 'decrypt']
   )
+}
+
+/**
+ * Derive AES-256-GCM key from HKDF CryptoKey (from deriveSharedSecretKey).
+ * This is the secure version that never exposes raw shared secret bytes.
+ *
+ * @param sharedSecretKey - Non-extractable HKDF CryptoKey from deriveSharedSecretKey()
+ * @param salt - Per-transfer salt for key derivation (at least 16 bytes)
+ */
+export async function deriveAESKeyFromSecretKey(
+  sharedSecretKey: CryptoKey,
+  salt: Uint8Array
+): Promise<CryptoKey> {
+  if (salt.length < 16) {
+    throw new Error(`Salt too short: expected at least 16 bytes, got ${salt.length}`)
+  }
+
+  return crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: toArrayBuffer(salt),
+      info: new TextEncoder().encode('secure-send-mutual'),
+    },
+    sharedSecretKey,
+    { name: 'AES-GCM', length: AES_KEY_LENGTH },
+    false,
+    ['encrypt', 'decrypt']
+  )
+}
+
+/**
+ * Derive key confirmation value from shared secret.
+ * Uses HKDF with separate info label for domain separation.
+ * Returns 16 bytes that can be hashed for commitment.
+ *
+ * This allows both parties to prove they derived the same shared secret
+ * without revealing the secret itself.
+ *
+ * @deprecated Use deriveKeyConfirmationFromSecretKey() for better security - accepts non-extractable CryptoKey
+ */
+export async function deriveKeyConfirmation(
+  sharedSecret: Uint8Array,
+  salt: Uint8Array
+): Promise<Uint8Array> {
+  if (sharedSecret.length !== 32) {
+    throw new Error(`Invalid shared secret length: expected 32 bytes, got ${sharedSecret.length}`)
+  }
+  if (salt.length < 16) {
+    throw new Error(`Salt too short: expected at least 16 bytes, got ${salt.length}`)
+  }
+
+  // Import shared secret as HKDF key material
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    toArrayBuffer(sharedSecret),
+    'HKDF',
+    false, // extractable: false per CLAUDE.md
+    ['deriveBits']
+  )
+
+  // Derive 16 bytes using HKDF with key-confirm label
+  const confirmBits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: toArrayBuffer(salt),
+      info: new TextEncoder().encode('secure-send-key-confirm'),
+    },
+    keyMaterial,
+    128 // 16 bytes = 128 bits
+  )
+
+  return new Uint8Array(confirmBits)
+}
+
+/**
+ * Derive key confirmation value from HKDF CryptoKey (from deriveSharedSecretKey).
+ * This is the secure version that never exposes raw shared secret bytes.
+ *
+ * @param sharedSecretKey - Non-extractable HKDF CryptoKey from deriveSharedSecretKey()
+ * @param salt - Per-transfer salt for key derivation (at least 16 bytes)
+ */
+export async function deriveKeyConfirmationFromSecretKey(
+  sharedSecretKey: CryptoKey,
+  salt: Uint8Array
+): Promise<Uint8Array> {
+  if (salt.length < 16) {
+    throw new Error(`Salt too short: expected at least 16 bytes, got ${salt.length}`)
+  }
+
+  // Derive 16 bytes using HKDF with key-confirm label
+  const confirmBits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: toArrayBuffer(salt),
+      info: new TextEncoder().encode('secure-send-key-confirm'),
+    },
+    sharedSecretKey,
+    128 // 16 bytes = 128 bits
+  )
+
+  return new Uint8Array(confirmBits)
+}
+
+/**
+ * Compute hash of key confirmation value for commitment.
+ * Returns hex-encoded SHA-256 hash truncated to 32 chars (16 bytes).
+ * @param confirmValue - 16-byte key confirmation value from deriveKeyConfirmation
+ * @throws TypeError if input is not a 16-byte Uint8Array
+ */
+export async function hashKeyConfirmation(confirmValue: Uint8Array): Promise<string> {
+  if (!(confirmValue instanceof Uint8Array)) {
+    throw new TypeError(
+      `Invalid key confirmation value: expected Uint8Array, got ${typeof confirmValue}`
+    )
+  }
+  if (confirmValue.length !== 16) {
+    throw new TypeError(
+      `Invalid key confirmation value length: expected 16 bytes, got ${confirmValue.length}`
+    )
+  }
+
+  const hash = await crypto.subtle.digest('SHA-256', confirmValue as BufferSource)
+  const hashArray = new Uint8Array(hash)
+  // Take first 16 bytes (32 hex chars) for the commitment
+  return Array.from(hashArray.slice(0, 16), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * Compute public key commitment (first 16 bytes of SHA-256 hash).
+ * Used to prevent relay MITM attacks by committing to receiver's identity.
+ * Returns 32 hex characters.
+ */
+export async function computePublicKeyCommitment(publicKeyBytes: Uint8Array): Promise<string> {
+  if (publicKeyBytes.length !== 65) {
+    throw new TypeError(
+      `Invalid public key length: expected 65 bytes, got ${publicKeyBytes.length}`
+    )
+  }
+
+  const hash = await crypto.subtle.digest('SHA-256', publicKeyBytes as BufferSource)
+  const hashArray = new Uint8Array(hash)
+  // Take first 16 bytes (32 hex chars)
+  return Array.from(hashArray.slice(0, 16), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * Verify public key matches commitment.
+ * Uses constant-time comparison to prevent timing attacks.
+ */
+export async function verifyPublicKeyCommitment(
+  publicKeyBytes: Uint8Array,
+  commitment: string
+): Promise<boolean> {
+  const computed = await computePublicKeyCommitment(publicKeyBytes)
+  return constantTimeEqual(computed, commitment.toLowerCase())
+}
+
+/**
+ * Constant-time string comparison to prevent timing attacks.
+ * Returns true only if strings are equal (same length and content), false otherwise.
+ *
+ * Note: This is a best-effort constant-time mitigation in JavaScript.
+ * True constant-time guarantees are not possible in JS due to JIT optimization,
+ * garbage collection, and string implementation details. However, this approach
+ * avoids obvious timing leaks from early returns or variable iteration counts.
+ */
+export function constantTimeEqual(a: string, b: string): boolean {
+  const maxLen = Math.max(a.length, b.length)
+
+  // XOR lengths to detect mismatch (will be non-zero if different)
+  let result = a.length ^ b.length
+
+  // Compare all characters up to maxLen, using 0 for out-of-bounds access
+  for (let i = 0; i < maxLen; i++) {
+    const charA = i < a.length ? a.charCodeAt(i) : 0
+    const charB = i < b.length ? b.charCodeAt(i) : 0
+    result |= charA ^ charB
+  }
+
+  return result === 0
 }

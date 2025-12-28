@@ -34,9 +34,13 @@ import { WebRTCConnection } from '@/lib/webrtc'
 import { getPasskeyECDHKeypair } from '@/lib/crypto/passkey'
 import {
   importECDHPrivateKey,
-  deriveSharedSecret,
-  deriveAESKeyFromSecret,
+  deriveSharedSecretKey,
+  deriveAESKeyFromSecretKey,
   publicKeyToFingerprint,
+  deriveKeyConfirmationFromSecretKey,
+  hashKeyConfirmation,
+  verifyPublicKeyCommitment,
+  constantTimeEqual,
 } from '@/lib/crypto/ecdh'
 
 export interface ReceiveOptions {
@@ -95,6 +99,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       'usePasskey' in arg && arg.usePasskey === true && 'senderPublicKey' in arg && arg.senderPublicKey
     const pinMaterial = !('usePasskey' in arg) ? (arg as PinKeyMaterial) : null
 
+    // Closure variables for mutual trust mode - keeps sensitive data scoped
+    let ownPublicKeyBytes: Uint8Array | null = null
+    // SECURITY: sharedSecretKey is a non-extractable CryptoKey - raw secret bytes never exposed to JS
+    let sharedSecretKey: CryptoKey | null = null
+    let deriveKeyWithSalt: ((salt: Uint8Array) => Promise<CryptoKey>) | null = null
+
     try {
       let hint: string
       let key: CryptoKey | null = null
@@ -117,29 +127,27 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           setOwnPublicKey(publicKeyBytes)
           setOwnFingerprint(publicKeyFingerprint)
 
+          // Store in closure for event processing
+          ownPublicKeyBytes = publicKeyBytes
+
           // Calculate expected sender fingerprint for verification
           expectedSenderFingerprint = await publicKeyToFingerprint(opts.senderPublicKey!)
 
           // Import our private key for ECDH
           const privateKey = await importECDHPrivateKey(privateKeyBytes)
 
-          // Derive shared secret with sender's public key
-          const sharedSecret = await deriveSharedSecret(privateKey, opts.senderPublicKey!)
-
-          // We'll derive the AES key later with the salt from the event
-          // For now, store the shared secret in a ref-like pattern
-          // Actually, we need to use HKDF with the event's salt, so we'll do it per-event
+          // Derive shared secret as non-extractable HKDF CryptoKey
+          // SECURITY: Raw shared secret bytes are never exposed to JavaScript
+          sharedSecretKey = await deriveSharedSecretKey(privateKey, opts.senderPublicKey!)
 
           // Hint is our own public key fingerprint (sender addresses events to us)
           hint = publicKeyFingerprint
 
-          // Store shared secret and salt derivation for later
-          const deriveKeyWithSalt = async (salt: Uint8Array) => {
-            return deriveAESKeyFromSecret(sharedSecret, salt)
+          // Store key derivation function in closure for event processing
+          const ecdhSharedSecret = sharedSecretKey // Capture for closure
+          deriveKeyWithSalt = async (salt: Uint8Array) => {
+            return deriveAESKeyFromSecretKey(ecdhSharedSecret, salt)
           }
-
-          // Store this function for use in event processing
-          ;(window as unknown as Record<string, unknown>).__deriveKeyWithSalt = deriveKeyWithSalt
         } catch (err) {
           setState({
             status: 'error',
@@ -201,6 +209,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       let sawExpiredCandidate = false
       let sawNonExpiredCandidate = false
       let selectedCreatedAtSec: number | null = null
+      // Security: Store nonce for ready ACK echo
+      let eventNonce: string | undefined
 
       const sortedEvents = [...events].sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
 
@@ -222,17 +232,36 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           const parsed = parseMutualTrustEvent(event)
           if (!parsed) continue
 
-          // Verify sender's fingerprint matches expected
-          if (parsed.senderFingerprint !== expectedSenderFingerprint) {
-            console.log(`Sender fingerprint mismatch: ${parsed.senderFingerprint} vs ${expectedSenderFingerprint}`)
+          // === SECURITY VERIFICATION 1: Sender fingerprint (constant-time) ===
+          if (!constantTimeEqual(parsed.senderFingerprint, expectedSenderFingerprint!)) {
+            console.log('Sender fingerprint mismatch')
+            continue
+          }
+
+          // === SECURITY VERIFICATION 2: Receiver public key commitment ===
+          // Verify this event was addressed to us (prevents relay MITM)
+          if (!ownPublicKeyBytes) {
+            console.error('Own public key not available for RPKC verification')
+            continue
+          }
+          const rpkcValid = await verifyPublicKeyCommitment(ownPublicKeyBytes, parsed.receiverPkCommitment)
+          if (!rpkcValid) {
+            console.log('Receiver public key commitment mismatch - event not addressed to us')
+            continue
+          }
+
+          // Verify closure variables are available
+          if (!deriveKeyWithSalt) {
+            console.error('Key derivation function not available')
+            continue
+          }
+          if (!sharedSecretKey) {
+            console.error('Shared secret key not available for key confirmation')
             continue
           }
 
           try {
-            // Derive key using stored function
-            const deriveKeyWithSalt = (window as unknown as Record<string, unknown>).__deriveKeyWithSalt as (
-              salt: Uint8Array
-            ) => Promise<CryptoKey>
+            // Derive key using closure function
             const derivedKey = await deriveKeyWithSalt(parsed.salt)
 
             // Try to decrypt
@@ -241,10 +270,21 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             const payloadStr = decoder.decode(decrypted)
             payload = JSON.parse(payloadStr) as PinExchangePayload
 
+            // === SECURITY VERIFICATION 3: Key confirmation ===
+            // Verify we derived the same shared secret (detects MITM)
+            const confirmValue = await deriveKeyConfirmationFromSecretKey(sharedSecretKey, parsed.salt)
+            const computedKcHash = await hashKeyConfirmation(confirmValue)
+            if (!constantTimeEqual(computedKcHash, parsed.keyConfirmHash)) {
+              console.error('Key confirmation mismatch - potential MITM attack')
+              continue
+            }
+
             transferId = parsed.transferId
             senderPubkey = event.pubkey
             key = derivedKey
             selectedCreatedAtSec = event.created_at || null
+            // Store nonce for ready ACK echo (replay protection)
+            eventNonce = parsed.nonce
             break
           } catch {
             continue
@@ -270,11 +310,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             continue
           }
         }
-      }
-
-      // Clean up global
-      if (isMutualTrustMode) {
-        delete (window as unknown as Record<string, unknown>).__deriveKeyWithSalt
       }
 
       if (!payload || !transferId || !senderPubkey || !key) {
@@ -319,8 +354,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Generate receiver keypair
       const { secretKey } = generateEphemeralKeys()
 
-      // Send ready ACK (seq=0)
-      const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0, hint)
+      // Send ready ACK (seq=0) - include nonce for replay protection in mutual trust mode
+      const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0, hint, eventNonce)
       await client.publish(readyAck)
 
       if (cancelledRef.current) return
