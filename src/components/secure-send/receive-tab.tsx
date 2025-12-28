@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ChevronDown, ChevronRight, ArrowRight } from 'lucide-react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ChevronDown, ChevronRight, ArrowRight, Keyboard } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { PinInput, type PinInputRef, type PinChangePayload } from './pin-input'
 import { TransferStatus } from './transfer-status'
 import { QRDisplay } from './qr-display'
@@ -14,6 +15,17 @@ import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file
 import type { SignalingMethod } from '@/lib/nostr/types'
 import type { PinKeyMaterial } from '@/lib/types'
 import { Link } from 'react-router-dom'
+import { publicKeyToFingerprint } from '@/lib/crypto/ecdh'
+
+// Helper to convert base64 to Uint8Array
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
+}
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -26,6 +38,10 @@ export function ReceiveTab() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [usePasskey, setUsePasskey] = useState(false)
   const [passkeyAuthenticating, setPasskeyAuthenticating] = useState(false)
+  const [senderPublicKeyInput, setSenderPublicKeyInput] = useState('')
+  const [senderPublicKeyFingerprint, setSenderPublicKeyFingerprint] = useState<string | null>(null)
+  const [senderPublicKeyError, setSenderPublicKeyError] = useState<string | null>(null)
+  const [showPublicKeyModal, setShowPublicKeyModal] = useState(false)
 
   // Store PIN in ref to avoid React DevTools exposure
   const pinSecretRef = useRef<PinSecret | null>(null)
@@ -36,6 +52,42 @@ export function ReceiveTab() {
   const [timeRemaining, setTimeRemaining] = useState(0)
   const [, setDetectedMethod] = useState<SignalingMethod>('nostr')
   const [pinFingerprint, setPinFingerprint] = useState<string | null>(null)
+
+  // Parse and validate sender public key (pure computation)
+  const { senderPublicKeyBytes, validationError } = useMemo(() => {
+    const input = senderPublicKeyInput.trim()
+    if (!input) {
+      return { senderPublicKeyBytes: null, validationError: null }
+    }
+    try {
+      const bytes = base64ToUint8Array(input)
+      if (bytes.length !== 65 || bytes[0] !== 0x04) {
+        return { senderPublicKeyBytes: null, validationError: 'Invalid public key format (expected 65-byte P-256 key)' }
+      }
+      return { senderPublicKeyBytes: bytes, validationError: null }
+    } catch {
+      return { senderPublicKeyBytes: null, validationError: 'Invalid base64 encoding' }
+    }
+  }, [senderPublicKeyInput])
+
+  // Handle side effects separately
+  useEffect(() => {
+    setSenderPublicKeyError(validationError)
+
+    if (!senderPublicKeyBytes) {
+      setSenderPublicKeyFingerprint(null)
+      return
+    }
+
+    let cancelled = false
+    publicKeyToFingerprint(senderPublicKeyBytes).then(fp => {
+      if (!cancelled) {
+        setSenderPublicKeyFingerprint(`${fp.slice(0, 4)}-${fp.slice(4, 8)}-${fp.slice(8, 11)}`)
+      }
+    })
+
+    return () => { cancelled = true }
+  }, [senderPublicKeyBytes, validationError])
 
   // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrReceive()
@@ -48,8 +100,8 @@ export function ReceiveTab() {
 
   const { state: rawState, receivedContent, cancel, reset } = activeHook
 
-  // Get passkey fingerprint from nostr hook for verification display (only in nostr mode)
-  const receiverPasskeyFingerprint = !isManualMode ? nostrHook.passkeyFingerprint : null
+  // Get own fingerprint from nostr hook for verification display (only in nostr mode)
+  const receiverOwnFingerprint = !isManualMode ? nostrHook.ownFingerprint : null
 
   // Get the right receive function based on mode
   // nostrHook has .receive, manualHook does not
@@ -225,17 +277,25 @@ export function ReceiveTab() {
   // Handle passkey authentication for receiving
   const handlePasskeyAuth = async () => {
     if (passkeyAuthenticating) return
+    if (!senderPublicKeyBytes) return // Require sender public key
+
     setPasskeyAuthenticating(true)
 
     try {
-      // Start receive with passkey mode
-      await nostrHook.receive({ usePasskey: true })
+      // Start receive with passkey mode and sender public key
+      await nostrHook.receive({
+        usePasskey: true,
+        senderPublicKey: senderPublicKeyBytes,
+      })
     } catch {
       // Error will be handled by the hook
     } finally {
       setPasskeyAuthenticating(false)
     }
   }
+
+  // Whether passkey mode requirements are met
+  const passkeyRequirementsMet = senderPublicKeyBytes !== null
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
   const showQRInput = isManualMode && state.status === 'waiting_for_offer'
@@ -262,15 +322,79 @@ export function ReceiveTab() {
             <>
               {usePasskey ? (
                 <>
-                  {/* Passkey mode - skip PIN entry */}
+                  {/* Passkey mode - skip PIN entry, enter sender's public key */}
                   <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
                     <Fingerprint className="h-3 w-3" />
-                    <span>Passkey mode enabled - no PIN needed</span>
+                    <span>Passkey mode - enter sender&apos;s public key</span>
                   </div>
 
-                  <div className="text-xs text-muted-foreground text-center pb-2">
-                    Make sure you have the same synced passkey as the sender (1Password, iCloud, Google).
+                  {/* Sender public key input */}
+                  <div className="space-y-2">
+                    <Label htmlFor="sender-pubkey" className="text-sm font-medium">
+                      Sender&apos;s Public Key
+                    </Label>
+                    <div className="flex gap-2">
+                      <Textarea
+                        id="sender-pubkey"
+                        placeholder="Paste sender's public key (base64)..."
+                        value={senderPublicKeyInput}
+                        onChange={(e) => setSenderPublicKeyInput(e.target.value)}
+                        className="font-mono text-xs min-h-[60px] resize-none"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowPublicKeyModal(true)}
+                        className="flex-shrink-0"
+                        title="Enter public key"
+                      >
+                        <Keyboard className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    {senderPublicKeyError && (
+                      <p className="text-xs text-destructive">{senderPublicKeyError}</p>
+                    )}
+                    {senderPublicKeyFingerprint && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Fingerprint className="h-3 w-3" />
+                        <span>Sender fingerprint: </span>
+                        <span className="font-mono font-medium text-cyan-600">{senderPublicKeyFingerprint}</span>
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Get the sender&apos;s public key from their{' '}
+                      <Link to="/passkey" className="text-primary hover:underline">
+                        Passkey page
+                      </Link>
+                    </p>
                   </div>
+
+                  {/* Public key entry modal */}
+                  {showPublicKeyModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                      <div className="bg-background rounded-lg p-4 max-w-md w-full mx-4 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-medium">Enter Sender&apos;s Public Key</h3>
+                          <Button variant="ghost" size="sm" onClick={() => setShowPublicKeyModal(false)}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Paste the sender&apos;s public key from their Passkey page.
+                        </p>
+                        <Textarea
+                          placeholder="Paste public key (base64)..."
+                          value={senderPublicKeyInput}
+                          onChange={(e) => setSenderPublicKeyInput(e.target.value)}
+                          className="font-mono text-xs min-h-[100px]"
+                          autoFocus
+                        />
+                        <Button onClick={() => setShowPublicKeyModal(false)} className="w-full">
+                          Done
+                        </Button>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="border rounded-lg overflow-hidden">
                     <button
@@ -304,8 +428,8 @@ export function ReceiveTab() {
                           </div>
                           <p className="text-xs text-muted-foreground mt-1">
                             {usePasskey
-                              ? 'Skip PIN entry. Authenticate with the same synced passkey as the sender.'
-                              : 'Use your passkey instead of entering a PIN. Both sender and receiver must have the same passkey.'}
+                              ? 'Receive from a specific sender using their public key. No PIN needed.'
+                              : 'Use passkey-based encryption instead of PIN. Requires sender\'s public key.'}
                           </p>
                         </div>
                       </div>
@@ -314,11 +438,11 @@ export function ReceiveTab() {
 
                   <Button
                     onClick={handlePasskeyAuth}
-                    disabled={passkeyAuthenticating}
+                    disabled={passkeyAuthenticating || !passkeyRequirementsMet}
                     className="w-full bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700"
                   >
                     <Fingerprint className="mr-2 h-4 w-4" />
-                    {passkeyAuthenticating ? 'Authenticating...' : 'Authenticate & Receive'}
+                    {passkeyAuthenticating ? 'Authenticating...' : passkeyRequirementsMet ? 'Authenticate & Receive' : 'Enter sender\'s key first'}
                   </Button>
                 </>
               ) : (
@@ -436,19 +560,19 @@ export function ReceiveTab() {
             </div>
           )}
 
-          {/* Show passkey fingerprint during transfer for verification */}
-          {receiverPasskeyFingerprint && (
+          {/* Show receiver's own fingerprint during transfer for verification */}
+          {receiverOwnFingerprint && (
             <div className="text-xs text-muted-foreground border border-cyan-500/30 bg-cyan-50/30 dark:bg-cyan-950/20 px-3 py-2 rounded">
               <div className="flex items-center gap-2 font-mono">
                 <Fingerprint className="h-3 w-3 text-cyan-600" />
-                <span>Your Passkey Fingerprint: </span>
+                <span>Your fingerprint: </span>
                 <span className="font-medium text-cyan-600">
-                  {receiverPasskeyFingerprint.toUpperCase().slice(0, 4)}-
-                  {receiverPasskeyFingerprint.toUpperCase().slice(4, 8)}-
-                  {receiverPasskeyFingerprint.toUpperCase().slice(8, 11)}
+                  {receiverOwnFingerprint.slice(0, 4)}-
+                  {receiverOwnFingerprint.slice(4, 8)}-
+                  {receiverOwnFingerprint.slice(8, 11)}
                 </span>
               </div>
-              <p className="mt-1 ml-5">Compare with sender&apos;s passkey fingerprint to verify same passkey is used.</p>
+              <p className="mt-1 ml-5">Sender should verify this matches your public key.</p>
             </div>
           )}
 

@@ -81,6 +81,79 @@ export function parsePinExchangeEvent(event: Event): {
 }
 
 /**
+ * Create Mutual Trust exchange event (kind 24243)
+ * Used for passkey-based mutual trust mode where both parties exchange public keys.
+ *
+ * @param secretKey - Nostr ephemeral secret key
+ * @param encryptedPayload - AES-GCM encrypted transfer metadata
+ * @param salt - Per-transfer salt for key derivation
+ * @param transferId - Unique transfer identifier
+ * @param receiverFingerprint - Receiver's public key fingerprint (for event filtering)
+ * @param senderFingerprint - Sender's public key fingerprint (for verification)
+ */
+export function createMutualTrustEvent(
+  secretKey: Uint8Array,
+  encryptedPayload: Uint8Array,
+  salt: Uint8Array,
+  transferId: string,
+  receiverFingerprint: string,
+  senderFingerprint: string
+): Event {
+  const expiration = Math.floor((Date.now() + TRANSFER_EXPIRATION_MS) / 1000)
+
+  const event = finalizeEvent(
+    {
+      kind: EVENT_KIND_PIN_EXCHANGE,
+      content: uint8ArrayToBase64(encryptedPayload),
+      tags: [
+        ['h', receiverFingerprint], // For receiver to find the event
+        ['spk', senderFingerprint], // Sender's public key fingerprint for verification
+        ['s', uint8ArrayToBase64(salt)],
+        ['t', transferId],
+        ['type', 'mutual_trust'],
+        ['expiration', expiration.toString()],
+      ],
+      created_at: Math.floor(Date.now() / 1000),
+    },
+    secretKey
+  )
+
+  return event
+}
+
+/**
+ * Parse Mutual Trust event tags.
+ * @returns Object with receiver/sender fingerprints, salt, transferId, and encryptedPayload
+ */
+export function parseMutualTrustEvent(event: Event): {
+  receiverFingerprint: string
+  senderFingerprint: string
+  salt: Uint8Array
+  transferId: string
+  encryptedPayload: Uint8Array
+} | null {
+  if (event.kind !== EVENT_KIND_PIN_EXCHANGE) return null
+
+  const type = event.tags.find((t) => t[0] === 'type')?.[1]
+  if (type !== 'mutual_trust') return null
+
+  const receiverFingerprint = event.tags.find((t) => t[0] === 'h')?.[1]
+  const senderFingerprint = event.tags.find((t) => t[0] === 'spk')?.[1]
+  const saltB64 = event.tags.find((t) => t[0] === 's')?.[1]
+  const transferId = event.tags.find((t) => t[0] === 't')?.[1]
+
+  if (!receiverFingerprint || !senderFingerprint || !saltB64 || !transferId) return null
+
+  return {
+    receiverFingerprint,
+    senderFingerprint,
+    salt: base64ToUint8Array(saltB64),
+    transferId,
+    encryptedPayload: base64ToUint8Array(event.content),
+  }
+}
+
+/**
  * Create ACK event (kind 24242)
  * seq=0 for ready ACK, seq=-1 for completion ACK
  * hint is optional - used in dual mode to indicate which key the receiver used

@@ -1,215 +1,114 @@
 /**
  * Passkey (WebAuthn PRF) encryption utilities
  *
- * Uses WebAuthn PRF extension to derive encryption keys from passkeys.
- * Supports cross-device encryption when passkeys are synced via 1Password/iCloud/Google.
+ * Uses WebAuthn PRF extension to derive deterministic ECDH keypairs from passkeys.
+ * Supports cross-device key derivation when passkeys are synced via 1Password/iCloud/Google.
  */
+
+import { p256 } from '@noble/curves/nist.js'
+import { publicKeyToFingerprint } from './ecdh'
 
 // Constants
-const PRF_SALT_PREFIX = 'secure-send-passkey-encryption-v1'
-const PASSKEY_MASTER_PRF_LABEL = 'secure-send-passkey-master-v1'
+const PASSKEY_ECDH_LABEL = 'secure-send-passkey-ecdh-v1'
 
 /**
- * Derive AES-256-GCM key from passkey using PRF extension
- * Same passkey + same salt = same key (deterministic)
+ * Derive deterministic ECDH keypair from passkey master key.
+ * Same passkey will always derive the same keypair across devices.
  */
-export async function deriveKeyFromPasskey(salt: Uint8Array): Promise<CryptoKey> {
-  // Combine prefix with salt for PRF input
-  const prfInput = new TextEncoder().encode(PRF_SALT_PREFIX + base64urlEncode(salt))
-
-  // Use discoverable credential flow - passkey picker will appear
-  const assertion = (await navigator.credentials.get({
-    publicKey: {
-      challenge: crypto.getRandomValues(new Uint8Array(32)),
-      userVerification: 'required',
-      extensions: {
-        prf: {
-          eval: {
-            first: prfInput,
-          },
-        },
-      },
-    },
-  })) as PublicKeyCredential
-
-  if (!assertion) {
-    throw new Error('User cancelled passkey authentication or no credentials available')
-  }
-
-  const credential = assertion as PublicKeyCredential
-
-  const extResults = credential.getClientExtensionResults() as {
-    prf?: { results?: { first?: ArrayBuffer } }
-  }
-
-  if (!extResults.prf?.results?.first) {
-    throw new Error('PRF evaluation failed - authenticator may not support PRF extension')
-  }
-
-  // Import PRF output as AES-256-GCM key
-  return crypto.subtle.importKey(
-    'raw',
-    extResults.prf.results.first,
-    { name: 'AES-GCM' },
-    false, // extractable: false per CLAUDE.md
-    ['encrypt', 'decrypt']
-  )
-}
-
-/**
- * Get credential fingerprint for identification.
- * Returns an 11-character alphanumeric identifier derived from the credential ID.
- *
- * Note: This is NOT related to PINs. The fingerprint serves a similar purpose
- * to PIN hint (for Nostr event filtering), but is derived from the WebAuthn
- * credential ID, not from any user-entered PIN.
- */
-export async function getCredentialFingerprint(): Promise<string> {
-  // Authenticate to get credential ID
-  const assertion = await navigator.credentials.get({
-    publicKey: {
-      challenge: crypto.getRandomValues(new Uint8Array(32)),
-      userVerification: 'required',
-    },
-  })
-
-  if (!assertion) {
-    throw new Error('User cancelled passkey authentication or no credentials available')
-  }
-
-  const credential = assertion as PublicKeyCredential
-
-  return credentialIdToFingerprint(new Uint8Array(credential.rawId))
-}
-
-/**
- * Derive key from passkey with externally-provided salt
- * Used when salt comes from signaling (sender provides salt to receiver)
- * This is an alias for deriveKeyFromPasskey for clarity
- */
-export async function deriveKeyFromPasskeyWithSalt(salt: Uint8Array): Promise<CryptoKey> {
-  return deriveKeyFromPasskey(salt)
-}
-
-/**
- * Derive key and fingerprint in one passkey assertion (single prompt)
- */
-export async function deriveKeyAndFingerprintFromPasskey(
-  salt: Uint8Array
-): Promise<{ key: CryptoKey; fingerprint: string }> {
-  const prfInput = new TextEncoder().encode(PRF_SALT_PREFIX + base64urlEncode(salt))
-
-  const assertion = await navigator.credentials.get({
-    publicKey: {
-      challenge: crypto.getRandomValues(new Uint8Array(32)),
-      userVerification: 'required',
-      extensions: {
-        prf: {
-          eval: {
-            first: prfInput,
-          },
-        },
-      },
-    },
-  })
-
-  if (!assertion) {
-    throw new Error('User cancelled passkey authentication or no credentials available')
-  }
-
-  const credential = assertion as PublicKeyCredential
-
-  const extResults = credential.getClientExtensionResults() as {
-    prf?: { results?: { first?: ArrayBuffer } }
-  }
-
-  if (!extResults.prf?.results?.first) {
-    throw new Error('PRF evaluation failed - authenticator may not support PRF extension')
-  }
-
-  const key = await crypto.subtle.importKey(
-    'raw',
-    extResults.prf.results.first,
-    { name: 'AES-GCM' },
-    false, // extractable: false per CLAUDE.md
-    ['encrypt', 'decrypt']
-  )
-
-  const fingerprint = await credentialIdToFingerprint(new Uint8Array(credential.rawId))
-  return { key, fingerprint }
-}
-
-/**
- * Derive a master key and fingerprint in one passkey assertion (single prompt).
- * Use the master key with HKDF + per-transfer salt to derive the AES key.
- */
-export async function getPasskeyMasterKeyAndFingerprint(): Promise<{
-  masterKey: CryptoKey
-  fingerprint: string
+export async function deriveECDHKeypairFromMasterKey(masterKey: CryptoKey): Promise<{
+  publicKeyBytes: Uint8Array // 65 bytes uncompressed P-256 (0x04 || X || Y)
+  privateKeyBytes: Uint8Array // 32 bytes private scalar
 }> {
-  const prfInput = new TextEncoder().encode(PASSKEY_MASTER_PRF_LABEL)
-
-  const assertion = await navigator.credentials.get({
-    publicKey: {
-      challenge: crypto.getRandomValues(new Uint8Array(32)),
-      userVerification: 'required',
-      extensions: {
-        prf: {
-          eval: {
-            first: prfInput,
-          },
-        },
-      },
-    },
-  })
-
-  if (!assertion) {
-    throw new Error('User cancelled passkey authentication or no credentials available')
-  }
-
-  const credential = assertion as PublicKeyCredential
-
-  const extResults = credential.getClientExtensionResults() as {
-    prf?: { results?: { first?: ArrayBuffer } }
-  }
-
-  if (!extResults.prf?.results?.first) {
-    throw new Error('PRF evaluation failed - authenticator may not support PRF extension')
-  }
-
-  const masterKey = await crypto.subtle.importKey(
-    'raw',
-    extResults.prf.results.first,
-    'HKDF',
-    false, // extractable: false per CLAUDE.md
-    ['deriveKey']
-  )
-
-  const fingerprint = await credentialIdToFingerprint(new Uint8Array(credential.rawId))
-  return { masterKey, fingerprint }
-}
-
-/**
- * Derive per-transfer AES key from passkey master key and salt (no prompt).
- */
-export async function deriveKeyFromPasskeyMasterKey(
-  masterKey: CryptoKey,
-  salt: Uint8Array
-): Promise<CryptoKey> {
-  const info = new TextEncoder().encode(PRF_SALT_PREFIX)
-  return crypto.subtle.deriveKey(
+  // Derive 32 bytes of seed from master key using HKDF
+  const info = new TextEncoder().encode(PASSKEY_ECDH_LABEL)
+  const seedKey = await crypto.subtle.deriveKey(
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt: salt as BufferSource,
+      salt: new Uint8Array(32), // Empty salt - label provides domain separation
       info,
     },
     masterKey,
     { name: 'AES-GCM', length: 256 },
+    true, // Extractable to get raw bytes
+    ['encrypt'] // Dummy usage
+  )
+
+  // Export seed bytes
+  const seedBytes = new Uint8Array(await crypto.subtle.exportKey('raw', seedKey))
+
+  // Use @noble/curves to derive P-256 keypair from seed
+  // The seed bytes are used directly as the private key
+  const privateKeyBytes = seedBytes
+
+  // Derive public key from private key (uncompressed format = 65 bytes)
+  const publicKeyBytes = p256.getPublicKey(privateKeyBytes, false)
+
+  return { publicKeyBytes, privateKeyBytes }
+}
+
+/**
+ * Get passkey master key (HKDF base key) from passkey authentication.
+ * Returns the master key for subsequent ECDH keypair derivation.
+ */
+export async function getPasskeyMasterKey(): Promise<CryptoKey> {
+  const prfInput = new TextEncoder().encode(PASSKEY_ECDH_LABEL)
+
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      userVerification: 'required',
+      extensions: {
+        prf: {
+          eval: {
+            first: prfInput,
+          },
+        },
+      },
+    },
+  })
+
+  if (!assertion) {
+    throw new Error('User cancelled passkey authentication or no credentials available')
+  }
+
+  const credential = assertion as PublicKeyCredential
+
+  const extResults = credential.getClientExtensionResults() as {
+    prf?: { results?: { first?: ArrayBuffer } }
+  }
+
+  if (!extResults.prf?.results?.first) {
+    throw new Error('PRF evaluation failed - authenticator may not support PRF extension')
+  }
+
+  // Import PRF output as HKDF master key
+  return crypto.subtle.importKey(
+    'raw',
+    extResults.prf.results.first,
+    'HKDF',
     false, // extractable: false per CLAUDE.md
-    ['encrypt', 'decrypt']
+    ['deriveKey', 'deriveBits']
   )
 }
+
+/**
+ * Single call: authenticate with passkey and get ECDH keypair with fingerprint.
+ * This is the main entry point for passkey-based ECDH.
+ */
+export async function getPasskeyECDHKeypair(): Promise<{
+  publicKeyBytes: Uint8Array
+  privateKeyBytes: Uint8Array
+  publicKeyFingerprint: string
+}> {
+  const masterKey = await getPasskeyMasterKey()
+  const { publicKeyBytes, privateKeyBytes } = await deriveECDHKeypairFromMasterKey(masterKey)
+  const publicKeyFingerprint = await publicKeyToFingerprint(publicKeyBytes)
+
+  return { publicKeyBytes, privateKeyBytes, publicKeyFingerprint }
+}
+
+// publicKeyToFingerprint is used from ecdh.ts
 
 /**
  * Check if WebAuthn and PRF extension are supported.
@@ -233,7 +132,8 @@ export async function checkWebAuthnSupport(): Promise<{
   }
 
   // Check if platform authenticator is available
-  const platformAuthAvailable = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+  const platformAuthAvailable =
+    await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
   if (!platformAuthAvailable) {
     return {
       webauthnSupported: true,
@@ -256,25 +156,30 @@ export async function checkWebAuthnSupport(): Promise<{
  */
 function isIpAddress(hostname: string): boolean {
   // More robust IPv4 pattern
-  const ipv4Pattern = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
-  
+  const ipv4Pattern =
+    /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
+
   // IPv6 pattern (supports full, compressed, and IPv4-mapped forms)
-  const ipv6Pattern = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|::([fF]{4}:)?((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))$/
-  
+  const ipv6Pattern =
+    /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|::([fF]{4}:)?((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))$/
+
   return ipv4Pattern.test(hostname) || ipv6Pattern.test(hostname)
 }
 
 /**
  * Create a new passkey credential for this app.
  * Uses navigator.credentials.create() with PRF extension.
- * Returns the fingerprint of the newly created credential and PRF support status.
+ *
+ * Note: This only creates the credential. To get the ECDH public key and fingerprint,
+ * a separate authentication via getPasskeyECDHKeypair() or testPasskeyAndGetFingerprint()
+ * is required (PRF output is only available during authentication, not registration).
  *
  * Note: WebAuthn requires a valid domain name as rpId. IP addresses are not allowed
  * per the WebAuthn spec. Use localhost or a proper domain name for development.
  */
 export async function createPasskeyCredential(
   userName: string
-): Promise<{ fingerprint: string; credentialId: string; prfSupported: boolean }> {
+): Promise<{ credentialId: string; prfSupported: boolean }> {
   // Generate random user ID (we don't persist this - it's just for WebAuthn ceremony)
   const userId = crypto.getRandomValues(new Uint8Array(32))
 
@@ -285,8 +190,8 @@ export async function createPasskeyCredential(
   if (isIpAddress(rpId)) {
     throw new Error(
       `Cannot create passkey: IP addresses are not allowed as WebAuthn rpId. ` +
-      `Current host "${rpId}" is an IP address. ` +
-      `Please access this app via "localhost" or a domain name instead.`
+        `Current host "${rpId}" is an IP address. ` +
+        `Please access this app via "localhost" or a domain name instead.`
     )
   }
 
@@ -317,9 +222,9 @@ export async function createPasskeyCredential(
     },
   }
 
-  const credential = await navigator.credentials.create({
+  const credential = (await navigator.credentials.create({
     publicKey: createOptions,
-  }) as PublicKeyCredential | null
+  })) as PublicKeyCredential | null
 
   if (!credential) {
     throw new Error('User cancelled passkey creation or no credential returned')
@@ -335,58 +240,17 @@ export async function createPasskeyCredential(
   if (!prfSupported) {
     throw new Error(
       'PRF extension not supported by this authenticator. ' +
-      'Passkey encryption requires PRF support (available in 1Password, iCloud Keychain, etc.)'
+        'Passkey encryption requires PRF support (available in 1Password, iCloud Keychain, etc.)'
     )
   }
 
   const credentialIdBytes = new Uint8Array(credential.rawId)
-  const fingerprint = await credentialIdToFingerprint(credentialIdBytes)
-  const credentialIdBase64 = base64urlEncode(credentialIdBytes)
+  const credentialId = base64urlEncode(credentialIdBytes)
 
-  return { fingerprint, credentialId: credentialIdBase64, prfSupported }
+  return { credentialId, prfSupported }
 }
 
-/**
- * Test an existing passkey and return its fingerprint
- * Uses the same flow as getPasskeyMasterKeyAndFingerprint but discards the key
- */
-export async function testPasskeyAndGetFingerprint(): Promise<{
-  fingerprint: string
-  prfSupported: boolean
-}> {
-  const prfInput = new TextEncoder().encode(PASSKEY_MASTER_PRF_LABEL)
-
-  const assertion = await navigator.credentials.get({
-    publicKey: {
-      challenge: crypto.getRandomValues(new Uint8Array(32)),
-      userVerification: 'required',
-      extensions: {
-        prf: {
-          eval: {
-            first: prfInput,
-          },
-        },
-      },
-    },
-  })
-
-  if (!assertion) {
-    throw new Error('User cancelled passkey authentication or no credentials available')
-  }
-
-  const credential = assertion as PublicKeyCredential
-
-  const extResults = credential.getClientExtensionResults() as {
-    prf?: { results?: { first?: ArrayBuffer } }
-  }
-
-  const prfSupported = !!extResults.prf?.results?.first
-  const fingerprint = await credentialIdToFingerprint(new Uint8Array(credential.rawId))
-
-  return { fingerprint, prfSupported }
-}
-
-// Base64url encoding/decoding utilities
+// Base64url encoding utility
 function base64urlEncode(data: Uint8Array): string {
   let binary = ''
   for (let i = 0; i < data.length; i++) {
@@ -394,22 +258,4 @@ function base64urlEncode(data: Uint8Array): string {
   }
   const base64 = btoa(binary)
   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-
-export async function credentialIdToFingerprint(credentialId: Uint8Array): Promise<string> {
-  const credentialBytes = new Uint8Array(credentialId)
-  const hash = await crypto.subtle.digest('SHA-256', credentialBytes as BufferSource)
-  const hashArray = new Uint8Array(hash)
-
-  let value = 0n
-  for (let i = 0; i < 8; i++) {
-    value = (value << 8n) | BigInt(hashArray[i])
-  }
-  const fingerprint = value
-    .toString(36)
-    .padStart(11, '0')
-    .toUpperCase()
-    .slice(0, 11)
-
-  return fingerprint
 }

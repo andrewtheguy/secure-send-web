@@ -9,13 +9,12 @@ import {
   ENCRYPTION_CHUNK_SIZE,
   CLOUD_CHUNK_SIZE,
   TRANSFER_EXPIRATION_MS,
-  deriveKeyFromPasskeyMasterKey,
-  getPasskeyMasterKeyAndFingerprint,
 } from '@/lib/crypto'
 import {
   createNostrClient,
   generateEphemeralKeys,
   parsePinExchangeEvent,
+  parseMutualTrustEvent,
   createAckEvent,
   parseChunkNotifyEvent,
   DEFAULT_RELAYS,
@@ -32,15 +31,24 @@ import type { PinKeyMaterial, ReceivedContent } from '@/lib/types'
 import { downloadFromCloud } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { WebRTCConnection } from '@/lib/webrtc'
+import { getPasskeyECDHKeypair } from '@/lib/crypto/passkey'
+import {
+  importECDHPrivateKey,
+  deriveSharedSecret,
+  deriveAESKeyFromSecret,
+  publicKeyToFingerprint,
+} from '@/lib/crypto/ecdh'
 
 export interface ReceiveOptions {
   usePasskey?: boolean
+  senderPublicKey?: Uint8Array // For mutual trust mode
 }
 
 export interface UseNostrReceiveReturn {
   state: TransferState
   receivedContent: ReceivedContent | null
-  passkeyFingerprint: string | null
+  ownPublicKey: Uint8Array | null
+  ownFingerprint: string | null
   receive: (pinMaterial: PinKeyMaterial | ReceiveOptions) => Promise<void>
   cancel: () => void
   reset: () => void
@@ -49,7 +57,8 @@ export interface UseNostrReceiveReturn {
 export function useNostrReceive(): UseNostrReceiveReturn {
   const [state, setState] = useState<TransferState>({ status: 'idle' })
   const [receivedContent, setReceivedContent] = useState<ReceivedContent | null>(null)
-  const [passkeyFingerprint, setPasskeyFingerprint] = useState<string | null>(null)
+  const [ownPublicKey, setOwnPublicKey] = useState<Uint8Array | null>(null)
+  const [ownFingerprint, setOwnFingerprint] = useState<string | null>(null)
 
   const clientRef = useRef<NostrClient | null>(null)
   const cancelledRef = useRef(false)
@@ -62,14 +71,16 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       clientRef.current.close()
       clientRef.current = null
     }
-    setPasskeyFingerprint(null)
+    setOwnPublicKey(null)
+    setOwnFingerprint(null)
     setState({ status: 'idle' })
   }, [])
 
   const reset = useCallback(() => {
     cancel()
     setReceivedContent(null)
-    setPasskeyFingerprint(null)
+    setOwnPublicKey(null)
+    setOwnFingerprint(null)
   }, [cancel])
 
   const receive = useCallback(async (arg: PinKeyMaterial | ReceiveOptions) => {
@@ -79,56 +90,96 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     cancelledRef.current = false
     setReceivedContent(null)
 
-    // Determine if this is passkey mode or PIN mode
-    const isPasskeyMode = 'usePasskey' in arg && arg.usePasskey === true
-    const pinMaterial = isPasskeyMode ? null : (arg as PinKeyMaterial)
+    // Determine mode
+    const isMutualTrustMode =
+      'usePasskey' in arg && arg.usePasskey === true && 'senderPublicKey' in arg && arg.senderPublicKey
+    const pinMaterial = !('usePasskey' in arg) ? (arg as PinKeyMaterial) : null
 
     try {
-      let pinHint: string
-      let passkeyMaster: CryptoKey | null = null
+      let hint: string
+      let key: CryptoKey | null = null
+      let expectedSenderFingerprint: string | undefined
 
-      if (isPasskeyMode) {
-        // Passkey mode: authenticate once to get master key + fingerprint
+      if (isMutualTrustMode) {
+        // MUTUAL TRUST MODE: Use passkey ECDH with sender's public key
+        const opts = arg as ReceiveOptions
         setState({ status: 'connecting', message: 'Authenticate with passkey...' })
+
         try {
-          const { masterKey, fingerprint } = await getPasskeyMasterKeyAndFingerprint()
-          passkeyMaster = masterKey
-          pinHint = fingerprint
-          // Store fingerprint for UI display (verification)
-          setPasskeyFingerprint(fingerprint)
+          // Authenticate and get our ECDH keypair
+          const {
+            publicKeyBytes,
+            privateKeyBytes,
+            publicKeyFingerprint,
+          } = await getPasskeyECDHKeypair()
+
+          // Store for UI display
+          setOwnPublicKey(publicKeyBytes)
+          setOwnFingerprint(publicKeyFingerprint)
+
+          // Calculate expected sender fingerprint for verification
+          expectedSenderFingerprint = await publicKeyToFingerprint(opts.senderPublicKey!)
+
+          // Import our private key for ECDH
+          const privateKey = await importECDHPrivateKey(privateKeyBytes)
+
+          // Derive shared secret with sender's public key
+          const sharedSecret = await deriveSharedSecret(privateKey, opts.senderPublicKey!)
+
+          // We'll derive the AES key later with the salt from the event
+          // For now, store the shared secret in a ref-like pattern
+          // Actually, we need to use HKDF with the event's salt, so we'll do it per-event
+
+          // Hint is our own public key fingerprint (sender addresses events to us)
+          hint = publicKeyFingerprint
+
+          // Store shared secret and salt derivation for later
+          const deriveKeyWithSalt = async (salt: Uint8Array) => {
+            return deriveAESKeyFromSecret(sharedSecret, salt)
+          }
+
+          // Store this function for use in event processing
+          ;(window as unknown as Record<string, unknown>).__deriveKeyWithSalt = deriveKeyWithSalt
         } catch (err) {
-          setState({ status: 'error', message: err instanceof Error ? err.message : 'Passkey authentication failed' })
+          setState({
+            status: 'error',
+            message: err instanceof Error ? err.message : 'Passkey authentication failed',
+          })
           receivingRef.current = false
           return
         }
-      } else {
+      } else if (pinMaterial) {
         // PIN mode: use provided material
-        if (!pinMaterial?.key || !pinMaterial?.hint) {
+        if (!pinMaterial.key || !pinMaterial.hint) {
           setState({ status: 'error', message: 'PIN unavailable. Please re-enter.' })
           receivingRef.current = false
           return
         }
         setState({ status: 'connecting', message: 'Deriving encryption key...' })
-        pinHint = pinMaterial.hint
+        hint = pinMaterial.hint
+      } else {
+        setState({ status: 'error', message: 'No credentials provided' })
+        receivingRef.current = false
+        return
       }
 
       if (cancelledRef.current) return
 
-      // Use seed relays for PIN exchange query
+      // Connect to relays
       setState({ status: 'connecting', message: 'Connecting to relays...' })
       const client = createNostrClient([...DEFAULT_RELAYS])
       clientRef.current = client
 
       if (cancelledRef.current) return
 
-      // Search for PIN exchange event
+      // Search for exchange event
       setState({ status: 'receiving', message: 'Searching for sender...' })
 
-      // Query for PIN exchange events with matching hint
+      // Query for events with matching hint
       const events = await client.query([
         {
           kinds: [EVENT_KIND_PIN_EXCHANGE],
-          '#h': [pinHint],
+          '#h': [hint],
           limit: 10,
         },
       ])
@@ -136,24 +187,25 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       if (cancelledRef.current) return
 
       if (events.length === 0) {
-        setState({ status: 'error', message: isPasskeyMode ? 'No transfer found for this passkey' : 'No transfer found for this PIN' })
+        setState({
+          status: 'error',
+          message: isMutualTrustMode ? 'No transfer found for this passkey' : 'No transfer found for this PIN',
+        })
         return
       }
 
-      // Try to decrypt each event (in case of hint collision)
+      // Try to decrypt each event
       let payload: PinExchangePayload | null = null
       let transferId: string | null = null
       let senderPubkey: string | null = null
-      let key: CryptoKey | null = null
       let sawExpiredCandidate = false
       let sawNonExpiredCandidate = false
       let selectedCreatedAtSec: number | null = null
 
-      // Prefer newest non-expired events first.
       const sortedEvents = [...events].sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
 
       for (const event of sortedEvents) {
-        // Enforce TTL before establishing any session, even if PIN is correct.
+        // Enforce TTL
         if (!event.created_at) {
           sawExpiredCandidate = true
           continue
@@ -165,39 +217,64 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         }
         sawNonExpiredCandidate = true
 
-        const parsed = parsePinExchangeEvent(event)
-        if (!parsed) continue
+        if (isMutualTrustMode) {
+          // Mutual trust mode: parse and verify sender fingerprint
+          const parsed = parseMutualTrustEvent(event)
+          if (!parsed) continue
 
-        try {
-          // Derive key with this salt
-          let derivedKey: CryptoKey
-          if (isPasskeyMode) {
-            if (!passkeyMaster) {
-              setState({ status: 'error', message: 'Passkey authentication unavailable' })
-              return
-            }
-            // Passkey mode: derive key from master key with salt (no prompt)
-            derivedKey = await deriveKeyFromPasskeyMasterKey(passkeyMaster, parsed.salt)
-          } else {
-            // PIN mode: derive key from PIN key material
-            derivedKey = await deriveKeyFromPinKey(pinMaterial!.key, parsed.salt)
+          // Verify sender's fingerprint matches expected
+          if (parsed.senderFingerprint !== expectedSenderFingerprint) {
+            console.log(`Sender fingerprint mismatch: ${parsed.senderFingerprint} vs ${expectedSenderFingerprint}`)
+            continue
           }
 
-          // Try to decrypt
-          const decrypted = await decrypt(derivedKey, parsed.encryptedPayload)
-          const decoder = new TextDecoder()
-          const payloadStr = decoder.decode(decrypted)
-          payload = JSON.parse(payloadStr) as PinExchangePayload
+          try {
+            // Derive key using stored function
+            const deriveKeyWithSalt = (window as unknown as Record<string, unknown>).__deriveKeyWithSalt as (
+              salt: Uint8Array
+            ) => Promise<CryptoKey>
+            const derivedKey = await deriveKeyWithSalt(parsed.salt)
 
-          transferId = parsed.transferId
-          senderPubkey = event.pubkey
-          key = derivedKey
-          selectedCreatedAtSec = event.created_at || null
-          break
-        } catch {
-          // Decryption failed, try next event
-          continue
+            // Try to decrypt
+            const decrypted = await decrypt(derivedKey, parsed.encryptedPayload)
+            const decoder = new TextDecoder()
+            const payloadStr = decoder.decode(decrypted)
+            payload = JSON.parse(payloadStr) as PinExchangePayload
+
+            transferId = parsed.transferId
+            senderPubkey = event.pubkey
+            key = derivedKey
+            selectedCreatedAtSec = event.created_at || null
+            break
+          } catch {
+            continue
+          }
+        } else {
+          // PIN mode
+          const parsed = parsePinExchangeEvent(event)
+          if (!parsed) continue
+
+          try {
+            const derivedKey = await deriveKeyFromPinKey(pinMaterial!.key, parsed.salt)
+            const decrypted = await decrypt(derivedKey, parsed.encryptedPayload)
+            const decoder = new TextDecoder()
+            const payloadStr = decoder.decode(decrypted)
+            payload = JSON.parse(payloadStr) as PinExchangePayload
+
+            transferId = parsed.transferId
+            senderPubkey = event.pubkey
+            key = derivedKey
+            selectedCreatedAtSec = event.created_at || null
+            break
+          } catch {
+            continue
+          }
         }
+      }
+
+      // Clean up global
+      if (isMutualTrustMode) {
+        delete (window as unknown as Record<string, unknown>).__deriveKeyWithSalt
       }
 
       if (!payload || !transferId || !senderPubkey || !key) {
@@ -205,7 +282,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           setState({ status: 'error', message: 'Transfer expired. Ask sender to start a new transfer.' })
           return
         }
-        setState({ status: 'error', message: isPasskeyMode ? 'Could not decrypt transfer. Different passkey?' : 'Could not decrypt transfer. Wrong PIN?' })
+        setState({
+          status: 'error',
+          message: isMutualTrustMode
+            ? 'Could not decrypt transfer. Wrong sender public key?'
+            : 'Could not decrypt transfer. Wrong PIN?',
+        })
         return
       }
 
@@ -214,7 +296,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         return
       }
 
-      // Required field: fileSize must be present and valid
+      // Validate payload
       if (payload.fileSize == null || !Number.isFinite(payload.fileSize) || payload.fileSize < 0) {
         setState({ status: 'error', message: 'Invalid file size in transfer' })
         return
@@ -224,12 +306,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       const resolvedFileSize = payload.fileSize
       const resolvedMimeType = payload.mimeType || 'application/octet-stream'
 
-      // Security check: Enforce MAX_MESSAGE_SIZE to prevent DoS/OOM
-      const expectedSize = resolvedFileSize
-      if (expectedSize > MAX_MESSAGE_SIZE) {
+      if (resolvedFileSize > MAX_MESSAGE_SIZE) {
         setState({
           status: 'error',
-          message: `Transfer rejected: Size (${Math.round(expectedSize / 1024 / 1024)}MB) exceeds limit (${MAX_MESSAGE_SIZE / 1024 / 1024}MB)`
+          message: `Transfer rejected: Size (${Math.round(resolvedFileSize / 1024 / 1024)}MB) exceeds limit (${MAX_MESSAGE_SIZE / 1024 / 1024}MB)`,
         })
         return
       }
@@ -239,11 +319,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Generate receiver keypair
       const { secretKey } = generateEphemeralKeys()
 
-      // Send ready ACK (seq=0) with hint so sender knows which key to use
-      console.log(`Sending ready ACK (seq=0) for transfer ${transferId}`)
-      const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0, pinHint)
+      // Send ready ACK (seq=0)
+      const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0, hint)
       await client.publish(readyAck)
-      console.log(`✓ Ready ACK sent successfully`)
 
       if (cancelledRef.current) return
 
@@ -261,309 +339,249 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         totalRelays: DEFAULT_RELAYS.length,
       })
 
-      // Unified listener for both P2P and chunked cloud transfer
-      // P2P is preferred, but if sender can't establish P2P, they'll send chunk notifications
+      // Unified listener for P2P and cloud transfer
       let webRTCSuccess = false
-      // Cloud uses separate tracking since encrypted chunks have different size
       const receivedCloudChunkIndices: Set<number> = new Set()
       let cloudBuffer: Uint8Array | null = null
       let cloudTotalBytes = 0
       let expectedTotalChunks = payload.totalChunks || 1
 
-      const transferResult = await new Promise<{ mode: 'p2p' | 'cloud' | 'inline'; data: Uint8Array }>((resolve, reject) => {
-        let rtc: WebRTCConnection | null = null
+      const transferResult = await new Promise<{ mode: 'p2p' | 'cloud' | 'inline'; data: Uint8Array }>(
+        (resolve, reject) => {
+          let rtc: WebRTCConnection | null = null
+          const expectedSize = resolvedFileSize
+          let combinedBuffer: Uint8Array | null = expectedSize > 0 ? new Uint8Array(expectedSize) : null
+          const receivedChunkIndices: Set<number> = new Set()
+          const pendingChunkPromises: Set<Promise<void>> = new Set()
+          let totalDecryptedBytes = 0
+          let settled = false
+          let cloudTransferStarted = false
 
-        // Pre-allocate buffer for received data to avoid 2x memory during assembly
-        // For files, use fileSize; for text, we'll grow as needed
-        const expectedSize = resolvedFileSize
-        let combinedBuffer: Uint8Array | null = expectedSize > 0 ? new Uint8Array(expectedSize) : null
-        const receivedChunkIndices: Set<number> = new Set()
-        const pendingChunkPromises: Set<Promise<void>> = new Set()
-        let totalDecryptedBytes = 0
-        let settled = false
-        let cloudTransferStarted = false
+          const overallTimeout = setTimeout(() => {
+            if (!settled) {
+              settled = true
+              if (rtc) rtc.close()
+              client.unsubscribe(subId)
+              reject(new Error('Transfer timeout'))
+            }
+          }, 10 * 60 * 1000)
 
-        // Overall timeout - 10 minutes for entire transfer
-        const overallTimeout = setTimeout(() => {
-          if (!settled) {
-            settled = true
-            if (rtc) rtc.close()
-            client.unsubscribe(subId)
-            reject(new Error('Transfer timeout'))
-          }
-        }, 10 * 60 * 1000)
+          const initWebRTC = () => {
+            if (rtc) return rtc
 
-        // Initialize WebRTC on first signal offer
-        const initWebRTC = () => {
-          if (rtc) return rtc
-
-          rtc = new WebRTCConnection(
-            { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
-            async (signal) => {
-              // Send Answer/Candidate via Nostr
-              const signalPayload = { type: 'signal', signal }
-              const signalJson = JSON.stringify(signalPayload)
-              const encryptedSignal = await encrypt(key!, new TextEncoder().encode(signalJson))
-              const event = createSignalingEvent(secretKey, senderPubkey!, transferId!, encryptedSignal)
-              await client.publish(event)
-            },
-            () => {
-              console.log('Receiver DataChannel open')
-              setState(s => ({ ...s, message: 'Receiving via P2P...', useWebRTC: true }))
-            },
-            (data) => {
-              // Handle DONE message with chunk count (format: "DONE:N")
-              if (typeof data === 'string' && data.startsWith('DONE:')) {
-                void (async () => {
-                  const expectedChunks = parseInt(data.split(':')[1], 10)
-                  if (!Number.isFinite(expectedChunks)) {
-                    reject(new Error('Invalid DONE message: missing chunk count'))
-                    return
-                  }
-
-                  // Wait for any in-flight chunk decrypts to complete before verifying.
-                  if (pendingChunkPromises.size > 0) {
-                    await Promise.allSettled(Array.from(pendingChunkPromises))
-                  }
-
-                  // Verify all chunks received
-                  if (receivedChunkIndices.size !== expectedChunks) {
-                    console.error(`Chunk count mismatch: got ${receivedChunkIndices.size}, expected ${expectedChunks}`)
-                    reject(new Error(`Missing chunks: got ${receivedChunkIndices.size}, expected ${expectedChunks}`))
-                    return
-                  }
-
-                  // Transfer complete via WebRTC
-                  if (!settled) {
-                    settled = true
-                    clearTimeout(overallTimeout)
-                    client.unsubscribe(subId)
-                    if (rtc) {
-                      rtc.send('DONE_ACK')
-                      rtc.close()
+            rtc = new WebRTCConnection(
+              { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
+              async (signal) => {
+                const signalPayload = { type: 'signal', signal }
+                const signalJson = JSON.stringify(signalPayload)
+                const encryptedSignal = await encrypt(key!, new TextEncoder().encode(signalJson))
+                const event = createSignalingEvent(secretKey, senderPubkey!, transferId!, encryptedSignal)
+                await client.publish(event)
+              },
+              () => {
+                setState((s) => ({ ...s, message: 'Receiving via P2P...', useWebRTC: true }))
+              },
+              (data) => {
+                if (typeof data === 'string' && data.startsWith('DONE:')) {
+                  void (async () => {
+                    const expectedChunks = parseInt(data.split(':')[1], 10)
+                    if (!Number.isFinite(expectedChunks)) {
+                      reject(new Error('Invalid DONE message: missing chunk count'))
+                      return
                     }
 
-                    // Buffer is already assembled - just trim to actual size if needed
-                    const result = combinedBuffer
-                      ? combinedBuffer.slice(0, totalDecryptedBytes)
-                      : new Uint8Array(0)
-
-                    console.log(`P2P transfer complete: received and decrypted ${expectedChunks} chunks (${totalDecryptedBytes} bytes)`)
-                    webRTCSuccess = true
-                    resolve({ mode: 'p2p', data: result })
-                  }
-                })()
-                return
-              }
-
-              // Handle legacy DONE format (for backwards compatibility)
-              if (typeof data === 'string' && data === 'DONE') {
-                reject(new Error('Unsupported sender: missing chunk count. Ask sender to update and retry.'))
-                return
-              }
-
-              // Handle encrypted chunk data
-              if (data instanceof ArrayBuffer) {
-                if (settled) return
-                // Parse and decrypt chunk on-the-fly, write directly to buffer
-                const decryptPromise = (async () => {
-                  try {
-                    const { chunkIndex, encryptedData } = parseChunkMessage(data)
-                    const decryptedChunk = await decryptChunk(key!, encryptedData)
-
-                    // Calculate write position based on chunk index
-                    const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE
-
-                    // Ensure buffer is large enough (for text messages or unknown sizes)
-                    const requiredSize = writePosition + decryptedChunk.length
-                    if (!combinedBuffer || combinedBuffer.length < requiredSize) {
-                      const newBuffer = new Uint8Array(Math.max(requiredSize, (combinedBuffer?.length || 0) * 2))
-                      if (combinedBuffer) {
-                        newBuffer.set(combinedBuffer)
-                      }
-                      combinedBuffer = newBuffer
+                    if (pendingChunkPromises.size > 0) {
+                      await Promise.allSettled(Array.from(pendingChunkPromises))
                     }
 
-                    // Write directly to position in buffer - no intermediate storage!
-                    combinedBuffer.set(decryptedChunk, writePosition)
-                    receivedChunkIndices.add(chunkIndex)
-                    totalDecryptedBytes += decryptedChunk.length
+                    if (receivedChunkIndices.size !== expectedChunks) {
+                      reject(
+                        new Error(`Missing chunks: got ${receivedChunkIndices.size}, expected ${expectedChunks}`)
+                      )
+                      return
+                    }
 
-                    // Update progress
-                    const totalBytes = resolvedFileSize
-                    setState(s => ({
-                      ...s,
-                      status: 'receiving',
-                      progress: {
-                        current: totalDecryptedBytes,
-                        total: totalBytes
+                    if (!settled) {
+                      settled = true
+                      clearTimeout(overallTimeout)
+                      client.unsubscribe(subId)
+                      if (rtc) {
+                        rtc.send('DONE_ACK')
+                        rtc.close()
                       }
-                    }))
-                  } catch (err) {
-                    console.error('Failed to decrypt chunk:', err)
-                    // Don't reject immediately - might be a transient error
-                  }
-                })()
-                pendingChunkPromises.add(decryptPromise)
-                decryptPromise.finally(() => {
-                  pendingChunkPromises.delete(decryptPromise)
-                })
+
+                      const result = combinedBuffer
+                        ? combinedBuffer.slice(0, totalDecryptedBytes)
+                        : new Uint8Array(0)
+
+                      webRTCSuccess = true
+                      resolve({ mode: 'p2p', data: result })
+                    }
+                  })()
+                  return
+                }
+
+                if (typeof data === 'string' && data === 'DONE') {
+                  reject(new Error('Unsupported sender: missing chunk count. Ask sender to update and retry.'))
+                  return
+                }
+
+                if (data instanceof ArrayBuffer) {
+                  if (settled) return
+                  const decryptPromise = (async () => {
+                    try {
+                      const { chunkIndex, encryptedData } = parseChunkMessage(data)
+                      const decryptedChunk = await decryptChunk(key!, encryptedData)
+                      const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE
+                      const requiredSize = writePosition + decryptedChunk.length
+
+                      if (!combinedBuffer || combinedBuffer.length < requiredSize) {
+                        const newBuffer = new Uint8Array(
+                          Math.max(requiredSize, (combinedBuffer?.length || 0) * 2)
+                        )
+                        if (combinedBuffer) {
+                          newBuffer.set(combinedBuffer)
+                        }
+                        combinedBuffer = newBuffer
+                      }
+
+                      combinedBuffer.set(decryptedChunk, writePosition)
+                      receivedChunkIndices.add(chunkIndex)
+                      totalDecryptedBytes += decryptedChunk.length
+
+                      setState((s) => ({
+                        ...s,
+                        status: 'receiving',
+                        progress: {
+                          current: totalDecryptedBytes,
+                          total: resolvedFileSize,
+                        },
+                      }))
+                    } catch (err) {
+                      console.error('Failed to decrypt chunk:', err)
+                    }
+                  })()
+                  pendingChunkPromises.add(decryptPromise)
+                  decryptPromise.finally(() => {
+                    pendingChunkPromises.delete(decryptPromise)
+                  })
+                }
               }
-            }
-          )
-          return rtc
-        }
-
-        // Handle chunk notification (cloud fallback)
-        const handleChunkNotify = async (chunkPayload: ChunkNotifyPayload) => {
-          if (settled) return
-
-          // First chunk notification - switch to cloud mode
-          if (!cloudTransferStarted) {
-            cloudTransferStarted = true
-            console.log('Switching to cloud chunk download mode')
-
-            // Close any pending WebRTC connection
-            if (rtc) {
-              rtc.close()
-              rtc = null
-            }
-
-            // Pre-allocate buffer for encrypted cloud data
-            // Cloud chunks are encrypted, so we estimate size based on totalChunks * chunkSize
-            // Add some overhead for encryption (28 bytes per original chunk, but cloud encrypts whole content)
-            const estimatedEncryptedSize = chunkPayload.totalChunks * CLOUD_CHUNK_SIZE
-            cloudBuffer = new Uint8Array(estimatedEncryptedSize)
+            )
+            return rtc
           }
 
-          expectedTotalChunks = chunkPayload.totalChunks
+          const handleChunkNotify = async (chunkPayload: ChunkNotifyPayload) => {
+            if (settled) return
 
-          setState(s => ({
-            ...s,
-            message: `Downloading chunk ${chunkPayload.chunkIndex + 1}/${chunkPayload.totalChunks}...`,
-            useWebRTC: false,
-          }))
+            if (!cloudTransferStarted) {
+              cloudTransferStarted = true
+              if (rtc) {
+                rtc.close()
+                rtc = null
+              }
+              const estimatedEncryptedSize = chunkPayload.totalChunks * CLOUD_CHUNK_SIZE
+              cloudBuffer = new Uint8Array(estimatedEncryptedSize)
+            }
 
-          try {
-            // Download this chunk
-            const chunkData = await downloadFromCloud(
-              chunkPayload.chunkUrl,
-              (loaded) => {
-                setState(s => ({
+            expectedTotalChunks = chunkPayload.totalChunks
+
+            setState((s) => ({
+              ...s,
+              message: `Downloading chunk ${chunkPayload.chunkIndex + 1}/${chunkPayload.totalChunks}...`,
+              useWebRTC: false,
+            }))
+
+            try {
+              const chunkData = await downloadFromCloud(chunkPayload.chunkUrl, (loaded) => {
+                setState((s) => ({
                   ...s,
                   progress: {
                     current: cloudTotalBytes + loaded,
                     total: resolvedFileSize,
                   },
                 }))
-              }
-            )
+              })
 
-            // Validate chunk size
-            if (chunkData.length !== chunkPayload.chunkSize) {
-              console.warn(`Chunk ${chunkPayload.chunkIndex} size mismatch: expected ${chunkPayload.chunkSize}, got ${chunkData.length}`)
-            }
+              const writePosition = chunkPayload.chunkIndex * CLOUD_CHUNK_SIZE
+              const requiredSize = writePosition + chunkData.length
 
-            // Calculate write position based on chunk index and cloud chunk size
-            const writePosition = chunkPayload.chunkIndex * CLOUD_CHUNK_SIZE
-
-            // Ensure buffer is large enough
-            const requiredSize = writePosition + chunkData.length
-            if (!cloudBuffer || cloudBuffer.length < requiredSize) {
-              const newBuffer = new Uint8Array(Math.max(requiredSize, (cloudBuffer?.length || 0) * 2))
-              if (cloudBuffer) {
-                newBuffer.set(cloudBuffer)
-              }
-              cloudBuffer = newBuffer
-            }
-
-            // Write directly to position in buffer - no intermediate storage!
-            cloudBuffer.set(chunkData, writePosition)
-            receivedCloudChunkIndices.add(chunkPayload.chunkIndex)
-            cloudTotalBytes += chunkData.length
-
-            console.log(`Chunk ${chunkPayload.chunkIndex + 1}/${chunkPayload.totalChunks} downloaded (${chunkData.length} bytes)`)
-
-            // Send chunk ACK (seq = chunkIndex + 1, 1-based)
-            const chunkAck = createAckEvent(
-              secretKey,
-              senderPubkey!,
-              transferId!,
-              chunkPayload.chunkIndex + 1
-            )
-            await client.publish(chunkAck)
-            console.log(`Chunk ${chunkPayload.chunkIndex + 1} ACK sent`)
-
-            // Check if all chunks received
-            if (receivedCloudChunkIndices.size === expectedTotalChunks) {
-              settled = true
-              clearTimeout(overallTimeout)
-              client.unsubscribe(subId)
-
-              // Buffer is already assembled - just trim to actual size
-              const result = cloudBuffer.slice(0, cloudTotalBytes)
-              console.log(`All ${expectedTotalChunks} cloud chunks assembled (${cloudTotalBytes} bytes)`)
-              resolve({ mode: 'cloud', data: result })
-            }
-          } catch (err) {
-            console.error(`Failed to download chunk ${chunkPayload.chunkIndex}:`, err)
-            // Don't reject immediately - sender might resend
-          }
-        }
-
-        // Track processed event IDs to avoid duplicates
-        const processedEventIds = new Set<string>()
-
-        // Process an event (signal or chunk notification)
-        const processEvent = async (event: Event) => {
-          if (settled) return
-          if (processedEventIds.has(event.id)) return
-          processedEventIds.add(event.id)
-
-          // Check for WebRTC signal (only if cloud transfer hasn't started)
-          if (!cloudTransferStarted) {
-            const signalData = parseSignalingEvent(event)
-            if (signalData && signalData.transferId === transferId) {
-              try {
-                const decrypted = await decrypt(key!, signalData.encryptedSignal)
-                const signalPayload = JSON.parse(new TextDecoder().decode(decrypted))
-                if (signalPayload.type === 'signal' && signalPayload.signal) {
-                  console.log('Received WebRTC signal:', signalPayload.signal.type || 'candidate')
-                  const r = initWebRTC()
-                  r.handleSignal(signalPayload.signal)
+              if (!cloudBuffer || cloudBuffer.length < requiredSize) {
+                const newBuffer = new Uint8Array(Math.max(requiredSize, (cloudBuffer?.length || 0) * 2))
+                if (cloudBuffer) {
+                  newBuffer.set(cloudBuffer)
                 }
-              } catch (e) {
-                console.error("Signal handling error", e)
+                cloudBuffer = newBuffer
               }
-              return
+
+              cloudBuffer.set(chunkData, writePosition)
+              receivedCloudChunkIndices.add(chunkPayload.chunkIndex)
+              cloudTotalBytes += chunkData.length
+
+              const chunkAck = createAckEvent(
+                secretKey,
+                senderPubkey!,
+                transferId!,
+                chunkPayload.chunkIndex + 1
+              )
+              await client.publish(chunkAck)
+
+              if (receivedCloudChunkIndices.size === expectedTotalChunks) {
+                settled = true
+                clearTimeout(overallTimeout)
+                client.unsubscribe(subId)
+                const result = cloudBuffer.slice(0, cloudTotalBytes)
+                resolve({ mode: 'cloud', data: result })
+              }
+            } catch (err) {
+              console.error(`Failed to download chunk ${chunkPayload.chunkIndex}:`, err)
             }
           }
 
-          // Check for chunk notification (cloud fallback)
-          const chunkNotify = parseChunkNotifyEvent(event)
-          if (chunkNotify && chunkNotify.transferId === transferId) {
-            // Avoid processing duplicate chunk notifications
-            if (!receivedCloudChunkIndices.has(chunkNotify.chunkIndex)) {
-              await handleChunkNotify(chunkNotify)
+          const processedEventIds = new Set<string>()
+
+          const processEvent = async (event: Event) => {
+            if (settled) return
+            if (processedEventIds.has(event.id)) return
+            processedEventIds.add(event.id)
+
+            if (!cloudTransferStarted) {
+              const signalData = parseSignalingEvent(event)
+              if (signalData && signalData.transferId === transferId) {
+                try {
+                  const decrypted = await decrypt(key!, signalData.encryptedSignal)
+                  const signalPayload = JSON.parse(new TextDecoder().decode(decrypted))
+                  if (signalPayload.type === 'signal' && signalPayload.signal) {
+                    const r = initWebRTC()
+                    r.handleSignal(signalPayload.signal)
+                  }
+                } catch (e) {
+                  console.error('Signal handling error', e)
+                }
+                return
+              }
+            }
+
+            const chunkNotify = parseChunkNotifyEvent(event)
+            if (chunkNotify && chunkNotify.transferId === transferId) {
+              if (!receivedCloudChunkIndices.has(chunkNotify.chunkIndex)) {
+                await handleChunkNotify(chunkNotify)
+              }
             }
           }
-        }
 
-        // Listen for both WebRTC signals AND chunk notifications from sender
-        const subId = client.subscribe(
-          [
-            {
-              kinds: [EVENT_KIND_DATA_TRANSFER],
-              '#t': [transferId!],
-              authors: [senderPubkey!],
-            },
-          ],
-          processEvent
-        )
+          const subId = client.subscribe(
+            [
+              {
+                kinds: [EVENT_KIND_DATA_TRANSFER],
+                '#t': [transferId!],
+                authors: [senderPubkey!],
+              },
+            ],
+            processEvent
+          )
 
-          // Query for existing events that may have arrived before subscription
-          // This fixes race condition where sender's offer arrives before receiver subscribes
-          ; (async () => {
+          ;(async () => {
             try {
               const existingEvents = await client.query([
                 {
@@ -573,7 +591,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                   limit: 50,
                 },
               ])
-              console.log(`Found ${existingEvents.length} existing events for transfer`)
               for (const event of existingEvents) {
                 await processEvent(event)
               }
@@ -581,8 +598,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               console.error('Failed to query existing events:', err)
             }
           })()
-
-      })
+        }
+      )
 
       if (cancelledRef.current) return
 
@@ -590,24 +607,18 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       let contentData: Uint8Array
 
       if (transferResult.mode === 'p2p') {
-        // P2P data is already decrypted on-the-fly during reception
         contentData = transferResult.data
         webRTCSuccess = true
-        console.log('Received and decrypted data via P2P')
       } else {
-        // Cloud data is encrypted - need to decrypt
-        setState(s => ({ ...s, message: 'Decrypting...' }))
+        setState((s) => ({ ...s, message: 'Decrypting...' }))
         contentData = await decrypt(key, transferResult.data)
-        console.log('Downloaded and decrypted data from cloud storage')
       }
 
       if (cancelledRef.current) return
 
       // Send completion ACK
-      console.log(`Sending completion ACK (seq=-1) for transfer ${transferId}`)
       const completeAck = createAckEvent(secretKey, senderPubkey, transferId, -1)
       await client.publish(completeAck)
-      console.log(`✓ Completion ACK sent successfully`)
 
       // Set received content
       setReceivedContent({
@@ -617,7 +628,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         fileSize: resolvedFileSize,
         mimeType: resolvedMimeType,
       })
-      setState(prevState => ({
+
+      setState((prevState) => ({
         status: 'complete',
         message: webRTCSuccess ? 'File received (P2P)!' : 'File received!',
         contentType: 'file',
@@ -626,20 +638,19 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           fileSize: resolvedFileSize,
           mimeType: resolvedMimeType,
         },
-        currentRelays: prevState.currentRelays, // Preserve for debugging
+        currentRelays: prevState.currentRelays,
         totalRelays: prevState.totalRelays,
         useWebRTC: prevState.useWebRTC,
       }))
     } catch (error) {
       if (!cancelledRef.current) {
-        setState(prevState => ({
+        setState((prevState) => ({
           ...prevState,
           status: 'error',
           message: error instanceof Error ? error.message : 'Failed to receive',
         }))
       }
     } finally {
-      // Always clean up resources and reset receiving flag
       receivingRef.current = false
       if (clientRef.current) {
         clientRef.current.close()
@@ -648,5 +659,5 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     }
   }, [])
 
-  return { state, receivedContent, passkeyFingerprint, receive, cancel, reset }
+  return { state, receivedContent, ownPublicKey, ownFingerprint, receive, cancel, reset }
 }

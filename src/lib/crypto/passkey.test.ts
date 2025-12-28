@@ -1,45 +1,52 @@
 import { expect, test, describe } from 'vitest'
-import { credentialIdToFingerprint } from './passkey'
+import { publicKeyToFingerprint } from './ecdh'
 
 describe('Passkey Utilities', () => {
-  describe('credentialIdToFingerprint', () => {
+  describe('publicKeyToFingerprint', () => {
     test('should generate deterministic 11-character uppercase fingerprint', async () => {
-      const credentialId = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-      const fingerprint = await credentialIdToFingerprint(credentialId)
+      // 65-byte P-256 uncompressed public key (0x04 prefix + X + Y)
+      const publicKey = new Uint8Array(65)
+      publicKey[0] = 0x04
+      publicKey.fill(0x01, 1, 33) // X coordinate
+      publicKey.fill(0x02, 33, 65) // Y coordinate
+      const fingerprint = await publicKeyToFingerprint(publicKey)
 
       expect(fingerprint.length).toBe(11)
       expect(fingerprint).toMatch(/^[0-9A-Z]+$/)
     })
 
-    test('should generate same fingerprint for same credential ID', async () => {
-      const credentialId = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-      const fingerprint1 = await credentialIdToFingerprint(credentialId)
-      const fingerprint2 = await credentialIdToFingerprint(credentialId)
+    test('should generate same fingerprint for same public key', async () => {
+      const publicKey = new Uint8Array(65)
+      publicKey[0] = 0x04
+      publicKey.fill(0x01, 1, 33)
+      publicKey.fill(0x02, 33, 65)
+      const fingerprint1 = await publicKeyToFingerprint(publicKey)
+      const fingerprint2 = await publicKeyToFingerprint(publicKey)
 
       expect(fingerprint1).toBe(fingerprint2)
     })
 
-    test('should generate different fingerprints for different credential IDs', async () => {
-      const credentialId1 = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-      const credentialId2 = new Uint8Array([10, 9, 8, 7, 6, 5, 4, 3, 2, 1])
+    test('should generate different fingerprints for different public keys', async () => {
+      const publicKey1 = new Uint8Array(65)
+      publicKey1[0] = 0x04
+      publicKey1.fill(0x01, 1, 33)
+      publicKey1.fill(0x02, 33, 65)
 
-      const fingerprint1 = await credentialIdToFingerprint(credentialId1)
-      const fingerprint2 = await credentialIdToFingerprint(credentialId2)
+      const publicKey2 = new Uint8Array(65)
+      publicKey2[0] = 0x04
+      publicKey2.fill(0x03, 1, 33)
+      publicKey2.fill(0x04, 33, 65)
+
+      const fingerprint1 = await publicKeyToFingerprint(publicKey1)
+      const fingerprint2 = await publicKeyToFingerprint(publicKey2)
 
       expect(fingerprint1).not.toBe(fingerprint2)
     })
 
-    test('should handle empty credential ID', async () => {
-      const credentialId = new Uint8Array([])
-      const fingerprint = await credentialIdToFingerprint(credentialId)
-
-      expect(fingerprint.length).toBe(11)
-      expect(fingerprint).toMatch(/^[0-9A-Z]+$/)
-    })
-
-    test('should handle large credential ID', async () => {
-      const credentialId = new Uint8Array(256).fill(0xff)
-      const fingerprint = await credentialIdToFingerprint(credentialId)
+    test('should handle arbitrary input (not validation)', async () => {
+      // The function hashes any input, so even non-P256 data will produce a fingerprint
+      const data = new Uint8Array([1, 2, 3, 4, 5])
+      const fingerprint = await publicKeyToFingerprint(data)
 
       expect(fingerprint.length).toBe(11)
       expect(fingerprint).toMatch(/^[0-9A-Z]+$/)
