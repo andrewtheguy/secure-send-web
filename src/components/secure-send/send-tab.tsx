@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo } from 'react'
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, AlertTriangle, Info, Fingerprint, ArrowRight, ScanLine } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -61,33 +61,41 @@ export function SendTab() {
   const folderInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
 
-  // Parse and validate receiver public key
-  const receiverPublicKeyBytes = useMemo(() => {
+  // Parse receiver public key (pure computation only)
+  const receiverPublicKeyParsed = useMemo((): { bytes: Uint8Array } | { error: string } | null => {
     if (!receiverPublicKeyInput.trim()) {
-      setReceiverPublicKeyError(null)
-      setReceiverPublicKeyFingerprint(null)
       return null
     }
     try {
       const bytes = base64ToUint8Array(receiverPublicKeyInput.trim())
       // P-256 uncompressed public key should be 65 bytes starting with 0x04
       if (bytes.length !== 65 || bytes[0] !== 0x04) {
-        setReceiverPublicKeyError('Invalid public key format (expected 65-byte P-256 key)')
-        setReceiverPublicKeyFingerprint(null)
-        return null
+        return { error: 'Invalid public key format (expected 65-byte P-256 key)' }
       }
-      // Compute fingerprint asynchronously
-      publicKeyToFingerprint(bytes).then(fp => {
-        setReceiverPublicKeyFingerprint(`${fp.slice(0, 4)}-${fp.slice(4, 8)}-${fp.slice(8, 11)}`)
-      })
-      setReceiverPublicKeyError(null)
-      return bytes
+      return { bytes }
     } catch {
-      setReceiverPublicKeyError('Invalid base64 encoding')
-      setReceiverPublicKeyFingerprint(null)
-      return null
+      return { error: 'Invalid base64 encoding' }
     }
   }, [receiverPublicKeyInput])
+
+  // Side effects: update error and fingerprint states
+  useEffect(() => {
+    if (!receiverPublicKeyParsed) {
+      setReceiverPublicKeyError(null)
+      setReceiverPublicKeyFingerprint(null)
+    } else if ('error' in receiverPublicKeyParsed) {
+      setReceiverPublicKeyError(receiverPublicKeyParsed.error)
+      setReceiverPublicKeyFingerprint(null)
+    } else {
+      setReceiverPublicKeyError(null)
+      publicKeyToFingerprint(receiverPublicKeyParsed.bytes).then(fp => {
+        setReceiverPublicKeyFingerprint(`${fp.slice(0, 4)}-${fp.slice(4, 8)}-${fp.slice(8, 11)}`)
+      })
+    }
+  }, [receiverPublicKeyParsed])
+
+  // Extract valid bytes for use in callbacks
+  const receiverPublicKeyBytes = receiverPublicKeyParsed && 'bytes' in receiverPublicKeyParsed ? receiverPublicKeyParsed.bytes : null
 
   // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrSend()

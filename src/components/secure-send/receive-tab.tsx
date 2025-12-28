@@ -53,33 +53,41 @@ export function ReceiveTab() {
   const [, setDetectedMethod] = useState<SignalingMethod>('nostr')
   const [pinFingerprint, setPinFingerprint] = useState<string | null>(null)
 
-  // Parse and validate sender public key
-  const senderPublicKeyBytes = useMemo(() => {
+  // Parse sender public key (pure computation only)
+  const senderPublicKeyParsed = useMemo((): { bytes: Uint8Array } | { error: string } | null => {
     if (!senderPublicKeyInput.trim()) {
-      setSenderPublicKeyError(null)
-      setSenderPublicKeyFingerprint(null)
       return null
     }
     try {
       const bytes = base64ToUint8Array(senderPublicKeyInput.trim())
       // P-256 uncompressed public key should be 65 bytes starting with 0x04
       if (bytes.length !== 65 || bytes[0] !== 0x04) {
-        setSenderPublicKeyError('Invalid public key format (expected 65-byte P-256 key)')
-        setSenderPublicKeyFingerprint(null)
-        return null
+        return { error: 'Invalid public key format (expected 65-byte P-256 key)' }
       }
-      // Compute fingerprint asynchronously
-      publicKeyToFingerprint(bytes).then(fp => {
-        setSenderPublicKeyFingerprint(`${fp.slice(0, 4)}-${fp.slice(4, 8)}-${fp.slice(8, 11)}`)
-      })
-      setSenderPublicKeyError(null)
-      return bytes
+      return { bytes }
     } catch {
-      setSenderPublicKeyError('Invalid base64 encoding')
-      setSenderPublicKeyFingerprint(null)
-      return null
+      return { error: 'Invalid base64 encoding' }
     }
   }, [senderPublicKeyInput])
+
+  // Side effects: update error and fingerprint states
+  useEffect(() => {
+    if (!senderPublicKeyParsed) {
+      setSenderPublicKeyError(null)
+      setSenderPublicKeyFingerprint(null)
+    } else if ('error' in senderPublicKeyParsed) {
+      setSenderPublicKeyError(senderPublicKeyParsed.error)
+      setSenderPublicKeyFingerprint(null)
+    } else {
+      setSenderPublicKeyError(null)
+      publicKeyToFingerprint(senderPublicKeyParsed.bytes).then(fp => {
+        setSenderPublicKeyFingerprint(`${fp.slice(0, 4)}-${fp.slice(4, 8)}-${fp.slice(8, 11)}`)
+      })
+    }
+  }, [senderPublicKeyParsed])
+
+  // Extract valid bytes for use in callbacks
+  const senderPublicKeyBytes = senderPublicKeyParsed && 'bytes' in senderPublicKeyParsed ? senderPublicKeyParsed.bytes : null
 
   // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrReceive()
