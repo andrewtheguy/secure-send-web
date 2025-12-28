@@ -335,8 +335,10 @@ export function PasskeyPage() {
               Register New Passkey
             </h3>
             <p className="text-sm text-muted-foreground">
-              Create a new passkey for this app. The passkey will be stored in your
-              browser or password manager and can be synced across devices.
+              Create a passkey to generate your unique public key.
+              Your passkey will be saved to your password manager (1Password, iCloud Keychain, etc.).
+              You'll be prompted twice: once to create the passkey, then once more to verify and
+              retrieve your public key.
             </p>
             <div className="space-y-2">
               <Label htmlFor="userName">Display Name (optional)</Label>
@@ -356,10 +358,12 @@ export function PasskeyPage() {
               disabled={isLoading}
               className="w-full"
             >
-              {pageState === 'creating' || pageState === 'checking' ? (
+              {pageState !== 'idle' ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  {pageState === 'checking' ? 'Checking support...' : 'Creating passkey...'}
+                  {pageState === 'checking' && 'Checking support...'}
+                  {pageState === 'creating' && 'Creating passkey...'}
+                  {pageState === 'getting_key' && 'Getting public key...'}
                 </>
               ) : (
                 <>
