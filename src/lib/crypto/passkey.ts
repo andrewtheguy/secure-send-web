@@ -213,6 +213,9 @@ export async function deriveKeyFromPasskeyMasterKey(
  * Format: 'P' + 11-char fingerprint = 12 chars (same as regular PIN)
  */
 export function generatePasskeyPin(fingerprint: string): string {
+  if (fingerprint.length < 11) {
+    throw new Error(`Passkey fingerprint must be at least 11 characters; received ${fingerprint.length}`)
+  }
   return 'P' + fingerprint.slice(0, 11)
 }
 
@@ -245,12 +248,15 @@ async function credentialIdToFingerprint(credentialId: Uint8Array): Promise<stri
   const hash = await crypto.subtle.digest('SHA-256', credentialBytes as BufferSource)
   const hashArray = new Uint8Array(hash)
 
-  // Convert first 8 bytes to alphanumeric (base36-ish)
-  // This gives us ~11 chars which fits nicely after 'P' prefix
-  let fingerprint = ''
-  for (let i = 0; i < 8 && fingerprint.length < 11; i++) {
-    fingerprint += hashArray[i].toString(36)
+  let value = 0n
+  for (let i = 0; i < 8; i++) {
+    value = (value << 8n) | BigInt(hashArray[i])
   }
+  const fingerprint = value
+    .toString(36)
+    .padStart(11, '0')
+    .toUpperCase()
+    .slice(0, 11)
 
-  return fingerprint.slice(0, 11).toUpperCase()
+  return fingerprint
 }

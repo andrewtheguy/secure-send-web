@@ -248,12 +248,9 @@ export function parseChunkNotifyEvent(event: Event): ChunkNotifyPayload | null {
 }
 
 export function uint8ArrayToBase64(bytes: Uint8Array): string {
-  // ...
   let binary = ''
-  const chunkSize = 8192
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize)
-    binary += String.fromCharCode(...chunk)
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i])
   }
   return btoa(binary)
 }
