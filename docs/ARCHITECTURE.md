@@ -2,7 +2,7 @@
 
 ## Overview
 
-Secure Send is a browser-based encrypted file and message transfer application. It uses PIN-based encryption for signaling and cloud transfers, supports two signaling methods (Nostr relays or QR codes), and enables direct P2P (WebRTC) data transfer with optional cloud fallback (Nostr mode only).
+Secure Send is a browser-based encrypted file and message transfer application. It supports PIN-based or passkey-based encryption for signaling and cloud transfers, two signaling methods (Nostr relays or QR codes), and enables direct P2P (WebRTC) data transfer with optional cloud fallback (Nostr mode only).
 
 ## Core Principles
 
@@ -11,6 +11,7 @@ Secure Send is a browser-based encrypted file and message transfer application. 
 3. **Memory-Efficient Streaming**: Content is encrypted/decrypted in streaming chunks. All receivers (P2P and cloud) preallocate buffers and write directly to calculated positions - no intermediate chunk arrays.
 4. **Pluggable Signaling**: Signaling (Nostr, QR) is decoupled from the transfer layer. The same encryption/chunking logic is used regardless of signaling method.
 5. **Dual PIN Representation**: A 12-character alphanumeric PIN serves as the shared secret. To improve shareability (e.g., via voice), this PIN can be bijectively mapped to a 7-word sequence from the BIP-39 wordlist.
+6. **Passkey Support**: Alternative to PIN-based authentication using WebAuthn PRF extension. Keys are derived from hardware-backed secure elements (Touch ID, Face ID, Windows Hello) when passkeys are synced via password managers.
 
 ## Signaling Methods
 
@@ -107,6 +108,7 @@ sequenceDiagram
 |-----------|-------------|
 | `pin.ts` | Alphanumeric (12-char) and Word (7-word) PIN handling, weighted checksums, signaling detection |
 | `kdf.ts` | Key derivation using PBKDF2-SHA256 (600,000 iterations) |
+| `passkey.ts` | WebAuthn PRF extension for passkey-based key derivation |
 | `aes-gcm.ts` | AES-256-GCM encryption/decryption |
 | `stream-crypto.ts` | Streaming encryption/decryption (128KB chunks, protocol-agnostic) |
 | `constants.ts` | Crypto parameters, charsets (69 chars), BIP-39 wordlist (2048 words) |
@@ -132,6 +134,56 @@ To protect against manual entry errors, the PIN includes a custom checksum:
 - **Algorithm**: `sum(char_index * (position + 1)) % charset_size`.
 - **Detection**: Effectively catches single-character errors and swaps (transpositions).
 - **Independent Validation**: Both characters and word sequences are validated against the same underlying checksum logic.
+
+### Passkey Architecture
+
+Passkeys provide an alternative to PIN-based authentication using the WebAuthn PRF extension for hardware-backed key derivation.
+
+#### How It Works
+
+1. **Credential Creation**: User creates a passkey at `/passkey`, stored in their password manager (1Password, iCloud Keychain, Google Password Manager)
+2. **Passkey Sync**: Both sender and receiver must have the same passkey synced via their password manager
+3. **PRF Extension**: WebAuthn PRF (Pseudo-Random Function) extension derives encryption keys from the passkey
+4. **Hardware-Backed**: Keys are derived from device secure elements (Touch ID, Face ID, Windows Hello)
+
+#### Passkey Identifier Format
+
+- **Format**: `P` + 11-character fingerprint = 12 characters (same length as PIN)
+- **Fingerprint**: SHA-256 hash of credential ID, encoded as 11 base36 characters
+- **Purpose**: Used for Nostr event filtering (same role as PIN hint) and verification
+
+#### Key Derivation Flow
+
+```mermaid
+flowchart TD
+    Passkey[Passkey Authentication] --> PRF[WebAuthn PRF Extension]
+    PRF --> MasterKey[Master Key HKDF]
+    Salt[Random Salt] --> HKDF[HKDF-SHA256]
+    MasterKey --> HKDF
+    HKDF --> AESKey[AES-256-GCM Key]
+```
+
+1. **Master Key**: Single passkey prompt derives HKDF master key via PRF
+2. **Per-Transfer Key**: HKDF with random salt derives unique AES key per transfer
+3. **No PIN Required**: Biometric/device unlock replaces PIN entry
+
+#### Dual Mode (Sender)
+
+When passkey mode is enabled, the sender generates BOTH:
+- Normal PIN + PIN-derived key
+- Passkey fingerprint + passkey-derived key
+
+Two PIN exchange events are published to Nostr (one for each mode). Receiver chooses their preferred authentication method, and the ACK includes a hint indicating which key was used.
+
+#### Security Properties
+
+| Property | PIN Mode | Passkey Mode |
+|----------|----------|--------------|
+| Key Source | User-memorized PIN | Hardware secure element |
+| Brute Force Resistance | 600K PBKDF2 iterations | Hardware rate limiting |
+| Phishing Resistance | None | Origin-bound credentials |
+| Sync Method | Out-of-band sharing | Password manager sync |
+| Verification | PIN match | Fingerprint comparison |
 
 ### User Interface Architecture
 
@@ -389,10 +441,19 @@ interface PinExchangePayload {
 ```
 
 ### Encryption Flow
+
+**PIN Mode:**
 1. **PIN Generation**: 12-character from mixed charset (excluding ambiguous chars)
 2. **Salt Generation**: 16 random bytes (included in signaling payload for receiver)
 3. **Key Derivation**: PBKDF2-SHA256 with 600,000 iterations
 4. **Chunk Encryption**: AES-256-GCM with 12-byte nonce per 128KB chunk
+
+**Passkey Mode:**
+1. **Passkey Authentication**: WebAuthn prompt (biometric/device unlock)
+2. **Master Key**: PRF extension output imported as HKDF key
+3. **Salt Generation**: 16 random bytes (included in signaling payload)
+4. **Key Derivation**: HKDF-SHA256 with salt derives per-transfer AES key
+5. **Chunk Encryption**: Same AES-256-GCM with 12-byte nonce per 128KB chunk
 
 ### What's Encrypted Where
 
@@ -511,13 +572,15 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 ## Security Considerations
 
 1. **Ephemeral Keys**: New keypair generated for each transfer
-2. **Forward Secrecy**: PIN-derived key is unique per transfer (includes random salt) - applies to all modes
+2. **Forward Secrecy**: PIN/passkey-derived key is unique per transfer (includes random salt) - applies to all modes
 3. **No Server Trust**: Cloud storage and relays see only encrypted payloads and minimal routing metadata; plaintext never leaves the device
 4. **PIN Entropy**: ~67 bits (11 random chars from 69-char set + 1 checksum)
-5. **Brute-Force Resistance**: 600K PBKDF2 iterations (planned: Argon2id)
-6. **PIN Role**: PIN encrypts signaling (preventing unauthorized P2P connection) AND content (defense in depth)
+5. **Brute-Force Resistance**: 600K PBKDF2 iterations for PIN mode; hardware rate limiting for passkey mode
+6. **PIN/Passkey Role**: Encrypts signaling (preventing unauthorized P2P connection) AND content (defense in depth)
 7. **Transport Security**: All P2P transfers (Nostr, Manual Exchange) use both AES-256-GCM encryption (128KB chunks) and WebRTC DTLS
 8. **Protocol-Agnostic Security**: Same encryption layer used regardless of signaling method - no security difference between Nostr or Manual Exchange
+9. **Passkey Security**: WebAuthn PRF extension provides hardware-backed key derivation with origin-bound credentials and phishing resistance
+10. **Passkey Sync**: Requires same passkey synced via password manager (1Password, iCloud Keychain, Google Password Manager) - no out-of-band PIN sharing needed
 
 ## File Structure
 
@@ -527,7 +590,8 @@ src/
 │   ├── crypto/              # Cryptographic functions
 │   │   ├── constants.ts     # Parameters and limits
 │   │   ├── pin.ts           # PIN generation/validation
-│   │   ├── kdf.ts           # Key derivation
+│   │   ├── kdf.ts           # Key derivation (PBKDF2)
+│   │   ├── passkey.ts       # Passkey/WebAuthn PRF key derivation
 │   │   ├── aes-gcm.ts       # Encryption/decryption
 │   │   └── stream-crypto.ts # Streaming chunk encryption (P2P)
 │   ├── nostr/               # Nostr protocol (signaling option 1)
@@ -554,7 +618,11 @@ src/
 │       ├── qr-display.tsx   # Binary QR code display
 │       ├── qr-scanner.tsx   # QR scanner (binary mode)
 │       └── qr-input.tsx     # Dual input (scan or paste)
-└── pages/                   # Page components
+└── pages/
+    ├── send.tsx             # Send page
+    ├── receive.tsx          # Receive page
+    ├── about.tsx            # About page
+    └── passkey.tsx          # Passkey setup/test page
 ```
 
 **Crypto parameters**: Key tunables like `PBKDF2_ITERATIONS`, `ENCRYPTION_CHUNK_SIZE`, and `CLOUD_CHUNK_SIZE` live in [src/lib/crypto/constants.ts](src/lib/crypto/constants.ts) for quick lookup.
