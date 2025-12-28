@@ -18,7 +18,7 @@ export async function deriveKeyFromPasskey(salt: Uint8Array): Promise<CryptoKey>
   const prfInput = new TextEncoder().encode(PRF_SALT_PREFIX + base64urlEncode(salt))
 
   // Use discoverable credential flow - passkey picker will appear
-  const assertion = await navigator.credentials.get({
+  const assertion = (await navigator.credentials.get({
     publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)),
       userVerification: 'required',
@@ -30,10 +30,14 @@ export async function deriveKeyFromPasskey(salt: Uint8Array): Promise<CryptoKey>
         },
       },
     },
-  })
+  })) as PublicKeyCredential
 
   if (!assertion) {
-    throw new Error('Passkey authentication cancelled or unavailable')
+    throw new Error('User cancelled passkey authentication or no credentials available')
+  }
+
+  if (!assertion) {
+    throw new Error('User cancelled passkey authentication or no credentials available')
   }
 
   const credential = assertion as PublicKeyCredential
@@ -71,7 +75,7 @@ export async function getCredentialFingerprint(): Promise<string> {
   })
 
   if (!assertion) {
-    throw new Error('Passkey authentication cancelled or unavailable')
+    throw new Error('User cancelled passkey authentication or no credentials available')
   }
 
   const credential = assertion as PublicKeyCredential
@@ -111,7 +115,7 @@ export async function deriveKeyAndFingerprintFromPasskey(
   })
 
   if (!assertion) {
-    throw new Error('Passkey authentication cancelled or unavailable')
+    throw new Error('User cancelled passkey authentication or no credentials available')
   }
 
   const credential = assertion as PublicKeyCredential
@@ -161,7 +165,7 @@ export async function getPasskeyMasterKeyAndFingerprint(): Promise<{
   })
 
   if (!assertion) {
-    throw new Error('Passkey authentication cancelled or unavailable')
+    throw new Error('User cancelled passkey authentication or no credentials available')
   }
 
   const credential = assertion as PublicKeyCredential
