@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react'
-import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, AlertTriangle, Info, Fingerprint } from 'lucide-react'
+import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, AlertTriangle, Info, Fingerprint, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
@@ -15,6 +15,7 @@ import { MAX_MESSAGE_SIZE } from '@/lib/crypto'
 import { formatFileSize } from '@/lib/file-utils'
 import { compressFilesToZip, getFolderName, getTotalSize, supportsFolderSelection } from '@/lib/folder-utils'
 import type { SignalingMethod } from '@/lib/nostr/types'
+import { Link } from 'react-router-dom'
 
 type ContentMode = 'file' | 'folder'
 type MethodChoice = 'nostr' | 'manual'
@@ -594,6 +595,19 @@ export function SendTab() {
             state={state}
             betweenProgressAndChunks={showPinDisplay ? <PinDisplay pin={pin} passkeyFingerprint={passkeyFingerprint} onExpire={cancel} /> : undefined}
           />
+
+          {/* Passkey authentication help */}
+          {state.status === 'connecting' && state.message?.toLowerCase().includes('passkey') && (
+            <div className="text-xs text-muted-foreground border border-primary/20 bg-primary/5 px-3 py-2 rounded space-y-1">
+              <p>A passkey prompt should appear from your browser or password manager.</p>
+              <p>
+                Don't have a passkey yet?{' '}
+                <Link to="/passkey" className="text-primary hover:underline inline-flex items-center gap-1">
+                  Create one here <ExternalLink className="h-3 w-3" />
+                </Link>
+              </p>
+            </div>
+          )}
 
           {/* QR Code display for sender */}
           {showQRDisplay && (
