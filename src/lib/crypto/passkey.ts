@@ -234,7 +234,11 @@ export function extractPasskeyFingerprint(pin: string): string {
 }
 
 /**
- * Check if WebAuthn and PRF extension are supported
+ * Check if WebAuthn and PRF extension are supported.
+ *
+ * Note: PRF support is assumed (not verified) if a platform authenticator exists.
+ * Actual PRF support can only be confirmed during credential creation/assertion.
+ * This is a best-effort pre-check to provide early feedback to users.
  */
 export async function checkWebAuthnSupport(): Promise<{
   webauthnSupported: boolean
@@ -261,7 +265,7 @@ export async function checkWebAuthnSupport(): Promise<{
   }
 
   // PRF support can only be confirmed by attempting credential creation/get
-  // For now, assume PRF is supported if platform authenticator exists
+  // Assume PRF is supported if platform authenticator exists (best-effort check)
   return {
     webauthnSupported: true,
     prfSupported: true,
@@ -269,9 +273,39 @@ export async function checkWebAuthnSupport(): Promise<{
 }
 
 /**
- * Create a new passkey credential for this app
- * Uses navigator.credentials.create() with PRF extension
- * Returns the fingerprint of the newly created credential and PRF support status
+ * Check if a hostname is an IP address (IPv4 or IPv6).
+ * WebAuthn does not allow IP addresses as rpId per spec.
+ */
+function isIpAddress(hostname: string): boolean {
+  // IPv4 pattern
+  const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/
+  // IPv6 pattern (simplified - checks for colons which aren't in domain names)
+  const ipv6Pattern = /^[\da-fA-F:]+$/
+
+  if (ipv4Pattern.test(hostname)) {
+    // Validate each octet is 0-255
+    const octets = hostname.split('.')
+    return octets.every(o => {
+      const num = parseInt(o, 10)
+      return num >= 0 && num <= 255
+    })
+  }
+
+  // Check for IPv6 (contains colons, no dots except in IPv4-mapped addresses)
+  if (hostname.includes(':') && ipv6Pattern.test(hostname.replace(/\./g, ''))) {
+    return true
+  }
+
+  return false
+}
+
+/**
+ * Create a new passkey credential for this app.
+ * Uses navigator.credentials.create() with PRF extension.
+ * Returns the fingerprint of the newly created credential and PRF support status.
+ *
+ * Note: WebAuthn requires a valid domain name as rpId. IP addresses are not allowed
+ * per the WebAuthn spec. Use localhost or a proper domain name for development.
  */
 export async function createPasskeyCredential(
   userName: string
@@ -281,6 +315,15 @@ export async function createPasskeyCredential(
 
   // Get relying party ID from current domain
   const rpId = window.location.hostname
+
+  // Validate rpId - WebAuthn does not allow IP addresses
+  if (isIpAddress(rpId)) {
+    throw new Error(
+      `Cannot create passkey: IP addresses are not allowed as WebAuthn rpId. ` +
+      `Current host "${rpId}" is an IP address. ` +
+      `Please access this app via "localhost" or a domain name instead.`
+    )
+  }
 
   const createOptions: PublicKeyCredentialCreationOptions = {
     challenge: crypto.getRandomValues(new Uint8Array(32)),
