@@ -109,7 +109,7 @@ sequenceDiagram
 | `pin.ts` | Alphanumeric (12-char) and Word (7-word) PIN handling, weighted checksums, signaling detection |
 | `kdf.ts` | Key derivation using PBKDF2-SHA256 (600,000 iterations) |
 | `passkey.ts` | WebAuthn PRF extension for passkey-based key derivation |
-| `ecdh.ts` | ECDH key exchange, fingerprints, key confirmation, public key commitment, constant-time comparison |
+| `ecdh.ts` | ECDH key exchange (non-extractable keys), fingerprints, key confirmation, public key commitment, constant-time comparison |
 | `aes-gcm.ts` | AES-256-GCM encryption/decryption |
 | `stream-crypto.ts` | Streaming encryption/decryption (128KB chunks, protocol-agnostic) |
 | `constants.ts` | Crypto parameters, charsets (69 chars), BIP-39 wordlist (2048 words) |
@@ -166,6 +166,28 @@ flowchart TD
 1. **Master Key**: Single passkey prompt derives HKDF master key via PRF
 2. **Per-Transfer Key**: HKDF with random salt derives unique AES key per transfer
 3. **No PIN Required**: Biometric/device unlock replaces PIN entry
+
+#### Mutual Trust Key Derivation (Non-Extractable Keys)
+
+When using passkey mutual trust mode, the ECDH shared secret is kept as a **non-extractable CryptoKey** throughout the entire derivation chain:
+
+```mermaid
+flowchart TD
+    PrivKey[ECDH Private Key] --> DeriveKey[Web Crypto deriveKey]
+    PeerPubKey[Peer's Public Key] --> DeriveKey
+    DeriveKey --> SharedSecretKey[Shared Secret<br/>non-extractable HKDF CryptoKey]
+    SharedSecretKey --> AES[deriveKey → AES-256-GCM]
+    SharedSecretKey --> KC[deriveBits → Key Confirmation]
+    Salt[Random Salt] --> AES
+    Salt --> KC
+```
+
+**Security benefit**: The raw ECDH shared secret (32 bytes) never appears as a `Uint8Array` in JavaScript memory. Instead, Web Crypto's `deriveKey` chains ECDH directly to HKDF, producing a non-extractable `CryptoKey`. This prevents:
+- XSS attacks from reading the shared secret via memory inspection
+- Accidental logging or serialization of the secret
+- Side-channel attacks on the raw secret bytes
+
+**Implementation**: `deriveSharedSecretKey()`, `deriveAESKeyFromSecretKey()`, and `deriveKeyConfirmationFromSecretKey()` in `src/lib/crypto/ecdh.ts`
 
 #### Dual Mode (Sender)
 
@@ -238,6 +260,7 @@ Security-critical functions validate inputs before cryptographic operations:
 | Relay MITM Protection | N/A | Public key commitment binding |
 | Replay Protection | TTL only | TTL + cryptographic nonce |
 | Timing Attack Prevention | N/A | Constant-time string comparisons |
+| Shared Secret Protection | Raw bytes in memory | Non-extractable CryptoKey (never exposed to JS) |
 
 ### User Interface Architecture
 
@@ -638,6 +661,7 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 11. **XSS Protection**: Sensitive cryptographic material (shared secrets, key derivation functions) stored in closure scope, not on global `window` object
 12. **Resource Cleanup**: All error paths properly clean up timeouts and subscriptions to prevent resource leaks
 13. **Input Validation**: Cryptographic functions validate inputs (nonce length, key confirmation size) before operations to provide deterministic errors
+14. **Non-Extractable Shared Secret**: In passkey mutual trust mode, the ECDH shared secret is kept as a non-extractable `CryptoKey` throughout the derivation chain - raw bytes never exposed to JavaScript, preventing exfiltration via XSS or memory inspection
 
 ## File Structure
 
