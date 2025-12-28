@@ -3,6 +3,11 @@ import { PBKDF2_ITERATIONS, PBKDF2_HASH, SALT_LENGTH, AES_KEY_LENGTH } from './c
 /**
  * Import a PIN into non-extractable PBKDF2 key material.
  * The raw Uint8Array buffer is zeroed after import to avoid lingering plaintext.
+ *
+ * SECURITY IMPACT: If pinData is exposed in memory, an attacker can derive the
+ * same PBKDF2 keys and decrypt PIN-protected transfers.
+ * Scope note: PIN-derived keys are session-scoped and typically expire (~1 hour),
+ * so exposure risk is bounded to that TTL window, but still high within it.
  */
 export async function importPinKey(pin: string): Promise<CryptoKey> {
   const encoder = new TextEncoder()

@@ -58,6 +58,9 @@ export function formatFingerprint(fingerprint: string): string {
  * Import P-256 private key from raw bytes (32 bytes) for ECDH.
  * Uses JWK format internally since Web Crypto doesn't support raw private key import for P-256.
  *
+ * SECURITY IMPACT: privateKeyBytes is raw secret material. If exposed, an attacker
+ * can derive the same shared secrets and decrypt protected data.
+ *
  * @param privateKeyBytes - 32-byte private key scalar
  * @returns CryptoKey for ECDH deriveBits operations
  */
