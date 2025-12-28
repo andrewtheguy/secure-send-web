@@ -51,7 +51,7 @@ export function ReceiveTab() {
   const receiverPasskeyFingerprint = nostrHook.passkeyFingerprint
 
   // Get the right receive function based on mode
-  // nostrHook and peerJSHook have .receive, manualHook does not
+  // nostrHook has .receive, manualHook does not
   const pinReceive: ((secret: PinSecret) => Promise<void>) | undefined =
     !isManualMode && 'receive' in activeHook && typeof activeHook.receive === 'function'
       ? activeHook.receive
