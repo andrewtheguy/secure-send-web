@@ -67,7 +67,7 @@ export function PasskeyPage() {
       const keypair = await getPasskeyECDHKeypair(credentialId)
       setFingerprint(keypair.publicKeyFingerprint)
       setPublicKeyBase64(uint8ArrayToBase64(keypair.publicKeyBytes))
-      setPrfSupported(true)
+      setPrfSupported(keypair.prfSupported)
       setSuccess('Passkey created! Your public key is now available for sharing.')
       setPageState('idle')
     } catch (err) {
@@ -85,7 +85,7 @@ export function PasskeyPage() {
       const result = await getPasskeyECDHKeypair()
       setFingerprint(result.publicKeyFingerprint)
       setPublicKeyBase64(uint8ArrayToBase64(result.publicKeyBytes))
-      setPrfSupported(true)
+      setPrfSupported(result.prfSupported)
       setSuccess('Public key retrieved! Share this with your contacts for secure file transfers.')
       setPageState('idle')
     } catch (err) {

@@ -57,9 +57,17 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<Crypto
   const prfInput = new TextEncoder().encode(PASSKEY_ECDH_LABEL)
 
   // Build allowCredentials if a specific credential is requested
-  const allowCredentials = credentialId
-    ? [{ type: 'public-key' as const, id: base64urlDecode(credentialId) }]
-    : undefined
+  let allowCredentials: PublicKeyCredentialDescriptor[] | undefined
+  if (credentialId) {
+    try {
+      allowCredentials = [{ type: 'public-key' as const, id: base64urlDecode(credentialId) }]
+    } catch (err) {
+      throw new Error(
+        `Invalid credentialId: not valid base64url encoding`,
+        { cause: err }
+      )
+    }
+  }
 
   const assertion = await navigator.credentials.get({
     publicKey: {
@@ -105,17 +113,20 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<Crypto
  * This is the main entry point for passkey-based ECDH.
  *
  * @param credentialId - Optional base64url credential ID to use specific passkey (skips picker)
+ * @returns Keypair with prfSupported flag (true if we got here, throws otherwise)
  */
 export async function getPasskeyECDHKeypair(credentialId?: string): Promise<{
   publicKeyBytes: Uint8Array
   privateKeyBytes: Uint8Array
   publicKeyFingerprint: string
+  prfSupported: boolean
 }> {
   const masterKey = await getPasskeyMasterKey(credentialId)
   const { publicKeyBytes, privateKeyBytes } = await deriveECDHKeypairFromMasterKey(masterKey)
   const publicKeyFingerprint = await publicKeyToFingerprint(publicKeyBytes)
 
-  return { publicKeyBytes, privateKeyBytes, publicKeyFingerprint }
+  // If we got here, PRF worked (getPasskeyMasterKey throws if PRF fails)
+  return { publicKeyBytes, privateKeyBytes, publicKeyFingerprint, prfSupported: true }
 }
 
 // publicKeyToFingerprint is used from ecdh.ts
