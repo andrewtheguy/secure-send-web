@@ -169,14 +169,17 @@ function isIpAddress(hostname: string): boolean {
 /**
  * Create a new passkey credential for this app.
  * Uses navigator.credentials.create() with PRF extension.
- * Returns the public key fingerprint and PRF support status.
+ *
+ * Note: This only creates the credential. To get the ECDH public key and fingerprint,
+ * a separate authentication via getPasskeyECDHKeypair() or testPasskeyAndGetFingerprint()
+ * is required (PRF output is only available during authentication, not registration).
  *
  * Note: WebAuthn requires a valid domain name as rpId. IP addresses are not allowed
  * per the WebAuthn spec. Use localhost or a proper domain name for development.
  */
 export async function createPasskeyCredential(
   userName: string
-): Promise<{ fingerprint: string; credentialId: string; prfSupported: boolean }> {
+): Promise<{ credentialId: string; prfSupported: boolean }> {
   // Generate random user ID (we don't persist this - it's just for WebAuthn ceremony)
   const userId = crypto.getRandomValues(new Uint8Array(32))
 
@@ -241,13 +244,10 @@ export async function createPasskeyCredential(
     )
   }
 
-  // After creation, authenticate to get the ECDH public key fingerprint
-  const { publicKeyFingerprint } = await getPasskeyECDHKeypair()
-
   const credentialIdBytes = new Uint8Array(credential.rawId)
-  const credentialIdBase64 = base64urlEncode(credentialIdBytes)
+  const credentialId = base64urlEncode(credentialIdBytes)
 
-  return { fingerprint: publicKeyFingerprint, credentialId: credentialIdBase64, prfSupported }
+  return { credentialId, prfSupported }
 }
 
 /**
@@ -265,8 +265,8 @@ export async function testPasskeyAndGetFingerprint(): Promise<{
       prfSupported: true,
       publicKeyBytes,
     }
-  } catch {
-    throw new Error('PRF extension not supported or passkey authentication failed')
+  } catch (e) {
+    throw new Error('PRF extension not supported or passkey authentication failed', { cause: e })
   }
 }
 

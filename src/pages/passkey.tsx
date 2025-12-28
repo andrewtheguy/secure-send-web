@@ -60,9 +60,10 @@ export function PasskeyPage() {
 
       // Create the passkey
       const result = await createPasskeyCredential(userName || 'Secure Transfer User')
-      setFingerprint(result.fingerprint)
-      setPrfSupported(result.prfSupported ?? false)
-      setSuccess('Passkey created successfully! It should now be available in your password manager.')
+      setPrfSupported(result.prfSupported)
+      setSuccess(
+        'Passkey created successfully! Click "Authenticate & Get Public Key" above to retrieve your public key for sharing.'
+      )
       setPageState('idle')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create passkey')
