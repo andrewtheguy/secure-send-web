@@ -81,7 +81,7 @@ export function PasskeyPage() {
 
     try {
       const result = await testPasskeyAndGetFingerprint()
-      setFingerprint(result.fingerprint)
+      setPublicKeyBase64(result.publicKeyBytes ? uint8ArrayToBase64(result.publicKeyBytes) : null)
       setPublicKeyBase64(uint8ArrayToBase64(result.publicKeyBytes))
       setPrfSupported(result.prfSupported)
       setSuccess(
