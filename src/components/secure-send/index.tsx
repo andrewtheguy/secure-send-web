@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Shield, Zap, Globe, Lock } from 'lucide-react'
+import { Shield, Zap, Globe, Lock, Fingerprint } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { SendTab } from './send-tab'
 import { ReceiveTab } from './receive-tab'
@@ -128,6 +128,13 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                     <p className="text-muted-foreground">No sign-ups, no tracking. Each transfer uses a fresh ephemeral identity that's discarded after use.</p>
                   </div>
                 </div>
+                <div className="flex gap-3">
+                  <Fingerprint className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-medium">Passkey Support</p>
+                    <p className="text-muted-foreground">Use synced passkeys (1Password, iCloud Keychain, Google Password Manager) for passwordless encryption. No PIN to memorize.</p>
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -136,6 +143,7 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
               <ul className="space-y-1 text-muted-foreground">
                 <li><span className="text-foreground">Encryption:</span> AES-256-GCM with PBKDF2-SHA256 key derivation (600,000 iterations)</li>
                 <li><span className="text-foreground">PIN format:</span> 12 characters with built-in checksum for typo detection</li>
+                <li><span className="text-foreground">Passkey:</span> WebAuthn PRF extension for hardware-backed key derivation</li>
                 <li><span className="text-foreground">Max size:</span> 100 MB per transfer</li>
                 <li><span className="text-foreground">PIN expiry:</span> 1 hour</li>
                 <li><span className="text-foreground">Signaling:</span> Auto-detected from PIN (uppercase = Nostr, "2" = QR/Manual)</li>
@@ -154,6 +162,17 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                   <p className="text-foreground font-medium">Manual Exchange — PIN starts with "2"</p>
                   <p className="text-sm">No internet required. Exchange signaling via QR scan or copy/paste (camera optional). With internet, works across different networks via STUN. Without internet, devices must be on same local network. P2P only, no fallback.</p>
                 </div>
+              </div>
+            </section>
+
+            <section>
+              <h3 className="font-semibold text-base mb-2">Passkey Mode</h3>
+              <p className="text-muted-foreground text-sm mb-3">Alternative to PIN - uses WebAuthn for passwordless encryption.</p>
+              <div className="space-y-2 text-muted-foreground text-sm">
+                <p><span className="text-foreground font-medium">Setup:</span> Create a passkey at <a href="/passkey" className="text-primary hover:underline">/passkey</a> - stored in your password manager</p>
+                <p><span className="text-foreground font-medium">Sync:</span> Both parties need the same passkey synced (1Password, iCloud Keychain, Google Password Manager)</p>
+                <p><span className="text-foreground font-medium">Verify:</span> Compare fingerprints (11-char identifier) to confirm same passkey</p>
+                <p><span className="text-foreground font-medium">Security:</span> Keys derived from device secure hardware via WebAuthn PRF extension</p>
               </div>
             </section>
 

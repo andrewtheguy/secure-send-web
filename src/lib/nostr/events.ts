@@ -13,7 +13,11 @@ export function generateEphemeralKeys(): { secretKey: Uint8Array; publicKey: str
 
 /**
  * Create PIN exchange event (kind 24243)
- * Contains encrypted payload with transfer metadata
+ * Contains encrypted payload with transfer metadata.
+ *
+ * @param hint - Identifier for event filtering. Can be either:
+ *   - PIN mode: SHA-256 hash of user's PIN (first 8 hex chars)
+ *   - Passkey mode: Passkey fingerprint (11 base36 chars from credential ID)
  *
  * TTL Behavior:
  * - Events include an 'expiration' tag set to 1 hour from creation (NIP-40)
@@ -26,7 +30,7 @@ export function createPinExchangeEvent(
   encryptedPayload: Uint8Array,
   salt: Uint8Array,
   transferId: string,
-  pinHint: string
+  hint: string
 ): Event {
   // Soft TTL: relays may auto-delete after this timestamp (NIP-40)
   const expiration = Math.floor((Date.now() + TRANSFER_EXPIRATION_MS) / 1000)
@@ -36,7 +40,7 @@ export function createPinExchangeEvent(
       kind: EVENT_KIND_PIN_EXCHANGE,
       content: uint8ArrayToBase64(encryptedPayload),
       tags: [
-        ['h', pinHint],
+        ['h', hint],
         ['s', uint8ArrayToBase64(salt)],
         ['t', transferId],
         ['type', 'pin_exchange'],
@@ -51,24 +55,25 @@ export function createPinExchangeEvent(
 }
 
 /**
- * Parse PIN exchange event tags
+ * Parse PIN exchange event tags.
+ * @returns Object with hint (PIN hash or passkey fingerprint), salt, transferId, and encryptedPayload
  */
 export function parsePinExchangeEvent(event: Event): {
-  pinHint: string
+  hint: string
   salt: Uint8Array
   transferId: string
   encryptedPayload: Uint8Array
 } | null {
   if (event.kind !== EVENT_KIND_PIN_EXCHANGE) return null
 
-  const pinHint = event.tags.find((t) => t[0] === 'h')?.[1]
+  const hint = event.tags.find((t) => t[0] === 'h')?.[1]
   const saltB64 = event.tags.find((t) => t[0] === 's')?.[1]
   const transferId = event.tags.find((t) => t[0] === 't')?.[1]
 
-  if (!pinHint || !saltB64 || !transferId) return null
+  if (!hint || !saltB64 || !transferId) return null
 
   return {
-    pinHint,
+    hint,
     salt: base64ToUint8Array(saltB64),
     transferId,
     encryptedPayload: base64ToUint8Array(event.content),

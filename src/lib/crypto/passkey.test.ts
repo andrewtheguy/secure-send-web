@@ -1,79 +1,7 @@
 import { expect, test, describe } from 'vitest'
-import {
-  generatePasskeyPin,
-  isPasskeyPin,
-  extractPasskeyFingerprint,
-  credentialIdToFingerprint,
-} from './passkey'
+import { credentialIdToFingerprint } from './passkey'
 
-describe('Passkey PIN Utilities', () => {
-  describe('generatePasskeyPin', () => {
-    test('should generate a 12-character PIN starting with P', () => {
-      const fingerprint = 'ABCDEFGHIJK'
-      const pin = generatePasskeyPin(fingerprint)
-      expect(pin).toBe('PABCDEFGHIJK')
-      expect(pin.length).toBe(12)
-      expect(pin.startsWith('P')).toBe(true)
-    })
-
-    test('should truncate fingerprint longer than 11 characters', () => {
-      const fingerprint = 'ABCDEFGHIJKLMNOP'
-      const pin = generatePasskeyPin(fingerprint)
-      expect(pin).toBe('PABCDEFGHIJK')
-      expect(pin.length).toBe(12)
-    })
-
-    test('should throw error for fingerprint shorter than 11 characters', () => {
-      const shortFingerprint = 'ABCDEFGHIJ' // 10 chars
-      expect(() => generatePasskeyPin(shortFingerprint)).toThrow(
-        'Passkey fingerprint must be at least 11 characters'
-      )
-    })
-
-    test('should throw error for empty fingerprint', () => {
-      expect(() => generatePasskeyPin('')).toThrow(
-        'Passkey fingerprint must be at least 11 characters'
-      )
-    })
-  })
-
-  describe('isPasskeyPin', () => {
-    test('should return true for PINs starting with P', () => {
-      expect(isPasskeyPin('PABCDEFGHIJK')).toBe(true)
-      expect(isPasskeyPin('P12345678901')).toBe(true)
-      expect(isPasskeyPin('Pxxxxxxxxxxx')).toBe(true)
-    })
-
-    test('should return false for regular PINs', () => {
-      // Nostr PINs (uppercase first char)
-      expect(isPasskeyPin('AABCDEFGHIJK')).toBe(false)
-      expect(isPasskeyPin('ZABCDEFGHIJK')).toBe(false)
-
-      // Manual PINs (start with 2)
-      expect(isPasskeyPin('2ABCDEFGHIJK')).toBe(false)
-
-      // Other characters
-      expect(isPasskeyPin('1ABCDEFGHIJK')).toBe(false)
-      expect(isPasskeyPin('aABCDEFGHIJK')).toBe(false)
-    })
-
-    test('should return false for empty string', () => {
-      expect(isPasskeyPin('')).toBe(false)
-    })
-  })
-
-  describe('extractPasskeyFingerprint', () => {
-    test('should extract fingerprint from passkey PIN', () => {
-      expect(extractPasskeyFingerprint('PABCDEFGHIJK')).toBe('ABCDEFGHIJK')
-      expect(extractPasskeyFingerprint('P12345678901')).toBe('12345678901')
-    })
-
-    test('should return everything after first character', () => {
-      expect(extractPasskeyFingerprint('PXYZ')).toBe('XYZ')
-      expect(extractPasskeyFingerprint('P')).toBe('')
-    })
-  })
-
+describe('Passkey Utilities', () => {
   describe('credentialIdToFingerprint', () => {
     test('should generate deterministic 11-character uppercase fingerprint', async () => {
       const credentialId = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
@@ -115,17 +43,6 @@ describe('Passkey PIN Utilities', () => {
 
       expect(fingerprint.length).toBe(11)
       expect(fingerprint).toMatch(/^[0-9A-Z]+$/)
-    })
-  })
-
-  describe('Integration: passkey PIN round-trip', () => {
-    test('should correctly detect passkey PIN and extract fingerprint', async () => {
-      const credentialId = new Uint8Array([42, 43, 44, 45, 46, 47, 48, 49, 50, 51])
-      const fingerprint = await credentialIdToFingerprint(credentialId)
-      const pin = generatePasskeyPin(fingerprint)
-
-      expect(isPasskeyPin(pin)).toBe(true)
-      expect(extractPasskeyFingerprint(pin)).toBe(fingerprint.slice(0, 11))
     })
   })
 })
