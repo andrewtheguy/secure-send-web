@@ -238,15 +238,29 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
           // === SECURITY VERIFICATION 2: Receiver public key commitment ===
           // Verify this event was addressed to us (prevents relay MITM)
-          const rpkcValid = await verifyPublicKeyCommitment(ownPublicKeyBytes!, parsed.receiverPkCommitment)
+          if (!ownPublicKeyBytes) {
+            console.error('Own public key not available for RPKC verification')
+            continue
+          }
+          const rpkcValid = await verifyPublicKeyCommitment(ownPublicKeyBytes, parsed.receiverPkCommitment)
           if (!rpkcValid) {
             console.log('Receiver public key commitment mismatch - event not addressed to us')
             continue
           }
 
+          // Verify closure variables are available
+          if (!deriveKeyWithSalt) {
+            console.error('Key derivation function not available')
+            continue
+          }
+          if (!sharedSecret) {
+            console.error('Shared secret not available for key confirmation')
+            continue
+          }
+
           try {
             // Derive key using closure function
-            const derivedKey = await deriveKeyWithSalt!(parsed.salt)
+            const derivedKey = await deriveKeyWithSalt(parsed.salt)
 
             // Try to decrypt
             const decrypted = await decrypt(derivedKey, parsed.encryptedPayload)
@@ -256,7 +270,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
             // === SECURITY VERIFICATION 3: Key confirmation ===
             // Verify we derived the same shared secret (detects MITM)
-            const confirmValue = await deriveKeyConfirmation(sharedSecret!, parsed.salt)
+            const confirmValue = await deriveKeyConfirmation(sharedSecret, parsed.salt)
             const computedKcHash = await hashKeyConfirmation(confirmValue)
             if (!constantTimeEqual(computedKcHash, parsed.keyConfirmHash)) {
               console.error('Key confirmation mismatch - potential MITM attack')
