@@ -1,9 +1,10 @@
 import { useState, useRef, useCallback } from 'react'
-import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, Zap, AlertTriangle, Info } from 'lucide-react'
+import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, Zap, AlertTriangle, Info, Fingerprint } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Switch } from '@/components/ui/switch'
 import { PinDisplay } from './pin-display'
 import { TransferStatus } from './transfer-status'
 import { QRDisplay } from './qr-display'
@@ -31,6 +32,7 @@ export function SendTab() {
   const [mode, setMode] = useState<ContentMode>('file')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [forcedMethod, setForcedMethod] = useState<ForcedMethod | null>(null)
+  const [usePasskey, setUsePasskey] = useState(false)
   const [activeMethod, setActiveMethod] = useState<SignalingMethod | null>(null)
   const [detectingMethod, setDetectingMethod] = useState(false)
   const [relayOnly, setRelayOnly] = useState(false)
@@ -129,8 +131,8 @@ export function SendTab() {
 
     setActiveMethod(methodToUse)
 
-    // Only Nostr hook supports relayOnly option
-    const sendOptions = methodToUse === 'nostr' ? { relayOnly } : undefined
+    // Only Nostr hook supports relayOnly and usePasskey options
+    const sendOptions = methodToUse === 'nostr' ? { relayOnly, usePasskey } : undefined
 
     const doSend = (content: File) => {
       if (methodToUse === 'nostr') {
@@ -526,6 +528,30 @@ export function SendTab() {
                     </Label>
                   </div>
                 )}
+
+                {/* Passkey toggle - only for Nostr */}
+                {(forcedMethod === null || forcedMethod === 'nostr-only') && (
+                  <div className="pt-3 border-t">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Fingerprint className="h-4 w-4 text-muted-foreground" />
+                        <Label htmlFor="use-passkey" className="text-sm font-medium cursor-pointer">
+                          Use Passkey instead of PIN
+                        </Label>
+                      </div>
+                      <Switch
+                        id="use-passkey"
+                        checked={usePasskey}
+                        onCheckedChange={setUsePasskey}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {usePasskey
+                        ? 'Receiver must have the same synced passkey (1Password, iCloud, Google).'
+                        : 'Use your passkey for encryption instead of a PIN. Great for personal cross-device transfers.'}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -534,6 +560,13 @@ export function SendTab() {
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded">
               <Cloud className="h-3 w-3" />
               <span>Cloud-only mode</span>
+            </div>
+          )}
+
+          {usePasskey && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
+              <Fingerprint className="h-3 w-3" />
+              <span>Passkey mode enabled</span>
             </div>
           )}
 

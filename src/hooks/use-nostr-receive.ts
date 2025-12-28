@@ -9,6 +9,8 @@ import {
   ENCRYPTION_CHUNK_SIZE,
   CLOUD_CHUNK_SIZE,
   TRANSFER_EXPIRATION_MS,
+  getCredentialFingerprint,
+  deriveKeyFromPasskeyWithSalt,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -59,10 +61,14 @@ async function publishWithBackup(
   }
 }
 
+export interface ReceiveOptions {
+  usePasskey?: boolean
+}
+
 export interface UseNostrReceiveReturn {
   state: TransferState
   receivedContent: ReceivedContent | null
-  receive: (pinMaterial: PinKeyMaterial) => Promise<void>
+  receive: (pinMaterial: PinKeyMaterial | ReceiveOptions) => Promise<void>
   cancel: () => void
   reset: () => void
 }
@@ -90,22 +96,40 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     setReceivedContent(null)
   }, [cancel])
 
-  const receive = useCallback(async (pinMaterial: PinKeyMaterial) => {
+  const receive = useCallback(async (arg: PinKeyMaterial | ReceiveOptions) => {
     // Guard against concurrent invocations
     if (receivingRef.current) return
     receivingRef.current = true
     cancelledRef.current = false
     setReceivedContent(null)
 
-    try {
-      if (!pinMaterial?.key || !pinMaterial?.hint) {
-        setState({ status: 'error', message: 'PIN unavailable. Please re-enter.' })
-        return
-      }
+    // Determine if this is passkey mode or PIN mode
+    const isPasskeyMode = 'usePasskey' in arg && arg.usePasskey === true
+    const pinMaterial = isPasskeyMode ? null : (arg as PinKeyMaterial)
 
-      // Derive key from PIN
-      setState({ status: 'connecting', message: 'Deriving encryption key...' })
-      const pinHint = pinMaterial.hint
+    try {
+      let pinHint: string
+
+      if (isPasskeyMode) {
+        // Passkey mode: authenticate and get fingerprint
+        setState({ status: 'connecting', message: 'Authenticate with passkey...' })
+        try {
+          pinHint = await getCredentialFingerprint()
+        } catch (err) {
+          setState({ status: 'error', message: err instanceof Error ? err.message : 'Passkey authentication failed' })
+          receivingRef.current = false
+          return
+        }
+      } else {
+        // PIN mode: use provided material
+        if (!pinMaterial?.key || !pinMaterial?.hint) {
+          setState({ status: 'error', message: 'PIN unavailable. Please re-enter.' })
+          receivingRef.current = false
+          return
+        }
+        setState({ status: 'connecting', message: 'Deriving encryption key...' })
+        pinHint = pinMaterial.hint
+      }
 
       if (cancelledRef.current) return
 
@@ -131,7 +155,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       if (cancelledRef.current) return
 
       if (events.length === 0) {
-        setState({ status: 'error', message: 'No transfer found for this PIN' })
+        setState({ status: 'error', message: isPasskeyMode ? 'No transfer found for this passkey' : 'No transfer found for this PIN' })
         return
       }
 
@@ -165,7 +189,14 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
         try {
           // Derive key with this salt
-          const derivedKey = await deriveKeyFromPinKey(pinMaterial.key, parsed.salt)
+          let derivedKey: CryptoKey
+          if (isPasskeyMode) {
+            // Passkey mode: derive key from passkey with salt (prompts for auth again)
+            derivedKey = await deriveKeyFromPasskeyWithSalt(parsed.salt)
+          } else {
+            // PIN mode: derive key from PIN key material
+            derivedKey = await deriveKeyFromPinKey(pinMaterial!.key, parsed.salt)
+          }
 
           // Try to decrypt
           const decrypted = await decrypt(derivedKey, parsed.encryptedPayload)
@@ -186,10 +217,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       if (!payload || !transferId || !senderPubkey || !key) {
         if (!sawNonExpiredCandidate && sawExpiredCandidate) {
-          setState({ status: 'error', message: 'Transfer expired. Ask sender to generate a new PIN.' })
+          setState({ status: 'error', message: 'Transfer expired. Ask sender to start a new transfer.' })
           return
         }
-        setState({ status: 'error', message: 'Could not decrypt transfer. Wrong PIN?' })
+        setState({ status: 'error', message: isPasskeyMode ? 'Could not decrypt transfer. Different passkey?' : 'Could not decrypt transfer. Wrong PIN?' })
         return
       }
 

@@ -12,6 +12,9 @@ import {
   TRANSFER_EXPIRATION_MS,
   CLOUD_CHUNK_SIZE,
   ENCRYPTION_CHUNK_SIZE,
+  getCredentialFingerprint,
+  deriveKeyFromPasskeyWithSalt,
+  generatePasskeyPin,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -142,10 +145,38 @@ export function useNostrSend(): UseNostrSendReturn {
       setState({ status: 'connecting', message: 'Reading file...' })
       const contentBytes = await readFileAsBytes(content)
 
-      // Generate PIN and derive key
-      setState({ status: 'connecting', message: 'Generating secure PIN...' })
-      const newPin = generatePinForMethod('nostr')
+      // Generate PIN/passkey and derive key
       const sessionStartTime = Date.now()
+      const salt = generateSalt()
+      let newPin: string
+      let key: CryptoKey
+      let pinHint: string
+
+      if (options?.usePasskey) {
+        // Passkey mode: authenticate and derive key from passkey
+        setState({ status: 'connecting', message: 'Authenticate with passkey...' })
+        try {
+          // Get credential fingerprint (prompts for passkey authentication)
+          const fingerprint = await getCredentialFingerprint()
+          // Derive key from passkey (prompts again - this is the PRF derivation)
+          key = await deriveKeyFromPasskeyWithSalt(salt)
+          // Generate passkey "PIN" for display ('P' + fingerprint)
+          newPin = generatePasskeyPin(fingerprint)
+          // For passkey, pinHint is just the fingerprint (receiver identifies by 'P' prefix)
+          pinHint = fingerprint
+        } catch (err) {
+          setState({ status: 'error', message: err instanceof Error ? err.message : 'Passkey authentication failed' })
+          sendingRef.current = false
+          return
+        }
+      } else {
+        // Regular PIN mode
+        setState({ status: 'connecting', message: 'Generating secure PIN...' })
+        newPin = generatePinForMethod('nostr')
+        pinHint = await computePinHint(newPin)
+        key = await deriveKeyFromPin(newPin, salt)
+      }
+
       setPin(newPin)
 
       // Best-effort cleanup: clear PIN state after expiration
@@ -161,9 +192,6 @@ export function useNostrSend(): UseNostrSendReturn {
           }
         }
       }, TRANSFER_EXPIRATION_MS)
-
-      const [pinHint, salt] = await Promise.all([computePinHint(newPin), Promise.resolve(generateSalt())])
-      const key = await deriveKeyFromPin(newPin, salt)
 
       if (cancelledRef.current) return
 

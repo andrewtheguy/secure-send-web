@@ -209,6 +209,66 @@ export function hasStoredCredential(): boolean {
   return localStorage.getItem(CREDENTIAL_STORAGE_KEY) !== null
 }
 
+/**
+ * Get credential fingerprint for identification
+ * Used as the "hint" in passkey mode (like PIN hint in regular mode)
+ * Returns 11 alphanumeric chars to fit PIN format: 'P' + fingerprint
+ */
+export async function getCredentialFingerprint(): Promise<string> {
+  // Authenticate to get credential ID
+  const assertion = (await navigator.credentials.get({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      userVerification: 'required',
+    },
+  })) as PublicKeyCredential
+
+  // Hash the credential ID
+  const credentialId = new Uint8Array(assertion.rawId)
+  const hash = await crypto.subtle.digest('SHA-256', credentialId)
+  const hashArray = new Uint8Array(hash)
+
+  // Convert first 8 bytes to alphanumeric (base36-ish)
+  // This gives us ~11 chars which fits nicely after 'P' prefix
+  let fingerprint = ''
+  for (let i = 0; i < 8 && fingerprint.length < 11; i++) {
+    fingerprint += hashArray[i].toString(36)
+  }
+
+  return fingerprint.slice(0, 11).toUpperCase()
+}
+
+/**
+ * Derive key from passkey with externally-provided salt
+ * Used when salt comes from signaling (sender provides salt to receiver)
+ * This is an alias for deriveKeyFromPasskey for clarity
+ */
+export async function deriveKeyFromPasskeyWithSalt(salt: Uint8Array): Promise<CryptoKey> {
+  return deriveKeyFromPasskey(salt)
+}
+
+/**
+ * Generate a "passkey PIN" for display and signaling
+ * Format: 'P' + 11-char fingerprint = 12 chars (same as regular PIN)
+ */
+export function generatePasskeyPin(fingerprint: string): string {
+  return 'P' + fingerprint.slice(0, 11)
+}
+
+/**
+ * Check if a PIN indicates passkey mode
+ */
+export function isPasskeyPin(pin: string): boolean {
+  return pin.startsWith('P')
+}
+
+/**
+ * Extract fingerprint from passkey PIN
+ */
+export function extractPasskeyFingerprint(pin: string): string {
+  return pin.slice(1)
+}
+
 // Base64url encoding/decoding utilities
 function base64urlEncode(data: Uint8Array): string {
   const base64 = btoa(String.fromCharCode(...data))

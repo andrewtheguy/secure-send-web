@@ -98,6 +98,7 @@ export interface SignalingPayload {
 
 export interface WebRTCOptions {
   relayOnly?: boolean
+  usePasskey?: boolean
 }
 
 // Signaling method for P2P connection
