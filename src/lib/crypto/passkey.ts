@@ -25,6 +25,11 @@ const PASSKEY_ECDH_LABEL = 'secure-send-passkey-ecdh-v1'
  * Residual risk (standard JS limitation):
  * - V8/browser may retain copies during GC
  *
+ * Impact if raw bytes are exfiltrated:
+ * - High: PRF output / derived seed == ECDH private key material.
+ * - An attacker could derive the same shared secret and decrypt transfers
+ *   tied to this passkey (past/future within protocol limits).
+ *
  * @see https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/deriveBits
  */
 export async function deriveECDHKeypairFromMasterKey(masterKey: CryptoKey): Promise<{
@@ -113,7 +118,9 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<Crypto
     throw new Error('PRF evaluation failed - authenticator may not support PRF extension')
   }
 
-  // Import PRF output as HKDF master key
+  // Import PRF output as HKDF master key.
+  // SECURITY: This PRF output is sensitive key material. If exposed, it can be
+  // used to deterministically re-derive the ECDH private key and decrypt data.
   return crypto.subtle.importKey(
     'raw',
     extResults.prf.results.first,
