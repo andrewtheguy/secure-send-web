@@ -237,36 +237,8 @@ export function PasskeyPage() {
           {/* Public Key display with QR */}
           {publicKeyBase64 && fingerprint && (
             <div className="p-4 rounded-lg border border-cyan-500/50 bg-cyan-50/30 dark:bg-cyan-950/20 space-y-4">
-              {/* Fingerprint */}
-              <div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Fingerprint className="h-5 w-5 text-cyan-600" />
-                    <span className="text-sm font-medium">Your Public Key Fingerprint</span>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleCopyFingerprint}
-                    className="h-8"
-                  >
-                    {copied ? (
-                      <Check className="h-4 w-4 text-green-600" />
-                    ) : (
-                      <Copy className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
-                <div className="mt-2 font-mono text-xl text-cyan-600 tracking-wider">
-                  {formattedFingerprint}
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Others will see this fingerprint when you share your public key. Use it to verify identity.
-                </p>
-              </div>
-
               {/* QR Code */}
-              <div className="pt-4 border-t">
+              <div>
                 <div className="flex items-center gap-2 mb-3">
                   <QrCode className="h-5 w-5 text-cyan-600" />
                   <span className="text-sm font-medium">Your Public Key</span>
@@ -284,11 +256,11 @@ export function PasskeyPage() {
               {/* Copy Public Key */}
               <div className="pt-4 border-t">
                 <div className="flex items-center gap-2 mb-2">
-                  <Key className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-xs font-medium text-muted-foreground">Public Key (base64)</span>
+                  <Key className="h-5 w-5 text-cyan-600" />
+                  <span className="text-sm font-medium">Public Key (base64)</span>
                 </div>
                 <div className="flex gap-2">
-                  <code className="flex-1 text-xs bg-muted p-2 rounded font-mono break-all max-h-20 overflow-y-auto">
+                  <code className="flex-1 text-sm bg-muted p-2 rounded font-mono break-all max-h-20 overflow-y-auto">
                     {publicKeyBase64}
                   </code>
                   <Button
@@ -304,6 +276,34 @@ export function PasskeyPage() {
                     )}
                   </Button>
                 </div>
+              </div>
+
+              {/* Fingerprint */}
+              <div className="pt-4 border-t">
+                <div className="flex items-center gap-2">
+                  <Fingerprint className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-xs font-medium text-muted-foreground">Fingerprint</span>
+                </div>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="font-mono text-sm text-muted-foreground">
+                    {formattedFingerprint}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleCopyFingerprint}
+                    className="h-8"
+                  >
+                    {copied ? (
+                      <Check className="h-4 w-4 text-green-600" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Use to verify identity when sharing your public key.
+                </p>
               </div>
 
               {prfSupported === false && (
