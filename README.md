@@ -10,6 +10,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 - **Works offline**: No internet required after page load when using Manual Exchange on same local network
 - **Flexible signaling**: Nostr (default) or Manual Exchange (QR/copy-paste). Manual Exchange works across networks with internet, or on same local network without internet.
 - **PIN-based security**: All signaling payloads are encrypted with the PIN
+- **Passkey support**: Use synced passkeys (1Password, iCloud Keychain, Google Password Manager) for passwordless encryption - no PIN memorization needed
 - **File or folder transfer**: Send files or folders up to 100MB
 - **End-to-end encryption**: All transfers use AES-256-GCM encryption
 - **No accounts required**: Ephemeral keypairs generated per transfer
@@ -45,6 +46,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 - **PBKDF2-SHA256** with 600,000 iterations for key derivation (browser-compatible)
 - **AES-256-GCM** authenticated encryption
 - **PIN never transmitted**: Only a hash hint is visible to relays
+- **Passkey security**: Keys derived via WebAuthn PRF extension from device secure hardware (Touch ID, Face ID, Windows Hello, etc.)
 - **Ephemeral identities**: New Nostr keypairs generated per transfer
 - **1-hour expiration**: PIN exchange events expire automatically
 - **QR signaling encryption**: QR payloads are encrypted with the PIN before encoding
@@ -98,11 +100,27 @@ See [Architecture](./docs/ARCHITECTURE.md) for detailed transfer flows and encry
 
 ### PIN Auto-Detection
 
-The signaling method is encoded in the PIN's first character:
-- **Uppercase letter** (A-Z): Nostr signaling
+The signaling method and authentication mode are encoded in the PIN's first character:
+- **Uppercase letter** (A-Z): Nostr signaling with PIN
 - **Digit "2"**: Manual exchange (QR or copy/paste)
+- **Letter "P"**: Passkey mode (no PIN needed)
 
 Receivers don't need to select a signaling method - it's automatically detected from the PIN.
+
+### Passkey Mode
+
+Passkeys provide passwordless encryption using the WebAuthn PRF extension:
+
+1. **Setup**: Create a passkey at `/passkey` - it's stored in your password manager (1Password, iCloud Keychain, Google Password Manager, etc.)
+2. **Sync**: Both sender and receiver must have the same passkey synced via the same password manager
+3. **Send**: Enable "Use Passkey" in Advanced Options - the sender authenticates with biometrics/device unlock
+4. **Receive**: Select "Use Passkey" and authenticate - no PIN entry needed
+
+**Key differences from PIN mode:**
+- No PIN to memorize or share - just sync the passkey via your password manager
+- Encryption keys derived from WebAuthn PRF extension (hardware-backed)
+- Fingerprint (11-char identifier) for verification that both parties have the same passkey
+- Same AES-256-GCM encryption strength as PIN mode
 
 ### Cloud Storage Redundancy
 
