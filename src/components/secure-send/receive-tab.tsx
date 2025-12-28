@@ -9,7 +9,6 @@ import { TransferStatus } from './transfer-status'
 import { QRDisplay } from './qr-display'
 import { QRInput } from './qr-input'
 import { useNostrReceive } from '@/hooks/use-nostr-receive'
-import { usePeerJSReceive } from '@/hooks/use-peerjs-receive'
 import { useManualReceive } from '@/hooks/use-manual-receive'
 import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
 import type { SignalingMethod } from '@/lib/nostr/types'
@@ -34,24 +33,17 @@ export function ReceiveTab() {
   const [isPinValid, setIsPinValid] = useState(false)
   const [pinExpired, setPinExpired] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(0)
-  const [detectedMethod, setDetectedMethod] = useState<SignalingMethod>('nostr')
+  const [, setDetectedMethod] = useState<SignalingMethod>('nostr')
   const [pinFingerprint, setPinFingerprint] = useState<string | null>(null)
 
   // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrReceive()
-  const peerJSHook = usePeerJSReceive()
   const manualHook = useManualReceive()
 
   // Determine which hook to use based on mode
   const isManualMode = receiveMode === 'scan'
 
-  const getActiveHook = () => {
-    if (isManualMode) return manualHook
-    if (detectedMethod === 'nostr') return nostrHook
-    if (detectedMethod === 'peerjs') return peerJSHook
-    return nostrHook // default fallback
-  }
-  const activeHook = getActiveHook()
+  const activeHook = isManualMode ? manualHook : nostrHook
 
   const { state: rawState, receivedContent, cancel, reset } = activeHook
 

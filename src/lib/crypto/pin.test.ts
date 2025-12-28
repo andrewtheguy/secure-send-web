@@ -5,8 +5,6 @@ describe('PIN Utilities', () => {
     test('detectSignalingMethod should identify method from PIN', () => {
         // Nostr (Uppercase)
         expect(detectSignalingMethod('A1234567890B')).toBe('nostr')
-        // PeerJS (Lowercase)
-        expect(detectSignalingMethod('a1234567890b')).toBe('peerjs')
         // QR/Manual ('2')
         expect(detectSignalingMethod('21234567890b')).toBe('manual')
         // Unknown/Empty

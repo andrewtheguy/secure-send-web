@@ -2,31 +2,31 @@
 
 ## Overview
 
-Secure Send is a browser-based encrypted file and message transfer application. It uses PIN-based encryption for signaling and cloud transfers, supports three signaling methods (Nostr relays, PeerJS, or QR codes), and enables direct P2P (WebRTC) data transfer with optional cloud fallback (Nostr mode only).
+Secure Send is a browser-based encrypted file and message transfer application. It uses PIN-based encryption for signaling and cloud transfers, supports two signaling methods (Nostr relays or QR codes), and enables direct P2P (WebRTC) data transfer with optional cloud fallback (Nostr mode only).
 
 ## Core Principles
 
 1. **P2P First**: Direct WebRTC connections are always preferred for data transfer.
 2. **Protocol-Agnostic Encryption**: All content is encrypted at the application layer using AES-256-GCM in 128KB chunks, regardless of transport encryption. This provides defense in depth and consistent security across all signaling methods.
 3. **Memory-Efficient Streaming**: Content is encrypted/decrypted in streaming chunks. All receivers (P2P and cloud) preallocate buffers and write directly to calculated positions - no intermediate chunk arrays.
-4. **Pluggable Signaling**: Signaling (Nostr, PeerJS, QR) is decoupled from the transfer layer. The same encryption/chunking logic is used regardless of signaling method.
+4. **Pluggable Signaling**: Signaling (Nostr, QR) is decoupled from the transfer layer. The same encryption/chunking logic is used regardless of signaling method.
 5. **Dual PIN Representation**: A 12-character alphanumeric PIN serves as the shared secret. To improve shareability (e.g., via voice), this PIN can be bijectively mapped to a 7-word sequence from the BIP-39 wordlist.
 
 ## Signaling Methods
 
-By default, Nostr is used for signaling. PeerJS and QR are available as alternatives under "Advanced Options" in the UI. Both sender and receiver must use the same method.
+By default, Nostr is used for signaling. QR/Manual exchange is available as an alternative under "Advanced Options" in the UI. Both sender and receiver must use the same method.
 
-| Feature | Nostr (Default) | PeerJS (Advanced) | Manual Exchange (No Signaling Server) |
-|---------|-----------------|-------------------|---------------------------------------|
-| Signaling Server | Decentralized relays | Centralized (0.peerjs.com) | None (QR or copy/paste) |
-| STUN Server | Yes (Google) | Yes (Google) | Yes (Google, when available) |
-| Cloud Fallback | Yes (tmpfiles.org) | No | No |
-| Reliability | Higher (fallback available) | P2P only | P2P only |
-| Privacy | Better (no central server) | PeerJS server sees peer IDs | Best (no signaling server) |
-| Complexity | More complex | Simpler | Manual exchange (QR or copy/paste) |
-| Internet Required | Yes | Yes | No |
-| Network Requirement | Any (via internet) | Any (via internet) | Same local network (without internet) |
-| Recommended For | Unreliable networks, NAT issues | Simple P2P, good connectivity | Offline transfers, local network only |
+| Feature | Nostr (Default) | Manual Exchange (No Signaling Server) |
+|---------|-----------------|---------------------------------------|
+| Signaling Server | Decentralized relays | None (QR or copy/paste) |
+| STUN Server | Yes (Google) | Yes (Google, when available) |
+| Cloud Fallback | Yes (tmpfiles.org) | No |
+| Reliability | Higher (fallback available) | P2P only |
+| Privacy | Better (no central server) | Best (no signaling server) |
+| Complexity | More complex | Manual exchange (QR or copy/paste) |
+| Internet Required | Yes | No |
+| Network Requirement | Any (via internet) | Same local network (without internet) |
+| Recommended For | Unreliable networks, NAT issues | Offline transfers, local network only |
 
 ## Transfer Flow
 
@@ -59,23 +59,6 @@ sequenceDiagram
     end
     Receiver->>Receiver: Combine & decrypt
     Receiver-->>Sender: Complete ACK (seq=-1)
-```
-
-### PeerJS Mode (P2P Only - No Cloud Fallback)
-```mermaid
-sequenceDiagram
-    participant Sender
-    participant Receiver
-    Sender->>Sender: Create Peer(ss-{pinHint}) on 0.peerjs.com:443
-    Note over Sender,Receiver: Share PIN out-of-band
-    Receiver->>Sender: Connect to Peer(ss-{pinHint})
-    Note over Sender,Receiver: PeerJS Data Channel Open
-    Sender->>Receiver: Metadata (salt, contentType)
-    Receiver-->>Sender: Ready
-    Note over Sender,Receiver: Data Transfer (128KB encrypted chunks)
-    Sender->>Receiver: Done
-    Receiver-->>Sender: Done ACK
-    Note over Sender,Receiver: If P2P connection fails, transfer fails (no cloud fallback)
 ```
 
 ### Manual Exchange Mode (No Internet Required)
@@ -136,7 +119,7 @@ Secure Send uses a sophisticated PIN system designed for both security and user-
 - **Length**: 12 characters.
 - **Charset**: 69 URL-safe characters (mixed case + digits + symbols).
 - **Entropy**: ~67 bits (11 random chars + 1 checksum).
-- **First Character**: Encodes the signaling method (`A-Z` for Nostr, `a-z` for PeerJS, `'2'` for Manual).
+- **First Character**: Encodes the signaling method (`A-Z` for Nostr, `'2'` for Manual).
 - **Last Character**: Weighted position-based checksum character.
 
 #### Word-Based Representation (Base-2048)
@@ -198,32 +181,6 @@ Uses Nostr protocol for decentralized signaling between sender and receiver.
 - `client.ts`: Nostr relay connection management
 - `relays.ts`: Default relay configuration
 - `discovery.ts`: Backup relay discovery
-
-### PeerJS Signaling (`src/lib/peerjs-signaling.ts`)
-
-Alternative signaling method using PeerJS cloud server instead of Nostr relays.
-
-**How it works:**
-- Peer ID derived from PIN: `ss-{SHA256(PIN).slice(0, PIN_HINT_LENGTH)}`
-- Both sender and receiver compute same peer ID from PIN
-- Sender creates peer, receiver connects to that peer ID
-- Uses PeerJS cloud server (`0.peerjs.com:443`) for NAT traversal
-- Data channel established directly via PeerJS (wraps WebRTC)
-
-**Message Types:**
-| Type | Direction | Purpose |
-|------|-----------|---------|
-| `metadata` | Sender → Receiver | Transfer info (includes `createdAt` TTL + key derivation `salt`) |
-| `ready` | Receiver → Sender | Acknowledge metadata received |
-| `chunk` | Sender → Receiver | Data chunk (ArrayBuffer) |
-| `done` | Sender → Receiver | Transfer complete |
-| `done_ack` | Receiver → Sender | Acknowledge completion |
-
-**Key Differences from Nostr:**
-- No cloud fallback - P2P only
-- Simpler protocol - no event kinds or tags
-- Centralized signaling server (PeerJS cloud)
-- Metadata exchange happens over data channel (not signaling)
 
 ### Manual Exchange Signaling (`src/lib/manual-signaling.ts`)
 
@@ -360,8 +317,6 @@ Fallback storage when P2P connection cannot be established (30s timeout window).
 
 ### React Hooks (`src/hooks/`)
 
-**Nostr Mode:**
-
 **`use-nostr-send.ts`** - Sender logic (Nostr):
 1. Read content (encrypt only if cloud fallback is needed)
 2. Publish PIN exchange (without cloud URL)
@@ -378,28 +333,6 @@ Fallback storage when P2P connection cannot be established (30s timeout window).
 4. If P2P: receive via data channel
 5. If cloud: download chunks, send ACKs, combine and decrypt
 6. Send completion ACK
-
-**PeerJS Mode:**
-
-**`use-peerjs-send.ts`** - Sender logic (PeerJS):
-1. Generate PIN, derive peer ID and encryption key (with salt)
-2. Create Peer with derived ID on PeerJS cloud server
-3. Wait for receiver connection (5 min timeout)
-4. Send metadata (with salt) over data channel
-5. Wait for ready acknowledgment
-6. Encrypt and transfer data in 128KB chunks with backpressure
-7. Wait for done acknowledgment
-8. If connection fails at any point: transfer fails (no cloud fallback)
-
-**`use-peerjs-receive.ts`** - Receiver logic (PeerJS):
-1. Validate PIN, derive peer ID
-2. Connect to sender's peer ID via PeerJS
-3. Receive metadata (with salt), derive decryption key
-4. Preallocate buffer based on totalBytes
-5. Send ready acknowledgment
-6. Receive encrypted chunks, decrypt and write directly to buffer position
-7. On done: send done acknowledgment
-8. If connection fails: transfer fails (no cloud fallback)
 
 **Manual Exchange Mode:**
 
@@ -432,7 +365,7 @@ Fallback storage when P2P connection cannot be established (30s timeout window).
 
 ### Unified Transfer Layer
 
-All three signaling methods (Nostr, PeerJS, Manual Exchange) share the same encryption middleware. This protocol-agnostic layer provides consistent security regardless of the transport mechanism.
+Both signaling methods (Nostr, Manual Exchange) share the same encryption middleware. This protocol-agnostic layer provides consistent security regardless of the transport mechanism.
 
 **Why encrypt when WebRTC provides DTLS?**
 - **Defense in depth**: Multiple encryption layers protect against implementation bugs
@@ -471,7 +404,7 @@ interface PinExchangePayload {
 
 ### Streaming Encryption (All Methods)
 
-All P2P transfers (Nostr, PeerJS, Manual Exchange) encrypt content in 128KB chunks using identical logic:
+All P2P transfers (Nostr, Manual Exchange) encrypt content in 128KB chunks using identical logic:
 
 **Sender side:**
 ```typescript
@@ -563,12 +496,11 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 
 **TTL Anchor (start time)**
 - **Nostr**: PIN exchange event `created_at` (seconds since epoch)
-- **PeerJS**: `PeerJSMetadata.createdAt` (milliseconds since epoch)
 - **Manual Exchange**: `SignalingPayload.createdAt` (milliseconds since epoch)
 
 **Enforcement Points (hard fail)**
 - **Receiver-side (pre-session)**:
-  - Reject expired/missing TTL before acknowledging or establishing a session (no `ready` ACK in PeerJS/Nostr; no WebRTC answer in Manual).
+  - Reject expired/missing TTL before acknowledging or establishing a session (no `ready` ACK in Nostr; no WebRTC answer in Manual).
 - **Sender-side (pre-transfer)**:
   - Re-check TTL immediately before sending any data (including at WebRTC DataChannel open and before any cloud upload fallback).
 
@@ -584,8 +516,8 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 4. **PIN Entropy**: ~67 bits (11 random chars from 69-char set + 1 checksum)
 5. **Brute-Force Resistance**: 600K PBKDF2 iterations (planned: Argon2id)
 6. **PIN Role**: PIN encrypts signaling (preventing unauthorized P2P connection) AND content (defense in depth)
-7. **Transport Security**: All P2P transfers (Nostr, PeerJS, Manual Exchange) use both AES-256-GCM encryption (128KB chunks) and WebRTC DTLS
-8. **Protocol-Agnostic Security**: Same encryption layer used regardless of signaling method - no security difference between Nostr, PeerJS, or Manual Exchange
+7. **Transport Security**: All P2P transfers (Nostr, Manual Exchange) use both AES-256-GCM encryption (128KB chunks) and WebRTC DTLS
+8. **Protocol-Agnostic Security**: Same encryption layer used regardless of signaling method - no security difference between Nostr or Manual Exchange
 
 ## File Structure
 
@@ -603,8 +535,7 @@ src/
 │   │   ├── events.ts        # Event creation/parsing
 │   │   ├── client.ts        # Relay client
 │   │   └── relays.ts        # Default relays
-│   ├── peerjs-signaling.ts  # PeerJS wrapper (signaling option 2)
-│   ├── manual-signaling.ts  # Manual exchange signaling (signaling option 3)
+│   ├── manual-signaling.ts  # Manual exchange signaling (signaling option 2)
 │   ├── qr-utils.ts          # Binary QR code generation (zxing-wasm)
 │   ├── webrtc.ts            # WebRTC connection management
 │   ├── cloud-storage.ts     # Cloud fallback (Nostr mode only)
@@ -615,8 +546,6 @@ src/
 ├── hooks/
 │   ├── use-nostr-send.ts    # Sender hook (Nostr mode)
 │   ├── use-nostr-receive.ts # Receiver hook (Nostr mode)
-│   ├── use-peerjs-send.ts   # Sender hook (PeerJS mode)
-│   ├── use-peerjs-receive.ts # Receiver hook (PeerJS mode)
 │   ├── use-manual-send.ts   # Sender hook (Manual Exchange mode)
 │   ├── use-manual-receive.ts # Receiver hook (Manual Exchange mode)
 │   └── useQRScanner.ts      # Camera-based QR scanning hook

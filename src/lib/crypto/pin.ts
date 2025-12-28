@@ -3,7 +3,6 @@ import {
   PIN_CHARSET,
   PIN_WORDLIST,
   NOSTR_FIRST_CHARSET,
-  PEERJS_FIRST_CHARSET,
   QR_FIRST_CHARSET,
   PIN_CHECKSUM_LENGTH,
   PIN_HINT_LENGTH,
@@ -43,19 +42,15 @@ function randomCharFromCharset(charset: string): string {
 
 
 /**
- * Generate random PIN with checksum  with signaling method encoded in first character
+ * Generate random PIN with checksum with signaling method encoded in first character
  * Charset excludes confusing characters: I, O, i, l, o, 0, 1
  * Uses rejection sampling to eliminate modulo bias
  * Last character is a checksum for typo detection
  * - Uppercase first char (A-Z excluding I,L,O) = Nostr
- * - Lowercase first char (a-z excluding i,l,o) = PeerJS
- * - '2' first char = QR
+ * - '2' first char = QR/Manual
  */
-export function generatePinForMethod(method: 'nostr' | 'peerjs' | 'manual'): string {
-  let firstCharset: string
-  if (method === 'nostr') firstCharset = NOSTR_FIRST_CHARSET
-  else if (method === 'peerjs') firstCharset = PEERJS_FIRST_CHARSET
-  else firstCharset = QR_FIRST_CHARSET
+export function generatePinForMethod(method: 'nostr' | 'manual'): string {
+  const firstCharset = method === 'nostr' ? NOSTR_FIRST_CHARSET : QR_FIRST_CHARSET
 
   const dataLength = PIN_LENGTH - PIN_CHECKSUM_LENGTH
 
@@ -88,16 +83,14 @@ export function generatePinForMethod(method: 'nostr' | 'peerjs' | 'manual'): str
 /**
  * Detect signaling method from PIN's first character
  * - Uppercase = Nostr
- * - Lowercase = PeerJS
- * - '2' = QR
- * - Other digits/symbols = null (reserved for future protocols)
+ * - '2' = QR/Manual
+ * - Other = null (reserved for future protocols)
  */
-export function detectSignalingMethod(pin: string): 'nostr' | 'peerjs' | 'manual' | null {
+export function detectSignalingMethod(pin: string): 'nostr' | 'manual' | null {
   if (!pin || pin.length === 0) return null
   const firstChar = pin[0]
   if (QR_FIRST_CHARSET.includes(firstChar)) return 'manual'
   if (NOSTR_FIRST_CHARSET.includes(firstChar)) return 'nostr'
-  if (PEERJS_FIRST_CHARSET.includes(firstChar)) return 'peerjs'
   return null // Reserved for future protocols
 }
 

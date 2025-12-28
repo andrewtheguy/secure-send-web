@@ -8,7 +8,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 
 - **100% Static - No Backend Required**: The entire app is a static site that can be hosted on any static hosting service (GitHub Pages, Netlify, Vercel, S3, etc.). No server-side code, no database, no backend infrastructure needed.
 - **Works offline**: No internet required after page load when using Manual Exchange on same local network
-- **Flexible signaling**: Nostr (default), PeerJS, or Manual Exchange (QR/copy-paste). Manual Exchange works across networks with internet, or on same local network without internet.
+- **Flexible signaling**: Nostr (default) or Manual Exchange (QR/copy-paste). Manual Exchange works across networks with internet, or on same local network without internet.
 - **PIN-based security**: All signaling payloads are encrypted with the PIN
 - **File or folder transfer**: Send files or folders up to 100MB
 - **End-to-end encryption**: All transfers use AES-256-GCM encryption
@@ -90,7 +90,6 @@ All signaling methods share a **unified encryption layer**: content is encrypted
 
 **Signaling Methods** (sender chooses):
 - **Nostr** (default): Requires internet. Decentralized relay signaling. Devices can be on different networks. Has cloud fallback.
-- **PeerJS**: Requires internet. Simpler P2P via PeerJS cloud server. Devices can be on different networks. No fallback.
 - **Manual Exchange**: No internet required. Exchange signaling via QR scan or copy/paste (camera optional). With internet, works across different networks. Without internet, devices must be on same local network.
 
 **Data Transfer**: WebRTC P2P preferred; cloud fallback available in Nostr mode only.
@@ -101,7 +100,6 @@ See [Architecture](./docs/ARCHITECTURE.md) for detailed transfer flows and encry
 
 The signaling method is encoded in the PIN's first character:
 - **Uppercase letter** (A-Z): Nostr signaling
-- **Lowercase letter** (a-z): PeerJS signaling
 - **Digit "2"**: Manual exchange (QR or copy/paste)
 
 Receivers don't need to select a signaling method - it's automatically detected from the PIN.

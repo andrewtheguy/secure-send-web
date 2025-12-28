@@ -102,4 +102,4 @@ export interface WebRTCOptions {
 }
 
 // Signaling method for P2P connection
-export type SignalingMethod = 'nostr' | 'peerjs' | 'manual'
+export type SignalingMethod = 'nostr' | 'manual'

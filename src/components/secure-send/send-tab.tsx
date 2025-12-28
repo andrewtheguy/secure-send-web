@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react'
-import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, Zap, AlertTriangle, Info, Fingerprint } from 'lucide-react'
+import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, AlertTriangle, Info, Fingerprint } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
@@ -10,7 +10,6 @@ import { TransferStatus } from './transfer-status'
 import { QRDisplay } from './qr-display'
 import { QRInput } from './qr-input'
 import { useNostrSend } from '@/hooks/use-nostr-send'
-import { usePeerJSSend } from '@/hooks/use-peerjs-send'
 import { useManualSend } from '@/hooks/use-manual-send'
 import { MAX_MESSAGE_SIZE } from '@/lib/crypto'
 import { formatFileSize } from '@/lib/file-utils'
@@ -18,7 +17,7 @@ import { compressFilesToZip, getFolderName, getTotalSize, supportsFolderSelectio
 import type { SignalingMethod } from '@/lib/nostr/types'
 
 type ContentMode = 'file' | 'folder'
-type ForcedMethod = 'nostr-only' | 'peerjs-only' | 'manual-only'
+type ForcedMethod = 'nostr-only' | 'manual-only'
 
 // Extend input element to include webkitdirectory attribute
 declare module 'react' {
@@ -47,16 +46,10 @@ export function SendTab() {
 
   // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrSend()
-  const peerJSHook = usePeerJSSend()
   const manualHook = useManualSend()
 
   // Use the appropriate hook based on active method (defaults to nostr before detection)
-  const getActiveHook = () => {
-    if (activeMethod === 'peerjs') return peerJSHook
-    if (activeMethod === 'manual') return manualHook
-    return nostrHook // default
-  }
-  const activeHook = getActiveHook()
+  const activeHook = activeMethod === 'manual' ? manualHook : nostrHook
 
   // Only nostr and peerjs hooks have PIN - use runtime check for type safety
   const pin: string | null =
@@ -97,7 +90,7 @@ export function SendTab() {
       // User forced a specific method via advanced options
       methodToUse = effectiveMethod.replace('-only', '') as SignalingMethod
     } else {
-      // Smart mode: test Nostr relay availability first, then PeerJS
+      // Smart mode: test Nostr relay availability
       setDetectingMethod(true)
       setSignalingUnavailable(false)
       try {
@@ -108,21 +101,11 @@ export function SendTab() {
           methodToUse = 'nostr'
           console.log('Smart detection: Nostr available', nostrResult)
         } else {
-          // Nostr unavailable, test PeerJS
-          console.log('Smart detection: Nostr unavailable, testing PeerJS...', nostrResult)
-          const { testPeerJSAvailability } = await import('@/lib/peerjs-signaling')
-          const peerJSResult = await testPeerJSAvailability()
-
-          if (peerJSResult.available) {
-            methodToUse = 'peerjs'
-            console.log('Smart detection: PeerJS available')
-          } else {
-            // Both unavailable - prompt user
-            console.log('Smart detection: Both Nostr and PeerJS unavailable', peerJSResult)
-            setDetectingMethod(false)
-            setSignalingUnavailable(true)
-            return // Don't auto-fallback to QR, let user decide
-          }
+          // Nostr unavailable - prompt user for manual mode
+          console.log('Smart detection: Nostr unavailable', nostrResult)
+          setDetectingMethod(false)
+          setSignalingUnavailable(true)
+          return // Don't auto-fallback to QR, let user decide
         }
       } catch (error) {
         // If test fails completely, show unavailable prompt
@@ -142,8 +125,6 @@ export function SendTab() {
     const doSend = (content: File) => {
       if (methodToUse === 'nostr') {
         nostrHook.send(content, sendOptions)
-      } else if (methodToUse === 'peerjs') {
-        peerJSHook.send(content)
       } else {
         manualHook.send(content)
       }
@@ -183,7 +164,6 @@ export function SendTab() {
 
   const handleReset = () => {
     nostrHook.cancel()
-    peerJSHook.cancel()
     manualHook.cancel()
     setSelectedFiles([])
     setFolderFiles(null)
@@ -465,8 +445,7 @@ export function SendTab() {
               Advanced Options
               {forcedMethod && (
                 <span className="ml-auto text-xs bg-muted px-2 py-0.5 rounded">
-                  {forcedMethod === 'nostr-only' ? 'Nostr only' :
-                   forcedMethod === 'peerjs-only' ? 'PeerJS only' : 'Manual'}
+                  {forcedMethod === 'nostr-only' ? 'Nostr only' : 'Manual'}
                 </span>
               )}
             </button>
@@ -497,12 +476,6 @@ export function SendTab() {
                     </Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="peerjs-only" id="peerjs-only" />
-                    <Label htmlFor="peerjs-only" className="text-sm font-normal cursor-pointer">
-                      PeerJS only
-                    </Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
                     <RadioGroupItem value="manual-only" id="manual-only" />
                     <Label htmlFor="manual-only" className="text-sm font-normal cursor-pointer flex items-center gap-1">
                       <QrCode className="h-3 w-3" />
@@ -512,12 +485,10 @@ export function SendTab() {
                 </RadioGroup>
                 <p className="text-xs text-muted-foreground">
                   {forcedMethod === null
-                    ? 'Auto mode tests Nostr first, falls back to PeerJS if unavailable.'
+                    ? 'Auto mode tests Nostr relay availability before sending.'
                     : forcedMethod === 'nostr-only'
                       ? 'Force Nostr relays. Transfer fails if relays are unavailable.'
-                      : forcedMethod === 'peerjs-only'
-                        ? 'Force PeerJS signaling server. No cloud fallback.'
-                        : 'Manual exchange via QR scan or copy/paste. No internet required. Without internet, devices must be on same local network.'}
+                      : 'Manual exchange via QR scan or copy/paste. No internet required. Without internet, devices must be on same local network.'}
                 </p>
                 {forcedMethod === 'nostr-only' && (
                   <div className="flex items-center gap-2 pt-1">
@@ -589,7 +560,7 @@ export function SendTab() {
                 <div className="space-y-1">
                   <p className="font-medium text-sm">Signaling Servers Unavailable</p>
                   <p className="text-xs text-muted-foreground">
-                    Both Nostr relays and PeerJS server are unreachable. You can use Manual Exchange mode which doesn't require internet - exchange signaling via QR code or copy/paste.
+                    Nostr relays are unreachable. You can use Manual Exchange mode which doesn't require internet - exchange signaling via QR code or copy/paste.
                   </p>
                 </div>
               </div>
@@ -624,11 +595,6 @@ export function SendTab() {
                       ? 'Using Nostr with Cloud Transfer Only (forced)'
                       : `Using Nostr${forcedMethod ? ' (forced)' : ' (auto-detected)'}`}
                   </span>
-                </>
-              ) : activeMethod === 'peerjs' ? (
-                <>
-                  <Zap className="h-3 w-3" />
-                  <span>Using PeerJS{forcedMethod ? ' (forced)' : ' (fallback)'}</span>
                 </>
               ) : (
                 <>
