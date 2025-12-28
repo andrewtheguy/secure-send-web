@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Fingerprint, Plus, AlertCircle, CheckCircle2, Loader2, Info, Copy, Check, Key, QrCode } from 'lucide-react'
+import { Fingerprint, Plus, AlertCircle, CheckCircle2, Loader2, Copy, Check, Key, QrCode } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -166,55 +166,87 @@ export function PasskeyPage() {
             Passkey Setup
           </CardTitle>
           <CardDescription>
-            Create or test passkeys for passwordless file transfer encryption
+            Generate your public key for secure, PIN-free file transfers
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Info box */}
-          <div className="rounded-lg bg-gradient-to-br from-primary/5 to-accent/5 border border-primary/10 p-4">
-            <div className="flex items-start gap-3">
-              <div className="rounded-full bg-primary/10 p-2">
-                <Info className="h-4 w-4 text-primary" />
-              </div>
-              <div className="text-sm space-y-2">
-                <p className="font-medium">Passkey-Based File Transfer</p>
-                <p className="text-muted-foreground">
-                  Use your passkey to derive a unique public key for secure file transfers.
-                  Share your public key with contacts once—then send and receive files without
-                  needing to share PINs. Each user has their own passkey; no syncing required.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Get My Public Key section */}
-          <div className="space-y-4 p-4 rounded-lg border border-primary/20 bg-primary/5">
-            <h3 className="font-medium flex items-center gap-2">
-              <Key className="h-4 w-4" />
-              Get My Public Key
+          {/* Create passkey section - Primary action */}
+          <div className="space-y-4 p-4 rounded-lg border-2 border-primary/30 bg-primary/5">
+            <h3 className="text-lg font-semibold flex items-center gap-2">
+              <Plus className="h-5 w-5" />
+              Create New Passkey
             </h3>
-            <p className="text-sm text-muted-foreground">
-              Authenticate with your passkey to display your public key. Share this with
-              contacts so they can send you files, and get their public key to send files to them.
+            <p className="text-sm">
+              Create a passkey to generate your unique public key. Share it with contacts
+              for secure file transfers without needing PINs.
             </p>
+            <div className="space-y-2">
+              <Label htmlFor="userName">Display Name (optional)</Label>
+              <Input
+                id="userName"
+                placeholder="e.g., Work Laptop, Personal"
+                value={userName}
+                onChange={(e) => setUserName(e.target.value)}
+                disabled={isLoading}
+              />
+              <p className="text-xs text-muted-foreground">
+                Helps identify this passkey in your password manager.
+              </p>
+            </div>
             <Button
-              onClick={handleGetPublicKey}
+              onClick={handleCreatePasskey}
               disabled={isLoading}
               className="w-full"
+              size="lg"
             >
-              {pageState === 'getting_key' ? (
+              {pageState !== 'idle' ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Authenticating...
+                  {pageState === 'checking' && 'Checking support...'}
+                  {pageState === 'creating' && 'Creating passkey...'}
+                  {pageState === 'getting_key' && 'Getting public key...'}
                 </>
               ) : (
                 <>
-                  <Fingerprint className="mr-2 h-4 w-4" />
-                  Authenticate &amp; Get Public Key
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create Passkey
                 </>
               )}
             </Button>
+            <p className="text-xs text-muted-foreground text-center">
+              You'll be prompted twice: once to create, then to retrieve your public key.
+            </p>
           </div>
+
+          {/* Get My Public Key section - Secondary action */}
+          {!publicKeyBase64 && (
+            <div className="space-y-3 p-4 rounded-lg border">
+              <h3 className="font-medium flex items-center gap-2">
+                <Key className="h-4 w-4" />
+                Already Have a Passkey?
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Authenticate to display your public key.
+              </p>
+              <Button
+                onClick={handleGetPublicKey}
+                disabled={isLoading}
+                className="w-full"
+              >
+                {pageState === 'getting_key' ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Authenticating...
+                  </>
+                ) : (
+                  <>
+                    <Fingerprint className="mr-2 h-4 w-4" />
+                    Authenticate &amp; Get Public Key
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
 
           {/* Error alert */}
           {error && (
@@ -225,12 +257,28 @@ export function PasskeyPage() {
             </Alert>
           )}
 
-          {/* Success alert */}
+          {/* Success alert with Authenticate Again option */}
           {success && (
             <Alert className="border-green-500/50 bg-green-50/50 dark:bg-green-950/20">
               <CheckCircle2 className="h-4 w-4 text-green-600" />
               <AlertTitle className="text-green-600">Success</AlertTitle>
-              <AlertDescription>{success}</AlertDescription>
+              <AlertDescription className="flex items-center justify-between gap-4">
+                <span>{success}</span>
+                <Button
+                  onClick={handleGetPublicKey}
+                  disabled={isLoading}
+                  size="sm"
+                >
+                  {pageState === 'getting_key' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Fingerprint className="mr-2 h-4 w-4" />
+                      Authenticate Again
+                    </>
+                  )}
+                </Button>
+              </AlertDescription>
             </Alert>
           )}
 
@@ -313,52 +361,6 @@ export function PasskeyPage() {
               )}
             </div>
           )}
-
-          {/* Create passkey section */}
-          <div className="space-y-4 p-4 rounded-lg border">
-            <h3 className="font-medium flex items-center gap-2">
-              <Plus className="h-4 w-4" />
-              Register New Passkey
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Create a passkey to generate your unique public key.
-              Your passkey will be saved to your password manager (1Password, iCloud Keychain, etc.).
-              You'll be prompted twice: once to create the passkey, then once more to verify and
-              retrieve your public key.
-            </p>
-            <div className="space-y-2">
-              <Label htmlFor="userName">Display Name (optional)</Label>
-              <Input
-                id="userName"
-                placeholder="e.g., Work Laptop, Personal"
-                value={userName}
-                onChange={(e) => setUserName(e.target.value)}
-                disabled={isLoading}
-              />
-              <p className="text-xs text-muted-foreground">
-                This name helps identify the passkey in your password manager.
-              </p>
-            </div>
-            <Button
-              onClick={handleCreatePasskey}
-              disabled={isLoading}
-              className="w-full"
-            >
-              {pageState !== 'idle' ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  {pageState === 'checking' && 'Checking support...'}
-                  {pageState === 'creating' && 'Creating passkey...'}
-                  {pageState === 'getting_key' && 'Getting public key...'}
-                </>
-              ) : (
-                <>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create Passkey
-                </>
-              )}
-            </Button>
-          </div>
 
           {/* Technical details */}
           <div className="text-xs text-muted-foreground space-y-1 border-t pt-4">
