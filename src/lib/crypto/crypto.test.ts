@@ -15,7 +15,7 @@ describe('AES-GCM Utils', () => {
     it('should encrypt and decrypt data correctly', async () => {
         const key = await crypto.subtle.generateKey(
             { name: 'AES-GCM', length: 256 },
-            true,
+            false,
             ['encrypt', 'decrypt']
         )
         const plaintext = new TextEncoder().encode('Hello World')
@@ -30,7 +30,7 @@ describe('AES-GCM Utils', () => {
     it('should encrypt and decrypt string messages', async () => {
         const key = await crypto.subtle.generateKey(
             { name: 'AES-GCM', length: 256 },
-            true,
+            false,
             ['encrypt', 'decrypt']
         )
         const message = "Secret Message 🚀"
@@ -44,12 +44,12 @@ describe('AES-GCM Utils', () => {
     it('should fail to decrypt with wrong key', async () => {
         const key1 = await crypto.subtle.generateKey(
             { name: 'AES-GCM', length: 256 },
-            true,
+            false,
             ['encrypt', 'decrypt']
         )
         const key2 = await crypto.subtle.generateKey(
             { name: 'AES-GCM', length: 256 },
-            true,
+            false,
             ['encrypt', 'decrypt']
         )
 
@@ -124,7 +124,7 @@ describe('Stream Crypto', () => {
     it('should encrypt and decrypt chunks', async () => {
         const key = await crypto.subtle.generateKey(
             { name: 'AES-GCM', length: 256 },
-            true,
+            false,
             ['encrypt', 'decrypt']
         )
         const chunkData = new Uint8Array([1, 2, 3, 4, 5])
@@ -151,7 +151,7 @@ describe('Stream Crypto', () => {
     it('should throw on invalid chunk index', async () => {
         const key = await crypto.subtle.generateKey(
             { name: 'AES-GCM', length: 256 },
-            true,
+            false,
             ['encrypt', 'decrypt']
         )
         const chunkData = new Uint8Array([1])
