@@ -34,6 +34,7 @@ import { uploadToCloud, splitIntoChunks } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { readFileAsBytes } from '@/lib/file-utils'
 import { WebRTCConnection } from '@/lib/webrtc'
+import { getWebRTCConfig } from '@/lib/webrtc-config'
 import { getPasskeyECDHKeypair } from '@/lib/crypto/passkey'
 import {
   deriveSharedSecretKey,
@@ -414,7 +415,7 @@ export function useNostrSend(): UseNostrSendReturn {
               }
 
               const rtc = new WebRTCConnection(
-                { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
+                getWebRTCConfig(),
                 async (signal) => {
                   if (cancelledRef.current) return
                   const signalPayload = { type: 'signal', signal }

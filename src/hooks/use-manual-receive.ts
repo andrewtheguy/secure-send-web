@@ -10,6 +10,7 @@ import {
   TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
+import { getWebRTCConfig } from '@/lib/webrtc-config'
 import {
   parseMutualPayload,
   generateMutualAnswerBinary,
@@ -45,9 +46,6 @@ export interface UseManualReceiveReturn {
   reset: () => void
 }
 
-const ICE_CONFIG: RTCConfiguration = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-}
 
 export function useManualReceive(): UseManualReceiveReturn {
   const [state, setState] = useState<ManualReceiveState>({ status: 'idle' })
@@ -204,7 +202,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       let answerSDPResolver: (() => void) | null = null
 
       const rtc = new WebRTCConnection(
-        ICE_CONFIG,
+        getWebRTCConfig(),
         (signal) => {
           // Collect signals (answer + candidates)
           if (signal.type === 'answer') {

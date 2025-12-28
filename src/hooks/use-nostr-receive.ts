@@ -31,6 +31,7 @@ import type { PinKeyMaterial, ReceivedContent } from '@/lib/types'
 import { downloadFromCloud } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { WebRTCConnection } from '@/lib/webrtc'
+import { getWebRTCConfig } from '@/lib/webrtc-config'
 import { getPasskeyECDHKeypair } from '@/lib/crypto/passkey'
 import {
   deriveSharedSecretKey,
@@ -401,7 +402,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             if (rtc) return rtc
 
             rtc = new WebRTCConnection(
-              { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
+              getWebRTCConfig(),
               async (signal) => {
                 const signalPayload = { type: 'signal', signal }
                 const signalJson = JSON.stringify(signalPayload)
