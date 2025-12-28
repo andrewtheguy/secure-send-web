@@ -212,34 +212,6 @@ export async function deriveKeyFromPasskeyMasterKey(
 }
 
 /**
- * Generate a passkey identifier formatted like a PIN for display compatibility.
- * Format: 'P' + 11-char fingerprint = 12 chars (same length as regular PIN)
- *
- * Note: This is NOT a PIN - it's the passkey fingerprint with a 'P' prefix
- * to distinguish it from actual PINs and maintain consistent display length.
- */
-export function generatePasskeyPin(fingerprint: string): string {
-  if (fingerprint.length < 11) {
-    throw new Error(`Passkey fingerprint must be at least 11 characters; received ${fingerprint.length}`)
-  }
-  return 'P' + fingerprint.slice(0, 11)
-}
-
-/**
- * Check if a PIN indicates passkey mode
- */
-export function isPasskeyPin(pin: string): boolean {
-  return pin.startsWith('P')
-}
-
-/**
- * Extract fingerprint from passkey PIN
- */
-export function extractPasskeyFingerprint(pin: string): string {
-  return pin.slice(1)
-}
-
-/**
  * Check if WebAuthn and PRF extension are supported.
  *
  * Note: PRF support is assumed (not verified) if a platform authenticator exists.

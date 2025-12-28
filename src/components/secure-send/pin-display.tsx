@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Check, Copy, AlertCircle, Eye, EyeOff, Clock, Hash, MessageSquareText, Fingerprint, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { PIN_DISPLAY_TIMEOUT_MS, pinToWords, computePinHint, isPasskeyPin } from '@/lib/crypto'
+import { PIN_DISPLAY_TIMEOUT_MS, pinToWords, computePinHint } from '@/lib/crypto'
 
 interface PinDisplayProps {
   pin: string
@@ -67,7 +67,6 @@ export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProp
       }
     }
   }, [])
-  const isPasskey = useMemo(() => isPasskeyPin(pin), [pin])
   const words = useMemo(() => pinToWords(pin), [pin])
   const wordsDisplay = useMemo(() => words.join(' '), [words])
 
@@ -321,12 +320,6 @@ export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProp
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
           Share this PIN with the receiver
-          {isPasskey && (
-            <span className="inline-flex items-center gap-1 text-xs bg-primary/10 border border-primary/20 px-2 py-0.5 rounded">
-              <Fingerprint className="h-3 w-3" />
-              Passkey
-            </span>
-          )}
         </h3>
         <div className="flex items-center gap-2 text-sm">
           <Clock className="h-4 w-4 text-amber-600" />
@@ -369,8 +362,7 @@ export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProp
             value={isMasked ? maskedPin : pin}
             readOnly
             aria-label="Alphanumeric PIN"
-            className={`text-center font-mono text-xl tracking-wider h-12 bg-background cursor-default select-all ${isPasskey ? 'border-cyan-500' : 'border-green-500'
-              }`}
+            className="text-center font-mono text-xl tracking-wider h-12 bg-background cursor-default select-all border-green-500"
           />
         </div>
       )}

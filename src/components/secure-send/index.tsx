@@ -146,7 +146,7 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                 <li><span className="text-foreground">Passkey:</span> WebAuthn PRF extension for hardware-backed key derivation</li>
                 <li><span className="text-foreground">Max size:</span> 100 MB per transfer</li>
                 <li><span className="text-foreground">PIN expiry:</span> 1 hour</li>
-                <li><span className="text-foreground">Signaling:</span> Auto-detected from PIN (uppercase = Nostr, "2" = QR/Manual, "P" = Passkey)</li>
+                <li><span className="text-foreground">Signaling:</span> Auto-detected from PIN (uppercase = Nostr, "2" = QR/Manual)</li>
               </ul>
             </section>
 

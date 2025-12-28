@@ -146,11 +146,10 @@ Passkeys provide an alternative to PIN-based authentication using the WebAuthn P
 3. **PRF Extension**: WebAuthn PRF (Pseudo-Random Function) extension derives encryption keys from the passkey
 4. **Hardware-Backed**: Keys are derived from device secure elements (Touch ID, Face ID, Windows Hello)
 
-#### Passkey Identifier Format
+#### Passkey Fingerprint
 
-- **Format**: `P` + 11-character fingerprint = 12 characters (same length as PIN)
-- **Fingerprint**: SHA-256 hash of credential ID, encoded as 11 base36 characters
-- **Purpose**: Used for Nostr event filtering (same role as PIN hint) and verification
+- **Fingerprint**: SHA-256 hash of credential ID, encoded as 11 base36 characters (formatted as `XXXX-XXXX-XXX` for display)
+- **Purpose**: Used for Nostr event filtering and verification that sender/receiver have the same passkey
 
 #### Key Derivation Flow
 
