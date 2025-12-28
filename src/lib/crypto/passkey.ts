@@ -281,7 +281,12 @@ function base64urlEncode(data: Uint8Array): string {
   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-// Base64url decoding utility
+/**
+ * Decode a base64url-encoded string to an ArrayBuffer.
+ * @param str - Base64url-encoded string (URL-safe alphabet, optional padding)
+ * @returns Decoded bytes as ArrayBuffer
+ * @throws If input contains invalid base64 characters
+ */
 function base64urlDecode(str: string): ArrayBuffer {
   // Add padding if needed
   let base64 = str.replace(/-/g, '+').replace(/_/g, '/')

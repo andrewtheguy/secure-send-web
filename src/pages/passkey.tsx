@@ -16,11 +16,7 @@ type PageState = 'idle' | 'checking' | 'creating' | 'getting_key'
 
 // Helper to convert Uint8Array to base64
 function uint8ArrayToBase64(bytes: Uint8Array): string {
-  let binary = ''
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i])
-  }
-  return btoa(binary)
+  return btoa(Array.from(bytes, (c) => String.fromCharCode(c)).join(''))
 }
 
 export function PasskeyPage() {
@@ -94,20 +90,22 @@ export function PasskeyPage() {
     }
   }
 
-  const handleCopyPublicKey = async () => {
-    if (!publicKeyBase64) return
-
+  const copyToClipboard = async (
+    text: string,
+    onSuccess: () => void,
+    onError: () => void
+  ) => {
     try {
+      // Try modern clipboard API first (requires secure context)
       if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        await navigator.clipboard.writeText(publicKeyBase64)
-        setCopiedKey(true)
-        setTimeout(() => setCopiedKey(false), 2000)
+        await navigator.clipboard.writeText(text)
+        onSuccess()
         return
       }
 
       // Fallback: use legacy execCommand method
       const textarea = document.createElement('textarea')
-      textarea.value = publicKeyBase64
+      textarea.value = text
       textarea.style.position = 'fixed'
       textarea.style.left = '-9999px'
       textarea.style.top = '-9999px'
@@ -119,54 +117,43 @@ export function PasskeyPage() {
       document.body.removeChild(textarea)
 
       if (successful) {
+        onSuccess()
+      } else {
+        onError()
+      }
+    } catch {
+      onError()
+    }
+  }
+
+  const handleCopyPublicKey = async () => {
+    if (!publicKeyBase64) return
+    await copyToClipboard(
+      publicKeyBase64,
+      () => {
         setCopiedKey(true)
         setTimeout(() => setCopiedKey(false), 2000)
-      } else {
+      },
+      () => {
         setError('Failed to copy to clipboard')
         setTimeout(() => setError(null), 3000)
       }
-    } catch {
-      setError('Failed to copy to clipboard')
-      setTimeout(() => setError(null), 3000)
-    }
+    )
   }
 
   const handleCopyFingerprint = async () => {
     if (!formattedFingerprint) return
-
-    try {
-      // Try modern clipboard API first (requires secure context)
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        await navigator.clipboard.writeText(formattedFingerprint)
+    await copyToClipboard(
+      formattedFingerprint,
+      () => {
         setCopied(true)
         setTimeout(() => setCopied(false), 2000)
-        return
-      }
-
-      // Fallback: use legacy execCommand method
-      const textarea = document.createElement('textarea')
-      textarea.value = formattedFingerprint
-      textarea.style.position = 'fixed'
-      textarea.style.left = '-9999px'
-      textarea.style.top = '-9999px'
-      document.body.appendChild(textarea)
-      textarea.focus()
-      textarea.select()
-
-      const successful = document.execCommand('copy')
-      document.body.removeChild(textarea)
-
-      if (successful) {
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-      } else {
+      },
+      () => {
         setError('Failed to copy to clipboard')
         setTimeout(() => setError(null), 3000)
       }
-    } catch {
-      setError('Failed to copy to clipboard')
-      setTimeout(() => setError(null), 3000)
-    }
+    )
   }
 
   const isLoading = pageState !== 'idle'
