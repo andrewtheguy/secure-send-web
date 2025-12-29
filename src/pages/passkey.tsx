@@ -9,7 +9,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import {
   checkWebAuthnSupport,
   createPasskeyCredential,
-  getPasskeyECDHKeypair,
+  getPasskeyIdentity,
 } from '@/lib/crypto/passkey'
 import { formatFingerprint } from '@/lib/crypto/ecdh'
 
@@ -24,7 +24,7 @@ export function PasskeyPage() {
   const [pageState, setPageState] = useState<PageState>('idle')
   const [userName, setUserName] = useState('')
   const [fingerprint, setFingerprint] = useState<string | null>(null)
-  const [publicKeyBase64, setPublicKeyBase64] = useState<string | null>(null)
+  const [publicIdBase64, setPublicIdBase64] = useState<string | null>(null)
   const [prfSupported, setPrfSupported] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -38,7 +38,7 @@ export function PasskeyPage() {
     setError(null)
     setSuccess(null)
     setFingerprint(null)
-    setPublicKeyBase64(null)
+    setPublicIdBase64(null)
     setPrfSupported(null)
     setPageState('checking')
 
@@ -57,13 +57,13 @@ export function PasskeyPage() {
       const { credentialId } = await createPasskeyCredential(userName || 'Secure Transfer User')
       setUserName('') // Clear display name input after successful creation
 
-      // Immediately authenticate with the new credential to get the public key (skips picker)
+      // Immediately authenticate with the new credential to get the public ID (skips picker)
       setPageState('getting_key')
-      const keypair = await getPasskeyECDHKeypair(credentialId)
-      setFingerprint(keypair.publicKeyFingerprint)
-      setPublicKeyBase64(uint8ArrayToBase64(keypair.publicKeyBytes))
-      setPrfSupported(keypair.prfSupported)
-      setSuccess('Passkey created! Your public key is now available for sharing.')
+      const identity = await getPasskeyIdentity(credentialId)
+      setFingerprint(identity.publicIdFingerprint)
+      setPublicIdBase64(uint8ArrayToBase64(identity.publicIdBytes))
+      setPrfSupported(identity.prfSupported)
+      setSuccess('Passkey created! Your public ID is now available for sharing.')
       setPageState('idle')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create passkey')
@@ -71,20 +71,20 @@ export function PasskeyPage() {
     }
   }
 
-  const handleGetPublicKey = async () => {
+  const handleGetPublicId = async () => {
     setError(null)
     setSuccess(null)
     setPageState('getting_key')
 
     try {
-      const result = await getPasskeyECDHKeypair()
-      setFingerprint(result.publicKeyFingerprint)
-      setPublicKeyBase64(uint8ArrayToBase64(result.publicKeyBytes))
+      const result = await getPasskeyIdentity()
+      setFingerprint(result.publicIdFingerprint)
+      setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
       setPrfSupported(result.prfSupported)
-      setSuccess('Public key retrieved! Share this with your contacts for secure file transfers.')
+      setSuccess('Public ID retrieved! Share this with your contacts for secure file transfers.')
       setPageState('idle')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to get public key')
+      setError(err instanceof Error ? err.message : 'Failed to get public ID')
       setPageState('idle')
     }
   }
@@ -125,10 +125,10 @@ export function PasskeyPage() {
     }
   }
 
-  const handleCopyPublicKey = async () => {
-    if (!publicKeyBase64) return
+  const handleCopyPublicId = async () => {
+    if (!publicIdBase64) return
     await copyToClipboard(
-      publicKeyBase64,
+      publicIdBase64,
       () => {
         setCopiedKey(true)
         setTimeout(() => setCopiedKey(false), 2000)
@@ -166,7 +166,7 @@ export function PasskeyPage() {
             Passkey Setup
           </CardTitle>
           <CardDescription>
-            Generate your public key for secure, PIN-free file transfers
+            Generate your passkey public ID for secure, PIN-free file transfers
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -177,7 +177,7 @@ export function PasskeyPage() {
               Create New Passkey
             </h3>
             <p className="text-sm">
-              Create a passkey to generate your unique public key. Share it with contacts
+              Create a passkey to generate your unique public ID. Share it with contacts
               for secure file transfers without needing PINs.
             </p>
             <div className="space-y-2">
@@ -204,7 +204,7 @@ export function PasskeyPage() {
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   {pageState === 'checking' && 'Checking support...'}
                   {pageState === 'creating' && 'Creating passkey...'}
-                  {pageState === 'getting_key' && 'Getting public key...'}
+                  {pageState === 'getting_key' && 'Getting public ID...'}
                 </>
               ) : (
                 <>
@@ -214,22 +214,22 @@ export function PasskeyPage() {
               )}
             </Button>
             <p className="text-xs text-muted-foreground text-center">
-              You'll be prompted twice: once to create, then to retrieve your public key.
+              You'll be prompted twice: once to create, then to retrieve your public ID.
             </p>
           </div>
 
-          {/* Get My Public Key section - Secondary action */}
-          {!publicKeyBase64 && (
+          {/* Get My Public ID section - Secondary action */}
+          {!publicIdBase64 && (
             <div className="space-y-3 p-4 rounded-lg border">
               <h3 className="font-medium flex items-center gap-2">
                 <Key className="h-4 w-4" />
                 Already Have a Passkey?
               </h3>
               <p className="text-sm text-muted-foreground">
-                Authenticate to display your public key.
+                Authenticate to display your public ID.
               </p>
               <Button
-                onClick={handleGetPublicKey}
+                onClick={handleGetPublicId}
                 disabled={isLoading}
                 className="w-full"
               >
@@ -239,11 +239,11 @@ export function PasskeyPage() {
                     Authenticating...
                   </>
                 ) : (
-                  <>
-                    <Fingerprint className="mr-2 h-4 w-4" />
-                    Authenticate &amp; Get Public Key
-                  </>
-                )}
+                    <>
+                      <Fingerprint className="mr-2 h-4 w-4" />
+                      Authenticate &amp; Get Public ID
+                    </>
+                  )}
               </Button>
             </div>
           )}
@@ -265,7 +265,7 @@ export function PasskeyPage() {
               <AlertDescription className="flex items-center justify-between gap-4">
                 <span>{success}</span>
                 <Button
-                  onClick={handleGetPublicKey}
+                  onClick={handleGetPublicId}
                   disabled={isLoading}
                   size="sm"
                 >
@@ -282,18 +282,18 @@ export function PasskeyPage() {
             </Alert>
           )}
 
-          {/* Public Key display with QR */}
-          {publicKeyBase64 && fingerprint && (
+          {/* Public ID display with QR */}
+          {publicIdBase64 && fingerprint && (
             <div className="p-4 rounded-lg border border-cyan-500/50 bg-cyan-50/30 dark:bg-cyan-950/20 space-y-4">
               {/* QR Code */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <QrCode className="h-5 w-5 text-primary" />
-                  <span className="text-sm font-semibold text-primary">Your Public Key</span>
+                  <span className="text-sm font-semibold text-primary">Your Public ID</span>
                 </div>
                 <div className="flex flex-col items-center gap-4">
                   <div className="bg-white p-4 rounded-lg">
-                    <QRCodeSVG value={publicKeyBase64} size={200} level="M" />
+                    <QRCodeSVG value={publicIdBase64} size={200} level="M" />
                   </div>
                   <p className="text-xs text-muted-foreground text-center max-w-xs">
                     Let contacts scan this QR code, or copy the key below to share via other means.
@@ -301,16 +301,16 @@ export function PasskeyPage() {
                 </div>
               </div>
 
-              {/* Copy Public Key */}
+              {/* Copy Public ID */}
               <div className="pt-4 border-t">
                 <div className="flex items-center gap-2 mb-2">
                   <Key className="h-5 w-5 text-primary" />
-                  <span className="text-sm font-semibold text-primary">Public Key (base64)</span>
+                  <span className="text-sm font-semibold text-primary">Public ID (base64)</span>
                 </div>
                 <div className="flex gap-2">
                   <textarea
                     readOnly
-                    value={publicKeyBase64}
+                    value={publicIdBase64}
                     onClick={(e) => e.currentTarget.select()}
                     rows={2}
                     className="flex-1 text-sm bg-primary/10 border border-primary/20 p-2 rounded font-mono text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
@@ -318,7 +318,7 @@ export function PasskeyPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={handleCopyPublicKey}
+                    onClick={handleCopyPublicId}
                     className={`flex-shrink-0 ${copiedKey ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-primary/10'}`}
                   >
                     {copiedKey ? (
@@ -354,7 +354,7 @@ export function PasskeyPage() {
                   </Button>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Use to verify identity when sharing your public key.
+                  Use to verify identity when sharing your public ID.
                 </p>
               </div>
 
@@ -370,14 +370,14 @@ export function PasskeyPage() {
           <div className="text-xs text-muted-foreground space-y-1 border-t pt-4">
             <p>
               <span className="font-medium text-foreground">How it works:</span> Your passkey
-              derives a deterministic ECDH keypair via the WebAuthn PRF extension. The public key
-              (65 bytes, P-256 curve) is shared with contacts. When transferring files, both parties
-              compute a shared secret using ECDH, ensuring only the intended recipient can decrypt.
+              derives a non-extractable master key via the WebAuthn PRF extension. A shareable
+              public ID and fingerprint are derived with HKDF. Transfers use ephemeral ECDH session
+              keys plus passkey-bound session binding, ensuring only the intended recipient can decrypt.
             </p>
             <p>
               <span className="font-medium text-foreground">Key exchange:</span> Share your
-              public key once with each contact (via QR code or copy/paste). No syncing required—
-              each person uses their own passkey on their own device.
+              public ID once with each contact (via QR code or copy/paste). Passkey mode still
+              requires both parties to have the same synced passkey on their own devices.
             </p>
           </div>
         </CardContent>

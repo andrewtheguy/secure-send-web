@@ -17,7 +17,7 @@ export function generateEphemeralKeys(): { secretKey: Uint8Array; publicKey: str
  *
  * @param hint - Identifier for event filtering. Can be either:
  *   - PIN mode: SHA-256 hash of user's PIN (first 8 hex chars)
- *   - Passkey mode: Passkey fingerprint (11 base36 chars from credential ID)
+ *   - Passkey mode: Passkey fingerprint (16 hex chars from passkey public ID)
  *
  * TTL Behavior:
  * - Events include an 'expiration' tag set to 1 hour from creation (NIP-40)
@@ -82,16 +82,16 @@ export function parsePinExchangeEvent(event: Event): {
 
 /**
  * Create Mutual Trust exchange event (kind 24243)
- * Used for passkey-based mutual trust mode where both parties exchange public keys.
+ * Used for passkey-based mutual trust mode where both parties exchange passkey public IDs.
  *
  * @param secretKey - Nostr ephemeral secret key
  * @param encryptedPayload - AES-GCM encrypted transfer metadata
  * @param salt - Per-transfer salt for key derivation
  * @param transferId - Unique transfer identifier
- * @param receiverFingerprint - Receiver's public key fingerprint (for event filtering)
- * @param senderFingerprint - Sender's public key fingerprint (for verification)
+ * @param receiverFingerprint - Receiver's public ID fingerprint (for event filtering)
+ * @param senderFingerprint - Sender's public ID fingerprint (for verification)
  * @param keyConfirmHash - Hash of HKDF-derived key confirmation value (MITM detection)
- * @param receiverPkCommitment - Hash of receiver's public key (relay MITM prevention)
+ * @param receiverPkCommitment - Hash of receiver's public ID (relay MITM prevention)
  * @param nonce - Base64-encoded 16-byte random nonce (replay protection)
  * @param senderEphemeralPub - Optional: Sender's ephemeral public key for PFS (65 bytes, base64)
  * @param senderSessionBinding - Optional: Session binding proving ephemeral key is authorized (32 bytes, base64)
@@ -113,9 +113,9 @@ export function createMutualTrustEvent(
 
   const tags: string[][] = [
     ['h', receiverFingerprint], // For receiver to find the event
-    ['spk', senderFingerprint], // Sender's public key fingerprint for verification
+    ['spk', senderFingerprint], // Sender's public ID fingerprint for verification
     ['kc', keyConfirmHash], // Key confirmation hash (MITM detection)
-    ['rpkc', receiverPkCommitment], // Receiver public key commitment (relay MITM prevention)
+    ['rpkc', receiverPkCommitment], // Receiver public ID commitment (relay MITM prevention)
     ['n', nonce], // Replay nonce (16 bytes, base64)
     ['s', uint8ArrayToBase64(salt)],
     ['t', transferId],

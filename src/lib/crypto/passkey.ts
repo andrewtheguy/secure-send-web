@@ -1,51 +1,30 @@
 /**
  * Passkey (WebAuthn PRF) encryption utilities
  *
- * Uses WebAuthn PRF extension to derive deterministic ECDH keypairs from passkeys.
- * Supports cross-device key derivation when passkeys are synced via 1Password/iCloud/Google.
+ * Uses WebAuthn PRF extension to derive a passkey master key (HKDF base key).
+ * A shareable public identifier and fingerprints are derived from that master key.
+ * Supports cross-device derivation when passkeys are synced via 1Password/iCloud/Google.
  */
 
-import { p256 } from '@noble/curves/nist.js'
 import {
   publicKeyToFingerprint,
-  importECDHPrivateKey,
   generateECDHKeyPair,
-  deriveSharedSecretKey,
 } from './ecdh'
 
 // Constants
-const PASSKEY_ECDH_LABEL = 'secure-send-passkey-ecdh-v1'
+const PASSKEY_MASTER_LABEL = 'secure-send-passkey-master-v1'
+const PASSKEY_PUBLIC_ID_LABEL = 'secure-send-passkey-public-id-v1'
 const SESSION_BINDING_LABEL = 'secure-send-session-bind-v1'
 
 /**
- * Derive deterministic ECDH keypair from passkey master key.
- * Same passkey will always derive the same keypair across devices.
+ * Derive a stable, shareable public identifier from the passkey master key.
+ * This identifier is NOT an ECDH public key; it is a derived, non-secret tag.
  *
- * SECURITY NOTE - Why raw bytes are temporarily needed:
- *
- * Web Crypto API cannot compute P-256 public key from private key material,
- * so we use @noble/curves (p256.getPublicKey) which requires raw bytes.
- * The seed bytes exist in memory only during this function call (~milliseconds)
- * and are zeroed in a finally block before returning.
- *
- * Residual risk (standard JS limitation):
- * - V8/browser may retain copies during GC
- *
- * Impact if raw bytes are exfiltrated:
- * - High: PRF output / derived seed == ECDH private key material.
- * - An attacker could derive the same shared secret and decrypt transfers
- *   tied to this passkey (past/future within protocol limits).
- *
- * @see https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/deriveBits
+ * SECURITY: Derived via HKDF; no raw private key material is exposed.
  */
-export async function deriveECDHKeypairFromMasterKey(masterKey: CryptoKey): Promise<{
-  publicKeyBytes: Uint8Array // 65 bytes uncompressed P-256 (0x04 || X || Y)
-  privateKey: CryptoKey // Non-extractable ECDH private key
-}> {
-  // Derive 32 bytes (256 bits) of seed from master key using HKDF deriveBits
-  // This is cleaner than deriveKey+export - directly gets raw bytes
-  const info = new TextEncoder().encode(PASSKEY_ECDH_LABEL)
-  const seedBits = await crypto.subtle.deriveBits(
+export async function derivePasskeyPublicId(masterKey: CryptoKey): Promise<Uint8Array> {
+  const info = new TextEncoder().encode(PASSKEY_PUBLIC_ID_LABEL)
+  const idBits = await crypto.subtle.deriveBits(
     {
       name: 'HKDF',
       hash: 'SHA-256',
@@ -53,34 +32,20 @@ export async function deriveECDHKeypairFromMasterKey(masterKey: CryptoKey): Prom
       info,
     },
     masterKey,
-    256 // 32 bytes = 256 bits for P-256 private key
+    256 // 32 bytes
   )
 
-  const seedBytes = new Uint8Array(seedBits)
-
-  try {
-    // Compute public key using noble/curves (Web Crypto can't do this)
-    const publicKeyBytes = p256.getPublicKey(seedBytes, false)
-
-    // Import as non-extractable CryptoKey for all future ECDH operations
-    const privateKey = await importECDHPrivateKey(seedBytes)
-
-    return { publicKeyBytes, privateKey }
-  } finally {
-    // SECURITY: Zero out seed bytes immediately - best effort cleanup
-    // Note: JS/V8 may retain copies but this prevents casual inspection
-    seedBytes.fill(0)
-  }
+  return new Uint8Array(idBits)
 }
 
 /**
  * Get passkey master key (HKDF base key) from passkey authentication.
- * Returns the master key for subsequent ECDH keypair derivation.
+ * Returns the master key for subsequent identity + session derivations.
  *
  * @param credentialId - Optional base64url credential ID to use specific passkey (skips picker)
  */
 export async function getPasskeyMasterKey(credentialId?: string): Promise<CryptoKey> {
-  const prfInput = new TextEncoder().encode(PASSKEY_ECDH_LABEL)
+  const prfInput = new TextEncoder().encode(PASSKEY_MASTER_LABEL)
 
   // Build allowCredentials if a specific credential is requested
   let allowCredentials: PublicKeyCredentialDescriptor[] | undefined
@@ -124,39 +89,41 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<Crypto
     throw new Error('PRF evaluation failed - authenticator may not support PRF extension')
   }
 
+  const prfBytes = new Uint8Array(extResults.prf.results.first)
+
   // Import PRF output as HKDF master key.
   // SECURITY: This PRF output is sensitive key material. If exposed, it can be
-  // used to deterministically re-derive the ECDH private key and decrypt data.
-  return crypto.subtle.importKey(
+  // used to derive encryption keys for this passkey.
+  const masterKey = await crypto.subtle.importKey(
     'raw',
-    extResults.prf.results.first,
+    prfBytes,
     'HKDF',
     false, // extractable: false per CLAUDE.md
     ['deriveKey', 'deriveBits']
   )
+  // Best-effort cleanup of PRF bytes
+  prfBytes.fill(0)
+  return masterKey
 }
 
 /**
- * Single call: authenticate with passkey and get ECDH keypair with fingerprint.
- * This is the main entry point for passkey-based ECDH.
- *
- * SECURITY: Returns non-extractable CryptoKey for private key operations.
+ * Single call: authenticate with passkey and derive public identifier + fingerprint.
+ * This is the main entry point for passkey identity info.
  *
  * @param credentialId - Optional base64url credential ID to use specific passkey (skips picker)
- * @returns Keypair with prfSupported flag (true if we got here, throws otherwise)
+ * @returns Identity with prfSupported flag (true if we got here, throws otherwise)
  */
-export async function getPasskeyECDHKeypair(credentialId?: string): Promise<{
-  publicKeyBytes: Uint8Array
-  privateKey: CryptoKey // Non-extractable ECDH private key
-  publicKeyFingerprint: string
+export async function getPasskeyIdentity(credentialId?: string): Promise<{
+  publicIdBytes: Uint8Array
+  publicIdFingerprint: string
   prfSupported: boolean
 }> {
   const masterKey = await getPasskeyMasterKey(credentialId)
-  const { publicKeyBytes, privateKey } = await deriveECDHKeypairFromMasterKey(masterKey)
-  const publicKeyFingerprint = await publicKeyToFingerprint(publicKeyBytes)
+  const publicIdBytes = await derivePasskeyPublicId(masterKey)
+  const publicIdFingerprint = await publicKeyToFingerprint(publicIdBytes)
 
   // If we got here, PRF worked (getPasskeyMasterKey throws if PRF fails)
-  return { publicKeyBytes, privateKey, publicKeyFingerprint, prfSupported: true }
+  return { publicIdBytes, publicIdFingerprint, prfSupported: true }
 }
 
 // publicKeyToFingerprint is used from ecdh.ts
@@ -221,8 +188,8 @@ function isIpAddress(hostname: string): boolean {
  * Create a new passkey credential for this app.
  * Uses navigator.credentials.create() with PRF extension.
  *
- * Note: This only creates the credential. To get the ECDH public key and fingerprint,
- * a separate authentication via getPasskeyECDHKeypair() or testPasskeyAndGetFingerprint()
+ * Note: This only creates the credential. To get the public ID and fingerprint,
+ * a separate authentication via getPasskeyIdentity()
  * is required (PRF output is only available during authentication, not registration).
  *
  * Note: WebAuthn requires a valid domain name as rpId. IP addresses are not allowed
@@ -344,14 +311,14 @@ export interface EphemeralSessionKeypair {
   ephemeralPublicKeyBytes: Uint8Array
   /** Ephemeral private key - non-extractable CryptoKey, raw bytes NEVER exposed */
   ephemeralPrivateKey: CryptoKey
-  /** Identity public key bytes from passkey derivation (for fingerprint display) */
+  /** Public identifier bytes derived from passkey (for fingerprint display) */
   identityPublicKeyBytes: Uint8Array
-  /** Identity fingerprint (16 hex chars) for UI verification */
+  /** Passkey fingerprint (16 hex chars) for UI verification */
   identityFingerprint: string
   /**
    * Session binding - cryptographic proof that this ephemeral key is authorized
-   * by the passkey identity. Computed as: HKDF(identitySharedSecret, ephemeralPub)
-   * Both parties can verify this because they share the identity-level ECDH secret.
+   * by the passkey identity. Computed as: HKDF(passkey master key, ephemeralPub)
+   * Both parties can verify this because they share the passkey master key.
    */
   sessionBinding: Uint8Array
 }
@@ -359,7 +326,7 @@ export interface EphemeralSessionKeypair {
 /**
  * Generate ephemeral session ECDH keypair with identity binding for Perfect Forward Secrecy.
  *
- * SECURITY: Unlike deriveECDHKeypairFromMasterKey, this function provides PFS:
+ * SECURITY: Unlike passkey identity derivation, this function provides PFS:
  * - Uses Web Crypto's generateKey which NEVER exposes raw private key material
  * - Each session uses fresh ephemeral keys
  * - Compromising one session's memory doesn't affect past/future sessions
@@ -379,8 +346,8 @@ export interface EphemeralSessionKeypair {
  * 7. Both compute: ECDH(ownEphemeralPriv, peerEphemeralPub) = sessionSecret
  * 8. File encryption uses sessionSecret (PFS protected)
  *
- * @param identitySharedSecretKey - HKDF CryptoKey from passkey-level ECDH (deriveSharedSecretKey)
- * @param ownIdentityPublicKeyBytes - Own passkey-derived public key (for fingerprint)
+ * @param identitySharedSecretKey - HKDF master key from passkey PRF
+ * @param ownIdentityPublicKeyBytes - Own passkey-derived public ID (for fingerprint)
  * @returns Ephemeral session keypair with identity binding
  */
 export async function generateEphemeralSessionKeypair(
@@ -397,7 +364,7 @@ export async function generateEphemeralSessionKeypair(
   // Create session binding: HKDF(identitySharedSecret, salt=ephemeralPub, info=label)
   // This proves the ephemeral key is authorized by the passkey identity pair.
   // Both parties can compute and verify this because they share identitySharedSecretKey.
-  const bindingBits = await crypto.subtle.deriveBits(
+ const bindingBits = await crypto.subtle.deriveBits(
     {
       name: 'HKDF',
       hash: 'SHA-256',
@@ -421,7 +388,7 @@ export async function generateEphemeralSessionKeypair(
  * Verify that an ephemeral public key is bound to a passkey identity.
  * This prevents ephemeral key substitution attacks (MITM).
  *
- * @param identitySharedSecretKey - HKDF CryptoKey from passkey-level ECDH
+ * @param identitySharedSecretKey - HKDF master key from passkey PRF
  * @param ephemeralPublicKeyBytes - Peer's ephemeral public key to verify
  * @param expectedBinding - Session binding provided by peer
  * @returns true if binding is valid, false otherwise
@@ -459,48 +426,36 @@ export async function verifySessionBinding(
  * This is the main entry point for passkey-based transfers with PFS.
  *
  * SECURITY: Provides Perfect Forward Secrecy:
- * - Identity keypair derived from passkey (for fingerprint, temporarily exposes raw bytes)
+ * - Passkey master key stays non-extractable (no raw private key material exposed)
  * - Ephemeral keypair generated via Web Crypto (raw bytes NEVER exposed)
  * - Actual encryption uses ephemeral keys, not identity keys
- * - Compromising identity raw bytes doesn't help decrypt past sessions
+ * - Compromising the passkey-derived public ID does not help decrypt sessions
  *
- * @param peerIdentityPublicKeyBytes - Peer's passkey-derived public key
  * @param credentialId - Optional credential ID to use specific passkey
  * @returns Session keypair with identity info and binding for verification
  */
 export async function getPasskeySessionKeypair(
-  peerIdentityPublicKeyBytes: Uint8Array,
   credentialId?: string
 ): Promise<{
   ephemeral: EphemeralSessionKeypair
-  identityPrivateKey: CryptoKey // For legacy compatibility, may be removed
-  identitySharedSecretKey: CryptoKey // Non-extractable HKDF key for session binding
+  identitySharedSecretKey: CryptoKey // Non-extractable HKDF master key for session binding
 }> {
   // Get passkey master key
   const masterKey = await getPasskeyMasterKey(credentialId)
 
-  // Derive identity keypair (temporarily exposes raw bytes for public key computation)
-  const { publicKeyBytes: identityPublicKeyBytes, privateKey: identityPrivateKey } =
-    await deriveECDHKeypairFromMasterKey(masterKey)
-
-  // Derive identity-level shared secret (for session binding verification)
-  // SECURITY: Raw shared secret bytes stay inside Web Crypto as non-extractable key
-  const identitySharedSecretKey = await deriveSharedSecretKey(
-    identityPrivateKey,
-    peerIdentityPublicKeyBytes
-  )
+  // Derive stable public identifier from master key (for fingerprint display)
+  const identityPublicKeyBytes = await derivePasskeyPublicId(masterKey)
 
   // Generate ephemeral session keypair with identity binding
   // SECURITY: Ephemeral private key is NEVER exposed as raw bytes
   const ephemeral = await generateEphemeralSessionKeypair(
-    identitySharedSecretKey,
+    masterKey,
     identityPublicKeyBytes
   )
 
   return {
     ephemeral,
-    identityPrivateKey,
-    identitySharedSecretKey,
+    identitySharedSecretKey: masterKey,
   }
 }
 

@@ -149,8 +149,13 @@ Passkeys provide an alternative to PIN-based authentication using the WebAuthn P
 
 #### Passkey Fingerprint
 
-- **Fingerprint**: SHA-256 hash of credential ID, encoded as 11 base36 characters (formatted as `XXXX-XXXX-XXX` for display)
+- **Fingerprint**: SHA-256 hash of the passkey public ID (32 bytes derived via HKDF), encoded as 16 hex characters (formatted as `XXXX-XXXX-XXXX-XXXX` for display)
 - **Purpose**: Used for Nostr event filtering and verification that sender/receiver have the same passkey
+
+#### Passkey Public ID
+
+- **Public ID**: 32 bytes derived from the passkey master key via HKDF (shareable, non-secret), encoded as base64 for copy/QR
+- **Purpose**: Shared with contacts to target Nostr events and validate receiver commitments (`rpkc`)
 
 #### Key Derivation Flow
 
@@ -169,27 +174,24 @@ flowchart TD
 
 #### Mutual Trust Key Derivation (Non-Extractable Keys)
 
-When using passkey mutual trust mode, the ECDH shared secret is kept as a **non-extractable CryptoKey** throughout the entire derivation chain:
+When using passkey mutual trust mode, the passkey master key is kept as a **non-extractable CryptoKey** and used directly for key confirmation and session binding:
 
 ```mermaid
 flowchart TD
-    PrivKey[ECDH Private Key] --> DeriveKey[Web Crypto deriveKey]
-    PeerPubKey[Peer's Public Key] --> DeriveKey
-    DeriveKey --> SharedSecretKey[Shared Secret<br/>non-extractable HKDF CryptoKey]
-    SharedSecretKey --> AES[deriveKey → AES-256-GCM]
-    SharedSecretKey --> KC[deriveBits → Key Confirmation]
-    SharedSecretKey --> EphBind[deriveBits → Session Binding]
+    MasterKey[Passkey Master Key<br/>non-extractable HKDF CryptoKey] --> AES[deriveKey → AES-256-GCM]
+    MasterKey --> KC[deriveBits → Key Confirmation]
+    MasterKey --> EphBind[deriveBits → Session Binding]
     Salt[Random Salt] --> AES
     Salt --> KC
     EphPub[Ephemeral Public Key] --> EphBind
 ```
 
-**Security benefit**: The raw ECDH shared secret (32 bytes) never appears as a `Uint8Array` in JavaScript memory. Instead, Web Crypto's `deriveKey` chains ECDH directly to HKDF, producing a non-extractable `CryptoKey`. This prevents:
-- XSS attacks from reading the shared secret via memory inspection
-- Accidental logging or serialization of the secret
-- Side-channel attacks on the raw secret bytes
+**Security benefit**: No raw private key material is exposed to JavaScript. The passkey master key stays inside Web Crypto as a non-extractable `CryptoKey`, and all derived keys are produced via `deriveKey`/`deriveBits`. This prevents:
+- XSS attacks from reading raw secret material via memory inspection
+- Accidental logging or serialization of raw keys
+- Side-channel exposure of raw private bytes
 
-**Implementation**: `deriveSharedSecretKey()`, `deriveAESKeyFromSecretKey()`, and `deriveKeyConfirmationFromSecretKey()` in `src/lib/crypto/ecdh.ts`
+**Implementation**: `getPasskeyMasterKey()`, `derivePasskeyPublicId()`, `generateEphemeralSessionKeypair()`, and `deriveSessionEncryptionKey()` in `src/lib/crypto/passkey.ts`
 
 #### Perfect Forward Secrecy (PFS)
 
@@ -199,10 +201,10 @@ Passkey mutual trust mode provides **Perfect Forward Secrecy** via ephemeral ses
 sequenceDiagram
     participant Sender
     participant Receiver
-    Note over Sender: Passkey auth → Identity keypair
+    Note over Sender: Passkey auth → Master key + public ID
     Note over Sender: Generate ephemeral keypair<br/>(Web Crypto - raw bytes NEVER exposed)
     Sender->>Receiver: Mutual Trust Event<br/>(epk: ephemeral pub, esb: session binding)
-    Note over Receiver: Passkey auth → Identity keypair
+    Note over Receiver: Passkey auth → Master key + public ID
     Note over Receiver: Verify sender's session binding
     Note over Receiver: Generate ephemeral keypair
     Receiver-->>Sender: Ready ACK<br/>(epk: ephemeral pub, esb: session binding)
@@ -213,12 +215,12 @@ sequenceDiagram
 
 **How it works:**
 
-1. **Identity Keys**: Passkey PRF derives deterministic identity keypair (for fingerprint verification)
+1. **Identity Material**: Passkey PRF derives a non-extractable master key and a public ID (for fingerprint verification)
 2. **Ephemeral Keys**: Each session generates fresh ECDH keypairs using `crypto.subtle.generateKey()` - raw private key material is **NEVER** exposed to JavaScript
-3. **Session Binding**: `HKDF(identitySharedSecret, ephemeralPub)` proves ephemeral keys are authorized by the passkey identity
+3. **Session Binding**: `HKDF(masterKey, ephemeralPub)` proves ephemeral keys are authorized by the passkey identity
 4. **Session Key**: `ECDH(ownEphemeralPriv, peerEphemeralPub)` derives the actual encryption key
 
-**Security benefit**: Compromising identity key material (the passkey PRF output) does NOT help decrypt past or future sessions because:
+**Security benefit**: Compromising the passkey public ID or a single session's memory does NOT help decrypt past or future sessions because:
 - Ephemeral private keys are generated via Web Crypto and never exposed as raw bytes
 - Each session uses unique ephemeral keys that are discarded after use
 - Even memory inspection during one session only reveals that session's ephemeral keys
@@ -242,7 +244,7 @@ When using passkey mode, additional cryptographic protections are applied:
 | Enhancement | Event Tag | Purpose |
 |-------------|-----------|---------|
 | Key Confirmation | `kc` | HKDF-derived hash proves both parties derived same shared secret (MITM detection) |
-| Receiver PK Commitment | `rpkc` | SHA-256 of receiver's public key prevents relay substitution attacks |
+| Receiver Public ID Commitment | `rpkc` | SHA-256 of receiver's public ID prevents relay substitution attacks |
 | Replay Nonce | `n` | 16-byte random nonce (base64) echoed in ACK prevents replay attacks within TTL |
 | Constant-Time Comparison | N/A | All security-critical string comparisons use timing-attack-resistant comparison |
 | Input Validation | N/A | Nonce must decode to exactly 16 bytes; key confirmation input validated as 16-byte Uint8Array |
@@ -252,7 +254,7 @@ When using passkey mode, additional cryptographic protections are applied:
 ['h', receiverFingerprint]     // For event filtering
 ['spk', senderFingerprint]     // Sender verification
 ['kc', keyConfirmHash]         // Key confirmation (MITM detection)
-['rpkc', receiverPkCommitment] // Receiver PK commitment (relay MITM prevention)
+['rpkc', receiverPkCommitment] // Receiver public ID commitment (relay MITM prevention)
 ['n', nonce]                   // Replay nonce (base64, 16 bytes)
 ['s', salt]                    // Per-transfer salt
 ['t', transferId]              // Transfer ID
@@ -269,8 +271,8 @@ When using passkey mode, additional cryptographic protections are applied:
 ```
 
 **Verification Flow:**
-1. Sender computes key confirmation hash, receiver PK commitment, and random nonce
-2. Receiver verifies RPKC matches own public key (prevents relay MITM)
+1. Sender computes key confirmation hash, receiver public ID commitment, and random nonce
+2. Receiver verifies RPKC matches own public ID (prevents relay MITM)
 3. Receiver verifies key confirmation hash matches (detects shared secret mismatch)
 4. Receiver echoes nonce in ready ACK
 5. Sender verifies nonce match using constant-time comparison (prevents replay)
@@ -303,7 +305,7 @@ Security-critical functions validate inputs before cryptographic operations:
 | Sync Method | Out-of-band sharing | Password manager sync |
 | Verification | PIN match | Fingerprint comparison |
 | Key Confirmation | N/A | HKDF-derived hash proves same shared secret |
-| Relay MITM Protection | N/A | Public key commitment binding |
+| Relay MITM Protection | N/A | Public ID commitment binding |
 | Replay Protection | TTL only | TTL + cryptographic nonce |
 | Timing Attack Prevention | N/A | Constant-time string comparisons |
 | Shared Secret Protection | Raw bytes in memory | Non-extractable CryptoKey (never exposed to JS) |
@@ -708,8 +710,8 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 11. **XSS Protection**: Sensitive cryptographic material (shared secrets, key derivation functions) stored in closure scope, not on global `window` object
 12. **Resource Cleanup**: All error paths properly clean up timeouts and subscriptions to prevent resource leaks
 13. **Input Validation**: Cryptographic functions validate inputs (nonce length, key confirmation size) before operations to provide deterministic errors
-14. **Non-Extractable Shared Secret**: In passkey mutual trust mode, the ECDH shared secret is kept as a non-extractable `CryptoKey` throughout the derivation chain - raw bytes never exposed to JavaScript, preventing exfiltration via XSS or memory inspection
-15. **Perfect Forward Secrecy (PFS)**: Passkey mode uses ephemeral session keys generated via Web Crypto's `generateKey()` - raw private key material is NEVER exposed to JavaScript. Compromising identity keys does not help decrypt past or future sessions. PFS is mandatory in passkey mode.
+14. **Non-Extractable Keys**: In passkey mutual trust mode, the passkey master key and the ephemeral ECDH shared secret are kept as non-extractable `CryptoKey` objects - raw bytes never exposed to JavaScript, preventing exfiltration via XSS or memory inspection
+15. **Perfect Forward Secrecy (PFS)**: Passkey mode uses ephemeral session keys generated via Web Crypto's `generateKey()` - raw private key material is NEVER exposed to JavaScript. Compromising the passkey public ID or a single session's memory does not help decrypt past or future sessions. PFS is mandatory in passkey mode.
 
 ## File Structure
 

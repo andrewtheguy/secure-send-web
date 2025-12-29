@@ -61,7 +61,7 @@ export function SendTab() {
   const folderInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
 
-  // Parse and validate receiver public key (pure computation)
+  // Parse and validate receiver public ID (pure computation)
   const { receiverPublicKeyBytes, validationError } = useMemo(() => {
     const input = receiverPublicKeyInput.trim()
     if (!input) {
@@ -69,8 +69,8 @@ export function SendTab() {
     }
     try {
       const bytes = base64ToUint8Array(input)
-      if (bytes.length !== 65 || bytes[0] !== 0x04) {
-        return { receiverPublicKeyBytes: null, validationError: 'Invalid public key format (expected 65-byte P-256 key)' }
+      if (bytes.length !== 32) {
+        return { receiverPublicKeyBytes: null, validationError: 'Invalid public ID format (expected 32 bytes)' }
       }
       return { receiverPublicKeyBytes: bytes, validationError: null }
     } catch {
@@ -132,7 +132,7 @@ export function SendTab() {
 
   const canSendFiles = selectedFiles.length > 0 && !isFilesOverLimit && state.status === 'idle' && !isCompressing
   const canSendFolder = folderFiles && folderFiles.length > 0 && !isFolderOverLimit && state.status === 'idle' && !isCompressing
-  // When passkey mode is enabled, require valid receiver public key
+  // When passkey mode is enabled, require valid receiver public ID
   const passkeyRequirementsMet = !usePasskey || (receiverPublicKeyBytes !== null)
   const canSend = (mode === 'file' ? canSendFiles : canSendFolder) && passkeyRequirementsMet
 
@@ -169,7 +169,7 @@ export function SendTab() {
     setActiveMethod(methodToUse)
 
     // Only Nostr hook supports relayOnly and usePasskey options
-    // Pass receiver public key when in passkey mode
+    // Pass receiver public ID when in passkey mode
     const sendOptions = methodToUse === 'nostr'
       ? {
           relayOnly,
@@ -575,20 +575,20 @@ export function SendTab() {
                     </div>
                     <p className="text-xs text-muted-foreground">
                       {usePasskey
-                        ? 'Send to a specific recipient using their public key. No PIN needed.'
-                        : 'Use passkey-based encryption instead of PIN. Requires receiver\'s public key.'}
+                        ? 'Send to a specific recipient using their public ID. No PIN needed.'
+                        : 'Use passkey-based encryption instead of PIN. Requires receiver\'s public ID.'}
                     </p>
 
-                    {/* Receiver public key input - only shown when passkey enabled */}
+                    {/* Receiver public ID input - only shown when passkey enabled */}
                     {usePasskey && (
                       <div className="space-y-2 pt-2 border-t border-dashed">
                         <Label htmlFor="receiver-pubkey" className="text-sm font-medium">
-                          Receiver&apos;s Public Key
+                          Receiver&apos;s Public ID
                         </Label>
                         <div className="flex gap-2">
                           <Textarea
                             id="receiver-pubkey"
-                            placeholder="Paste receiver's public key (base64)..."
+                            placeholder="Paste receiver's public ID (base64)..."
                             value={receiverPublicKeyInput}
                             onChange={(e) => setReceiverPublicKeyInput(e.target.value)}
                             className="font-mono text-xs min-h-[60px] resize-none"
@@ -598,7 +598,7 @@ export function SendTab() {
                             size="sm"
                             onClick={() => setShowPublicKeyModal(true)}
                             className="flex-shrink-0"
-                            title="Enter public key"
+                            title="Enter public ID"
                           >
                             <Keyboard className="h-4 w-4" />
                           </Button>
@@ -614,7 +614,7 @@ export function SendTab() {
                           </div>
                         )}
                         <p className="text-xs text-muted-foreground">
-                          Get the receiver&apos;s public key from their{' '}
+                          Get the receiver&apos;s public ID from their{' '}
                           <Link to="/passkey" className="text-primary hover:underline">
                             Passkey page
                           </Link>
@@ -638,26 +638,26 @@ export function SendTab() {
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
               <Fingerprint className="h-3 w-3" />
               <span>
-                Passkey mode{receiverPublicKeyFingerprint ? ` → ${receiverPublicKeyFingerprint}` : ' (enter receiver key)'}
+                Passkey mode{receiverPublicKeyFingerprint ? ` → ${receiverPublicKeyFingerprint}` : ' (enter receiver ID)'}
               </span>
             </div>
           )}
 
-          {/* Public key entry modal */}
+          {/* Public ID entry modal */}
           {showPublicKeyModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
               <div className="bg-background rounded-lg p-4 max-w-md w-full mx-4 space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-medium">Enter Receiver&apos;s Public Key</h3>
+                  <h3 className="font-medium">Enter Receiver&apos;s Public ID</h3>
                   <Button variant="ghost" size="sm" onClick={() => setShowPublicKeyModal(false)}>
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Paste the receiver&apos;s public key from their Passkey page.
+                  Paste the receiver&apos;s public ID from their Passkey page.
                 </p>
                 <Textarea
-                  placeholder="Paste public key (base64)..."
+                  placeholder="Paste public ID (base64)..."
                   value={receiverPublicKeyInput}
                   onChange={(e) => setReceiverPublicKeyInput(e.target.value)}
                   className="font-mono text-xs min-h-[100px]"
@@ -742,7 +742,7 @@ export function SendTab() {
                   {formatFingerprint(senderFingerprint)}
                 </span>
               </div>
-              <p className="mt-1 ml-5">Receiver should verify this matches your public key.</p>
+              <p className="mt-1 ml-5">Receiver should verify this matches your public ID.</p>
             </div>
           )}
 

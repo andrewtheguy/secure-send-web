@@ -118,7 +118,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       let expectedSenderFingerprint: string | undefined
 
       if (isMutualTrustMode) {
-        // MUTUAL TRUST MODE: Use passkey ECDH with sender's public key
+        // MUTUAL TRUST MODE: Use passkey mutual trust with sender's public ID
         // NOW WITH PERFECT FORWARD SECRECY via ephemeral session keys
         const opts = arg as ReceiveOptions
         setState({ status: 'connecting', message: 'Authenticate with passkey...' })
@@ -129,7 +129,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           const {
             ephemeral,
             identitySharedSecretKey: sharedSecret,
-          } = await getPasskeySessionKeypair(opts.senderPublicKey!)
+          } = await getPasskeySessionKeypair()
 
           // Store identity info for display
           setOwnPublicKey(ephemeral.identityPublicKeyBytes)
@@ -145,11 +145,11 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           // Calculate expected sender fingerprint for verification
           expectedSenderFingerprint = await publicKeyToFingerprint(opts.senderPublicKey!)
 
-          // Store identity shared secret for key derivation and binding verification
-          // SECURITY: Raw shared secret bytes are never exposed to JavaScript
+          // Store passkey master key for key derivation and binding verification
+          // SECURITY: Raw secret bytes are never exposed to JavaScript
           sharedSecretKey = sharedSecret
 
-          // Hint is our own public key fingerprint (sender addresses events to us)
+          // Hint is our own public ID fingerprint (sender addresses events to us)
           hint = ephemeral.identityFingerprint
 
           // Store key derivation function in closure for event processing
@@ -250,15 +250,15 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             continue
           }
 
-          // === SECURITY VERIFICATION 2: Receiver public key commitment ===
+          // === SECURITY VERIFICATION 2: Receiver public ID commitment ===
           // Verify this event was addressed to us (prevents relay MITM)
           if (!ownPublicKeyBytes) {
-            console.error('Own public key not available for RPKC verification')
+            console.error('Own public ID not available for RPKC verification')
             continue
           }
           const rpkcValid = await verifyPublicKeyCommitment(ownPublicKeyBytes, parsed.receiverPkCommitment)
           if (!rpkcValid) {
-            console.log('Receiver public key commitment mismatch - event not addressed to us')
+            console.log('Receiver public ID commitment mismatch - event not addressed to us')
             continue
           }
 
@@ -358,7 +358,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         setState({
           status: 'error',
           message: isMutualTrustMode
-            ? 'Could not decrypt transfer. Wrong sender public key?'
+            ? 'Could not decrypt transfer. Wrong sender public ID?'
             : 'Could not decrypt transfer. Wrong PIN?',
         })
         return

@@ -307,9 +307,9 @@ export async function hashKeyConfirmation(confirmValue: Uint8Array): Promise<str
  * Returns 32 hex characters.
  */
 export async function computePublicKeyCommitment(publicKeyBytes: Uint8Array): Promise<string> {
-  if (publicKeyBytes.length !== 65) {
+  if (!(publicKeyBytes instanceof Uint8Array) || publicKeyBytes.length < 16) {
     throw new TypeError(
-      `Invalid public key length: expected 65 bytes, got ${publicKeyBytes.length}`
+      `Invalid public key bytes: expected at least 16 bytes, got ${publicKeyBytes instanceof Uint8Array ? publicKeyBytes.length : typeof publicKeyBytes}`
     )
   }
 

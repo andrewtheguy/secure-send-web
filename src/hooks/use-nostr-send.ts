@@ -153,13 +153,13 @@ export function useNostrSend(): UseNostrSendReturn {
         let identitySharedSecretKey: CryptoKey | undefined
 
         if (options?.usePasskey && !options.receiverPublicKey) {
-          setState({ status: 'error', message: 'Receiver public key required for passkey mode' })
+          setState({ status: 'error', message: 'Receiver public ID required for passkey mode' })
           sendingRef.current = false
           return
         }
 
         if (options?.usePasskey && options.receiverPublicKey) {
-          // MUTUAL TRUST MODE: Use passkey ECDH with receiver's public key
+          // MUTUAL TRUST MODE: Use passkey mutual trust with receiver's public ID
           // NOW WITH PERFECT FORWARD SECRECY via ephemeral session keys
           setState({ status: 'connecting', message: 'Authenticate with passkey...' })
 
@@ -169,7 +169,7 @@ export function useNostrSend(): UseNostrSendReturn {
             const {
               ephemeral,
               identitySharedSecretKey: sharedSecret,
-            } = await getPasskeySessionKeypair(options.receiverPublicKey)
+            } = await getPasskeySessionKeypair()
 
             // Store identity info for display
             setOwnPublicKey(ephemeral.identityPublicKeyBytes)
@@ -180,7 +180,7 @@ export function useNostrSend(): UseNostrSendReturn {
             senderEphemeral = ephemeral
             identitySharedSecretKey = sharedSecret
 
-            // Derive AES key from IDENTITY shared secret for initial payload encryption
+            // Derive AES key from passkey master key for initial payload encryption
             // NOTE: This is for the payload only. File data will use session key (PFS)
             key = await deriveAESKeyFromSecretKey(sharedSecret, salt)
 
@@ -192,7 +192,7 @@ export function useNostrSend(): UseNostrSendReturn {
             keyConfirmHash = await hashKeyConfirmation(confirmValue)
 
             // 2. Receiver Public Key Commitment: Prevents relay MITM attacks
-            // Sender commits to the receiver's identity public key
+            // Sender commits to the receiver's identity public ID
             receiverPkCommitment = await computePublicKeyCommitment(options.receiverPublicKey)
 
             // 3. Replay Nonce: Prevents replay attacks within TTL window
@@ -200,7 +200,7 @@ export function useNostrSend(): UseNostrSendReturn {
             const nonceBytes = crypto.getRandomValues(new Uint8Array(16))
             replayNonce = uint8ArrayToBase64(nonceBytes)
 
-            // Hint is receiver's public key fingerprint (for event filtering)
+            // Hint is receiver's public ID fingerprint (for event filtering)
             hint = await publicKeyToFingerprint(options.receiverPublicKey)
           } catch (err) {
             setState({
@@ -285,10 +285,10 @@ export function useNostrSend(): UseNostrSendReturn {
             encryptedPayload,
             salt,
             transferId,
-            hint, // receiver's public key fingerprint
-            senderFingerprint, // sender's public key fingerprint
+            hint, // receiver's public ID fingerprint
+            senderFingerprint, // sender's public ID fingerprint
             keyConfirmHash, // key confirmation hash (MITM detection)
-            receiverPkCommitment, // receiver public key commitment (relay MITM prevention)
+            receiverPkCommitment, // receiver public ID commitment (relay MITM prevention)
             replayNonce, // replay nonce (replay protection)
             senderEphemeral.ephemeralPublicKeyBytes, // PFS: sender's ephemeral public key
             senderEphemeral.sessionBinding // PFS: session binding proof
