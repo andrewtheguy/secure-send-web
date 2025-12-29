@@ -193,11 +193,17 @@ export function PasskeyPage() {
         throw new Error('Credential public key not found. Please create a new passkey.')
       }
 
+      // Need signer's public ID for the token
+      if (!publicIdBase64) {
+        throw new Error('Please authenticate with a passkey first to get your public ID')
+      }
+
       // Create signed contact token using WebAuthn ECDSA signature
       const token = await createContactToken(
         currentCredentialId,
         credentialPublicKey,
-        trimmed,
+        publicIdBase64, // signer's public ID (for fingerprint matching)
+        trimmed, // recipient's public ID
         contactComment.trim() || undefined
       )
 

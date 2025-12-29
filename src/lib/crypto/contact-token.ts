@@ -29,6 +29,8 @@ export interface ContactTokenPayload {
   sub: string
   /** Signer's credential public key (base64, 65 bytes uncompressed P-256) */
   cpk: string
+  /** Signer's passkey public ID (base64, 32 bytes) - for fingerprint matching */
+  spk: string
   /** Issued at timestamp (Unix seconds) */
   iat: number
   /** Authenticator data from WebAuthn response (base64) */
@@ -49,7 +51,9 @@ export interface VerifiedContactToken {
   recipientFingerprint: string
   /** Signer's WebAuthn credential public key (65 bytes P-256) */
   signerCredentialPublicKey: Uint8Array
-  /** Fingerprint of the signer's credential (who created the token) */
+  /** Signer's passkey public ID (32 bytes) */
+  signerPublicId: Uint8Array
+  /** Fingerprint of the signer's passkey public ID (matches handshake fingerprints) */
   signerFingerprint: string
   issuedAt: Date
   comment?: string
@@ -132,6 +136,7 @@ export function isContactTokenFormat(input: string): boolean {
     return (
       typeof p.sub === 'string' &&
       typeof p.cpk === 'string' &&
+      typeof p.spk === 'string' &&
       typeof p.iat === 'number' &&
       typeof p.authData === 'string' &&
       typeof p.clientDataJSON === 'string' &&
@@ -150,6 +155,7 @@ export function isContactTokenFormat(input: string): boolean {
  *
  * @param credentialId - Signer's credential ID (base64url)
  * @param credentialPublicKey - Signer's credential public key (65 bytes)
+ * @param signerPublicIdBase64 - Signer's passkey public ID (base64, for fingerprint matching)
  * @param recipientPublicIdBase64 - Recipient's public ID (base64 encoded)
  * @param comment - Optional comment to append (e.g., "Alice's work laptop")
  * @returns Contact token in SSH-like format: sswct-es256 <payload> [comment]
@@ -157,6 +163,7 @@ export function isContactTokenFormat(input: string): boolean {
 export async function createContactToken(
   credentialId: string,
   credentialPublicKey: Uint8Array,
+  signerPublicIdBase64: string,
   recipientPublicIdBase64: string,
   comment?: string
 ): Promise<string> {
@@ -164,6 +171,12 @@ export async function createContactToken(
   const recipientPublicId = base64ToUint8Array(recipientPublicIdBase64)
   if (recipientPublicId.length !== 32) {
     throw new Error('Invalid recipient public ID: expected 32 bytes')
+  }
+
+  // Decode and validate signer public ID
+  const signerPublicId = base64ToUint8Array(signerPublicIdBase64)
+  if (signerPublicId.length !== 32) {
+    throw new Error('Invalid signer public ID: expected 32 bytes')
   }
 
   // Validate credential public key
@@ -174,13 +187,14 @@ export async function createContactToken(
   const iat = Math.floor(Date.now() / 1000)
 
   // Create challenge that includes the data we want to sign
-  // challenge = SHA256(sub || cpk || iat)
-  const dataToSign = new Uint8Array(32 + 65 + 8)
+  // challenge = SHA256(sub || spk || cpk || iat)
+  const dataToSign = new Uint8Array(32 + 32 + 65 + 8)
   dataToSign.set(recipientPublicId, 0)
-  dataToSign.set(credentialPublicKey, 32)
+  dataToSign.set(signerPublicId, 32)
+  dataToSign.set(credentialPublicKey, 64)
   const iatBytes = new DataView(new ArrayBuffer(8))
   iatBytes.setBigUint64(0, BigInt(iat), false) // big-endian
-  dataToSign.set(new Uint8Array(iatBytes.buffer), 97)
+  dataToSign.set(new Uint8Array(iatBytes.buffer), 129)
 
   const challenge = new Uint8Array(await crypto.subtle.digest('SHA-256', dataToSign))
 
@@ -205,6 +219,7 @@ export async function createContactToken(
   const payload: ContactTokenPayload = {
     sub: recipientPublicIdBase64,
     cpk: uint8ArrayToBase64(credentialPublicKey),
+    spk: signerPublicIdBase64,
     iat,
     authData: uint8ArrayToBase64(new Uint8Array(response.authenticatorData)),
     clientDataJSON: uint8ArrayToBase64(new Uint8Array(response.clientDataJSON)),
@@ -260,6 +275,7 @@ export async function verifyContactToken(
   if (
     typeof payload.sub !== 'string' ||
     typeof payload.cpk !== 'string' ||
+    typeof payload.spk !== 'string' ||
     typeof payload.iat !== 'number' ||
     typeof payload.authData !== 'string' ||
     typeof payload.clientDataJSON !== 'string' ||
@@ -272,6 +288,11 @@ export async function verifyContactToken(
   const recipientPublicId = base64ToUint8Array(payload.sub)
   if (recipientPublicId.length !== 32) {
     throw new Error('Invalid recipient public ID: expected 32 bytes')
+  }
+
+  const signerPublicId = base64ToUint8Array(payload.spk)
+  if (signerPublicId.length !== 32) {
+    throw new Error('Invalid signer public ID: expected 32 bytes')
   }
 
   const signerCredentialPublicKey = base64ToUint8Array(payload.cpk)
@@ -302,12 +323,14 @@ export async function verifyContactToken(
   }
 
   // Verify challenge matches expected value
-  const dataToSign = new Uint8Array(32 + 65 + 8)
+  // challenge = SHA256(sub || spk || cpk || iat)
+  const dataToSign = new Uint8Array(32 + 32 + 65 + 8)
   dataToSign.set(recipientPublicId, 0)
-  dataToSign.set(signerCredentialPublicKey, 32)
+  dataToSign.set(signerPublicId, 32)
+  dataToSign.set(signerCredentialPublicKey, 64)
   const iatBytes = new DataView(new ArrayBuffer(8))
   iatBytes.setBigUint64(0, BigInt(payload.iat), false)
-  dataToSign.set(new Uint8Array(iatBytes.buffer), 97)
+  dataToSign.set(new Uint8Array(iatBytes.buffer), 129)
 
   const expectedChallenge = new Uint8Array(await crypto.subtle.digest('SHA-256', dataToSign))
   const actualChallenge = base64urlDecode(clientData.challenge)
@@ -347,12 +370,13 @@ export async function verifyContactToken(
   }
 
   const recipientFingerprint = await publicKeyToFingerprint(recipientPublicId)
-  const signerFingerprint = await publicKeyToFingerprint(signerCredentialPublicKey)
+  const signerFingerprint = await publicKeyToFingerprint(signerPublicId)
 
   return {
     recipientPublicId,
     recipientFingerprint,
     signerCredentialPublicKey,
+    signerPublicId,
     signerFingerprint,
     issuedAt: new Date(payload.iat * 1000),
     comment,
