@@ -9,22 +9,12 @@
   <!-- Background with rounded corners -->
   <rect x="0" y="0" width="180" height="180" rx="36" fill="url(#bgGradient)"/>
 
-  <!-- Folder tab -->
-  <path d="M30 55 L30 50 Q30 45 35 45 L75 45 L85 58 L145 58 Q150 58 150 63"
-        fill="#64748b" opacity="0.7"/>
+  <!-- Folder -->
+  <path fill="#6B7280" d="M30 45C22.268 45 16 51.268 16 59V141C16 148.732 22.268 155 30 155H150C157.732 155 164 148.732 164 141V74C164 66.268 157.732 60 150 60H98.485C97.258 60 96.082 59.513 95.214 58.645L84.786 48.214C81.973 45.391 78.169 43.8 74.172 43.8L30 45Z"/>
 
-  <!-- Folder body -->
-  <path d="M30 60 L30 135 Q30 140 35 140 L145 140 Q150 140 150 135 L150 63 Q150 63 145 58 L85 58 L75 45 L35 45 Q30 45 30 50 Z"
-        fill="#64748b"/>
+  <!-- Lock shackle (centered at x=90) -->
+  <path fill="none" stroke="#374151" stroke-width="8" stroke-linecap="round" d="M70 108V98C70 86.954 78.954 78 90 78C101.046 78 110 86.954 110 98V108"/>
 
-  <!-- Lock shackle (closed/locked) -->
-  <path d="M77 105 L77 92 Q77 79 90 79 Q103 79 103 92 L103 105"
-        fill="none" stroke="#94a3b8" stroke-width="6" stroke-linecap="round"/>
-
-  <!-- Lock body -->
-  <rect x="72" y="105" width="36" height="27" rx="3" fill="#94a3b8"/>
-
-  <!-- Keyhole -->
-  <circle cx="90" cy="114" r="3.5" fill="#1e293b"/>
-  <rect x="87.5" y="114" width="5" height="9" fill="#1e293b"/>
+  <!-- Lock body (centered at x=90, width=50) -->
+  <rect x="65" y="108" width="50" height="32" rx="5" fill="#374151"/>
 </svg>
