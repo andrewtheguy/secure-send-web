@@ -278,9 +278,13 @@ export function parseMutualTrustPayloadEvent(event: Event): {
 
 /**
  * Create Mutual Trust exchange event (kind 24243)
- * LEGACY: Used for self-transfer only where sender and receiver share the same passkey.
+ * OPTIMIZED for self-transfer where sender and receiver share the same passkey.
  *
- * For cross-user passkey transfers, use the handshake flow instead:
+ * This is a single round-trip optimization: since both parties have the same passkey,
+ * they derive the same PRF output and can encrypt/decrypt immediately without
+ * needing an ephemeral key exchange first.
+ *
+ * For cross-user passkey transfers (different passkeys), use the handshake flow:
  * createMutualTrustHandshakeEvent -> ACK with epk -> createMutualTrustPayloadEvent
  *
  * @param secretKey - Nostr ephemeral secret key
