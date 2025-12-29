@@ -236,6 +236,14 @@ sequenceDiagram
   2. Before transfer starts (`use-nostr-send.ts`, `use-nostr-receive.ts`) - verifies own party membership
   3. During handshake - sender's token verified by receiver, receiver echoes token in ACK, sender verifies counterparty matches
 
+**Role in Encryption:**
+- The mutual token is **NOT used for encryption key derivation** - encryption uses ephemeral ECDH session keys (PFS)
+- However, the token is **required for the protocol to function**:
+  - Provides the counterparty's public ID for Nostr event targeting (`rpkc` commitment)
+  - Handshake fails if token is invalid or caller is not a party
+  - Without a valid token, you cannot establish a connection with the counterparty
+- This is authentication/authorization, not encryption - proving *who* you're communicating with, not *how* the data is encrypted
+
 #### Key Derivation Flow
 
 ```mermaid
