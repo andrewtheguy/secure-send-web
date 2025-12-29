@@ -303,6 +303,16 @@ export function PasskeyPage() {
       const cpk = getCredentialPublicKey(result.credentialId)
       if (cpk) {
         setCredentialPublicKeyBase64(uint8ArrayToBase64(cpk))
+      } else {
+        // Credential public key not found - passkey was created elsewhere (synced via iCloud/Google)
+        // User needs to create a new passkey on this device to get the public key
+        setCredentialPublicKeyBase64(null)
+        setError(
+          'This passkey was created on another device. Its credential key is not available locally. ' +
+            'Please create a new passkey on this device to generate contact tokens.'
+        )
+        setPageState('idle')
+        return
       }
 
       setSuccess('Authenticated successfully!')
