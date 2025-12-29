@@ -78,8 +78,8 @@ export function SendTab() {
     verifyContactToken(input).then(verified => {
       setVerifiedToken(verified)
       setReceiverPublicKeyError(null)
-      // Show signer fingerprint (now verified, not just parsed)
-      setReceiverPublicKeyFingerprint(formatFingerprint(verified.signerFingerprint))
+      // Show the receiver's fingerprint (the contact whose ID was bound in the token)
+      setReceiverPublicKeyFingerprint(formatFingerprint(verified.recipientFingerprint))
     }).catch((err) => {
       setVerifiedToken(null)
       setReceiverPublicKeyError(err instanceof Error ? err.message : 'Invalid or tampered token')

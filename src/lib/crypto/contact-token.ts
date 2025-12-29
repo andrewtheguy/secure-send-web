@@ -43,8 +43,13 @@ export interface ContactTokenPayload {
  * Result of verifying a token
  */
 export interface VerifiedContactToken {
+  /** The contact's public ID that was bound (32 bytes) */
   recipientPublicId: Uint8Array
+  /** Fingerprint of the contact's public ID (what you should verify) */
+  recipientFingerprint: string
+  /** Signer's WebAuthn credential public key (65 bytes P-256) */
   signerCredentialPublicKey: Uint8Array
+  /** Fingerprint of the signer's credential (who created the token) */
   signerFingerprint: string
   issuedAt: Date
   comment?: string
@@ -341,10 +346,12 @@ export async function verifyContactToken(
     throw new Error('Signature verification failed')
   }
 
+  const recipientFingerprint = await publicKeyToFingerprint(recipientPublicId)
   const signerFingerprint = await publicKeyToFingerprint(signerCredentialPublicKey)
 
   return {
     recipientPublicId,
+    recipientFingerprint,
     signerCredentialPublicKey,
     signerFingerprint,
     issuedAt: new Date(payload.iat * 1000),

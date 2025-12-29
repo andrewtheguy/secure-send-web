@@ -15,6 +15,8 @@ import {
   generateEphemeralKeys,
   parsePinExchangeEvent,
   parseMutualTrustEvent,
+  parseMutualTrustHandshakeEvent,
+  parseMutualTrustPayloadEvent,
   createAckEvent,
   parseChunkNotifyEvent,
   DEFAULT_RELAYS,
@@ -237,6 +239,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // PFS: Store sender's ephemeral public key and salt for session key derivation
       let senderEphemeralPub: Uint8Array | undefined
       let eventSalt: Uint8Array | undefined
+      // Cross-user passkey: flag for handshake flow
+      let isHandshakeFlow = false
+
+      // Determine if this is self-transfer or cross-user passkey mode
+      const isSelfTransfer = 'selfTransfer' in arg && (arg as ReceiveOptions).selfTransfer
+      const isCrossUserPasskey = isMutualTrustMode && !isSelfTransfer
 
       const sortedEvents = [...events].sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
 
@@ -253,8 +261,55 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         }
         sawNonExpiredCandidate = true
 
-        if (isMutualTrustMode) {
-          // Mutual trust mode: parse and verify sender fingerprint
+        if (isCrossUserPasskey) {
+          // Cross-user passkey mode: look for handshake events
+          const parsed = parseMutualTrustHandshakeEvent(event)
+          if (!parsed) continue
+
+          // === SECURITY VERIFICATION 1: Sender fingerprint (constant-time) ===
+          if (!constantTimeEqual(parsed.senderFingerprint, expectedSenderFingerprint!)) {
+            console.log('Sender fingerprint mismatch')
+            continue
+          }
+
+          // === SECURITY VERIFICATION 2: Receiver public ID commitment ===
+          if (!ownPublicKeyBytes) {
+            console.error('Own public ID not available for RPKC verification')
+            continue
+          }
+          const rpkcValid = await verifyPublicKeyCommitment(ownPublicKeyBytes, parsed.receiverPkCommitment)
+          if (!rpkcValid) {
+            console.log('Receiver public ID commitment mismatch - event not addressed to us')
+            continue
+          }
+
+          // === PFS VERIFICATION: Verify sender's ephemeral key binding ===
+          if (!identitySharedSecretKey) {
+            console.error('Identity shared secret not available for ephemeral key verification')
+            continue
+          }
+
+          const bindingValid = await verifySessionBinding(
+            identitySharedSecretKey,
+            parsed.senderEphemeralPub,
+            parsed.senderSessionBinding
+          )
+          if (!bindingValid) {
+            console.error('Sender ephemeral key binding invalid - potential MITM')
+            continue
+          }
+
+          // Handshake verified - store info for session key derivation
+          senderEphemeralPub = parsed.senderEphemeralPub
+          transferId = parsed.transferId
+          senderPubkey = event.pubkey
+          selectedCreatedAtSec = event.created_at || null
+          eventNonce = parsed.nonce
+          eventSalt = parsed.salt
+          isHandshakeFlow = true
+          break
+        } else if (isMutualTrustMode && isSelfTransfer) {
+          // Self-transfer mode: parse mutual trust event (has payload)
           const parsed = parseMutualTrustEvent(event)
           if (!parsed) continue
 
@@ -364,7 +419,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         }
       }
 
-      if (!payload || !transferId || !senderPubkey || !key) {
+      // For handshake flow, we don't have payload yet (it comes after ACK)
+      // For other modes, we need payload from the initial event
+      if (!isHandshakeFlow && (!payload || !key)) {
         if (!sawNonExpiredCandidate && sawExpiredCandidate) {
           setState({ status: 'error', message: 'Transfer expired. Ask sender to start a new transfer.' })
           return
@@ -378,26 +435,22 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         return
       }
 
-      if (!selectedCreatedAtSec || Date.now() - selectedCreatedAtSec * 1000 > TRANSFER_EXPIRATION_MS) {
-        setState({ status: 'error', message: 'Transfer expired. Ask sender to generate a new PIN.' })
-        return
-      }
-
-      // Validate payload
-      if (payload.fileSize == null || !Number.isFinite(payload.fileSize) || payload.fileSize < 0) {
-        setState({ status: 'error', message: 'Invalid file size in transfer' })
-        return
-      }
-
-      const resolvedFileName = payload.fileName || 'unknown'
-      const resolvedFileSize = payload.fileSize
-      const resolvedMimeType = payload.mimeType || 'application/octet-stream'
-
-      if (resolvedFileSize > MAX_MESSAGE_SIZE) {
+      if (!transferId || !senderPubkey) {
+        if (!sawNonExpiredCandidate && sawExpiredCandidate) {
+          setState({ status: 'error', message: 'Transfer expired. Ask sender to start a new transfer.' })
+          return
+        }
         setState({
           status: 'error',
-          message: `Transfer rejected: Size (${Math.round(resolvedFileSize / 1024 / 1024)}MB) exceeds limit (${MAX_MESSAGE_SIZE / 1024 / 1024}MB)`,
+          message: isMutualTrustMode
+            ? 'No transfer found from this sender'
+            : 'Could not decrypt transfer. Wrong PIN?',
         })
+        return
+      }
+
+      if (!selectedCreatedAtSec || Date.now() - selectedCreatedAtSec * 1000 > TRANSFER_EXPIRATION_MS) {
+        setState({ status: 'error', message: 'Transfer expired. Ask sender to generate a new PIN.' })
         return
       }
 
@@ -435,6 +488,117 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         receiverEphemeral?.sessionBinding
       )
       await client.publish(readyAck)
+
+      if (cancelledRef.current) return
+
+      // For handshake flow, wait for payload event and decrypt it
+      if (isHandshakeFlow) {
+        setState({ status: 'receiving', message: 'Waiting for encrypted metadata...' })
+
+        // Wait for payload event from sender
+        const payloadEvent = await new Promise<Event | null>((resolve) => {
+          const timeout = setTimeout(() => {
+            client.unsubscribe(subId)
+            resolve(null)
+          }, 60000) // 1 minute timeout for payload
+
+          const subId = client.subscribe(
+            [
+              {
+                kinds: [EVENT_KIND_DATA_TRANSFER],
+                '#t': [transferId!],
+                authors: [senderPubkey!],
+              },
+            ],
+            (event) => {
+              const parsed = parseMutualTrustPayloadEvent(event)
+              if (parsed && parsed.transferId === transferId) {
+                clearTimeout(timeout)
+                client.unsubscribe(subId)
+                resolve(event)
+              }
+            }
+          )
+
+          // Also check existing events
+          ;(async () => {
+            try {
+              const existingEvents = await client.query([
+                {
+                  kinds: [EVENT_KIND_DATA_TRANSFER],
+                  '#t': [transferId!],
+                  authors: [senderPubkey!],
+                  limit: 10,
+                },
+              ])
+              for (const event of existingEvents) {
+                const parsed = parseMutualTrustPayloadEvent(event)
+                if (parsed && parsed.transferId === transferId) {
+                  clearTimeout(timeout)
+                  client.unsubscribe(subId)
+                  resolve(event)
+                  return
+                }
+              }
+            } catch (err) {
+              console.error('Failed to query existing payload events:', err)
+            }
+          })()
+        })
+
+        if (!payloadEvent) {
+          setState({ status: 'error', message: 'Timeout waiting for encrypted payload from sender' })
+          return
+        }
+
+        if (cancelledRef.current) return
+
+        // Parse and decrypt payload
+        const parsedPayload = parseMutualTrustPayloadEvent(payloadEvent)
+        if (!parsedPayload) {
+          setState({ status: 'error', message: 'Invalid payload event from sender' })
+          return
+        }
+
+        if (!key) {
+          setState({ status: 'error', message: 'Session key not available for decryption' })
+          return
+        }
+
+        try {
+          const decrypted = await decrypt(key, parsedPayload.encryptedPayload)
+          const decoder = new TextDecoder()
+          const payloadStr = decoder.decode(decrypted)
+          payload = JSON.parse(payloadStr) as PinExchangePayload
+        } catch (err) {
+          console.error('Failed to decrypt payload:', err)
+          setState({ status: 'error', message: 'Failed to decrypt transfer metadata' })
+          return
+        }
+      }
+
+      // Validate payload (now available for all flows)
+      if (!payload) {
+        setState({ status: 'error', message: 'No transfer metadata available' })
+        return
+      }
+
+      if (payload.fileSize == null || !Number.isFinite(payload.fileSize) || payload.fileSize < 0) {
+        setState({ status: 'error', message: 'Invalid file size in transfer' })
+        return
+      }
+
+      const resolvedFileName = payload.fileName || 'unknown'
+      const resolvedFileSize = payload.fileSize
+      const resolvedMimeType = payload.mimeType || 'application/octet-stream'
+
+      if (resolvedFileSize > MAX_MESSAGE_SIZE) {
+        setState({
+          status: 'error',
+          message: `Transfer rejected: Size (${Math.round(resolvedFileSize / 1024 / 1024)}MB) exceeds limit (${MAX_MESSAGE_SIZE / 1024 / 1024}MB)`,
+        })
+        return
+      }
 
       if (cancelledRef.current) return
 
@@ -724,6 +888,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         webRTCSuccess = true
       } else {
         setState((s) => ({ ...s, message: 'Decrypting...' }))
+        if (!key) {
+          throw new Error('Session key not available for decryption')
+        }
         contentData = await decrypt(key, transferResult.data)
       }
 

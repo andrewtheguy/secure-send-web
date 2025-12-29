@@ -18,6 +18,8 @@ import {
   generateEphemeralKeys,
   createPinExchangeEvent,
   createMutualTrustEvent,
+  createMutualTrustHandshakeEvent,
+  createMutualTrustPayloadEvent,
   parseAckEvent,
   createSignalingEvent,
   parseSignalingEvent,
@@ -291,8 +293,25 @@ export function useNostrSend(): UseNostrSendReturn {
 
         // Choose event type based on mode
         let exchangeEvent
-        if (options?.usePasskey && senderFingerprint && keyConfirmHash && receiverPkCommitment && replayNonce && senderEphemeral) {
-          // Mutual trust mode: include sender's fingerprint, security tags, and ephemeral key for PFS
+        const isCrossUserPasskey = options?.usePasskey && !options.selfTransfer
+        if (isCrossUserPasskey && senderFingerprint && receiverPkCommitment && replayNonce && senderEphemeral) {
+          // Cross-user passkey mode: use handshake flow
+          // Phase 1: Send handshake with ephemeral public key (no payload yet)
+          // Receiver will respond with their ephemeral key, then we derive session key
+          exchangeEvent = createMutualTrustHandshakeEvent(
+            secretKey,
+            salt,
+            transferId,
+            hint, // receiver's public ID fingerprint
+            senderFingerprint, // sender's public ID fingerprint
+            receiverPkCommitment, // receiver public ID commitment (relay MITM prevention)
+            replayNonce, // replay nonce (replay protection)
+            senderEphemeral.ephemeralPublicKeyBytes, // sender's ephemeral public key for ECDH
+            senderEphemeral.sessionBinding // session binding proof
+          )
+        } else if (options?.usePasskey && options.selfTransfer && senderFingerprint && keyConfirmHash && receiverPkCommitment && replayNonce && senderEphemeral) {
+          // Self-transfer (same passkey): use single mutual trust event
+          // Both parties have the same passkey, so they derive the same key
           exchangeEvent = createMutualTrustEvent(
             secretKey,
             encryptedPayload,
@@ -408,6 +427,24 @@ export function useNostrSend(): UseNostrSendReturn {
             receiverEphemeralPub,
             salt
           )
+
+          // Cross-user passkey mode: send encrypted payload now that we have session key
+          // (For self-transfer, payload was already included in the initial mutual trust event)
+          if (isCrossUserPasskey) {
+            setState({ status: 'connecting', message: 'Sending encrypted metadata...' })
+
+            // Encrypt payload with session key
+            const sessionEncryptedPayload = await encrypt(key, payloadBytes)
+
+            // Publish payload event addressed to receiver
+            const payloadEvent = createMutualTrustPayloadEvent(
+              secretKey,
+              receiverPubkey,
+              transferId,
+              sessionEncryptedPayload
+            )
+            await client.publish(payloadEvent)
+          }
         }
 
         // Enforce TTL: reject if session has expired
