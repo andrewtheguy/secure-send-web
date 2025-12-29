@@ -6,9 +6,9 @@
  * from both parties, proving mutual consent to communicate.
  *
  * Token flow:
- * 1. Party A creates pending token with their signature (createMutualTokenInit)
- * 2. Party B verifies and adds their countersignature (countersignMutualToken)
- * 3. Both parties use the same completed token for send/receive
+ * 1. Party A creates a token request with their signature (createMutualTokenInit)
+ * 2. Party B verifies and signs the request (countersignMutualToken)
+ * 3. Both parties use the same mutual token for send/receive
  *
  * Token format: Raw JSON object with dual signatures
  *
@@ -22,9 +22,9 @@ import { publicKeyToFingerprint, constantTimeEqualBytes } from './ecdh'
 const MAX_COMMENT_LENGTH = 256
 
 /**
- * Pending mutual token - after initiator signs, before countersigning
+ * Token request - created by initiator, waiting for countersigner
  */
-export interface PendingMutualToken {
+export interface PendingTokenRequest {
   /** Party A's public ID (base64, 32 bytes) - lexicographically smaller */
   a_id: string
   /** Party A's credential public key (base64, 65 bytes P-256) */
@@ -48,7 +48,7 @@ export interface PendingMutualToken {
 /**
  * Complete mutual token - both parties have signed
  */
-export interface MutualContactTokenPayload extends PendingMutualToken {
+export interface MutualContactTokenPayload extends PendingTokenRequest {
   /** Countersigner's WebAuthn authenticator data (base64) */
   counter_authData: string
   /** Countersigner's WebAuthn client data JSON (base64) */
@@ -162,10 +162,10 @@ async function computeMutualChallenge(
 }
 
 /**
- * Check if a string looks like a pending mutual token (single signature).
+ * Check if a string looks like a token request (single signature).
  * Does NOT verify the signature - just checks structure.
  */
-export function isPendingMutualToken(input: string): boolean {
+export function isTokenRequest(input: string): boolean {
   try {
     const payload = JSON.parse(input.trim()) as unknown
     if (typeof payload !== 'object' || payload === null) return false
@@ -231,7 +231,7 @@ export function isMutualTokenFormat(input: string): boolean {
  * @param counterpartyPublicIdBase64 - Counterparty's public ID (base64)
  * @param counterpartyCpkBase64 - Counterparty's credential public key (base64)
  * @param comment - Optional comment (max 256 chars)
- * @returns Pending token (JSON string) to send to counterparty
+ * @returns Token request (JSON string) to send to counterparty for signing
  */
 export async function createMutualTokenInit(
   credentialId: string,
@@ -308,8 +308,8 @@ export async function createMutualTokenInit(
   const credential = assertion as PublicKeyCredential
   const response = credential.response as AuthenticatorAssertionResponse
 
-  // Build pending token
-  const payload: PendingMutualToken = {
+  // Build token request
+  const payload: PendingTokenRequest = {
     a_id: uint8ArrayToBase64(aId),
     a_cpk: uint8ArrayToBase64(aCpk),
     b_id: uint8ArrayToBase64(bId),
@@ -332,51 +332,51 @@ export async function createMutualTokenInit(
 }
 
 /**
- * Countersign a pending mutual token to complete it.
+ * Sign a token request to create the final mutual token.
  *
- * The countersigner verifies the initiator's signature and adds their own.
- * The resulting token can be used by both parties.
+ * The signer verifies the initiator's signature and adds their own.
+ * The resulting mutual token can be used by both parties.
  *
- * @param pendingToken - The pending token JSON from initiator
- * @param credentialId - Countersigner's WebAuthn credential ID (base64url)
- * @param credentialPublicKey - Countersigner's credential public key (65 bytes)
- * @param signerPublicIdBase64 - Countersigner's passkey public ID (base64)
+ * @param tokenRequest - The token request JSON from initiator
+ * @param credentialId - Signer's WebAuthn credential ID (base64url)
+ * @param credentialPublicKey - Signer's credential public key (65 bytes)
+ * @param signerPublicIdBase64 - Signer's passkey public ID (base64)
  * @returns Completed mutual token (JSON string)
  */
 export async function countersignMutualToken(
-  pendingToken: string,
+  tokenRequest: string,
   credentialId: string,
   credentialPublicKey: Uint8Array,
   signerPublicIdBase64: string
 ): Promise<string> {
-  // Parse pending token
-  let pending: PendingMutualToken
+  // Parse token request
+  let request: PendingTokenRequest
   try {
-    pending = JSON.parse(pendingToken.trim()) as PendingMutualToken
+    request = JSON.parse(tokenRequest.trim()) as PendingTokenRequest
   } catch {
-    throw new Error('Invalid pending token: failed to parse JSON')
+    throw new Error('Invalid token request: failed to parse JSON')
   }
 
   // Validate required fields
   if (
-    typeof pending.a_id !== 'string' ||
-    typeof pending.a_cpk !== 'string' ||
-    typeof pending.b_id !== 'string' ||
-    typeof pending.b_cpk !== 'string' ||
-    typeof pending.iat !== 'number' ||
-    !Number.isFinite(pending.iat) ||
-    typeof pending.init_authData !== 'string' ||
-    typeof pending.init_clientDataJSON !== 'string' ||
-    typeof pending.init_sig !== 'string'
+    typeof request.a_id !== 'string' ||
+    typeof request.a_cpk !== 'string' ||
+    typeof request.b_id !== 'string' ||
+    typeof request.b_cpk !== 'string' ||
+    typeof request.iat !== 'number' ||
+    !Number.isFinite(request.iat) ||
+    typeof request.init_authData !== 'string' ||
+    typeof request.init_clientDataJSON !== 'string' ||
+    typeof request.init_sig !== 'string'
   ) {
-    throw new Error('Invalid pending token: missing required fields')
+    throw new Error('Invalid token request: missing required fields')
   }
 
   // Decode fields
-  const aId = base64ToUint8Array(pending.a_id)
-  const aCpk = base64ToUint8Array(pending.a_cpk)
-  const bId = base64ToUint8Array(pending.b_id)
-  const bCpk = base64ToUint8Array(pending.b_cpk)
+  const aId = base64ToUint8Array(request.a_id)
+  const aCpk = base64ToUint8Array(request.a_cpk)
+  const bId = base64ToUint8Array(request.b_id)
+  const bCpk = base64ToUint8Array(request.b_cpk)
 
   if (aId.length !== 32) throw new Error('Invalid a_id: expected 32 bytes')
   if (bId.length !== 32) throw new Error('Invalid b_id: expected 32 bytes')
@@ -417,12 +417,12 @@ export async function countersignMutualToken(
   const initiatorCpk = isPartyA ? bCpk : aCpk
 
   // Verify initiator's signature first
-  const challenge = await computeMutualChallenge(aId, aCpk, bId, bCpk, pending.iat)
+  const challenge = await computeMutualChallenge(aId, aCpk, bId, bCpk, request.iat)
   await verifyWebAuthnSignature(
     initiatorCpk,
-    base64ToUint8Array(pending.init_authData),
-    base64ToUint8Array(pending.init_clientDataJSON),
-    base64ToUint8Array(pending.init_sig),
+    base64ToUint8Array(request.init_authData),
+    base64ToUint8Array(request.init_clientDataJSON),
+    base64ToUint8Array(request.init_sig),
     challenge
   )
 
@@ -445,9 +445,9 @@ export async function countersignMutualToken(
 
   // Build complete token with comment at the end for readability
   // Destructure to exclude comment, then add it back at the end
-  const { comment, ...pendingWithoutComment } = pending
+  const { comment, ...requestWithoutComment } = request
   const complete: MutualContactTokenPayload = {
-    ...pendingWithoutComment,
+    ...requestWithoutComment,
     counter_authData: uint8ArrayToBase64(new Uint8Array(response.authenticatorData)),
     counter_clientDataJSON: uint8ArrayToBase64(new Uint8Array(response.clientDataJSON)),
     counter_sig: uint8ArrayToBase64(new Uint8Array(response.signature)),
