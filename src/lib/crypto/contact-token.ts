@@ -5,11 +5,8 @@
  * Tokens bind a recipient's public ID to the signer's passkey using WebAuthn
  * ECDSA (ES256) signatures, ensuring the contact information hasn't been tampered with.
  *
- * Token format (SSH public key style):
- *   sswct-es256 <base64-payload> [optional comment]
- *
- * Example:
- *   sswct-es256 eyJzdWIiOi... Alice's work laptop
+ * Token format: Raw JSON object
+ *   {"sub":"...","cpk":"...","spk":"...","iat":...,"authData":"...","clientDataJSON":"...","sig":"...","comment":"..."}
  *
  * SECURITY: WebAuthn ensures the private key never leaves the authenticator.
  * Verification can be done without authentication using the stored credential public key.
@@ -17,11 +14,8 @@
 
 import { publicKeyToFingerprint, constantTimeEqualBytes } from './ecdh'
 
-/** Token type identifier for SSH-like format */
-const TOKEN_TYPE = 'sswct-es256'
-
 /**
- * Token payload structure (encoded as JSON, then base64)
+ * Token payload structure (raw JSON)
  */
 export interface ContactTokenPayload {
   /** Recipient's public ID (base64, 32 bytes decoded) */
@@ -38,6 +32,8 @@ export interface ContactTokenPayload {
   clientDataJSON: string
   /** ECDSA signature from WebAuthn response (base64, DER encoded) */
   sig: string
+  /** Optional comment (e.g., "Alice's work laptop") */
+  comment?: string
 }
 
 /**
@@ -56,31 +52,6 @@ export interface VerifiedContactToken {
   signerFingerprint: string
   issuedAt: Date
   comment?: string
-}
-
-/**
- * Parse SSH-like token format into parts.
- * Format: sswct-es256 <base64-payload> [comment]
- */
-function parseTokenFormat(input: string): { payload: string; comment?: string } | null {
-  const trimmed = input.trim()
-  if (!trimmed.startsWith(TOKEN_TYPE + ' ')) {
-    return null
-  }
-
-  // Split into parts: type, payload, and optional comment
-  const afterType = trimmed.slice(TOKEN_TYPE.length + 1)
-  const spaceIndex = afterType.indexOf(' ')
-
-  if (spaceIndex === -1) {
-    // No comment
-    return { payload: afterType }
-  }
-
-  return {
-    payload: afterType.slice(0, spaceIndex),
-    comment: afterType.slice(spaceIndex + 1),
-  }
 }
 
 // Helper: base64 encode
@@ -117,16 +88,11 @@ function base64urlDecode(str: string): Uint8Array {
  * Check if a string looks like a valid contact token format.
  * Does NOT verify the signature - just checks structure.
  *
- * Format: sswct-es256 <base64-payload> [optional comment]
+ * Format: Raw JSON object with required fields
  */
 export function isContactTokenFormat(input: string): boolean {
-  const parsed = parseTokenFormat(input)
-  if (!parsed) return false
-
   try {
-    // Payload is base64-encoded JSON
-    const json = atob(parsed.payload)
-    const payload = JSON.parse(json) as unknown
+    const payload = JSON.parse(input.trim()) as unknown
 
     // Check required fields exist
     if (typeof payload !== 'object' || payload === null) return false
@@ -140,6 +106,7 @@ export function isContactTokenFormat(input: string): boolean {
       typeof p.authData === 'string' &&
       typeof p.clientDataJSON === 'string' &&
       typeof p.sig === 'string'
+      // comment is optional
     )
   } catch {
     return false
@@ -156,8 +123,8 @@ export function isContactTokenFormat(input: string): boolean {
  * @param credentialPublicKey - Signer's credential public key (65 bytes)
  * @param signerPublicIdBase64 - Signer's passkey public ID (base64, for fingerprint matching)
  * @param recipientPublicIdBase64 - Recipient's public ID (base64 encoded)
- * @param comment - Optional comment to append (e.g., "Alice's work laptop")
- * @returns Contact token in SSH-like format: sswct-es256 <payload> [comment]
+ * @param comment - Optional comment to include (e.g., "Alice's work laptop")
+ * @returns Contact token as raw JSON string
  */
 export async function createContactToken(
   credentialId: string,
@@ -214,7 +181,7 @@ export async function createContactToken(
   const credential = assertion as PublicKeyCredential
   const response = credential.response as AuthenticatorAssertionResponse
 
-  // Create payload
+  // Create payload with optional comment
   const payload: ContactTokenPayload = {
     sub: recipientPublicIdBase64,
     cpk: uint8ArrayToBase64(credentialPublicKey),
@@ -225,15 +192,11 @@ export async function createContactToken(
     sig: uint8ArrayToBase64(new Uint8Array(response.signature)),
   }
 
-  // Encode as base64 JSON
-  const json = JSON.stringify(payload)
-  const base64Payload = btoa(json)
-
-  // Return in SSH-like format: sswct-es256 <payload> [comment]
-  if (comment && comment.trim()) {
-    return `${TOKEN_TYPE} ${base64Payload} ${comment.trim()}`
+  if (comment?.trim()) {
+    payload.comment = comment.trim()
   }
-  return `${TOKEN_TYPE} ${base64Payload}`
+
+  return JSON.stringify(payload)
 }
 
 /**
@@ -242,7 +205,7 @@ export async function createContactToken(
  * This does NOT require the signer to authenticate - verification uses
  * the credential public key stored in the token.
  *
- * Token format: sswct-es256 <base64-payload> [optional comment]
+ * Token format: Raw JSON object
  *
  * @param token - The contact token string to verify
  * @param trustedCredentialPublicKey - Optional: if provided, token must be signed by this key
@@ -253,21 +216,12 @@ export async function verifyContactToken(
   token: string,
   trustedCredentialPublicKey?: Uint8Array
 ): Promise<VerifiedContactToken> {
-  // Parse SSH-like format
-  const parsed = parseTokenFormat(token)
-  if (!parsed) {
-    throw new Error('Invalid contact token format: expected "sswct-es256 <payload> [comment]"')
-  }
-
-  const { payload: base64Payload, comment } = parsed
-
-  // Parse the JSON payload
+  // Parse raw JSON
   let payload: ContactTokenPayload
   try {
-    const json = atob(base64Payload)
-    payload = JSON.parse(json) as ContactTokenPayload
+    payload = JSON.parse(token.trim()) as ContactTokenPayload
   } catch {
-    throw new Error('Invalid contact token format: failed to parse payload')
+    throw new Error('Invalid contact token format: failed to parse JSON')
   }
 
   // Validate required fields
@@ -383,7 +337,7 @@ export async function verifyContactToken(
     signerPublicId,
     signerFingerprint,
     issuedAt: new Date(payload.iat * 1000),
-    comment,
+    comment: payload.comment,
   }
 }
 

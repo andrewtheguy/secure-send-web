@@ -4,11 +4,11 @@
  *
  * Usage: node scripts/verify-contact-token.mjs <token>
  *
- * Token format (SSH-like):
- *   sswct-es256 <base64-payload> [optional comment]
+ * Token format: Raw JSON object
+ *   {"sub":"...","cpk":"...","spk":"...","iat":...,"authData":"...","clientDataJSON":"...","sig":"...","comment":"..."}
  *
  * Example:
- *   node scripts/verify-contact-token.mjs "sswct-es256 eyJzdWIi... Alice's work laptop"
+ *   echo '{"sub":"...","cpk":"..."}' | node scripts/verify-contact-token.mjs
  *
  * Verifies the WebAuthn ECDSA signature without needing a browser.
  */
@@ -16,27 +16,6 @@
 import { webcrypto, timingSafeEqual } from 'crypto'
 
 const crypto = webcrypto
-const TOKEN_TYPE = 'sswct-es256'
-
-// Parse SSH-like format
-function parseTokenFormat(input) {
-  const trimmed = input.trim()
-  if (!trimmed.startsWith(TOKEN_TYPE + ' ')) {
-    return null
-  }
-
-  const afterType = trimmed.slice(TOKEN_TYPE.length + 1)
-  const spaceIndex = afterType.indexOf(' ')
-
-  if (spaceIndex === -1) {
-    return { payload: afterType, comment: null }
-  }
-
-  return {
-    payload: afterType.slice(0, spaceIndex),
-    comment: afterType.slice(spaceIndex + 1),
-  }
-}
 
 // Base64 decode
 function base64Decode(str) {
@@ -87,29 +66,25 @@ async function fingerprint(data) {
 }
 
 async function verifyContactToken(token) {
-  // Parse SSH-like format
-  const parsed = parseTokenFormat(token)
-  if (!parsed) {
-    throw new Error(`Invalid format: expected "${TOKEN_TYPE} <payload> [comment]"`)
+  // Parse raw JSON
+  let payload
+  try {
+    payload = JSON.parse(token.trim())
+  } catch {
+    throw new Error('Invalid format: expected raw JSON object')
   }
 
   console.log('\n=== Contact Token ===\n')
-  console.log('Format:', TOKEN_TYPE)
-  if (parsed.comment) {
-    console.log('Comment:', parsed.comment)
+  if (payload.comment) {
+    console.log('Comment:', payload.comment)
   }
-
-  // Decode payload
-  const json = Buffer.from(parsed.payload, 'base64').toString('utf8')
-  const payload = JSON.parse(json)
-
   console.log('Issued at:', new Date(payload.iat * 1000).toISOString())
 
   // Decode fields
   const recipientPublicId = base64Decode(payload.sub)
   const signerCredentialPublicKey = base64Decode(payload.cpk)
   if (!payload.spk) {
-    throw new Error('Missing signer public ID (spk) - token uses outdated format')
+    throw new Error('Missing signer public ID (spk)')
   }
   const signerPublicId = base64Decode(payload.spk)
   const authData = base64Decode(payload.authData)
@@ -206,7 +181,7 @@ async function verifyContactToken(token) {
     signerCredentialPublicKey: Buffer.from(signerCredentialPublicKey).toString('base64'),
     issuedAt: new Date(payload.iat * 1000),
     origin: clientData.origin,
-    comment: parsed.comment,
+    comment: payload.comment,
   }
 }
 
@@ -222,12 +197,12 @@ async function readStdin() {
 // Main
 const token = await readStdin()
 if (!token) {
-  console.error('Usage: echo "sswct-es256 <payload> [comment]" | node scripts/verify-contact-token.mjs')
+  console.error('Usage: echo \'{"sub":"...","cpk":"..."}\' | node scripts/verify-contact-token.mjs')
   console.error('')
-  console.error('Token format: sswct-es256 <base64-payload> [optional comment]')
+  console.error('Token format: Raw JSON object')
   console.error('')
   console.error('Examples:')
-  console.error('  echo "sswct-es256 eyJzdWIi... Alice" | node scripts/verify-contact-token.mjs')
+  console.error('  echo \'{"sub":"...","cpk":"..."}\' | node scripts/verify-contact-token.mjs')
   console.error('  pbpaste | node scripts/verify-contact-token.mjs')
   console.error('  cat token.txt | node scripts/verify-contact-token.mjs')
   process.exit(1)
