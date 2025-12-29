@@ -2,6 +2,10 @@
 
 ## Planned Features
 
+### better issued date/expiration date logic for mutual tokens for request and final tokens
+
+### add options to scan qr codes of tokens
+
 ### Improved Error Handling
 Better user feedback for network errors, relay failures, and WebRTC connection issues.
 
