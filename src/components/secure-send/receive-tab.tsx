@@ -16,7 +16,7 @@ import type { SignalingMethod } from '@/lib/nostr/types'
 import type { PinKeyMaterial } from '@/lib/types'
 import { Link } from 'react-router-dom'
 import { formatFingerprint } from '@/lib/crypto/ecdh'
-import { isContactTokenFormat, verifyContactToken, type VerifiedContactToken } from '@/lib/crypto/contact-token'
+import { isMutualTokenFormat, verifyMutualToken, type VerifiedMutualToken } from '@/lib/crypto/contact-token'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -51,9 +51,9 @@ export function ReceiveTab() {
   const [pinFingerprint, setPinFingerprint] = useState<string | null>(null)
 
   // Verified token state (updated via useEffect since verification is async)
-  const [verifiedToken, setVerifiedToken] = useState<VerifiedContactToken | null>(null)
+  const [verifiedToken, setVerifiedToken] = useState<VerifiedMutualToken | null>(null)
 
-  // Verify sender contact token - debounced to reduce signature checks on every keystroke
+  // Verify mutual contact token - debounced to reduce signature checks on every keystroke
   useEffect(() => {
     let cancelled = false
 
@@ -65,21 +65,21 @@ export function ReceiveTab() {
     }
 
     // Quick format check first (synchronous, no debounce needed)
-    if (!isContactTokenFormat(input)) {
+    if (!isMutualTokenFormat(input)) {
       setVerifiedToken(null)
-      setSenderPublicIdError('Invalid format: expected bound contact token (create one on the Passkey page)')
+      setSenderPublicIdError('Invalid format: expected mutual contact token (create one on the Passkey page)')
       return
     }
 
     // Debounce the async signature verification
     const timeoutId = setTimeout(() => {
-      verifyContactToken(input)
+      verifyMutualToken(input)
         .then((verified) => {
           if (cancelled) return
           setVerifiedToken(verified)
           setSenderPublicIdError(null)
         })
-        .catch((err) => {
+        .catch((err: unknown) => {
           if (cancelled) return
           setVerifiedToken(null)
           setSenderPublicIdError(err instanceof Error ? err.message : 'Invalid or tampered token')
@@ -389,16 +389,16 @@ export function ReceiveTab() {
                             </p>
                           )}
 
-                          {/* Sender contact token input - hidden when receiving from self */}
+                          {/* Mutual contact token input - hidden when receiving from self */}
                           {!receiveFromSelf && (
                             <>
                               <Label htmlFor="sender-pubkey" className="text-sm font-medium">
-                                Sender&apos;s Bound Token
+                                Mutual Contact Token
                               </Label>
                               <div className="flex gap-2">
                                 <Textarea
                                   id="sender-pubkey"
-                                  placeholder="Paste bound contact token from your Passkey page..."
+                                  placeholder="Paste mutual contact token from your Passkey page..."
                                   value={senderPublicIdInput}
                                   onChange={(e) => setSenderPublicIdInput(e.target.value)}
                                   className="font-mono text-xs min-h-[60px] resize-none"
@@ -420,22 +420,24 @@ export function ReceiveTab() {
                                 <div className="space-y-1 text-xs">
                                   <div className="flex items-center gap-2 text-green-700 dark:text-green-400">
                                     <Fingerprint className="h-3 w-3" />
-                                    <span>Sender:</span>
-                                    <span className="font-mono font-medium">{formatFingerprint(verifiedToken.recipientFingerprint)}</span>
+                                    <span>Party A:</span>
+                                    <span className="font-mono font-medium">{formatFingerprint(verifiedToken.partyAFingerprint)}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-green-700 dark:text-green-400 ml-5">
+                                    <span>Party B:</span>
+                                    <span className="font-mono font-medium">{formatFingerprint(verifiedToken.partyBFingerprint)}</span>
                                   </div>
                                   <div className="flex items-center gap-2 text-muted-foreground ml-5">
-                                    <span>Signed by:</span>
-                                    <span className="font-mono">{formatFingerprint(verifiedToken.signerFingerprint)}</span>
-                                    <span className="text-green-600 dark:text-green-400">(verified)</span>
+                                    <span className="text-green-600 dark:text-green-400">(both signatures verified)</span>
                                   </div>
                                 </div>
                               )}
                               <p className="text-xs text-muted-foreground">
-                                Create a bound token on your{' '}
+                                Create and exchange a mutual token on your{' '}
                                 <Link to="/passkey" className="text-primary hover:underline">
                                   Passkey page
                                 </Link>{' '}
-                                using the sender&apos;s public ID
+                                with your contact
                               </p>
                             </>
                           )}
@@ -449,16 +451,16 @@ export function ReceiveTab() {
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                       <div className="bg-background rounded-lg p-4 max-w-md w-full mx-4 space-y-4">
                         <div className="flex items-center justify-between">
-                          <h3 className="font-medium">Enter Bound Contact Token</h3>
+                          <h3 className="font-medium">Enter Mutual Contact Token</h3>
                           <Button variant="ghost" size="sm" onClick={() => setShowPublicIdModal(false)}>
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
                         <p className="text-sm text-muted-foreground">
-                          Paste the bound contact token you created on your Passkey page.
+                          Paste the mutual contact token you exchanged with your contact on your Passkey page.
                         </p>
                         <Textarea
-                          placeholder="Paste bound contact token..."
+                          placeholder="Paste mutual contact token..."
                           value={senderPublicIdInput}
                           onChange={(e) => setSenderPublicIdInput(e.target.value)}
                           className="font-mono text-xs min-h-[100px]"
@@ -474,7 +476,7 @@ export function ReceiveTab() {
                   {/* Passkey mode indicator */}
                   <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
                     <Fingerprint className="h-3 w-3" />
-                    <span>Passkey mode{receiveFromSelf ? ' → receiving from self' : verifiedToken ? ` → sender ${formatFingerprint(verifiedToken.recipientFingerprint)}` : ' (enter sender token in Advanced Options)'}</span>
+                    <span>Passkey mode{receiveFromSelf ? ' → receiving from self' : verifiedToken ? ' → mutual token verified' : ' (enter mutual token in Advanced Options)'}</span>
                   </div>
 
                   <Button
