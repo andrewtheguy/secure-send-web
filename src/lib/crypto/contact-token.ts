@@ -18,8 +18,8 @@
 
 import { publicKeyToFingerprint, constantTimeEqualBytes } from './ecdh'
 
-/** Maximum length for comment field to prevent overly large tokens */
-const MAX_COMMENT_LENGTH = 256
+/** Maximum byte length for comment field to prevent overly large tokens */
+const MAX_COMMENT_BYTES = 256
 
 /**
  * Token request - created by initiator, waiting for countersigner
@@ -130,19 +130,25 @@ function compareIds(id1: Uint8Array, id2: Uint8Array): number {
 
 /**
  * Compute the mutual challenge that both parties sign.
- * Challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat)
+ * Challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat || comment_bytes)
  *
  * IDs are sorted lexicographically to ensure deterministic ordering.
+ * Comment is optional; if provided, it is UTF-8 encoded and appended to the challenge input.
  */
 async function computeMutualChallenge(
   aId: Uint8Array,
   aCpk: Uint8Array,
   bId: Uint8Array,
   bCpk: Uint8Array,
-  iat: number
+  iat: number,
+  comment?: string
 ): Promise<Uint8Array> {
-  // Total: 32 + 65 + 32 + 65 + 8 = 202 bytes
-  const data = new Uint8Array(202)
+  // Encode comment as UTF-8 bytes (empty array if no comment)
+  const commentBytes = comment ? new TextEncoder().encode(comment) : new Uint8Array(0)
+
+  // Total: 32 + 65 + 32 + 65 + 8 + commentBytes.length
+  const baseLength = 202
+  const data = new Uint8Array(baseLength + commentBytes.length)
   let offset = 0
 
   data.set(aId, offset)
@@ -157,6 +163,12 @@ async function computeMutualChallenge(
   const iatBytes = new DataView(new ArrayBuffer(8))
   iatBytes.setBigUint64(0, BigInt(iat), false) // big-endian
   data.set(new Uint8Array(iatBytes.buffer), offset)
+  offset += 8
+
+  // Append comment bytes if present
+  if (commentBytes.length > 0) {
+    data.set(commentBytes, offset)
+  }
 
   return new Uint8Array(await crypto.subtle.digest('SHA-256', data))
 }
@@ -288,8 +300,17 @@ export async function createMutualTokenInit(
 
   const iat = Math.floor(Date.now() / 1000)
 
-  // Compute challenge
-  const challenge = await computeMutualChallenge(aId, aCpk, bId, bCpk, iat)
+  // Trim and validate comment before signing (byte length, not character count)
+  const trimmedComment = comment?.trim()
+  if (trimmedComment) {
+    const commentByteLength = new TextEncoder().encode(trimmedComment).length
+    if (commentByteLength > MAX_COMMENT_BYTES) {
+      throw new Error(`Comment exceeds maximum size of ${MAX_COMMENT_BYTES} bytes (got ${commentByteLength} bytes)`)
+    }
+  }
+
+  // Compute challenge (includes comment if present)
+  const challenge = await computeMutualChallenge(aId, aCpk, bId, bCpk, iat, trimmedComment)
 
   // Get WebAuthn signature
   const credentialIdBytes = base64urlDecode(credentialId)
@@ -320,11 +341,7 @@ export async function createMutualTokenInit(
     init_sig: uint8ArrayToBase64(new Uint8Array(response.signature)),
   }
 
-  if (comment?.trim()) {
-    const trimmedComment = comment.trim()
-    if (trimmedComment.length > MAX_COMMENT_LENGTH) {
-      throw new Error(`Comment exceeds maximum length of ${MAX_COMMENT_LENGTH} characters`)
-    }
+  if (trimmedComment) {
     payload.comment = trimmedComment
   }
 
@@ -372,6 +389,17 @@ export async function countersignMutualToken(
     throw new Error('Invalid token request: missing required fields')
   }
 
+  // Validate comment byte length if present
+  if (request.comment !== undefined) {
+    if (typeof request.comment !== 'string') {
+      throw new Error('Invalid token request: comment must be a string')
+    }
+    const commentByteLength = new TextEncoder().encode(request.comment).length
+    if (commentByteLength > MAX_COMMENT_BYTES) {
+      throw new Error(`Comment exceeds maximum size of ${MAX_COMMENT_BYTES} bytes`)
+    }
+  }
+
   // Decode fields
   const aId = base64ToUint8Array(request.a_id)
   const aCpk = base64ToUint8Array(request.a_cpk)
@@ -416,8 +444,8 @@ export async function countersignMutualToken(
   // Determine initiator's credential key (the other party)
   const initiatorCpk = isPartyA ? bCpk : aCpk
 
-  // Verify initiator's signature first
-  const challenge = await computeMutualChallenge(aId, aCpk, bId, bCpk, request.iat)
+  // Verify initiator's signature first (challenge includes comment if present)
+  const challenge = await computeMutualChallenge(aId, aCpk, bId, bCpk, request.iat, request.comment)
   await verifyWebAuthnSignature(
     initiatorCpk,
     base64ToUint8Array(request.init_authData),
@@ -583,8 +611,8 @@ export async function verifyMutualToken(
     }
   }
 
-  // Compute challenge (same for both signatures)
-  const challenge = await computeMutualChallenge(aId, aCpk, bId, bCpk, payload.iat)
+  // Compute challenge (same for both signatures, includes comment if present)
+  const challenge = await computeMutualChallenge(aId, aCpk, bId, bCpk, payload.iat, payload.comment)
 
   // Determine which party was the initiator by checking whose signature is in init_*
   // We need to try both and see which one verifies

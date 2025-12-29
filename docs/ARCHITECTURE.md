@@ -191,12 +191,20 @@ interface MutualContactTokenPayload extends PendingMutualToken {
 
 **Challenge Computation:**
 ```
-challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat)
-                   32     65       32      65       8    = 202 bytes
+challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat || comment_bytes)
+                   32     65       32      65       8     0-256 bytes
 ```
 - IDs sorted lexicographically to ensure deterministic ordering
 - Both parties sign the same challenge
-- **Note:** The `comment` field is NOT included in the challenge - it is unsigned metadata that can be modified without invalidating signatures
+- Comment is optional; if present, it is UTF-8 encoded (max 256 bytes) and appended to the challenge input
+
+**Tamper Protection:**
+
+The entire token payload is tamper-proof:
+- **Data fields** (`a_id`, `a_cpk`, `b_id`, `b_cpk`, `iat`, `comment`): Included in the signed challenge. Tampering invalidates both signatures.
+- **Signature fields** (`init_authData`, `init_clientDataJSON`, `init_sig`, `counter_authData`, `counter_clientDataJSON`, `counter_sig`): These are the WebAuthn assertion outputs. They cannot be included in the challenge (circular dependency), but are cryptographically verified during `verifyMutualToken()`. Tampering causes verification to fail.
+
+**Result:** Modifying any field in the token — whether data or signature — will be detected and rejected.
 
 **Token Creation Flow:**
 ```mermaid
@@ -208,7 +216,7 @@ sequenceDiagram
     Bob->>Alice: Bob's Contact Card (id + cpk)
     Note over Alice: 2. Alice creates pending token
     Alice->>Alice: Sort IDs lexicographically
-    Alice->>Alice: Compute challenge = SHA256(a_id||a_cpk||b_id||b_cpk||iat)
+    Alice->>Alice: Compute challenge = SHA256(a_id||a_cpk||b_id||b_cpk||iat||comment)
     Alice->>Alice: WebAuthn sign challenge
     Alice->>Bob: Pending token (init signature only)
     Note over Bob: 3. Bob countersigns

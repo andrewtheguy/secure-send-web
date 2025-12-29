@@ -59,6 +59,7 @@ export function SendTab() {
   // Saved tokens for quick selection
   const [savedTokens, setSavedTokens] = useState<SavedToken[]>([])
   const [showTokenDropdown, setShowTokenDropdown] = useState(false)
+  const [loadedFromHistory, setLoadedFromHistory] = useState(false)
 
   // Verify mutual contact token - debounced to reduce signature checks on every keystroke
   useEffect(() => {
@@ -260,6 +261,7 @@ export function SendTab() {
     setReceiverPublicKeyError(null)
     setVerifiedToken(null)
     setSendToSelf(false)
+    setLoadedFromHistory(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
     if (folderInputRef.current) folderInputRef.current.value = ''
   }
@@ -668,6 +670,7 @@ export function SendTab() {
                                         className="w-full px-3 py-2 text-left hover:bg-muted/50 border-b last:border-b-0 text-xs"
                                         onClick={() => {
                                           setReceiverPublicKeyInput(saved.token)
+                                          setLoadedFromHistory(true)
                                           setShowTokenDropdown(false)
                                         }}
                                       >
@@ -686,24 +689,30 @@ export function SendTab() {
                                 )}
                               </div>
                             )}
-                            <div className="flex gap-2">
-                              <Textarea
-                                id="receiver-pubkey"
-                                placeholder="Paste mutual contact token from your Passkey page..."
-                                value={receiverPublicKeyInput}
-                                onChange={(e) => setReceiverPublicKeyInput(e.target.value)}
-                                className="font-mono text-xs min-h-[60px] resize-none"
-                              />
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setShowPublicKeyModal(true)}
-                                className="flex-shrink-0"
-                                title="Enter contact token"
-                              >
-                                <Keyboard className="h-4 w-4" />
-                              </Button>
-                            </div>
+                            {/* Hide textarea when token is loaded from history and verified */}
+                            {!(loadedFromHistory && verifiedToken) && (
+                              <div className="flex gap-2">
+                                <Textarea
+                                  id="receiver-pubkey"
+                                  placeholder="Paste mutual contact token from your Passkey page..."
+                                  value={receiverPublicKeyInput}
+                                  onChange={(e) => {
+                                    setReceiverPublicKeyInput(e.target.value)
+                                    setLoadedFromHistory(false)
+                                  }}
+                                  className="font-mono text-xs min-h-[60px] resize-none"
+                                />
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setShowPublicKeyModal(true)}
+                                  className="flex-shrink-0"
+                                  title="Enter contact token"
+                                >
+                                  <Keyboard className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
                             {receiverPublicKeyError && (
                               <p className="text-xs text-destructive">{receiverPublicKeyError}</p>
                             )}
@@ -718,8 +727,27 @@ export function SendTab() {
                                   <span>Party B:</span>
                                   <span className="font-mono font-medium">{formatFingerprint(verifiedToken.partyBFingerprint)}</span>
                                 </div>
-                                <div className="flex items-center gap-2 text-muted-foreground ml-5">
+                                {verifiedToken.comment && (
+                                  <div className="flex items-center gap-2 text-muted-foreground ml-5">
+                                    <span className="italic">"{verifiedToken.comment}"</span>
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-2 ml-5">
                                   <span className="text-green-600 dark:text-green-400">(both signatures verified)</span>
+                                  {loadedFromHistory && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-5 px-1 text-xs text-muted-foreground hover:text-foreground"
+                                      onClick={() => {
+                                        setReceiverPublicKeyInput('')
+                                        setVerifiedToken(null)
+                                        setLoadedFromHistory(false)
+                                      }}
+                                    >
+                                      Change
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
                             )}
