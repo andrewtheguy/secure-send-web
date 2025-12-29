@@ -55,9 +55,10 @@ export function SendTab() {
   // Verified token state (updated via useEffect since verification is async)
   const [verifiedToken, setVerifiedToken] = useState<VerifiedContactToken | null>(null)
 
-  // Verify receiver contact token - now verifies signature immediately
+  // Verify receiver contact token - debounced to reduce signature checks on every keystroke
   useEffect(() => {
     let cancelled = false
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
 
     const input = receiverPublicKeyInput.trim()
     if (!input) {
@@ -66,25 +67,34 @@ export function SendTab() {
       return
     }
 
-    // Quick format check first
+    // Quick format check first (synchronous, no debounce needed)
     if (!isContactTokenFormat(input)) {
       setVerifiedToken(null)
       setReceiverPublicKeyError('Invalid format: expected bound contact token (create one on the Passkey page)')
       return
     }
 
-    // Verify token signature - no authentication required!
-    verifyContactToken(input).then(verified => {
-      if (cancelled) return
-      setVerifiedToken(verified)
-      setReceiverPublicKeyError(null)
-    }).catch((err) => {
-      if (cancelled) return
-      setVerifiedToken(null)
-      setReceiverPublicKeyError(err instanceof Error ? err.message : 'Invalid or tampered token')
-    })
+    // Debounce the async signature verification
+    timeoutId = setTimeout(() => {
+      verifyContactToken(input)
+        .then((verified) => {
+          if (cancelled) return
+          setVerifiedToken(verified)
+          setReceiverPublicKeyError(null)
+        })
+        .catch((err) => {
+          if (cancelled) return
+          setVerifiedToken(null)
+          setReceiverPublicKeyError(err instanceof Error ? err.message : 'Invalid or tampered token')
+        })
+    }, 300)
 
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId)
+      }
+    }
   }, [receiverPublicKeyInput])
 
   // All hooks must be called unconditionally (React rules)
