@@ -376,8 +376,8 @@ export function PasskeyPage() {
             </p>
             <p>
               <span className="font-medium text-foreground">Key exchange:</span> Share your
-              public ID once with each contact (via QR code or copy/paste). Passkey mode still
-              requires both parties to have the same synced passkey on their own devices.
+              public ID once with each contact (via QR code or copy/paste). Each party uses their
+              own passkey (synced across their devices).
             </p>
           </div>
         </CardContent>
