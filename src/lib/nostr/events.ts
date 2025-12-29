@@ -2,6 +2,9 @@ import { finalizeEvent, generateSecretKey, getPublicKey, type Event } from 'nost
 import { EVENT_KIND_PIN_EXCHANGE, EVENT_KIND_DATA_TRANSFER, type ChunkNotifyPayload } from './types'
 import { TRANSFER_EXPIRATION_MS } from '../crypto/constants'
 
+const EPHEMERAL_PUBKEY_BYTES = 65
+const EPHEMERAL_BINDING_BYTES = 32
+
 /**
  * Generate ephemeral keypair for a transfer
  */
@@ -17,7 +20,7 @@ export function generateEphemeralKeys(): { secretKey: Uint8Array; publicKey: str
  *
  * @param hint - Identifier for event filtering. Can be either:
  *   - PIN mode: SHA-256 hash of user's PIN (first 8 hex chars)
- *   - Passkey mode: Passkey fingerprint (11 base36 chars from credential ID)
+ *   - Passkey mode: Passkey fingerprint (16 hex chars from passkey public ID)
  *
  * TTL Behavior:
  * - Events include an 'expiration' tag set to 1 hour from creation (NIP-40)
@@ -82,17 +85,19 @@ export function parsePinExchangeEvent(event: Event): {
 
 /**
  * Create Mutual Trust exchange event (kind 24243)
- * Used for passkey-based mutual trust mode where both parties exchange public keys.
+ * Used for passkey-based mutual trust mode where both parties exchange passkey public IDs.
  *
  * @param secretKey - Nostr ephemeral secret key
  * @param encryptedPayload - AES-GCM encrypted transfer metadata
  * @param salt - Per-transfer salt for key derivation
  * @param transferId - Unique transfer identifier
- * @param receiverFingerprint - Receiver's public key fingerprint (for event filtering)
- * @param senderFingerprint - Sender's public key fingerprint (for verification)
+ * @param receiverFingerprint - Receiver's public ID fingerprint (for event filtering)
+ * @param senderFingerprint - Sender's public ID fingerprint (for verification)
  * @param keyConfirmHash - Hash of HKDF-derived key confirmation value (MITM detection)
- * @param receiverPkCommitment - Hash of receiver's public key (relay MITM prevention)
+ * @param receiverPkCommitment - Hash of receiver's public ID (relay MITM prevention)
  * @param nonce - Base64-encoded 16-byte random nonce (replay protection)
+ * @param senderEphemeralPub - Optional: Sender's ephemeral public key for PFS (Uint8Array, 65 bytes). Encoded as base64 in the event tag.
+ * @param senderSessionBinding - Optional: Session binding proving ephemeral key is authorized (Uint8Array, 32 bytes). Encoded as base64 in the event tag.
  */
 export function createMutualTrustEvent(
   secretKey: Uint8Array,
@@ -103,25 +108,45 @@ export function createMutualTrustEvent(
   senderFingerprint: string,
   keyConfirmHash: string,
   receiverPkCommitment: string,
-  nonce: string
+  nonce: string,
+  senderEphemeralPub?: Uint8Array,
+  senderSessionBinding?: Uint8Array
 ): Event {
   const expiration = Math.floor((Date.now() + TRANSFER_EXPIRATION_MS) / 1000)
+
+  const tags: string[][] = [
+    ['h', receiverFingerprint], // For receiver to find the event
+    ['spk', senderFingerprint], // Sender's public ID fingerprint for verification
+    ['kc', keyConfirmHash], // Key confirmation hash (MITM detection)
+    ['rpkc', receiverPkCommitment], // Receiver public ID commitment (relay MITM prevention)
+    ['n', nonce], // Replay nonce (16 bytes, base64)
+    ['s', uint8ArrayToBase64(salt)],
+    ['t', transferId],
+    ['type', 'mutual_trust'],
+    ['expiration', expiration.toString()],
+  ]
+
+  // Add ephemeral key tags for Perfect Forward Secrecy
+  if (senderEphemeralPub && senderSessionBinding) {
+    if (senderEphemeralPub.length !== EPHEMERAL_PUBKEY_BYTES) {
+      throw new Error(
+        `Invalid sender ephemeral public key length: expected ${EPHEMERAL_PUBKEY_BYTES} bytes, got ${senderEphemeralPub.length}`
+      )
+    }
+    if (senderSessionBinding.length !== EPHEMERAL_BINDING_BYTES) {
+      throw new Error(
+        `Invalid sender session binding length: expected ${EPHEMERAL_BINDING_BYTES} bytes, got ${senderSessionBinding.length}`
+      )
+    }
+    tags.push(['epk', uint8ArrayToBase64(senderEphemeralPub)]) // Ephemeral public key
+    tags.push(['esb', uint8ArrayToBase64(senderSessionBinding)]) // Ephemeral session binding
+  }
 
   const event = finalizeEvent(
     {
       kind: EVENT_KIND_PIN_EXCHANGE,
       content: uint8ArrayToBase64(encryptedPayload),
-      tags: [
-        ['h', receiverFingerprint], // For receiver to find the event
-        ['spk', senderFingerprint], // Sender's public key fingerprint for verification
-        ['kc', keyConfirmHash], // Key confirmation hash (MITM detection)
-        ['rpkc', receiverPkCommitment], // Receiver public key commitment (relay MITM prevention)
-        ['n', nonce], // Replay nonce (16 bytes, base64)
-        ['s', uint8ArrayToBase64(salt)],
-        ['t', transferId],
-        ['type', 'mutual_trust'],
-        ['expiration', expiration.toString()],
-      ],
+      tags,
       created_at: Math.floor(Date.now() / 1000),
     },
     secretKey
@@ -133,6 +158,7 @@ export function createMutualTrustEvent(
 /**
  * Parse Mutual Trust event tags.
  * @returns Object with receiver/sender fingerprints, security tags, salt, transferId, and encryptedPayload
+ *          Plus optional ephemeral key data for PFS
  */
 export function parseMutualTrustEvent(event: Event): {
   receiverFingerprint: string
@@ -143,6 +169,9 @@ export function parseMutualTrustEvent(event: Event): {
   salt: Uint8Array
   transferId: string
   encryptedPayload: Uint8Array
+  // Optional PFS fields (present if sender supports ephemeral session keys)
+  senderEphemeralPub?: Uint8Array
+  senderSessionBinding?: Uint8Array
 } | null {
   if (event.kind !== EVENT_KIND_PIN_EXCHANGE) return null
 
@@ -190,6 +219,12 @@ export function parseMutualTrustEvent(event: Event): {
     return null
   }
 
+  // Parse optional ephemeral key fields for PFS
+  const {
+    ephemeralPub: senderEphemeralPub,
+    sessionBinding: senderSessionBinding,
+  } = parseEphemeralKeys(event.tags)
+
   return {
     receiverFingerprint,
     senderFingerprint,
@@ -199,6 +234,8 @@ export function parseMutualTrustEvent(event: Event): {
     salt,
     transferId,
     encryptedPayload,
+    senderEphemeralPub,
+    senderSessionBinding,
   }
 }
 
@@ -207,6 +244,7 @@ export function parseMutualTrustEvent(event: Event): {
  * seq=0 for ready ACK, seq=-1 for completion ACK
  * hint is optional - used in dual mode to indicate which key the receiver used
  * nonce is optional - echoed from sender's mutual trust event for replay protection
+ * receiverEphemeralPub/receiverSessionBinding - for PFS (Perfect Forward Secrecy)
  */
 export function createAckEvent(
   secretKey: Uint8Array,
@@ -214,7 +252,9 @@ export function createAckEvent(
   transferId: string,
   seq: number,
   hint?: string,
-  nonce?: string
+  nonce?: string,
+  receiverEphemeralPub?: Uint8Array,
+  receiverSessionBinding?: Uint8Array
 ): Event {
   const tags: string[][] = [
     ['p', senderPubkey],
@@ -231,6 +271,25 @@ export function createAckEvent(
   // Add nonce tag for replay protection (echoed from sender's mutual trust event)
   if (nonce) {
     tags.push(['n', nonce])
+  }
+
+  // Add ephemeral key tags for Perfect Forward Secrecy (receiver responds with their ephemeral key)
+  if ((receiverEphemeralPub && !receiverSessionBinding) || (!receiverEphemeralPub && receiverSessionBinding)) {
+    throw new Error('Invalid receiver ephemeral parameters: epk and esb must be provided together')
+  }
+  if (receiverEphemeralPub && receiverSessionBinding) {
+    if (receiverEphemeralPub.length !== EPHEMERAL_PUBKEY_BYTES) {
+      throw new Error(
+        `Invalid receiver ephemeral public key length: expected ${EPHEMERAL_PUBKEY_BYTES} bytes, got ${receiverEphemeralPub.length}`
+      )
+    }
+    if (receiverSessionBinding.length !== EPHEMERAL_BINDING_BYTES) {
+      throw new Error(
+        `Invalid receiver session binding length: expected ${EPHEMERAL_BINDING_BYTES} bytes, got ${receiverSessionBinding.length}`
+      )
+    }
+    tags.push(['epk', uint8ArrayToBase64(receiverEphemeralPub)]) // Receiver's ephemeral public key
+    tags.push(['esb', uint8ArrayToBase64(receiverSessionBinding)]) // Receiver's session binding
   }
 
   const event = finalizeEvent(
@@ -255,6 +314,9 @@ export function parseAckEvent(event: Event): {
   seq: number
   hint?: string
   nonce?: string
+  // Optional PFS fields (present if receiver supports ephemeral session keys)
+  receiverEphemeralPub?: Uint8Array
+  receiverSessionBinding?: Uint8Array
 } | null {
   if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null
 
@@ -274,7 +336,13 @@ export function parseAckEvent(event: Event): {
   // Validate: seq must be integer, valid values are -1 (complete), 0 (ready), or > 0 (chunk ack)
   if (!Number.isInteger(seq) || seq < -1) return null
 
-  return { senderPubkey, transferId, seq, hint, nonce }
+  // Parse optional ephemeral key fields for PFS (receiver's response)
+  const {
+    ephemeralPub: receiverEphemeralPub,
+    sessionBinding: receiverSessionBinding,
+  } = parseEphemeralKeys(event.tags)
+
+  return { senderPubkey, transferId, seq, hint, nonce, receiverEphemeralPub, receiverSessionBinding }
 }
 
 /**
@@ -409,4 +477,39 @@ export function base64ToUint8Array(base64: string): Uint8Array {
     bytes[i] = binary.charCodeAt(i)
   }
   return bytes
+}
+
+function parseEphemeralKeys(tags: string[][]): {
+  ephemeralPub?: Uint8Array
+  sessionBinding?: Uint8Array
+} {
+  const ephemeralPubB64 = tags.find((t) => t[0] === 'epk')?.[1]
+  const sessionBindingB64 = tags.find((t) => t[0] === 'esb')?.[1]
+
+  if ((ephemeralPubB64 && !sessionBindingB64) || (!ephemeralPubB64 && sessionBindingB64)) {
+    throw new Error('Invalid ephemeral key tags: epk and esb must be provided together')
+  }
+  if (!ephemeralPubB64 || !sessionBindingB64) {
+    return {}
+  }
+
+  let ephemeralPub: Uint8Array
+  let sessionBinding: Uint8Array
+  try {
+    ephemeralPub = base64ToUint8Array(ephemeralPubB64)
+    sessionBinding = base64ToUint8Array(sessionBindingB64)
+  } catch {
+    throw new Error('Invalid ephemeral key tags: epk/esb are malformed or have invalid length')
+  }
+  if (ephemeralPub.length !== EPHEMERAL_PUBKEY_BYTES) {
+    throw new Error(
+      `Invalid ephemeral public key length: expected ${EPHEMERAL_PUBKEY_BYTES} bytes, got ${ephemeralPub.length}`
+    )
+  }
+  if (sessionBinding.length !== EPHEMERAL_BINDING_BYTES) {
+    throw new Error(
+      `Invalid session binding length: expected ${EPHEMERAL_BINDING_BYTES} bytes, got ${sessionBinding.length}`
+    )
+  }
+  return { ephemeralPub, sessionBinding }
 }

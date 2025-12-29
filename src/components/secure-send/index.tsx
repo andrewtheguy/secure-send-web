@@ -171,7 +171,7 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
               <div className="space-y-2 text-muted-foreground text-sm">
                 <p><span className="text-foreground font-medium">Setup:</span> Create a passkey at <a href="/passkey" className="text-primary hover:underline">/passkey</a> - stored in your password manager</p>
                 <p><span className="text-foreground font-medium">Sync:</span> Both parties need the same passkey synced (1Password, iCloud Keychain, Google Password Manager)</p>
-                <p><span className="text-foreground font-medium">Verify:</span> Compare fingerprints (11-char identifier) to confirm same passkey</p>
+                <p><span className="text-foreground font-medium">Verify:</span> Compare fingerprints (16-hex identifier) to confirm same passkey</p>
                 <p><span className="text-foreground font-medium">Security:</span> Keys derived from device secure hardware via WebAuthn PRF extension</p>
               </div>
             </section>

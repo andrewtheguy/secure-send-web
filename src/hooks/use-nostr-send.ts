@@ -35,9 +35,13 @@ import type { Event } from 'nostr-tools'
 import { readFileAsBytes } from '@/lib/file-utils'
 import { WebRTCConnection } from '@/lib/webrtc'
 import { getWebRTCConfig } from '@/lib/webrtc-config'
-import { getPasskeyECDHKeypair } from '@/lib/crypto/passkey'
 import {
-  deriveSharedSecretKey,
+  getPasskeySessionKeypair,
+  verifySessionBinding,
+  deriveSessionEncryptionKey,
+  type EphemeralSessionKeypair,
+} from '@/lib/crypto/passkey'
+import {
   deriveAESKeyFromSecretKey,
   publicKeyToFingerprint,
   deriveKeyConfirmationFromSecretKey,
@@ -144,46 +148,51 @@ export function useNostrSend(): UseNostrSendReturn {
         let keyConfirmHash: string | undefined
         let receiverPkCommitment: string | undefined
         let replayNonce: string | undefined
+        // PFS: Ephemeral session keypair for Perfect Forward Secrecy
+        let senderEphemeral: EphemeralSessionKeypair | undefined
+        let identitySharedSecretKey: CryptoKey | undefined
 
         if (options?.usePasskey && !options.receiverPublicKey) {
-          setState({ status: 'error', message: 'Receiver public key required for passkey mode' })
+          setState({ status: 'error', message: 'Receiver public ID required for passkey mode' })
           sendingRef.current = false
           return
         }
 
         if (options?.usePasskey && options.receiverPublicKey) {
-          // MUTUAL TRUST MODE: Use passkey ECDH with receiver's public key
+          // MUTUAL TRUST MODE: Use passkey mutual trust with receiver's public ID
+          // NOW WITH PERFECT FORWARD SECRECY via ephemeral session keys
           setState({ status: 'connecting', message: 'Authenticate with passkey...' })
 
           try {
-            // Authenticate and get our ECDH keypair (privateKey is non-extractable CryptoKey)
+            // Authenticate and get ephemeral session keypair with identity binding
+            // SECURITY: Ephemeral private key is NEVER exposed as raw bytes (Web Crypto generateKey)
             const {
-              publicKeyBytes,
-              privateKey,
-              publicKeyFingerprint,
-            } = await getPasskeyECDHKeypair()
+              ephemeral,
+              identitySharedSecretKey: sharedSecret,
+            } = await getPasskeySessionKeypair()
 
-            // Store our public key for display
-            setOwnPublicKey(publicKeyBytes)
-            setOwnFingerprint(publicKeyFingerprint)
-            senderFingerprint = publicKeyFingerprint
+            // Store identity info for display
+            setOwnPublicKey(ephemeral.identityPublicKeyBytes)
+            setOwnFingerprint(ephemeral.identityFingerprint)
+            senderFingerprint = ephemeral.identityFingerprint
 
-            // Derive shared secret as non-extractable HKDF CryptoKey
-            // SECURITY: Raw shared secret bytes are never exposed to JavaScript
-            const sharedSecretKey = await deriveSharedSecretKey(privateKey, options.receiverPublicKey)
+            // Store for later use (deriving session key after ACK)
+            senderEphemeral = ephemeral
+            identitySharedSecretKey = sharedSecret
 
-            // Derive AES key from shared secret key
-            key = await deriveAESKeyFromSecretKey(sharedSecretKey, salt)
+            // Derive AES key from passkey master key for initial payload encryption
+            // NOTE: This is for the payload only. File data will use session key (PFS)
+            key = await deriveAESKeyFromSecretKey(sharedSecret, salt)
 
             // === SECURITY ENHANCEMENTS ===
 
             // 1. Key Confirmation: Derive confirmation value and hash it
-            // This proves both parties derived the same shared secret
-            const confirmValue = await deriveKeyConfirmationFromSecretKey(sharedSecretKey, salt)
+            // This proves both parties derived the same identity shared secret
+            const confirmValue = await deriveKeyConfirmationFromSecretKey(sharedSecret, salt)
             keyConfirmHash = await hashKeyConfirmation(confirmValue)
 
             // 2. Receiver Public Key Commitment: Prevents relay MITM attacks
-            // Sender commits to the receiver's public key
+            // Sender commits to the receiver's identity public ID
             receiverPkCommitment = await computePublicKeyCommitment(options.receiverPublicKey)
 
             // 3. Replay Nonce: Prevents replay attacks within TTL window
@@ -191,7 +200,7 @@ export function useNostrSend(): UseNostrSendReturn {
             const nonceBytes = crypto.getRandomValues(new Uint8Array(16))
             replayNonce = uint8ArrayToBase64(nonceBytes)
 
-            // Hint is receiver's public key fingerprint (for event filtering)
+            // Hint is receiver's public ID fingerprint (for event filtering)
             hint = await publicKeyToFingerprint(options.receiverPublicKey)
           } catch (err) {
             setState({
@@ -269,18 +278,20 @@ export function useNostrSend(): UseNostrSendReturn {
 
         // Choose event type based on mode
         let exchangeEvent
-        if (options?.usePasskey && senderFingerprint && keyConfirmHash && receiverPkCommitment && replayNonce) {
-          // Mutual trust mode: include sender's fingerprint and security tags
+        if (options?.usePasskey && senderFingerprint && keyConfirmHash && receiverPkCommitment && replayNonce && senderEphemeral) {
+          // Mutual trust mode: include sender's fingerprint, security tags, and ephemeral key for PFS
           exchangeEvent = createMutualTrustEvent(
             secretKey,
             encryptedPayload,
             salt,
             transferId,
-            hint, // receiver's public key fingerprint
-            senderFingerprint, // sender's public key fingerprint
+            hint, // receiver's public ID fingerprint
+            senderFingerprint, // sender's public ID fingerprint
             keyConfirmHash, // key confirmation hash (MITM detection)
-            receiverPkCommitment, // receiver public key commitment (relay MITM prevention)
-            replayNonce // replay nonce (replay protection)
+            receiverPkCommitment, // receiver public ID commitment (relay MITM prevention)
+            replayNonce, // replay nonce (replay protection)
+            senderEphemeral.ephemeralPublicKeyBytes, // PFS: sender's ephemeral public key
+            senderEphemeral.sessionBinding // PFS: session binding proof
           )
         } else {
           // PIN mode
@@ -295,9 +306,11 @@ export function useNostrSend(): UseNostrSendReturn {
         await client.waitForConnection()
 
         // Wait for receiver ready ACK (seq=0)
-        const { receiverPubkey } = await new Promise<{
+        const { receiverPubkey, receiverEphemeralPub, receiverSessionBinding } = await new Promise<{
           receiverPubkey: string
           receiverHint?: string
+          receiverEphemeralPub?: Uint8Array
+          receiverSessionBinding?: Uint8Array
         }>((resolve, reject) => {
           const timeout = setTimeout(() => {
             client.unsubscribe(subId)
@@ -337,7 +350,12 @@ export function useNostrSend(): UseNostrSendReturn {
 
                 clearTimeout(timeout)
                 client.unsubscribe(subId)
-                resolve({ receiverPubkey: event.pubkey, receiverHint: ack.hint })
+                resolve({
+                  receiverPubkey: event.pubkey,
+                  receiverHint: ack.hint,
+                  receiverEphemeralPub: ack.receiverEphemeralPub,
+                  receiverSessionBinding: ack.receiverSessionBinding,
+                })
               }
             }
           )
@@ -349,6 +367,35 @@ export function useNostrSend(): UseNostrSendReturn {
         setPin(null)
         setOwnPublicKey(null)
         setOwnFingerprint(null)
+
+        // PFS: Derive session encryption key from ephemeral ECDH
+        // This key provides Perfect Forward Secrecy - compromising identity keys
+        // doesn't help decrypt this session's data
+        if (senderEphemeral && identitySharedSecretKey) {
+          // In passkey mode, PFS is mandatory - receiver MUST provide ephemeral keys
+          if (!receiverEphemeralPub || !receiverSessionBinding) {
+            throw new Error('Security check failed: receiver did not provide ephemeral keys for PFS')
+          }
+
+          // Verify receiver's session binding to prevent ephemeral key substitution
+          const bindingValid = await verifySessionBinding(
+            identitySharedSecretKey,
+            receiverEphemeralPub,
+            receiverSessionBinding
+          )
+          if (!bindingValid) {
+            throw new Error('Security check failed: invalid receiver session binding (potential MITM)')
+          }
+
+          // Derive session key from ephemeral ECDH
+          // SECURITY: This key is derived from ephemeral keys whose private material
+          // was NEVER exposed as raw bytes, providing true Perfect Forward Secrecy
+          key = await deriveSessionEncryptionKey(
+            senderEphemeral.ephemeralPrivateKey,
+            receiverEphemeralPub,
+            salt
+          )
+        }
 
         // Enforce TTL: reject if session has expired
         if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {

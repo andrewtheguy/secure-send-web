@@ -393,8 +393,9 @@ export function useManualSend(): UseManualSendReturn {
         }))
       }
 
-      // Send done signal
-      rtc.send('DONE')
+      // Send done signal with chunk count
+      const totalChunks = Math.ceil(contentBytes.length / ENCRYPTION_CHUNK_SIZE)
+      rtc.send(`DONE:${totalChunks}`)
 
       // Wait for acknowledgment
       await new Promise<void>((resolve, reject) => {

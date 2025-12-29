@@ -199,6 +199,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       let transferComplete = false
       let dataChannelResolver: (() => void) | null = null
       let transferResolver: (() => void) | null = null
+      let transferRejecter: ((err: Error) => void) | null = null
       let answerSDPResolver: (() => void) | null = null
 
       const rtc = new WebRTCConnection(
@@ -223,11 +224,29 @@ export function useManualReceive(): UseManualReceiveReturn {
         (data) => {
           // Message received
           if (typeof data === 'string') {
-            if (data === 'DONE') {
+            if (data.startsWith('DONE:')) {
+              const expectedChunks = Math.ceil(totalBytes! / ENCRYPTION_CHUNK_SIZE)
+              const receivedChunkCount = parseInt(data.split(':')[1], 10)
+              if (!Number.isFinite(receivedChunkCount) || receivedChunkCount <= 0) {
+                transferRejecter?.(new Error('Invalid DONE message: missing chunk count'))
+                return
+              }
+              if (receivedChunkCount !== expectedChunks) {
+                transferRejecter?.(
+                  new Error(
+                    `Invalid DONE message: expected ${expectedChunks} chunks, got ${receivedChunkCount}`
+                  )
+                )
+                return
+              }
               transferComplete = true
               if (transferResolver) {
                 transferResolver()
               }
+            } else if (data === 'DONE') {
+              transferRejecter?.(
+                new Error('Unsupported sender: missing chunk count. Ask sender to update and retry.')
+              )
             }
           } else if (data instanceof ArrayBuffer) {
             // Store encrypted chunk for later decryption
@@ -353,19 +372,6 @@ export function useManualReceive(): UseManualReceiveReturn {
         const timeout = setTimeout(() => {
           reject(new Error('Transfer timeout'))
         }, 10 * 60 * 1000) // 10 minutes
-
-        transferResolver = () => {
-          clearTimeout(timeout)
-          resolve()
-        }
-
-        // Check if already complete
-        if (transferComplete) {
-          clearTimeout(timeout)
-          resolve()
-        }
-
-        // Check periodically for cancellation
         const checkInterval = setInterval(() => {
           if (cancelledRef.current) {
             clearInterval(checkInterval)
@@ -373,6 +379,24 @@ export function useManualReceive(): UseManualReceiveReturn {
             reject(new Error('Cancelled'))
           }
         }, 500)
+
+        transferResolver = () => {
+          clearTimeout(timeout)
+          clearInterval(checkInterval)
+          resolve()
+        }
+        transferRejecter = (err) => {
+          clearTimeout(timeout)
+          clearInterval(checkInterval)
+          reject(err)
+        }
+
+        // Check if already complete
+        if (transferComplete) {
+          clearTimeout(timeout)
+          clearInterval(checkInterval)
+          resolve()
+        }
       })
 
       if (cancelledRef.current) return
