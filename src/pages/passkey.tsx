@@ -188,17 +188,10 @@ export function PasskeyPage() {
         setCredentialPublicKeyBase64(uint8ArrayToBase64(cpk))
       }
 
-      // Immediately authenticate with the new credential to get the public ID (skips picker)
-      setPageState('getting_key')
-      const identity = await getPasskeyIdentity(credentialId)
-      setFingerprint(identity.publicIdFingerprint)
-      setPublicIdBase64(uint8ArrayToBase64(identity.publicIdBytes))
-      setPrfSupported(identity.prfSupported)
-      setSuccess('Passkey created successfully!')
+      // Show success and let user manually authenticate
+      // (Auto-authenticating immediately can fail on some authenticators like 1Password mobile)
+      setSuccess('Passkey created! Click "Authenticate" below to continue.')
       setPageState('idle')
-
-      // Auto-advance to mode selection
-      setWizardStep('mode-select')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create passkey')
       setPageState('idle')
