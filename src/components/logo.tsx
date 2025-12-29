@@ -13,7 +13,7 @@ export function Logo({ className = 'h-10 w-10' }: LogoProps) {
       {/* Folder */}
       <path
         className="fill-[#7a8a9a] dark:fill-current dark:opacity-60"
-        d="M4 4C2.89543 4 2 4.89543 2 6V18C2 19.1046 2.89543 20 4 20H20C21.1046 20 22 19.1046 22 18V8C22 6.89543 21.1046 6 20 6H12.4142C12.149 6 11.8946 5.89464 11.7071 5.70711L10.5858 4.58579C10.2107 4.21071 9.70201 4 9.17157 4H4Z"
+        d="M4 3.3C2.89543 3.3 2 4.1 2 5.2V18.8C2 19.9 2.89543 20.7 4 20.7H20C21.1046 20.7 22 19.9 22 18.8V7.2C22 6.1 21.1046 5.3 20 5.3H13.1C12.84 5.3 12.59 5.2 12.4 5L11.3 3.9C10.93 3.5 10.42 3.3 9.89 3.2L4 3.3Z"
       />
       {/* Lock shackle */}
       <path
@@ -21,16 +21,16 @@ export function Logo({ className = 'h-10 w-10' }: LogoProps) {
         fill="none"
         strokeWidth="1.5"
         strokeLinecap="round"
-        d="M9 13V11.5C9 9.84315 10.3431 8.5 12 8.5C13.6569 8.5 15 9.84315 15 11.5V13"
+        d="M9.3 12.9V11.5C9.3 9.8 10.5 8.9 12 8.9C13.5 8.9 14.7 9.8 14.7 11.5V12.9"
       />
       {/* Lock body */}
       <rect
         className="fill-[#3a4958] dark:fill-current"
-        x="8.5"
-        y="13"
-        width="7"
-        height="4.5"
-        rx="1"
+        x="8.7"
+        y="12.9"
+        width="6.6"
+        height="4.3"
+        rx="0.7"
       />
     </svg>
   )
