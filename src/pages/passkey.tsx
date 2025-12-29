@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Fingerprint, Plus, AlertCircle, CheckCircle2, Loader2, Copy, Check, Key, QrCode, Shield } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -19,6 +19,7 @@ import {
   countersignMutualToken,
   isPendingMutualToken,
 } from '@/lib/crypto/contact-token'
+import { PIN_WORDLIST } from '@/lib/crypto/constants'
 
 type PageState = 'idle' | 'checking' | 'creating' | 'getting_key' | 'binding_contact'
 
@@ -68,9 +69,21 @@ function parseContactInput(input: string): ContactCard | null {
   return null
 }
 
+// Generate random placeholder name from BIP39 words
+function generateRandomName(): string {
+  const words: string[] = []
+  const randomBytes = crypto.getRandomValues(new Uint8Array(8)) // 4 words * 2 bytes each
+  for (let i = 0; i < 4; i++) {
+    const index = ((randomBytes[i * 2] << 8) | randomBytes[i * 2 + 1]) % PIN_WORDLIST.length
+    words.push(PIN_WORDLIST[index])
+  }
+  return words.join('-')
+}
+
 export function PasskeyPage() {
   const [pageState, setPageState] = useState<PageState>('idle')
   const [userName, setUserName] = useState('')
+  const defaultUserName = useMemo(() => generateRandomName(), [])
   const [fingerprint, setFingerprint] = useState<string | null>(null)
   const [publicIdBase64, setPublicIdBase64] = useState<string | null>(null)
   const [credentialPublicKeyBase64, setCredentialPublicKeyBase64] = useState<string | null>(null)
@@ -120,7 +133,7 @@ export function PasskeyPage() {
       setPageState('creating')
 
       // Create the passkey (also stores credential public key)
-      const { credentialId } = await createPasskeyCredential(userName || 'Secure Transfer User')
+      const { credentialId } = await createPasskeyCredential(userName || defaultUserName)
       setUserName('') // Clear display name input after successful creation
       setCurrentCredentialId(credentialId)
 
@@ -341,10 +354,10 @@ export function PasskeyPage() {
               transfers without needing PINs.
             </p>
             <div className="space-y-2">
-              <Label htmlFor="userName">Display Name (optional)</Label>
+              <Label htmlFor="userName">Display Name</Label>
               <Input
                 id="userName"
-                placeholder="e.g., Work Laptop, Personal"
+                placeholder={defaultUserName}
                 value={userName}
                 onChange={(e) => setUserName(e.target.value)}
                 disabled={isLoading}
