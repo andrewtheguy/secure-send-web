@@ -258,7 +258,10 @@ export async function createPasskeyCredential(
     throw new Error('User cancelled passkey creation or no credential returned')
   }
 
-  // Check if PRF is enabled for this credential
+  // Check if PRF is reported as enabled for this credential
+  // Note: Some authenticators (e.g., 1Password on mobile) don't report prf.enabled=true
+  // during creation but PRF still works during authentication. We don't throw here -
+  // actual PRF validation happens during authentication in getPasskeyMasterKey().
   const extResults = credential.getClientExtensionResults() as {
     prf?: { enabled?: boolean }
   }
@@ -266,9 +269,9 @@ export async function createPasskeyCredential(
   const prfSupported = extResults.prf?.enabled === true
 
   if (!prfSupported) {
-    throw new Error(
-      'PRF extension not supported by this authenticator. ' +
-        'Passkey encryption requires PRF support (available in 1Password, iCloud Keychain, etc.)'
+    console.warn(
+      'PRF extension not reported as enabled during creation. ' +
+        'PRF support will be verified during authentication.'
     )
   }
 
