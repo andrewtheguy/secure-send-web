@@ -40,8 +40,8 @@ type PageState = 'idle' | 'checking' | 'creating' | 'getting_key' | 'binding_con
 type WizardStep =
   | 'authenticate' // Step 1
   | 'mode-select' // Step 2: Choose role
-  | 'create-token' // Step 3A: Initiator flow (includes contact card)
-  | 'complete-token' // Step 3B: Non-initiator flow (includes contact card)
+  | 'create-request' // Step 3A: Initiator creates token request
+  | 'sign-request' // Step 3B: Countersigner signs token request
 
 // Contact card format: JSON with id (public ID) and cpk (credential public key)
 interface ContactCard {
@@ -151,8 +151,8 @@ export function PasskeyPage() {
 
   // Get step 3 label based on current mode
   const getStep3Label = (): string => {
-    if (wizardStep === 'create-token') return 'Create Token'
-    if (wizardStep === 'complete-token') return 'Complete Token'
+    if (wizardStep === 'create-request') return 'Create Request'
+    if (wizardStep === 'sign-request') return 'Sign Request'
     return 'Token'
   }
 
@@ -345,7 +345,7 @@ export function PasskeyPage() {
     }
   }
 
-  const handleCompleteToken = async () => {
+  const handleSignRequest = async () => {
     setTokenError(null)
     setOutputToken(null)
     setPageState('binding_contact')
@@ -353,7 +353,7 @@ export function PasskeyPage() {
     try {
       const trimmed = contactInput.trim()
       if (!trimmed) {
-        throw new Error('Please enter pending token')
+        throw new Error('Please enter token request')
       }
 
       if (!currentCredentialId) {
@@ -370,7 +370,7 @@ export function PasskeyPage() {
       }
 
       if (!isPendingMutualToken(trimmed)) {
-        throw new Error('Invalid pending token format')
+        throw new Error('Invalid token request format')
       }
 
       const token = await countersignMutualToken(
@@ -384,7 +384,7 @@ export function PasskeyPage() {
       setContactInput('')
       setPageState('idle')
     } catch (err) {
-      setTokenError(err instanceof Error ? err.message : 'Failed to complete token')
+      setTokenError(err instanceof Error ? err.message : 'Failed to sign token request')
       setPageState('idle')
     }
   }
@@ -646,7 +646,7 @@ export function PasskeyPage() {
 
       <div className="grid gap-4">
         <Button
-          onClick={() => setWizardStep('create-token')}
+          onClick={() => setWizardStep('create-request')}
           className="h-auto py-4 flex flex-col items-start gap-1"
           variant="outline"
         >
@@ -655,29 +655,29 @@ export function PasskeyPage() {
             I&apos;m starting the exchange
           </div>
           <p className="text-xs text-muted-foreground font-normal text-left">
-            You have your contact&apos;s card and will create a pending token for them
+            You have your contact&apos;s card and will create a token request for them to sign
           </p>
         </Button>
 
         <Button
-          onClick={() => setWizardStep('complete-token')}
+          onClick={() => setWizardStep('sign-request')}
           className="h-auto py-4 flex flex-col items-start gap-1"
           variant="outline"
         >
           <div className="flex items-center gap-2 font-semibold">
             <CheckCircle2 className="h-5 w-5" />
-            I&apos;m completing an exchange
+            I&apos;m signing a token request
           </div>
           <p className="text-xs text-muted-foreground font-normal text-left">
-            Share your contact card, then complete the pending token you receive
+            Share your contact card, then sign the token request you receive
           </p>
         </Button>
       </div>
     </div>
   )
 
-  // Step 3A: Create Token (initiator flow)
-  const renderCreateTokenStep = () => (
+  // Step 3A: Create Request (initiator flow)
+  const renderCreateRequestStep = () => (
     <div className="space-y-6">
       {/* Back button */}
       <Button
@@ -691,14 +691,14 @@ export function PasskeyPage() {
         Back to options
       </Button>
 
-      {/* Token creation form */}
+      {/* Token request creation form */}
       <div className="space-y-4 p-4 rounded-lg border border-amber-500/30 bg-amber-50/30 dark:bg-amber-950/10">
         <h3 className="font-semibold flex items-center gap-2">
           <Shield className="h-5 w-5 text-amber-600" />
-          Create Pending Token
+          Create Token Request
         </h3>
         <p className="text-sm text-muted-foreground">
-          Paste your contact&apos;s card to create a pending token for them to complete.
+          Paste your contact&apos;s card to create a token request for them to sign.
         </p>
 
         <div className="space-y-2">
@@ -736,7 +736,7 @@ export function PasskeyPage() {
           ) : (
             <>
               <Shield className="mr-2 h-4 w-4" />
-              Create Pending Token
+              Create Token Request
             </>
           )}
         </Button>
@@ -752,7 +752,7 @@ export function PasskeyPage() {
           <div className="space-y-3 pt-3 border-t border-amber-500/30">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-green-600" />
-              <span className="text-sm font-medium text-green-600">Pending Token Created</span>
+              <span className="text-sm font-medium text-green-600">Token Request Created</span>
             </div>
             <div className="flex gap-2">
               <Textarea
@@ -772,7 +772,7 @@ export function PasskeyPage() {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Send this pending token to your contact. They will complete it and send back the final
+              Send this token request to your contact. They will sign it and send back the final
               mutual token.
             </p>
             <Button variant="outline" onClick={handleStartOver} className="w-full">
@@ -784,8 +784,8 @@ export function PasskeyPage() {
     </div>
   )
 
-  // Step 3B: Complete Token (with contact card at top)
-  const renderCompleteTokenStep = () => (
+  // Step 3B: Sign Request (with contact card at top)
+  const renderSignRequestStep = () => (
     <div className="space-y-6">
       {/* Back button */}
       <Button
@@ -805,17 +805,17 @@ export function PasskeyPage() {
       <div className="space-y-4 p-4 rounded-lg border border-amber-500/30 bg-amber-50/30 dark:bg-amber-950/10">
         <h3 className="font-semibold flex items-center gap-2">
           <Shield className="h-5 w-5 text-amber-600" />
-          Complete Pending Token
+          Sign Token Request
         </h3>
         <p className="text-sm text-muted-foreground">
-          Paste the pending token your contact sent you to complete the mutual token.
+          Paste the token request your contact sent you to create the mutual token.
         </p>
 
         <div className="space-y-2">
-          <Label htmlFor="pending-token">Pending Token</Label>
+          <Label htmlFor="token-request">Token Request</Label>
           <Textarea
-            id="pending-token"
-            placeholder="Paste the pending token from your contact..."
+            id="token-request"
+            placeholder="Paste the token request from your contact..."
             value={contactInput}
             onChange={(e) => setContactInput(e.target.value)}
             disabled={isLoading}
@@ -824,7 +824,7 @@ export function PasskeyPage() {
         </div>
 
         <Button
-          onClick={handleCompleteToken}
+          onClick={handleSignRequest}
           disabled={!contactInput.trim() || isLoading}
           className="w-full"
         >
@@ -836,7 +836,7 @@ export function PasskeyPage() {
           ) : (
             <>
               <Shield className="mr-2 h-4 w-4" />
-              Complete Token
+              Sign Token Request
             </>
           )}
         </Button>
@@ -890,10 +890,10 @@ export function PasskeyPage() {
         return renderAuthenticateStep()
       case 'mode-select':
         return renderModeSelectStep()
-      case 'create-token':
-        return renderCreateTokenStep()
-      case 'complete-token':
-        return renderCompleteTokenStep()
+      case 'create-request':
+        return renderCreateRequestStep()
+      case 'sign-request':
+        return renderSignRequestStep()
     }
   }
 
@@ -944,8 +944,8 @@ export function PasskeyPage() {
             </p>
             <p>
               <span className="font-medium text-foreground">Mutual tokens:</span> Both parties sign
-              the same token, proving mutual consent. The initiator creates a pending token, and the
-              counterparty completes it with their signature.
+              the same token, proving mutual consent. The initiator creates a token request, and the
+              counterparty signs it to produce the final mutual token.
             </p>
           </div>
         </CardContent>
