@@ -16,7 +16,6 @@ import {
 const PASSKEY_MASTER_LABEL = 'secure-send-passkey-master-v1'
 const PASSKEY_PUBLIC_ID_LABEL = 'secure-send-passkey-public-id-v1'
 const SESSION_BINDING_LABEL = 'secure-send-session-bind-v1'
-const CONTACT_BINDING_LABEL = 'secure-send-contact-binding-v1'
 
 /**
  * Derive a stable, shareable public identifier from the passkey master key.
@@ -38,38 +37,6 @@ export async function derivePasskeyPublicId(masterKey: CryptoKey): Promise<Uint8
   )
 
   return new Uint8Array(idBits)
-}
-
-/**
- * Derive a binding for a contact's public ID.
- * Uses HKDF so no raw key material is ever exposed to JavaScript.
- *
- * The binding cryptographically ties the signer's passkey to the recipient's public ID.
- * Verification requires the signer to re-authenticate (which is fine since they
- * authenticate anyway when sending files).
- *
- * SECURITY: This approach avoids exposing any raw private key bytes, unlike ECDSA
- * which would require temporarily exposing the private key seed for import.
- *
- * @param masterKey - Non-extractable HKDF master key from passkey
- * @param recipientPublicIdBytes - Recipient's 32-byte public ID
- * @returns 32-byte binding value
- */
-export async function deriveContactBinding(
-  masterKey: CryptoKey,
-  recipientPublicIdBytes: Uint8Array
-): Promise<Uint8Array> {
-  const bindingBits = await crypto.subtle.deriveBits(
-    {
-      name: 'HKDF',
-      hash: 'SHA-256',
-      salt: recipientPublicIdBytes as BufferSource,
-      info: new TextEncoder().encode(CONTACT_BINDING_LABEL),
-    },
-    masterKey,
-    256 // 32 bytes
-  )
-  return new Uint8Array(bindingBits)
 }
 
 /**
