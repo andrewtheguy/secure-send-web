@@ -212,7 +212,16 @@ export function parseMutualTrustHandshakeEvent(event: Event): {
   }
 
   // Parse ephemeral key fields (required for handshake)
-  const { ephemeralPub, sessionBinding } = parseEphemeralKeys(event.tags)
+  let ephemeralPub: Uint8Array | undefined
+  let sessionBinding: Uint8Array | undefined
+  try {
+    const parsed = parseEphemeralKeys(event.tags)
+    ephemeralPub = parsed.ephemeralPub
+    sessionBinding = parsed.sessionBinding
+  } catch {
+    // Malformed epk/esb tags - treat as invalid event
+    return null
+  }
   if (!ephemeralPub || !sessionBinding) return null
 
   return {
@@ -426,10 +435,16 @@ export function parseMutualTrustEvent(event: Event): {
   }
 
   // Parse optional ephemeral key fields for PFS
-  const {
-    ephemeralPub: senderEphemeralPub,
-    sessionBinding: senderSessionBinding,
-  } = parseEphemeralKeys(event.tags)
+  let senderEphemeralPub: Uint8Array | undefined
+  let senderSessionBinding: Uint8Array | undefined
+  try {
+    const parsed = parseEphemeralKeys(event.tags)
+    senderEphemeralPub = parsed.ephemeralPub
+    senderSessionBinding = parsed.sessionBinding
+  } catch {
+    // Malformed epk/esb tags - treat as invalid event
+    return null
+  }
 
   return {
     receiverFingerprint,
@@ -553,10 +568,16 @@ export function parseAckEvent(event: Event): {
   if (!Number.isInteger(seq) || seq < -1) return null
 
   // Parse optional ephemeral key fields for PFS (receiver's response)
-  const {
-    ephemeralPub: receiverEphemeralPub,
-    sessionBinding: receiverSessionBinding,
-  } = parseEphemeralKeys(event.tags)
+  let receiverEphemeralPub: Uint8Array | undefined
+  let receiverSessionBinding: Uint8Array | undefined
+  try {
+    const parsed = parseEphemeralKeys(event.tags)
+    receiverEphemeralPub = parsed.ephemeralPub
+    receiverSessionBinding = parsed.sessionBinding
+  } catch {
+    // Malformed epk/esb tags - treat as invalid event
+    return null
+  }
 
   return { senderPubkey, transferId, seq, hint, nonce, receiverEphemeralPub, receiverSessionBinding, receiverContactToken }
 }

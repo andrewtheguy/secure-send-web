@@ -55,6 +55,8 @@ export function ReceiveTab() {
 
   // Verify sender contact token - now verifies signature immediately
   useEffect(() => {
+    let cancelled = false
+
     const input = senderPublicIdInput.trim()
     if (!input) {
       setVerifiedToken(null)
@@ -71,12 +73,16 @@ export function ReceiveTab() {
 
     // Verify token signature - no authentication required!
     verifyContactToken(input).then(verified => {
+      if (cancelled) return
       setVerifiedToken(verified)
       setSenderPublicIdError(null)
     }).catch((err) => {
+      if (cancelled) return
       setVerifiedToken(null)
       setSenderPublicIdError(err instanceof Error ? err.message : 'Invalid or tampered token')
     })
+
+    return () => { cancelled = true }
   }, [senderPublicIdInput])
 
   // Auto-expand Advanced Options when passkey mode is enabled

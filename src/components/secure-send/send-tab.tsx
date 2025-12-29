@@ -57,6 +57,8 @@ export function SendTab() {
 
   // Verify receiver contact token - now verifies signature immediately
   useEffect(() => {
+    let cancelled = false
+
     const input = receiverPublicKeyInput.trim()
     if (!input) {
       setVerifiedToken(null)
@@ -73,12 +75,16 @@ export function SendTab() {
 
     // Verify token signature - no authentication required!
     verifyContactToken(input).then(verified => {
+      if (cancelled) return
       setVerifiedToken(verified)
       setReceiverPublicKeyError(null)
     }).catch((err) => {
+      if (cancelled) return
       setVerifiedToken(null)
       setReceiverPublicKeyError(err instanceof Error ? err.message : 'Invalid or tampered token')
     })
+
+    return () => { cancelled = true }
   }, [receiverPublicKeyInput])
 
   // All hooks must be called unconditionally (React rules)

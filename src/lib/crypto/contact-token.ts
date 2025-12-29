@@ -312,10 +312,15 @@ export async function verifyContactToken(
   const signature = base64ToUint8Array(payload.sig)
 
   // Parse and validate clientDataJSON
-  const clientData = JSON.parse(new TextDecoder().decode(clientDataJSON)) as {
+  let clientData: {
     type: string
     challenge: string
     origin: string
+  }
+  try {
+    clientData = JSON.parse(new TextDecoder().decode(clientDataJSON)) as typeof clientData
+  } catch (err) {
+    throw new Error(`Failed to parse clientDataJSON: ${err instanceof Error ? err.message : 'unknown error'}`)
   }
 
   if (clientData.type !== 'webauthn.get') {
