@@ -31,7 +31,7 @@ export interface PendingMutualToken {
   a_cpk: string
   /** Party B's public ID (base64, 32 bytes) - lexicographically larger */
   b_id: string
-  /** Party B's credential public key (base64, 65 bytes P-256) - empty until countersigned */
+  /** Party B's credential public key (base64, 65 bytes P-256) */
   b_cpk: string
   /** Created at timestamp (Unix seconds) - set by initiator */
   iat: number

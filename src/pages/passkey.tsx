@@ -43,7 +43,7 @@ function base64ToUint8Array(base64: string): Uint8Array {
   return bytes
 }
 
-// Parse a contact card from JSON or legacy base64 public ID
+// Parse a contact card from JSON format
 function parseContactInput(input: string): ContactCard | null {
   const trimmed = input.trim()
   if (!trimmed) return null
