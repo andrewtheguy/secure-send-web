@@ -1,31 +1,39 @@
 #!/usr/bin/env npx tsx
 /**
- * Standalone contact token verifier
+ * Standalone mutual contact token verifier
  *
- * Usage: npx tsx scripts/verify-contact-token.ts <token>
+ * Usage: npx tsx scripts/verify-contact-token.ts
  *
- * Token format: Raw JSON object
- *   {"sub":"...","cpk":"...","spk":"...","iat":...,"authData":"...","clientDataJSON":"...","sig":"...","comment":"..."}
+ * Token format: Raw JSON object (mutual token with dual signatures)
+ *   {"a_id":"...","a_cpk":"...","b_id":"...","b_cpk":"...","iat":...,"init_authData":"...","init_clientDataJSON":"...","init_sig":"...","counter_authData":"...","counter_clientDataJSON":"...","counter_sig":"..."}
  *
  * Example:
- *   echo '{"sub":"...","cpk":"..."}' | npx tsx scripts/verify-contact-token.ts
+ *   echo '{"a_id":"...","a_cpk":"..."}' | npx tsx scripts/verify-contact-token.ts
+ *   pbpaste | npx tsx scripts/verify-contact-token.ts
  *
- * Verifies the WebAuthn ECDSA signature without needing a browser.
+ * Verifies both WebAuthn ECDSA signatures without needing a browser.
  */
 
 import { webcrypto, timingSafeEqual } from 'crypto'
 
 const crypto = webcrypto
 
-interface ContactTokenPayload {
-  sub: string
-  cpk: string
-  spk: string
+interface PendingMutualToken {
+  a_id: string
+  a_cpk: string
+  b_id: string
+  b_cpk: string
   iat: number
-  authData: string
-  clientDataJSON: string
-  sig: string
+  init_authData: string
+  init_clientDataJSON: string
+  init_sig: string
   comment?: string
+}
+
+interface MutualContactTokenPayload extends PendingMutualToken {
+  counter_authData: string
+  counter_clientDataJSON: string
+  counter_sig: string
 }
 
 interface ClientData {
@@ -68,18 +76,15 @@ function derToRaw(der: Uint8Array): Uint8Array {
     if (2 + lenBytes > der.length) {
       throw new Error('Invalid DER signature: truncated length bytes')
     }
-    // Parse the length (we don't actually need the value, just skip past it)
     let seqLen = 0
     for (let i = 0; i < lenBytes; i++) {
       seqLen = (seqLen << 8) | der[2 + i]
     }
     offset = 2 + lenBytes
-    // Validate sequence length fits in buffer
     if (offset + seqLen > der.length) {
       throw new Error('Invalid DER signature: sequence length exceeds buffer')
     }
   } else {
-    // Short form length
     const seqLen = der[1]
     if (2 + seqLen > der.length) {
       throw new Error('Invalid DER signature: sequence length exceeds buffer')
@@ -101,7 +106,7 @@ function derToRaw(der: Uint8Array): Uint8Array {
   if (offset + rLen > der.length) {
     throw new Error('Invalid DER signature: r extends past buffer')
   }
-  let r = der.slice(offset, offset + rLen)
+  let r = der.subarray(offset, offset + rLen)
   offset += rLen
 
   // Parse s INTEGER
@@ -119,11 +124,11 @@ function derToRaw(der: Uint8Array): Uint8Array {
   if (offset + sLen > der.length) {
     throw new Error('Invalid DER signature: s extends past buffer')
   }
-  let s = der.slice(offset, offset + sLen)
+  let s = der.subarray(offset, offset + sLen)
 
   // Remove leading zero bytes (used for sign in DER encoding)
-  if (r.length === 33 && r[0] === 0) r = r.slice(1)
-  if (s.length === 33 && s[0] === 0) s = s.slice(1)
+  if (r.length === 33 && r[0] === 0) r = r.subarray(1)
+  if (s.length === 33 && s[0] === 0) s = s.subarray(1)
 
   // Pad to 32 bytes
   const raw = new Uint8Array(64)
@@ -135,123 +140,80 @@ function derToRaw(der: Uint8Array): Uint8Array {
 // Compute fingerprint (first 8 bytes of SHA-256, hex)
 async function fingerprint(data: Uint8Array): Promise<string> {
   const hash = await crypto.subtle.digest('SHA-256', data)
-  return Buffer.from(new Uint8Array(hash).slice(0, 8)).toString('hex').toUpperCase()
+  return Buffer.from(new Uint8Array(hash).subarray(0, 8)).toString('hex').toUpperCase()
 }
 
-interface VerificationResult {
-  recipientPublicId: string
-  signerPublicId: string
-  signerCredentialPublicKey: string
-  issuedAt: Date
-  origin: string
-  comment?: string
+// Format fingerprint as XXXX-XXXX-XXXX-XXXX
+function formatFingerprint(fp: string): string {
+  return fp.match(/.{4}/g)!.join('-')
 }
 
-async function verifyContactToken(token: string): Promise<VerificationResult> {
-  // Parse raw JSON
-  let payload: ContactTokenPayload
-  try {
-    payload = JSON.parse(token.trim()) as ContactTokenPayload
-  } catch {
-    throw new Error('Invalid format: expected raw JSON object')
+// Compare two 32-byte public IDs lexicographically
+function compareIds(id1: Uint8Array, id2: Uint8Array): number {
+  for (let i = 0; i < 32; i++) {
+    if (id1[i] < id2[i]) return -1
+    if (id1[i] > id2[i]) return 1
   }
+  return 0
+}
 
-  // Validate required fields exist and have correct types
-  if (typeof payload.sub !== 'string') {
-    throw new Error('Missing or invalid field: sub (expected base64 string)')
-  }
-  if (typeof payload.cpk !== 'string') {
-    throw new Error('Missing or invalid field: cpk (expected base64 string)')
-  }
-  if (typeof payload.spk !== 'string') {
-    throw new Error('Missing or invalid field: spk (expected base64 string)')
-  }
-  if (typeof payload.iat !== 'number' || !Number.isFinite(payload.iat)) {
-    throw new Error('Missing or invalid field: iat (expected numeric timestamp)')
-  }
-  if (typeof payload.authData !== 'string') {
-    throw new Error('Missing or invalid field: authData (expected base64 string)')
-  }
-  if (typeof payload.clientDataJSON !== 'string') {
-    throw new Error('Missing or invalid field: clientDataJSON (expected base64 string)')
-  }
-  if (typeof payload.sig !== 'string') {
-    throw new Error('Missing or invalid field: sig (expected base64 string)')
-  }
+// Compute the mutual challenge
+async function computeMutualChallenge(
+  aId: Uint8Array,
+  aCpk: Uint8Array,
+  bId: Uint8Array,
+  bCpk: Uint8Array,
+  iat: number
+): Promise<Uint8Array> {
+  // Total: 32 + 65 + 32 + 65 + 8 = 202 bytes
+  const data = new Uint8Array(202)
+  let offset = 0
 
-  console.log('\n=== Contact Token ===\n')
-  if (payload.comment) {
-    console.log('Comment:', payload.comment)
-  }
-  console.log('Issued at:', new Date(payload.iat * 1000).toISOString())
+  data.set(aId, offset)
+  offset += 32
+  data.set(aCpk, offset)
+  offset += 65
+  data.set(bId, offset)
+  offset += 32
+  data.set(bCpk, offset)
+  offset += 65
 
-  // Decode fields (safe after validation)
-  const recipientPublicId = base64Decode(payload.sub)
-  const signerCredentialPublicKey = base64Decode(payload.cpk)
-  const signerPublicId = base64Decode(payload.spk)
-  const authData = base64Decode(payload.authData)
-  const clientDataJSON = base64Decode(payload.clientDataJSON)
-  const signature = base64Decode(payload.sig)
+  const iatBytes = new DataView(new ArrayBuffer(8))
+  iatBytes.setBigUint64(0, BigInt(iat), false) // big-endian
+  data.set(new Uint8Array(iatBytes.buffer), offset)
 
-  // Validate sizes
-  if (recipientPublicId.length !== 32) {
-    throw new Error(`Invalid recipient public ID: expected 32 bytes, got ${recipientPublicId.length}`)
-  }
-  if (signerCredentialPublicKey.length !== 65 || signerCredentialPublicKey[0] !== 0x04) {
-    throw new Error('Invalid credential public key: expected 65-byte uncompressed P-256')
-  }
-  if (signerPublicId.length !== 32) {
-    throw new Error(`Invalid signer public ID: expected 32 bytes, got ${signerPublicId.length}`)
-  }
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', data))
+}
 
-  // Show fingerprints
-  const recipientFp = await fingerprint(recipientPublicId)
-  const signerFp = await fingerprint(signerPublicId)
-  const credentialFp = await fingerprint(signerCredentialPublicKey)
-  console.log('\nRecipient fingerprint:', recipientFp.match(/.{4}/g)!.join('-'))
-  console.log('Signer fingerprint:', signerFp.match(/.{4}/g)!.join('-'), '(passkey public ID)')
-  console.log('Credential fingerprint:', credentialFp.match(/.{4}/g)!.join('-'), '(WebAuthn key)')
-
+// Verify a single WebAuthn signature
+async function verifySignature(
+  credentialPublicKey: Uint8Array,
+  authData: Uint8Array,
+  clientDataJSON: Uint8Array,
+  signature: Uint8Array,
+  expectedChallenge: Uint8Array,
+  label: string
+): Promise<string> {
   // Parse clientDataJSON
   const clientData = JSON.parse(Buffer.from(clientDataJSON).toString('utf8')) as ClientData
-  console.log('\nClient data:')
-  console.log('  Type:', clientData.type)
-  console.log('  Origin:', clientData.origin)
 
   if (clientData.type !== 'webauthn.get') {
-    throw new Error(`Invalid clientData type: ${clientData.type}`)
+    throw new Error(`${label}: Invalid clientData type: ${clientData.type}`)
   }
 
-  // Verify challenge matches expected value
-  // challenge = SHA256(sub || spk || cpk || iat)
-  const dataToSign = new Uint8Array(32 + 32 + 65 + 8)
-  dataToSign.set(recipientPublicId, 0)
-  dataToSign.set(signerPublicId, 32)
-  dataToSign.set(signerCredentialPublicKey, 64)
-  const iatView = new DataView(new ArrayBuffer(8))
-  iatView.setBigUint64(0, BigInt(payload.iat), false)
-  dataToSign.set(new Uint8Array(iatView.buffer), 129)
-
-  const expectedChallenge = new Uint8Array(await crypto.subtle.digest('SHA-256', dataToSign))
+  // Verify challenge matches
   const actualChallenge = base64urlDecode(clientData.challenge)
-
-  // Verify lengths match before byte comparison
   if (actualChallenge.length !== expectedChallenge.length) {
-    throw new Error(
-      `Challenge length mismatch: expected ${expectedChallenge.length} bytes, got ${actualChallenge.length} bytes`
-    )
+    throw new Error(`${label}: Challenge length mismatch`)
   }
-
-  // Constant-time byte comparison using Node's timingSafeEqual
   if (!timingSafeEqual(Buffer.from(expectedChallenge), Buffer.from(actualChallenge))) {
-    throw new Error('Challenge mismatch - token data may be tampered')
+    throw new Error(`${label}: Challenge mismatch - token data may be tampered`)
   }
-  console.log('\nChallenge: VALID (matches token data)')
 
   // Import public key
   const publicKey = await crypto.subtle.importKey(
     'raw',
-    signerCredentialPublicKey,
+    credentialPublicKey,
     { name: 'ECDSA', namedCurve: 'P-256' },
     false,
     ['verify']
@@ -273,18 +235,182 @@ async function verifyContactToken(token: string): Promise<VerificationResult> {
   )
 
   if (!valid) {
-    throw new Error('SIGNATURE VERIFICATION FAILED')
+    throw new Error(`${label}: SIGNATURE VERIFICATION FAILED`)
   }
 
-  console.log('Signature: VALID')
-  console.log('\n=== VERIFICATION PASSED ===\n')
+  return clientData.origin
+}
+
+interface VerificationResult {
+  partyAPublicId: string
+  partyAFingerprint: string
+  partyBPublicId: string
+  partyBFingerprint: string
+  issuedAt: Date
+  initOrigin: string
+  counterOrigin?: string
+  isPending: boolean
+  comment?: string
+}
+
+async function verifyMutualToken(token: string): Promise<VerificationResult> {
+  // Parse raw JSON
+  let payload: PendingMutualToken | MutualContactTokenPayload
+  try {
+    payload = JSON.parse(token.trim()) as PendingMutualToken | MutualContactTokenPayload
+  } catch {
+    throw new Error('Invalid format: expected raw JSON object')
+  }
+
+  // Validate required fields for pending token
+  if (typeof payload.a_id !== 'string') {
+    throw new Error('Missing or invalid field: a_id (expected base64 string)')
+  }
+  if (typeof payload.a_cpk !== 'string') {
+    throw new Error('Missing or invalid field: a_cpk (expected base64 string)')
+  }
+  if (typeof payload.b_id !== 'string') {
+    throw new Error('Missing or invalid field: b_id (expected base64 string)')
+  }
+  if (typeof payload.b_cpk !== 'string') {
+    throw new Error('Missing or invalid field: b_cpk (expected base64 string)')
+  }
+  if (typeof payload.iat !== 'number' || !Number.isFinite(payload.iat)) {
+    throw new Error('Missing or invalid field: iat (expected numeric timestamp)')
+  }
+  if (typeof payload.init_authData !== 'string') {
+    throw new Error('Missing or invalid field: init_authData (expected base64 string)')
+  }
+  if (typeof payload.init_clientDataJSON !== 'string') {
+    throw new Error('Missing or invalid field: init_clientDataJSON (expected base64 string)')
+  }
+  if (typeof payload.init_sig !== 'string') {
+    throw new Error('Missing or invalid field: init_sig (expected base64 string)')
+  }
+
+  // Check if complete or pending
+  const hasCounterSig =
+    typeof (payload as MutualContactTokenPayload).counter_authData === 'string' &&
+    typeof (payload as MutualContactTokenPayload).counter_clientDataJSON === 'string' &&
+    typeof (payload as MutualContactTokenPayload).counter_sig === 'string'
+
+  const isPending = !hasCounterSig
+
+  console.log('\n=== Mutual Contact Token ===\n')
+  console.log('Status:', isPending ? 'PENDING (single signature)' : 'COMPLETE (dual signatures)')
+  if (payload.comment) {
+    console.log('Comment:', payload.comment)
+  }
+  console.log('Issued at:', new Date(payload.iat * 1000).toISOString())
+
+  // Decode fields
+  const aId = base64Decode(payload.a_id)
+  const aCpk = base64Decode(payload.a_cpk)
+  const bId = base64Decode(payload.b_id)
+  const bCpk = base64Decode(payload.b_cpk)
+  const initAuthData = base64Decode(payload.init_authData)
+  const initClientDataJSON = base64Decode(payload.init_clientDataJSON)
+  const initSig = base64Decode(payload.init_sig)
+
+  // Validate sizes
+  if (aId.length !== 32) {
+    throw new Error(`Invalid a_id: expected 32 bytes, got ${aId.length}`)
+  }
+  if (bId.length !== 32) {
+    throw new Error(`Invalid b_id: expected 32 bytes, got ${bId.length}`)
+  }
+  if (aCpk.length !== 65 || aCpk[0] !== 0x04) {
+    throw new Error('Invalid a_cpk: expected 65-byte uncompressed P-256')
+  }
+  if (bCpk.length !== 65 || bCpk[0] !== 0x04) {
+    throw new Error('Invalid b_cpk: expected 65-byte uncompressed P-256')
+  }
+
+  // Verify lexicographic ordering
+  if (compareIds(aId, bId) >= 0) {
+    throw new Error('Invalid token: a_id must be lexicographically smaller than b_id')
+  }
+
+  // Show fingerprints
+  const aFp = await fingerprint(aId)
+  const bFp = await fingerprint(bId)
+  const aCpkFp = await fingerprint(aCpk)
+  const bCpkFp = await fingerprint(bCpk)
+
+  console.log('\nParty A:')
+  console.log('  Public ID:', formatFingerprint(aFp))
+  console.log('  Credential:', formatFingerprint(aCpkFp))
+  console.log('\nParty B:')
+  console.log('  Public ID:', formatFingerprint(bFp))
+  console.log('  Credential:', formatFingerprint(bCpkFp))
+
+  // Compute challenge
+  const challenge = await computeMutualChallenge(aId, aCpk, bId, bCpk, payload.iat)
+
+  // Try to verify init signature with aCpk first, then bCpk
+  let initOrigin: string
+  let initiatorCpk: Uint8Array
+  let counterSignerCpk: Uint8Array
+  let initiatorLabel: string
+
+  try {
+    initOrigin = await verifySignature(aCpk, initAuthData, initClientDataJSON, initSig, challenge, 'Initiator')
+    initiatorCpk = aCpk
+    counterSignerCpk = bCpk
+    initiatorLabel = 'Party A'
+  } catch {
+    try {
+      initOrigin = await verifySignature(bCpk, initAuthData, initClientDataJSON, initSig, challenge, 'Initiator')
+      initiatorCpk = bCpk
+      counterSignerCpk = aCpk
+      initiatorLabel = 'Party B'
+    } catch {
+      throw new Error('Initiator signature verification failed - neither party\'s key matches')
+    }
+  }
+
+  console.log(`\nInitiator: ${initiatorLabel}`)
+  console.log('  Origin:', initOrigin)
+  console.log('  Signature: VALID')
+
+  // Verify counter signature if present
+  let counterOrigin: string | undefined
+  if (!isPending) {
+    const complete = payload as MutualContactTokenPayload
+    const counterAuthData = base64Decode(complete.counter_authData)
+    const counterClientDataJSON = base64Decode(complete.counter_clientDataJSON)
+    const counterSig = base64Decode(complete.counter_sig)
+
+    counterOrigin = await verifySignature(
+      counterSignerCpk,
+      counterAuthData,
+      counterClientDataJSON,
+      counterSig,
+      challenge,
+      'Countersigner'
+    )
+
+    const counterLabel = initiatorCpk === aCpk ? 'Party B' : 'Party A'
+    console.log(`\nCountersigner: ${counterLabel}`)
+    console.log('  Origin:', counterOrigin)
+    console.log('  Signature: VALID')
+  }
+
+  if (isPending) {
+    console.log('\n=== PENDING TOKEN - NEEDS COUNTERSIGNATURE ===\n')
+  } else {
+    console.log('\n=== VERIFICATION PASSED - BOTH SIGNATURES VALID ===\n')
+  }
 
   return {
-    recipientPublicId: Buffer.from(recipientPublicId).toString('base64'),
-    signerPublicId: Buffer.from(signerPublicId).toString('base64'),
-    signerCredentialPublicKey: Buffer.from(signerCredentialPublicKey).toString('base64'),
+    partyAPublicId: Buffer.from(aId).toString('base64'),
+    partyAFingerprint: aFp,
+    partyBPublicId: Buffer.from(bId).toString('base64'),
+    partyBFingerprint: bFp,
     issuedAt: new Date(payload.iat * 1000),
-    origin: clientData.origin,
+    initOrigin,
+    counterOrigin,
+    isPending,
     comment: payload.comment,
   }
 }
@@ -302,19 +428,19 @@ async function readStdin(): Promise<string> {
 async function main(): Promise<void> {
   const token = await readStdin()
   if (!token) {
-    console.error("Usage: echo '{\"sub\":\"...\",\"cpk\":\"...\"}' | npx tsx scripts/verify-contact-token.ts")
+    console.error('Usage: echo \'{"a_id":"...","a_cpk":"..."}\' | npx tsx scripts/verify-contact-token.ts')
     console.error('')
-    console.error('Token format: Raw JSON object')
+    console.error('Token format: Raw JSON object (mutual token with dual signatures)')
     console.error('')
     console.error('Examples:')
-    console.error("  echo '{\"sub\":\"...\",\"cpk\":\"...\"}' | npx tsx scripts/verify-contact-token.ts")
+    console.error('  echo \'{"a_id":"...","a_cpk":"..."}\' | npx tsx scripts/verify-contact-token.ts')
     console.error('  pbpaste | npx tsx scripts/verify-contact-token.ts')
     console.error('  cat token.txt | npx tsx scripts/verify-contact-token.ts')
     process.exit(1)
   }
 
   try {
-    await verifyContactToken(token)
+    await verifyMutualToken(token)
   } catch (err) {
     console.error('\n=== VERIFICATION FAILED ===')
     console.error('Error:', err instanceof Error ? err.message : String(err))

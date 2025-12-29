@@ -52,7 +52,7 @@ import {
   constantTimeEqual,
 } from '@/lib/crypto/ecdh'
 import { uint8ArrayToBase64 } from '@/lib/nostr/events'
-import { verifyContactToken } from '@/lib/crypto/contact-token'
+import { verifyMutualToken, getCounterpartyFromToken } from '@/lib/crypto/contact-token'
 
 export interface UseNostrSendReturn {
   state: TransferState
@@ -188,24 +188,18 @@ export function useNostrSend(): UseNostrSendReturn {
             if (options.selfTransfer) {
               receiverPublicKeyBytes = ephemeral.identityPublicKeyBytes
             } else {
-              // Verify contact token's WebAuthn signature (no authentication required)
-              // This proves the token was signed by a specific passkey credential
-              const verifiedToken = await verifyContactToken(options.receiverContactToken!)
+              // Verify mutual contact token (both signatures verified)
+              // This proves both parties signed the token with their passkey credentials
+              const verifiedToken = await verifyMutualToken(
+                options.receiverContactToken!,
+                ephemeral.identityPublicKeyBytes // Verify we're a party to this token
+              )
 
-              // SECURITY: Verify the token was signed by THIS passkey, not someone else's
-              // This is SEPARATE from protocol-level verification (lines 425-451) which checks
-              // the RECEIVER's token from the ACK. This check ensures the SENDER's stored token
-              // was created by their own passkey, preventing token substitution attacks where
-              // an attacker replaces the sender's stored token to redirect them to send files
-              // to the wrong receiver.
-              if (verifiedToken.signerFingerprint !== senderFingerprint) {
-                throw new Error(
-                  `Token was signed by a different passkey (${verifiedToken.signerFingerprint}). ` +
-                  `Expected your passkey (${senderFingerprint}). Please create a new bound token.`
-                )
-              }
-
-              receiverPublicKeyBytes = verifiedToken.recipientPublicId
+              // SECURITY: The mutual token proves both parties agreed to communicate.
+              // verifyMutualToken already verified we're a party to the token.
+              // Now extract the counterparty (receiver) from the token.
+              const counterparty = getCounterpartyFromToken(verifiedToken, ephemeral.identityPublicKeyBytes)
+              receiverPublicKeyBytes = counterparty.publicId
             }
 
             // Derive AES key from passkey master key for initial payload encryption
@@ -425,30 +419,28 @@ export function useNostrSend(): UseNostrSendReturn {
             throw new Error('Security check failed: receiver did not provide ephemeral keys for PFS')
           }
 
-          // For cross-user passkey: verify receiver's contact token proves mutual intent
-          // The token proves: (1) receiver signed it with their passkey, (2) token targets us (sender)
+          // For cross-user passkey: verify receiver's mutual token proves mutual intent
+          // With mutual tokens, both parties have the SAME token with both signatures
+          // The receiver echoes back the same token to prove they have it
           if (isCrossUserPasskey) {
             if (!receiverContactToken) {
-              throw new Error('Security check failed: receiver did not provide contact token')
+              throw new Error('Security check failed: receiver did not provide mutual contact token')
             }
             if (!receiverHint) {
               throw new Error('Security check failed: receiver did not provide identity hint')
             }
-            // Verify receiver's token: must target sender's public ID and be signed by receiver
-            const verifiedReceiverToken = await verifyContactToken(receiverContactToken)
-            // Token's recipient (sub) should be the sender's public ID
-            if (verifiedReceiverToken.recipientFingerprint !== senderFingerprint) {
+            // Verify the mutual token: both signatures valid, and we're both parties
+            const verifiedReceiverToken = await verifyMutualToken(
+              receiverContactToken,
+              senderEphemeral.identityPublicKeyBytes // Verify sender is a party
+            )
+            // Extract the counterparty (receiver) from the verified token
+            const counterparty = getCounterpartyFromToken(verifiedReceiverToken, senderEphemeral.identityPublicKeyBytes)
+            // Verify the counterparty's fingerprint matches the receiver's identity hint
+            // This ensures the receiver is actually the other party to this token
+            if (counterparty.fingerprint !== receiverHint) {
               throw new Error(
-                `Receiver's token targets wrong recipient (${verifiedReceiverToken.recipientFingerprint}). ` +
-                `Expected your ID (${senderFingerprint}).`
-              )
-            }
-            // Token's signer should match the receiver's hint (their fingerprint from the ACK)
-            // This ensures the token was actually created by the receiver, not by a third party
-            if (verifiedReceiverToken.signerFingerprint !== receiverHint) {
-              throw new Error(
-                `Receiver's token was signed by wrong identity (${verifiedReceiverToken.signerFingerprint}). ` +
-                `Expected receiver's ID (${receiverHint}).`
+                `Receiver's identity (${receiverHint}) doesn't match token counterparty (${counterparty.fingerprint}).`
               )
             }
           }

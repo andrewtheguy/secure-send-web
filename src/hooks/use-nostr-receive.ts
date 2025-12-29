@@ -48,7 +48,7 @@ import {
   verifyPublicKeyCommitment,
   constantTimeEqual,
 } from '@/lib/crypto/ecdh'
-import { verifyContactToken } from '@/lib/crypto/contact-token'
+import { verifyMutualToken, getCounterpartyFromToken } from '@/lib/crypto/contact-token'
 
 export interface ReceiveOptions {
   usePasskey?: boolean
@@ -151,24 +151,18 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           if (opts.selfTransfer) {
             senderPublicKeyBytes = ephemeral.identityPublicKeyBytes
           } else {
-            // Verify contact token's WebAuthn signature (no authentication required)
-            // This proves the token was signed by a specific passkey credential
-            const verifiedToken = await verifyContactToken(opts.senderContactToken!)
+            // Verify mutual contact token (both signatures verified)
+            // This proves both parties signed the token with their passkey credentials
+            const verifiedToken = await verifyMutualToken(
+              opts.senderContactToken!,
+              ephemeral.identityPublicKeyBytes // Verify we're a party to this token
+            )
 
-            // SECURITY: Verify the token was signed by THIS passkey, not someone else's
-            // This is SEPARATE from protocol-level verification (lines 296-308) which checks
-            // the SENDER's token. This check ensures the RECEIVER's stored token was created
-            // by their own passkey, preventing token substitution attacks where an attacker
-            // replaces the receiver's stored token to redirect them to accept files from
-            // the wrong sender.
-            if (verifiedToken.signerFingerprint !== ephemeral.identityFingerprint) {
-              throw new Error(
-                `Token was signed by a different passkey (${verifiedToken.signerFingerprint}). ` +
-                `Expected your passkey (${ephemeral.identityFingerprint}). Please create a new bound token.`
-              )
-            }
-
-            senderPublicKeyBytes = verifiedToken.recipientPublicId
+            // SECURITY: The mutual token proves both parties agreed to communicate.
+            // verifyMutualToken already verified we're a party to the token.
+            // Now extract the counterparty (sender) from the token.
+            const counterparty = getCounterpartyFromToken(verifiedToken, ephemeral.identityPublicKeyBytes)
+            senderPublicKeyBytes = counterparty.publicId
           }
 
           // Calculate expected sender fingerprint for verification
@@ -296,17 +290,18 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             continue
           }
 
-          // === SECURITY VERIFICATION 3: Sender's contact token ===
-          // This proves sender specifically chose to communicate with us (not a stolen token)
-          const verifiedSenderToken = await verifyContactToken(parsed.senderContactToken)
-          // Token's recipient (sub) should be our public ID
-          if (verifiedSenderToken.recipientFingerprint !== hint) {
-            console.log(`Sender's token targets wrong recipient (${verifiedSenderToken.recipientFingerprint}), expected us (${hint})`)
-            continue
-          }
-          // Token's signer should be the sender
-          if (verifiedSenderToken.signerFingerprint !== parsed.senderFingerprint) {
-            console.log(`Token signer (${verifiedSenderToken.signerFingerprint}) doesn't match sender (${parsed.senderFingerprint})`)
+          // === SECURITY VERIFICATION 3: Sender's mutual contact token ===
+          // With mutual tokens, both parties have the SAME token with both signatures
+          // This proves sender specifically chose to communicate with us
+          const verifiedSenderToken = await verifyMutualToken(
+            parsed.senderContactToken,
+            ownPublicKeyBytes // Verify we're a party to this token
+          )
+          // Extract the counterparty (sender) from the verified token
+          const senderFromToken = getCounterpartyFromToken(verifiedSenderToken, ownPublicKeyBytes)
+          // Verify the token's counterparty matches the sender's claimed identity
+          if (senderFromToken.fingerprint !== parsed.senderFingerprint) {
+            console.log(`Token counterparty (${senderFromToken.fingerprint}) doesn't match sender (${parsed.senderFingerprint})`)
             continue
           }
 
