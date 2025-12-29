@@ -18,8 +18,8 @@
 
 import { publicKeyToFingerprint, constantTimeEqualBytes } from './ecdh'
 
-/** Maximum length for comment field to prevent overly large tokens */
-const MAX_COMMENT_LENGTH = 256
+/** Maximum byte length for comment field to prevent overly large tokens */
+const MAX_COMMENT_BYTES = 256
 
 /**
  * Token request - created by initiator, waiting for countersigner
@@ -300,10 +300,13 @@ export async function createMutualTokenInit(
 
   const iat = Math.floor(Date.now() / 1000)
 
-  // Trim and validate comment before signing
+  // Trim and validate comment before signing (byte length, not character count)
   const trimmedComment = comment?.trim()
-  if (trimmedComment && trimmedComment.length > MAX_COMMENT_LENGTH) {
-    throw new Error(`Comment exceeds maximum length of ${MAX_COMMENT_LENGTH} characters`)
+  if (trimmedComment) {
+    const commentByteLength = new TextEncoder().encode(trimmedComment).length
+    if (commentByteLength > MAX_COMMENT_BYTES) {
+      throw new Error(`Comment exceeds maximum size of ${MAX_COMMENT_BYTES} bytes (got ${commentByteLength} bytes)`)
+    }
   }
 
   // Compute challenge (includes comment if present)
@@ -384,6 +387,17 @@ export async function countersignMutualToken(
     typeof request.init_sig !== 'string'
   ) {
     throw new Error('Invalid token request: missing required fields')
+  }
+
+  // Validate comment byte length if present
+  if (request.comment !== undefined) {
+    if (typeof request.comment !== 'string') {
+      throw new Error('Invalid token request: comment must be a string')
+    }
+    const commentByteLength = new TextEncoder().encode(request.comment).length
+    if (commentByteLength > MAX_COMMENT_BYTES) {
+      throw new Error(`Comment exceeds maximum size of ${MAX_COMMENT_BYTES} bytes`)
+    }
   }
 
   // Decode fields

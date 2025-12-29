@@ -192,11 +192,11 @@ interface MutualContactTokenPayload extends PendingMutualToken {
 **Challenge Computation:**
 ```
 challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat || comment_bytes)
-                   32     65       32      65       8       variable
+                   32     65       32      65       8     0-256 bytes
 ```
 - IDs sorted lexicographically to ensure deterministic ordering
 - Both parties sign the same challenge
-- Comment is optional; if present, it is UTF-8 encoded and appended to the challenge input
+- Comment is optional; if present, it is UTF-8 encoded (max 256 bytes) and appended to the challenge input
 
 **Tamper Protection:**
 

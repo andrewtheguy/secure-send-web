@@ -261,6 +261,7 @@ export function SendTab() {
     setReceiverPublicKeyError(null)
     setVerifiedToken(null)
     setSendToSelf(false)
+    setLoadedFromHistory(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
     if (folderInputRef.current) folderInputRef.current.value = ''
   }

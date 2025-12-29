@@ -299,6 +299,7 @@ export function ReceiveTab() {
     setSenderPublicIdError(null)
     setVerifiedToken(null)
     setReceiveFromSelf(false)
+    setLoadedFromHistory(false)
   }
 
   const handlePinChange = useCallback((payload: PinChangePayload) => {
