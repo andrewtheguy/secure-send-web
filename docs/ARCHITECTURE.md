@@ -190,29 +190,66 @@ flowchart TD
 
 #### Perfect Forward Secrecy (PFS)
 
-Passkey mutual trust mode provides **Perfect Forward Secrecy** via ephemeral session keys, similar to TLS/HTTPS ECDHE:
+Passkey mutual trust mode provides **Perfect Forward Secrecy** via ephemeral session keys, similar to TLS/HTTPS ECDHE. There are two flows depending on whether sender and receiver share the same passkey:
+
+##### Self-Transfer Flow (Same Passkey - Optimized Single Round Trip)
+
+When sender and receiver share the same passkey (e.g., synced via password manager), they derive the same PRF output and can encrypt/decrypt immediately:
 
 ```mermaid
 sequenceDiagram
     participant Sender
     participant Receiver
     Note over Sender: Passkey auth → Master key + public ID
-    Note over Sender: Generate ephemeral keypair<br/>(Web Crypto - raw bytes NEVER exposed)
-    Sender->>Receiver: Mutual Trust Event<br/>(epk: ephemeral pub, esb: session binding)
-    Note over Receiver: Passkey auth → Master key + public ID
-    Note over Receiver: Verify sender's session binding
+    Note over Sender: Generate ephemeral keypair
+    Sender->>Receiver: Mutual Trust Event<br/>(encrypted metadata + epk + esb)
+    Note over Receiver: Same passkey → Same master key
+    Note over Receiver: Decrypt metadata immediately
+    Note over Receiver: Verify session binding (same master key)
     Note over Receiver: Generate ephemeral keypair
-    Receiver-->>Sender: Ready ACK<br/>(epk: ephemeral pub, esb: session binding)
-    Note over Sender: Verify receiver's session binding
-    Note over Sender,Receiver: Both derive: ECDH(ownEphemeralPriv, peerEphemeralPub) = sessionKey
-    Note over Sender,Receiver: File encryption uses sessionKey (PFS protected)
+    Receiver-->>Sender: Ready ACK (epk + esb)
+    Note over Sender: Verify session binding
+    Note over Sender,Receiver: Both derive: ECDH(ownEphPriv, peerEphPub) = sessionKey
+    Note over Sender,Receiver: File data uses sessionKey (PFS protected)
 ```
+
+##### Cross-User Flow (Different Passkeys - Two Round Trips)
+
+When sender and receiver have different passkeys, there's no shared secret initially. An extra handshake round trip establishes the session key before metadata can be sent:
+
+```mermaid
+sequenceDiagram
+    participant Sender
+    participant Receiver
+    Note over Sender: Passkey auth → Master key A + public ID A
+    Note over Sender: Generate ephemeral keypair
+    Sender->>Receiver: Handshake Event<br/>(NO payload, epk + esb)
+    Note over Receiver: Passkey auth → Master key B + public ID B
+    Note over Receiver: Verify fingerprint match
+    Note over Receiver: Generate ephemeral keypair
+    Receiver-->>Sender: Ready ACK (epk + esb)
+    Note over Sender,Receiver: Both derive: ECDH(ownEphPriv, peerEphPub) = sessionKey
+    Sender->>Receiver: Payload Event<br/>(encrypted metadata with sessionKey)
+    Note over Receiver: Decrypt metadata
+    Note over Sender,Receiver: File data uses sessionKey (PFS protected)
+```
+
+**Why two flows?**
+
+| Aspect | Self-Transfer | Cross-User |
+|--------|---------------|------------|
+| Shared secret exists? | Yes (same PRF output) | No (different passkeys) |
+| Round trips | 1 | 2 |
+| Metadata encryption | Passkey-derived key | Session key (from ECDH) |
+| Session binding verification | Yes (same master key) | N/A (different master keys prevent verification) |
 
 **How it works:**
 
 1. **Identity Material**: Passkey PRF derives a non-extractable master key and a public ID (for fingerprint verification)
 2. **Ephemeral Keys**: Each session generates fresh ECDH keypairs using `crypto.subtle.generateKey()` - raw private key material is **NEVER** exposed to JavaScript
 3. **Session Binding**: `HKDF(masterKey, ephemeralPub)` proves ephemeral keys are authorized by the passkey identity
+   - **Self-transfer**: Both parties can verify each other's binding (same master key)
+   - **Cross-user**: Binding cannot be verified (different master keys), security relies on fingerprint verification, RPKC, and contact token WebAuthn signature
 4. **Session Key**: `ECDH(ownEphemeralPriv, peerEphemeralPub)` derives the actual encryption key
 
 **Security benefit**: Compromising the passkey public ID or a single session's memory does NOT help decrypt past or future sessions because:
@@ -249,7 +286,7 @@ When using passkey mode, additional cryptographic protections are applied:
 | Constant-Time Comparison | N/A | All security-critical string comparisons use timing-attack-resistant comparison |
 | Input Validation | N/A | Nonce must decode to exactly 16 bytes; key confirmation input validated as 16-byte Uint8Array |
 
-**Mutual Trust Event Tags:**
+**Mutual Trust Event Tags (Self-Transfer):**
 ```
 ['h', receiverFingerprint]     // For event filtering
 ['spk', senderFingerprint]     // Sender verification
@@ -263,6 +300,30 @@ When using passkey mode, additional cryptographic protections are applied:
 ['epk', ephemeralPubKey]       // PFS: Ephemeral public key (base64, 65 bytes)
 ['esb', sessionBinding]        // PFS: Session binding proof (base64, 32 bytes)
 ```
+
+**Mutual Trust Handshake Event Tags (Cross-User - Phase 1):**
+```
+['h', receiverFingerprint]     // For event filtering
+['spk', senderFingerprint]     // Sender verification
+['rpkc', receiverPkCommitment] // Receiver public ID commitment
+['n', nonce]                   // Replay nonce (base64, 16 bytes)
+['s', salt]                    // Per-transfer salt
+['t', transferId]              // Transfer ID
+['type', 'mutual_trust_handshake'] // Event type
+['expiration', timestamp]      // TTL (NIP-40)
+['epk', ephemeralPubKey]       // Ephemeral public key (base64, 65 bytes)
+['esb', sessionBinding]        // Session binding proof (base64, 32 bytes)
+```
+Note: No `['kc', ...]` tag - key confirmation requires shared secret which doesn't exist for cross-user transfers.
+
+**Mutual Trust Payload Event Tags (Cross-User - Phase 2):**
+```
+['p', receiverPubkey]          // Receiver's Nostr pubkey
+['t', transferId]              // Transfer ID
+['type', 'mutual_trust_payload'] // Event type
+['expiration', timestamp]      // TTL (NIP-40)
+```
+Note: Encrypted payload in event content, encrypted with session key from ephemeral ECDH.
 
 **Ready ACK Tags (PFS):**
 ```
@@ -297,19 +358,20 @@ Security-critical functions validate inputs before cryptographic operations:
 
 #### Security Properties
 
-| Property | PIN Mode | Passkey Mode |
-|----------|----------|--------------|
-| Key Source | User-memorized PIN | Hardware secure element |
-| Brute Force Resistance | 600K PBKDF2 iterations | Hardware rate limiting |
-| Phishing Resistance | None | Origin-bound credentials |
-| Sync Method | Out-of-band sharing | Password manager sync |
-| Verification | PIN match | Fingerprint comparison |
-| Key Confirmation | N/A | HKDF-derived hash proves same shared secret |
-| Relay MITM Protection | N/A | Public ID commitment binding |
-| Replay Protection | TTL only | TTL + cryptographic nonce |
-| Timing Attack Prevention | N/A | Constant-time string comparisons |
-| Shared Secret Protection | Raw bytes in memory | Non-extractable CryptoKey (never exposed to JS) |
-| Perfect Forward Secrecy | No | Yes - ephemeral session keys (Web Crypto generateKey) |
+| Property | PIN Mode | Passkey Self-Transfer | Passkey Cross-User |
+|----------|----------|----------------------|-------------------|
+| Key Source | User-memorized PIN | Hardware secure element | Hardware secure element |
+| Brute Force Resistance | 600K PBKDF2 iterations | Hardware rate limiting | Hardware rate limiting |
+| Phishing Resistance | None | Origin-bound credentials | Origin-bound credentials |
+| Sync Method | Out-of-band sharing | Password manager sync | Contact token exchange |
+| Verification | PIN match | Fingerprint comparison | Fingerprint + contact token |
+| Key Confirmation | N/A | HKDF-derived hash | N/A (no shared secret) |
+| Relay MITM Protection | N/A | Public ID commitment | Public ID commitment |
+| Replay Protection | TTL only | TTL + nonce | TTL + nonce |
+| Session Binding Verification | N/A | Yes (same master key) | No (different master keys) |
+| Shared Secret Protection | Raw bytes in memory | Non-extractable CryptoKey | Non-extractable CryptoKey |
+| Perfect Forward Secrecy | No | Yes (ephemeral ECDH) | Yes (ephemeral ECDH) |
+| Round Trips | 1 | 1 | 2 (handshake + payload) |
 
 ### User Interface Architecture
 

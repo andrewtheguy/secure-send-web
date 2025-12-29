@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, AlertTriangle, Info, Fingerprint, ArrowRight, Keyboard } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -17,17 +17,8 @@ import { formatFileSize } from '@/lib/file-utils'
 import { compressFilesToZip, getFolderName, getTotalSize, supportsFolderSelection } from '@/lib/folder-utils'
 import type { SignalingMethod } from '@/lib/nostr/types'
 import { Link } from 'react-router-dom'
-import { publicKeyToFingerprint, formatFingerprint } from '@/lib/crypto/ecdh'
-
-// Helper to convert base64 to Uint8Array
-function base64ToUint8Array(base64: string): Uint8Array {
-  const binary = atob(base64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i)
-  }
-  return bytes
-}
+import { formatFingerprint } from '@/lib/crypto/ecdh'
+import { isContactTokenFormat, verifyContactToken, type VerifiedContactToken } from '@/lib/crypto/contact-token'
 
 type ContentMode = 'file' | 'folder'
 type MethodChoice = 'nostr' | 'manual'
@@ -55,48 +46,53 @@ export function SendTab() {
   const [checkingNostr, setCheckingNostr] = useState(false)
   const [nostrUnavailable, setNostrUnavailable] = useState(false)
   const [receiverPublicKeyInput, setReceiverPublicKeyInput] = useState('')
-  const [receiverPublicKeyFingerprint, setReceiverPublicKeyFingerprint] = useState<string | null>(null)
   const [receiverPublicKeyError, setReceiverPublicKeyError] = useState<string | null>(null)
   const [showPublicKeyModal, setShowPublicKeyModal] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
 
-  // Parse and validate receiver public ID (pure computation)
-  const { receiverPublicKeyBytes, validationError } = useMemo(() => {
+  // Verified token state (updated via useEffect since verification is async)
+  const [verifiedToken, setVerifiedToken] = useState<VerifiedContactToken | null>(null)
+
+  // Verify receiver contact token - debounced to reduce signature checks on every keystroke
+  useEffect(() => {
+    let cancelled = false
+
     const input = receiverPublicKeyInput.trim()
     if (!input) {
-      return { receiverPublicKeyBytes: null, validationError: null }
-    }
-    try {
-      const bytes = base64ToUint8Array(input)
-      if (bytes.length !== 32) {
-        return { receiverPublicKeyBytes: null, validationError: 'Invalid public ID format (expected 32 bytes)' }
-      }
-      return { receiverPublicKeyBytes: bytes, validationError: null }
-    } catch {
-      return { receiverPublicKeyBytes: null, validationError: 'Invalid base64 encoding' }
-    }
-  }, [receiverPublicKeyInput])
-
-  // Handle side effects separately
-  useEffect(() => {
-    setReceiverPublicKeyError(validationError)
-
-    if (!receiverPublicKeyBytes) {
-      setReceiverPublicKeyFingerprint(null)
+      setVerifiedToken(null)
+      setReceiverPublicKeyError(null)
       return
     }
 
-    let cancelled = false
-    publicKeyToFingerprint(receiverPublicKeyBytes).then(fp => {
-      if (!cancelled) {
-        setReceiverPublicKeyFingerprint(formatFingerprint(fp))
-      }
-    })
+    // Quick format check first (synchronous, no debounce needed)
+    if (!isContactTokenFormat(input)) {
+      setVerifiedToken(null)
+      setReceiverPublicKeyError('Invalid format: expected bound contact token (create one on the Passkey page)')
+      return
+    }
 
-    return () => { cancelled = true }
-  }, [receiverPublicKeyBytes, validationError])
+    // Debounce the async signature verification
+    const timeoutId = setTimeout(() => {
+      verifyContactToken(input)
+        .then((verified) => {
+          if (cancelled) return
+          setVerifiedToken(verified)
+          setReceiverPublicKeyError(null)
+        })
+        .catch((err) => {
+          if (cancelled) return
+          setVerifiedToken(null)
+          setReceiverPublicKeyError(err instanceof Error ? err.message : 'Invalid or tampered token')
+        })
+    }, 300)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timeoutId)
+    }
+  }, [receiverPublicKeyInput])
 
   // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrSend()
@@ -133,8 +129,8 @@ export function SendTab() {
 
   const canSendFiles = selectedFiles.length > 0 && !isFilesOverLimit && state.status === 'idle' && !isCompressing
   const canSendFolder = folderFiles && folderFiles.length > 0 && !isFolderOverLimit && state.status === 'idle' && !isCompressing
-  // When passkey mode is enabled, require valid receiver public ID OR sendToSelf
-  const passkeyRequirementsMet = !usePasskey || sendToSelf || (receiverPublicKeyBytes !== null)
+  // When passkey mode is enabled, require valid receiver contact token OR sendToSelf
+  const passkeyRequirementsMet = !usePasskey || sendToSelf || (verifiedToken !== null)
   const canSend = (mode === 'file' ? canSendFiles : canSendFolder) && passkeyRequirementsMet
 
   const handleSend = async () => {
@@ -170,13 +166,14 @@ export function SendTab() {
     setActiveMethod(methodToUse)
 
     // Only Nostr hook supports relayOnly and usePasskey options
-    // Pass receiver public ID when in passkey mode (unless sending to self)
+    // Pass receiver contact token when in passkey mode (unless sending to self)
+    // Token will be verified at send time when passkey authenticates
     const sendOptions = methodToUse === 'nostr'
       ? {
           relayOnly,
           usePasskey,
           selfTransfer: usePasskey && sendToSelf,
-          receiverPublicKey: usePasskey && !sendToSelf && receiverPublicKeyBytes ? receiverPublicKeyBytes : undefined,
+          receiverContactToken: usePasskey && !sendToSelf && receiverPublicKeyInput.trim() ? receiverPublicKeyInput.trim() : undefined,
         }
       : undefined
 
@@ -228,8 +225,8 @@ export function SendTab() {
     setActiveMethod(null)
     setNostrUnavailable(false)
     setReceiverPublicKeyInput('')
-    setReceiverPublicKeyFingerprint(null)
     setReceiverPublicKeyError(null)
+    setVerifiedToken(null)
     setSendToSelf(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
     if (folderInputRef.current) folderInputRef.current.value = ''
@@ -613,16 +610,16 @@ export function SendTab() {
                           </p>
                         )}
 
-                        {/* Receiver public ID input - hidden when sending to self */}
+                        {/* Receiver contact token input - hidden when sending to self */}
                         {!sendToSelf && (
                           <>
                             <Label htmlFor="receiver-pubkey" className="text-sm font-medium">
-                              Receiver&apos;s Public ID
+                              Receiver&apos;s Bound Token
                             </Label>
                             <div className="flex gap-2">
                               <Textarea
                                 id="receiver-pubkey"
-                                placeholder="Paste receiver's public ID (base64)..."
+                                placeholder="Paste bound contact token from your Passkey page..."
                                 value={receiverPublicKeyInput}
                                 onChange={(e) => setReceiverPublicKeyInput(e.target.value)}
                                 className="font-mono text-xs min-h-[60px] resize-none"
@@ -632,7 +629,7 @@ export function SendTab() {
                                 size="sm"
                                 onClick={() => setShowPublicKeyModal(true)}
                                 className="flex-shrink-0"
-                                title="Enter public ID"
+                                title="Enter contact token"
                               >
                                 <Keyboard className="h-4 w-4" />
                               </Button>
@@ -640,18 +637,26 @@ export function SendTab() {
                             {receiverPublicKeyError && (
                               <p className="text-xs text-destructive">{receiverPublicKeyError}</p>
                             )}
-                            {receiverPublicKeyFingerprint && (
-                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <Fingerprint className="h-3 w-3" />
-                                <span>Receiver fingerprint: </span>
-                                <span className="font-mono font-medium text-cyan-600">{receiverPublicKeyFingerprint}</span>
+                            {verifiedToken && (
+                              <div className="space-y-1 text-xs">
+                                <div className="flex items-center gap-2 text-green-700 dark:text-green-400">
+                                  <Fingerprint className="h-3 w-3" />
+                                  <span>Receiver:</span>
+                                  <span className="font-mono font-medium">{formatFingerprint(verifiedToken.recipientFingerprint)}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-muted-foreground ml-5">
+                                  <span>Signed by:</span>
+                                  <span className="font-mono">{formatFingerprint(verifiedToken.signerFingerprint)}</span>
+                                  <span className="text-green-600 dark:text-green-400">(verified)</span>
+                                </div>
                               </div>
                             )}
                             <p className="text-xs text-muted-foreground">
-                              Get the receiver&apos;s public ID from their{' '}
+                              Create a bound token on your{' '}
                               <Link to="/passkey" className="text-primary hover:underline">
                                 Passkey page
-                              </Link>
+                              </Link>{' '}
+                              using the receiver&apos;s public ID
                             </p>
                           </>
                         )}
@@ -674,26 +679,26 @@ export function SendTab() {
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
               <Fingerprint className="h-3 w-3" />
               <span>
-                Passkey mode{sendToSelf ? ' → sending to self' : receiverPublicKeyFingerprint ? ` → ${receiverPublicKeyFingerprint}` : ' (enter receiver ID)'}
+                Passkey mode{sendToSelf ? ' → sending to self' : verifiedToken ? ` → receiver ${formatFingerprint(verifiedToken.recipientFingerprint)}` : ' (enter receiver ID)'}
               </span>
             </div>
           )}
 
-          {/* Public ID entry modal */}
+          {/* Contact token entry modal */}
           {showPublicKeyModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
               <div className="bg-background rounded-lg p-4 max-w-md w-full mx-4 space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-medium">Enter Receiver&apos;s Public ID</h3>
+                  <h3 className="font-medium">Enter Bound Contact Token</h3>
                   <Button variant="ghost" size="sm" onClick={() => setShowPublicKeyModal(false)}>
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Paste the receiver&apos;s public ID from their Passkey page.
+                  Paste the bound contact token you created on your Passkey page.
                 </p>
                 <Textarea
-                  placeholder="Paste public ID (base64)..."
+                  placeholder="Paste bound contact token..."
                   value={receiverPublicKeyInput}
                   onChange={(e) => setReceiverPublicKeyInput(e.target.value)}
                   className="font-mono text-xs min-h-[100px]"

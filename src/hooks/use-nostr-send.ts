@@ -18,6 +18,8 @@ import {
   generateEphemeralKeys,
   createPinExchangeEvent,
   createMutualTrustEvent,
+  createMutualTrustHandshakeEvent,
+  createMutualTrustPayloadEvent,
   parseAckEvent,
   createSignalingEvent,
   parseSignalingEvent,
@@ -50,13 +52,14 @@ import {
   constantTimeEqual,
 } from '@/lib/crypto/ecdh'
 import { uint8ArrayToBase64 } from '@/lib/nostr/events'
+import { verifyContactToken } from '@/lib/crypto/contact-token'
 
 export interface UseNostrSendReturn {
   state: TransferState
   pin: string | null
   ownPublicKey: Uint8Array | null
   ownFingerprint: string | null
-  send: (content: File, options?: WebRTCOptions & { receiverPublicKey?: Uint8Array; selfTransfer?: boolean }) => Promise<void>
+  send: (content: File, options?: WebRTCOptions & { receiverContactToken?: string; selfTransfer?: boolean }) => Promise<void>
   cancel: () => void
 }
 
@@ -93,7 +96,7 @@ export function useNostrSend(): UseNostrSendReturn {
   }, [clearExpirationTimeout])
 
   const send = useCallback(
-    async (content: File, options?: WebRTCOptions & { receiverPublicKey?: Uint8Array; selfTransfer?: boolean }) => {
+    async (content: File, options?: WebRTCOptions & { receiverContactToken?: string; selfTransfer?: boolean }) => {
       // Guard against concurrent invocations
       if (sendingRef.current) return
       sendingRef.current = true
@@ -152,13 +155,13 @@ export function useNostrSend(): UseNostrSendReturn {
         let senderEphemeral: EphemeralSessionKeypair | undefined
         let identitySharedSecretKey: CryptoKey | undefined
 
-        if (options?.usePasskey && !options.receiverPublicKey && !options.selfTransfer) {
-          setState({ status: 'error', message: 'Receiver public ID required for passkey mode' })
+        if (options?.usePasskey && !options.receiverContactToken && !options.selfTransfer) {
+          setState({ status: 'error', message: 'Receiver contact token required for passkey mode' })
           sendingRef.current = false
           return
         }
 
-        if (options?.usePasskey && (options.receiverPublicKey || options.selfTransfer)) {
+        if (options?.usePasskey && (options.receiverContactToken || options.selfTransfer)) {
           // MUTUAL TRUST MODE: Use passkey mutual trust with receiver's public ID
           // NOW WITH PERFECT FORWARD SECRECY via ephemeral session keys
           setState({ status: 'connecting', message: 'Authenticate with passkey...' })
@@ -180,10 +183,30 @@ export function useNostrSend(): UseNostrSendReturn {
             senderEphemeral = ephemeral
             identitySharedSecretKey = sharedSecret
 
-            // Determine receiver public key: use own identity for self-transfer, otherwise use provided
-            const receiverPublicKeyBytes = options.selfTransfer
-              ? ephemeral.identityPublicKeyBytes
-              : options.receiverPublicKey!
+            // Determine receiver public key: use own identity for self-transfer, otherwise verify token
+            let receiverPublicKeyBytes: Uint8Array
+            if (options.selfTransfer) {
+              receiverPublicKeyBytes = ephemeral.identityPublicKeyBytes
+            } else {
+              // Verify contact token's WebAuthn signature (no authentication required)
+              // This proves the token was signed by a specific passkey credential
+              const verifiedToken = await verifyContactToken(options.receiverContactToken!)
+
+              // SECURITY: Verify the token was signed by THIS passkey, not someone else's
+              // This is SEPARATE from protocol-level verification (lines 425-451) which checks
+              // the RECEIVER's token from the ACK. This check ensures the SENDER's stored token
+              // was created by their own passkey, preventing token substitution attacks where
+              // an attacker replaces the sender's stored token to redirect them to send files
+              // to the wrong receiver.
+              if (verifiedToken.signerFingerprint !== senderFingerprint) {
+                throw new Error(
+                  `Token was signed by a different passkey (${verifiedToken.signerFingerprint}). ` +
+                  `Expected your passkey (${senderFingerprint}). Please create a new bound token.`
+                )
+              }
+
+              receiverPublicKeyBytes = verifiedToken.recipientPublicId
+            }
 
             // Derive AES key from passkey master key for initial payload encryption
             // NOTE: This is for the payload only. File data will use session key (PFS)
@@ -283,8 +306,26 @@ export function useNostrSend(): UseNostrSendReturn {
 
         // Choose event type based on mode
         let exchangeEvent
-        if (options?.usePasskey && senderFingerprint && keyConfirmHash && receiverPkCommitment && replayNonce && senderEphemeral) {
-          // Mutual trust mode: include sender's fingerprint, security tags, and ephemeral key for PFS
+        const isCrossUserPasskey = options?.usePasskey && !options.selfTransfer
+        if (isCrossUserPasskey && senderFingerprint && receiverPkCommitment && replayNonce && senderEphemeral && options?.receiverContactToken) {
+          // Cross-user passkey mode: use handshake flow
+          // Phase 1: Send handshake with ephemeral public key (no payload yet)
+          // Receiver will respond with their ephemeral key, then we derive session key
+          exchangeEvent = createMutualTrustHandshakeEvent(
+            secretKey,
+            salt,
+            transferId,
+            hint, // receiver's public ID fingerprint
+            senderFingerprint, // sender's public ID fingerprint
+            receiverPkCommitment, // receiver public ID commitment (relay MITM prevention)
+            replayNonce, // replay nonce (replay protection)
+            senderEphemeral.ephemeralPublicKeyBytes, // sender's ephemeral public key for ECDH
+            senderEphemeral.sessionBinding, // session binding proof
+            options.receiverContactToken // sender's bound token proving intent to communicate with receiver
+          )
+        } else if (options?.usePasskey && options.selfTransfer && senderFingerprint && keyConfirmHash && receiverPkCommitment && replayNonce && senderEphemeral) {
+          // Self-transfer (same passkey): use single mutual trust event
+          // Both parties have the same passkey, so they derive the same key
           exchangeEvent = createMutualTrustEvent(
             secretKey,
             encryptedPayload,
@@ -311,11 +352,12 @@ export function useNostrSend(): UseNostrSendReturn {
         await client.waitForConnection()
 
         // Wait for receiver ready ACK (seq=0)
-        const { receiverPubkey, receiverEphemeralPub, receiverSessionBinding } = await new Promise<{
+        const { receiverPubkey, receiverHint, receiverEphemeralPub, receiverSessionBinding, receiverContactToken } = await new Promise<{
           receiverPubkey: string
           receiverHint?: string
           receiverEphemeralPub?: Uint8Array
           receiverSessionBinding?: Uint8Array
+          receiverContactToken?: string
         }>((resolve, reject) => {
           const timeout = setTimeout(() => {
             client.unsubscribe(subId)
@@ -360,6 +402,7 @@ export function useNostrSend(): UseNostrSendReturn {
                   receiverHint: ack.hint,
                   receiverEphemeralPub: ack.receiverEphemeralPub,
                   receiverSessionBinding: ack.receiverSessionBinding,
+                  receiverContactToken: ack.receiverContactToken,
                 })
               }
             }
@@ -382,15 +425,54 @@ export function useNostrSend(): UseNostrSendReturn {
             throw new Error('Security check failed: receiver did not provide ephemeral keys for PFS')
           }
 
-          // Verify receiver's session binding to prevent ephemeral key substitution
-          const bindingValid = await verifySessionBinding(
-            identitySharedSecretKey,
-            receiverEphemeralPub,
-            receiverSessionBinding
-          )
-          if (!bindingValid) {
-            throw new Error('Security check failed: invalid receiver session binding (potential MITM)')
+          // For cross-user passkey: verify receiver's contact token proves mutual intent
+          // The token proves: (1) receiver signed it with their passkey, (2) token targets us (sender)
+          if (isCrossUserPasskey) {
+            if (!receiverContactToken) {
+              throw new Error('Security check failed: receiver did not provide contact token')
+            }
+            if (!receiverHint) {
+              throw new Error('Security check failed: receiver did not provide identity hint')
+            }
+            // Verify receiver's token: must target sender's public ID and be signed by receiver
+            const verifiedReceiverToken = await verifyContactToken(receiverContactToken)
+            // Token's recipient (sub) should be the sender's public ID
+            if (verifiedReceiverToken.recipientFingerprint !== senderFingerprint) {
+              throw new Error(
+                `Receiver's token targets wrong recipient (${verifiedReceiverToken.recipientFingerprint}). ` +
+                `Expected your ID (${senderFingerprint}).`
+              )
+            }
+            // Token's signer should match the receiver's hint (their fingerprint from the ACK)
+            // This ensures the token was actually created by the receiver, not by a third party
+            if (verifiedReceiverToken.signerFingerprint !== receiverHint) {
+              throw new Error(
+                `Receiver's token was signed by wrong identity (${verifiedReceiverToken.signerFingerprint}). ` +
+                `Expected receiver's ID (${receiverHint}).`
+              )
+            }
           }
+
+          // For self-transfer: verify receiver's session binding (same passkey = same master key)
+          // For cross-user: skip binding verification (different passkeys = different master keys)
+          if (!isCrossUserPasskey) {
+            // Verify receiver's session binding to prevent ephemeral key substitution
+            const bindingValid = await verifySessionBinding(
+              identitySharedSecretKey,
+              receiverEphemeralPub,
+              receiverSessionBinding
+            )
+            if (!bindingValid) {
+              throw new Error('Security check failed: invalid receiver session binding (potential MITM)')
+            }
+          }
+          // NOTE: For cross-user passkey mode, we CANNOT verify session binding because:
+          // - Receiver's binding is created using their passkey master key
+          // - We don't have access to receiver's master key (different passkeys = different PRF outputs)
+          // Security relies on:
+          // 1. Contact token verification - we verified receiver's WebAuthn signature before starting
+          // 2. RPKC commitment - we committed to receiver's public ID in the handshake event
+          // 3. Ephemeral ECDH - any MITM can't derive session key without both private keys
 
           // Derive session key from ephemeral ECDH
           // SECURITY: This key is derived from ephemeral keys whose private material
@@ -400,6 +482,24 @@ export function useNostrSend(): UseNostrSendReturn {
             receiverEphemeralPub,
             salt
           )
+
+          // Cross-user passkey mode: send encrypted payload now that we have session key
+          // (For self-transfer, payload was already included in the initial mutual trust event)
+          if (isCrossUserPasskey) {
+            setState({ status: 'connecting', message: 'Sending encrypted metadata...' })
+
+            // Encrypt payload with session key
+            const sessionEncryptedPayload = await encrypt(key, payloadBytes)
+
+            // Publish payload event addressed to receiver
+            const payloadEvent = createMutualTrustPayloadEvent(
+              secretKey,
+              receiverPubkey,
+              transferId,
+              sessionEncryptedPayload
+            )
+            await client.publish(payloadEvent)
+          }
         }
 
         // Enforce TTL: reject if session has expired

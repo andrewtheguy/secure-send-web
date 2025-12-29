@@ -55,70 +55,6 @@ export function formatFingerprint(fingerprint: string): string {
 }
 
 /**
- * Import P-256 private key from raw bytes (32 bytes) for ECDH.
- * Uses JWK format internally since Web Crypto doesn't support raw private key import for P-256.
- *
- * SECURITY IMPACT: privateKeyBytes is raw secret material. If exposed, an attacker
- * can derive the same shared secrets and decrypt protected data.
- *
- * @param privateKeyBytes - 32-byte private key scalar
- * @returns CryptoKey for ECDH deriveBits operations
- */
-export async function importECDHPrivateKey(privateKeyBytes: Uint8Array): Promise<CryptoKey> {
-  if (privateKeyBytes.length !== 32) {
-    throw new TypeError(
-      `Invalid private key length: expected 32 bytes, got ${privateKeyBytes.length}`
-    )
-  }
-
-  // We need to compute the public key from the private key to create a valid JWK
-  // Using @noble/curves to compute the public key
-  const { p256 } = await import('@noble/curves/nist.js')
-  const publicKeyBytes = p256.getPublicKey(privateKeyBytes, false) // Uncompressed: 0x04 || X || Y
-
-  // Extract X and Y coordinates (skip the 0x04 prefix)
-  const x = publicKeyBytes.slice(1, 33)
-  const y = publicKeyBytes.slice(33, 65)
-
-  // Convert to base64url for JWK
-  const d = bytesToBase64url(privateKeyBytes)
-  const xB64 = bytesToBase64url(x)
-  const yB64 = bytesToBase64url(y)
-
-  // Import as JWK
-  const jwk: JsonWebKey = {
-    kty: 'EC',
-    crv: 'P-256',
-    x: xB64,
-    y: yB64,
-    d: d,
-  }
-
-  return crypto.subtle.importKey(
-    'jwk',
-    jwk,
-    {
-      name: 'ECDH',
-      namedCurve: 'P-256',
-    },
-    false, // non-extractable
-    ['deriveBits', 'deriveKey']
-  )
-}
-
-/**
- * Helper: Convert bytes to base64url encoding (for JWK)
- */
-function bytesToBase64url(bytes: Uint8Array): string {
-  let binary = ''
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i])
-  }
-  const base64 = btoa(binary)
-  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-
-/**
  * ECDH key pair with raw public key bytes for transmission.
  * WARNING: privateKey must never be exported or stored - use only for deriveBits.
  */
@@ -351,6 +287,30 @@ export function constantTimeEqual(a: string, b: string): boolean {
     const charA = i < a.length ? a.charCodeAt(i) : 0
     const charB = i < b.length ? b.charCodeAt(i) : 0
     result |= charA ^ charB
+  }
+
+  return result === 0
+}
+
+/**
+ * Constant-time comparison of two Uint8Arrays.
+ * Prevents timing attacks by always comparing all bytes regardless of mismatch.
+ *
+ * Note: This is a best-effort constant-time mitigation in JavaScript.
+ * True constant-time guarantees are not possible in JS due to JIT optimization,
+ * garbage collection, and runtime engine behavior. However, this approach
+ * avoids obvious timing leaks from early returns or variable iteration counts.
+ */
+export function constantTimeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
+  // XOR lengths to detect mismatch
+  let result = a.length ^ b.length
+
+  // Compare all bytes up to the longer length
+  const maxLen = Math.max(a.length, b.length)
+  for (let i = 0; i < maxLen; i++) {
+    const byteA = i < a.length ? a[i] : 0
+    const byteB = i < b.length ? b[i] : 0
+    result |= byteA ^ byteB
   }
 
   return result === 0

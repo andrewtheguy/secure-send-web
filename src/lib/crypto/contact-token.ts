@@ -1,0 +1,463 @@
+/**
+ * Contact Token - Tamper-proof contact storage using WebAuthn ECDSA signatures
+ *
+ * This module provides functions to create and verify signed contact tokens.
+ * Tokens bind a recipient's public ID to the signer's passkey using WebAuthn
+ * ECDSA (ES256) signatures, ensuring the contact information hasn't been tampered with.
+ *
+ * Token format (SSH public key style):
+ *   sswct-es256 <base64-payload> [optional comment]
+ *
+ * Example:
+ *   sswct-es256 eyJzdWIiOi... Alice's work laptop
+ *
+ * SECURITY: WebAuthn ensures the private key never leaves the authenticator.
+ * Verification can be done without authentication using the stored credential public key.
+ */
+
+import { publicKeyToFingerprint, constantTimeEqualBytes } from './ecdh'
+
+/** Token type identifier for SSH-like format */
+const TOKEN_TYPE = 'sswct-es256'
+
+/**
+ * Token payload structure (encoded as JSON, then base64)
+ */
+export interface ContactTokenPayload {
+  /** Recipient's public ID (base64, 32 bytes decoded) */
+  sub: string
+  /** Signer's credential public key (base64, 65 bytes uncompressed P-256) */
+  cpk: string
+  /** Signer's passkey public ID (base64, 32 bytes) - for fingerprint matching */
+  spk: string
+  /** Issued at timestamp (Unix seconds) */
+  iat: number
+  /** Authenticator data from WebAuthn response (base64) */
+  authData: string
+  /** Client data JSON from WebAuthn response (base64) */
+  clientDataJSON: string
+  /** ECDSA signature from WebAuthn response (base64, DER encoded) */
+  sig: string
+}
+
+/**
+ * Result of verifying a token
+ */
+export interface VerifiedContactToken {
+  /** The contact's public ID that was bound (32 bytes) */
+  recipientPublicId: Uint8Array
+  /** Fingerprint of the contact's public ID (what you should verify) */
+  recipientFingerprint: string
+  /** Signer's WebAuthn credential public key (65 bytes P-256) */
+  signerCredentialPublicKey: Uint8Array
+  /** Signer's passkey public ID (32 bytes) */
+  signerPublicId: Uint8Array
+  /** Fingerprint of the signer's passkey public ID (matches handshake fingerprints) */
+  signerFingerprint: string
+  issuedAt: Date
+  comment?: string
+}
+
+/**
+ * Parse SSH-like token format into parts.
+ * Format: sswct-es256 <base64-payload> [comment]
+ */
+function parseTokenFormat(input: string): { payload: string; comment?: string } | null {
+  const trimmed = input.trim()
+  if (!trimmed.startsWith(TOKEN_TYPE + ' ')) {
+    return null
+  }
+
+  // Split into parts: type, payload, and optional comment
+  const afterType = trimmed.slice(TOKEN_TYPE.length + 1)
+  const spaceIndex = afterType.indexOf(' ')
+
+  if (spaceIndex === -1) {
+    // No comment
+    return { payload: afterType }
+  }
+
+  return {
+    payload: afterType.slice(0, spaceIndex),
+    comment: afterType.slice(spaceIndex + 1),
+  }
+}
+
+// Helper: base64 encode
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  return btoa(Array.from(bytes, (c) => String.fromCharCode(c)).join(''))
+}
+
+// Helper: base64 decode
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
+}
+
+// Helper: base64url decode
+function base64urlDecode(str: string): Uint8Array {
+  let base64 = str.replace(/-/g, '+').replace(/_/g, '/')
+  const pad = base64.length % 4
+  if (pad) {
+    base64 += '='.repeat(4 - pad)
+  }
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
+}
+
+/**
+ * Check if a string looks like a valid contact token format.
+ * Does NOT verify the signature - just checks structure.
+ *
+ * Format: sswct-es256 <base64-payload> [optional comment]
+ */
+export function isContactTokenFormat(input: string): boolean {
+  const parsed = parseTokenFormat(input)
+  if (!parsed) return false
+
+  try {
+    // Payload is base64-encoded JSON
+    const json = atob(parsed.payload)
+    const payload = JSON.parse(json) as unknown
+
+    // Check required fields exist
+    if (typeof payload !== 'object' || payload === null) return false
+    const p = payload as Record<string, unknown>
+
+    return (
+      typeof p.sub === 'string' &&
+      typeof p.cpk === 'string' &&
+      typeof p.spk === 'string' &&
+      typeof p.iat === 'number' &&
+      typeof p.authData === 'string' &&
+      typeof p.clientDataJSON === 'string' &&
+      typeof p.sig === 'string'
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Create a signed contact token using WebAuthn.
+ *
+ * The token contains the recipient's public ID along with a WebAuthn ECDSA
+ * signature that proves the signer created this token with their passkey.
+ *
+ * @param credentialId - Signer's credential ID (base64url)
+ * @param credentialPublicKey - Signer's credential public key (65 bytes)
+ * @param signerPublicIdBase64 - Signer's passkey public ID (base64, for fingerprint matching)
+ * @param recipientPublicIdBase64 - Recipient's public ID (base64 encoded)
+ * @param comment - Optional comment to append (e.g., "Alice's work laptop")
+ * @returns Contact token in SSH-like format: sswct-es256 <payload> [comment]
+ */
+export async function createContactToken(
+  credentialId: string,
+  credentialPublicKey: Uint8Array,
+  signerPublicIdBase64: string,
+  recipientPublicIdBase64: string,
+  comment?: string
+): Promise<string> {
+  // Decode and validate recipient public ID
+  const recipientPublicId = base64ToUint8Array(recipientPublicIdBase64)
+  if (recipientPublicId.length !== 32) {
+    throw new Error('Invalid recipient public ID: expected 32 bytes')
+  }
+
+  // Decode and validate signer public ID
+  const signerPublicId = base64ToUint8Array(signerPublicIdBase64)
+  if (signerPublicId.length !== 32) {
+    throw new Error('Invalid signer public ID: expected 32 bytes')
+  }
+
+  // Validate credential public key
+  if (credentialPublicKey.length !== 65 || credentialPublicKey[0] !== 0x04) {
+    throw new Error('Invalid credential public key: expected 65-byte uncompressed P-256')
+  }
+
+  const iat = Math.floor(Date.now() / 1000)
+
+  // Create challenge that includes the data we want to sign
+  // challenge = SHA256(sub || spk || cpk || iat)
+  const dataToSign = new Uint8Array(32 + 32 + 65 + 8)
+  dataToSign.set(recipientPublicId, 0)
+  dataToSign.set(signerPublicId, 32)
+  dataToSign.set(credentialPublicKey, 64)
+  const iatBytes = new DataView(new ArrayBuffer(8))
+  iatBytes.setBigUint64(0, BigInt(iat), false) // big-endian
+  dataToSign.set(new Uint8Array(iatBytes.buffer), 129)
+
+  const challenge = new Uint8Array(await crypto.subtle.digest('SHA-256', dataToSign))
+
+  // Get WebAuthn signature
+  const credentialIdBytes = base64urlDecode(credentialId)
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge,
+      allowCredentials: [{ type: 'public-key' as const, id: credentialIdBytes as BufferSource }],
+      userVerification: 'required',
+    },
+  })
+
+  if (!assertion) {
+    throw new Error('User cancelled passkey authentication')
+  }
+
+  const credential = assertion as PublicKeyCredential
+  const response = credential.response as AuthenticatorAssertionResponse
+
+  // Create payload
+  const payload: ContactTokenPayload = {
+    sub: recipientPublicIdBase64,
+    cpk: uint8ArrayToBase64(credentialPublicKey),
+    spk: signerPublicIdBase64,
+    iat,
+    authData: uint8ArrayToBase64(new Uint8Array(response.authenticatorData)),
+    clientDataJSON: uint8ArrayToBase64(new Uint8Array(response.clientDataJSON)),
+    sig: uint8ArrayToBase64(new Uint8Array(response.signature)),
+  }
+
+  // Encode as base64 JSON
+  const json = JSON.stringify(payload)
+  const base64Payload = btoa(json)
+
+  // Return in SSH-like format: sswct-es256 <payload> [comment]
+  if (comment && comment.trim()) {
+    return `${TOKEN_TYPE} ${base64Payload} ${comment.trim()}`
+  }
+  return `${TOKEN_TYPE} ${base64Payload}`
+}
+
+/**
+ * Verify a contact token's WebAuthn signature.
+ *
+ * This does NOT require the signer to authenticate - verification uses
+ * the credential public key stored in the token.
+ *
+ * Token format: sswct-es256 <base64-payload> [optional comment]
+ *
+ * @param token - The contact token string to verify
+ * @param trustedCredentialPublicKey - Optional: if provided, token must be signed by this key
+ * @returns Verified token data (including comment if present)
+ * @throws Error if token is invalid or signature verification fails
+ */
+export async function verifyContactToken(
+  token: string,
+  trustedCredentialPublicKey?: Uint8Array
+): Promise<VerifiedContactToken> {
+  // Parse SSH-like format
+  const parsed = parseTokenFormat(token)
+  if (!parsed) {
+    throw new Error('Invalid contact token format: expected "sswct-es256 <payload> [comment]"')
+  }
+
+  const { payload: base64Payload, comment } = parsed
+
+  // Parse the JSON payload
+  let payload: ContactTokenPayload
+  try {
+    const json = atob(base64Payload)
+    payload = JSON.parse(json) as ContactTokenPayload
+  } catch {
+    throw new Error('Invalid contact token format: failed to parse payload')
+  }
+
+  // Validate required fields
+  if (
+    typeof payload.sub !== 'string' ||
+    typeof payload.cpk !== 'string' ||
+    typeof payload.spk !== 'string' ||
+    typeof payload.iat !== 'number' ||
+    typeof payload.authData !== 'string' ||
+    typeof payload.clientDataJSON !== 'string' ||
+    typeof payload.sig !== 'string'
+  ) {
+    throw new Error('Invalid contact token format: missing required fields')
+  }
+
+  // Decode fields
+  const recipientPublicId = base64ToUint8Array(payload.sub)
+  if (recipientPublicId.length !== 32) {
+    throw new Error('Invalid recipient public ID: expected 32 bytes')
+  }
+
+  const signerPublicId = base64ToUint8Array(payload.spk)
+  if (signerPublicId.length !== 32) {
+    throw new Error('Invalid signer public ID: expected 32 bytes')
+  }
+
+  const signerCredentialPublicKey = base64ToUint8Array(payload.cpk)
+  if (signerCredentialPublicKey.length !== 65 || signerCredentialPublicKey[0] !== 0x04) {
+    throw new Error('Invalid credential public key: expected 65-byte uncompressed P-256')
+  }
+
+  // If trusted key is provided, verify it matches
+  if (trustedCredentialPublicKey) {
+    if (!constantTimeEqualBytes(signerCredentialPublicKey, trustedCredentialPublicKey)) {
+      throw new Error('Token not signed by trusted credential')
+    }
+  }
+
+  const authData = base64ToUint8Array(payload.authData)
+  const clientDataJSON = base64ToUint8Array(payload.clientDataJSON)
+  const signature = base64ToUint8Array(payload.sig)
+
+  // Parse and validate clientDataJSON
+  let clientData: {
+    type: string
+    challenge: string
+    origin: string
+  }
+  try {
+    clientData = JSON.parse(new TextDecoder().decode(clientDataJSON)) as typeof clientData
+  } catch (err) {
+    throw new Error(`Failed to parse clientDataJSON: ${err instanceof Error ? err.message : 'unknown error'}`)
+  }
+
+  if (clientData.type !== 'webauthn.get') {
+    throw new Error('Invalid clientData type')
+  }
+
+  // Verify challenge matches expected value
+  // challenge = SHA256(sub || spk || cpk || iat)
+  const dataToSign = new Uint8Array(32 + 32 + 65 + 8)
+  dataToSign.set(recipientPublicId, 0)
+  dataToSign.set(signerPublicId, 32)
+  dataToSign.set(signerCredentialPublicKey, 64)
+  const iatBytes = new DataView(new ArrayBuffer(8))
+  iatBytes.setBigUint64(0, BigInt(payload.iat), false)
+  dataToSign.set(new Uint8Array(iatBytes.buffer), 129)
+
+  const expectedChallenge = new Uint8Array(await crypto.subtle.digest('SHA-256', dataToSign))
+  const actualChallenge = base64urlDecode(clientData.challenge)
+
+  if (!constantTimeEqualBytes(expectedChallenge, actualChallenge)) {
+    throw new Error('Challenge mismatch - token data may be tampered')
+  }
+
+  // Import credential public key for verification
+  const publicKey = await crypto.subtle.importKey(
+    'raw',
+    signerCredentialPublicKey as BufferSource,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['verify']
+  )
+
+  // WebAuthn signature is over: authData || SHA256(clientDataJSON)
+  const clientDataHash = await crypto.subtle.digest('SHA-256', clientDataJSON as BufferSource)
+  const signatureBase = new Uint8Array(authData.length + 32)
+  signatureBase.set(authData, 0)
+  signatureBase.set(new Uint8Array(clientDataHash), authData.length)
+
+  // Convert DER signature to raw format for Web Crypto
+  const rawSignature = derToRaw(signature)
+
+  // Verify ECDSA signature
+  const valid = await crypto.subtle.verify(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    publicKey,
+    rawSignature as BufferSource,
+    signatureBase as BufferSource
+  )
+
+  if (!valid) {
+    throw new Error('Signature verification failed')
+  }
+
+  const recipientFingerprint = await publicKeyToFingerprint(recipientPublicId)
+  const signerFingerprint = await publicKeyToFingerprint(signerPublicId)
+
+  return {
+    recipientPublicId,
+    recipientFingerprint,
+    signerCredentialPublicKey,
+    signerPublicId,
+    signerFingerprint,
+    issuedAt: new Date(payload.iat * 1000),
+    comment,
+  }
+}
+
+/**
+ * Convert DER-encoded ECDSA signature to raw format (r || s).
+ * WebAuthn returns DER, but Web Crypto expects raw 64-byte format for P-256.
+ */
+function derToRaw(der: Uint8Array): Uint8Array {
+  // DER format: 0x30 <len> 0x02 <r-len> <r> 0x02 <s-len> <s>
+  if (der.length < 8) {
+    throw new Error('Invalid DER signature: truncated input (too short)')
+  }
+  if (der[0] !== 0x30) {
+    throw new Error('Invalid DER signature: expected SEQUENCE')
+  }
+
+  let offset = 2 // Skip 0x30 and length byte
+
+  // Handle multi-byte length
+  if (der[1] & 0x80) {
+    const lenBytes = der[1] & 0x7f
+    offset = 2 + lenBytes
+    if (offset >= der.length) {
+      throw new Error('Invalid DER signature: truncated input (bad length encoding)')
+    }
+  }
+
+  // Parse r
+  if (offset >= der.length || der[offset] !== 0x02) {
+    throw new Error('Invalid DER signature: expected INTEGER for r')
+  }
+  offset++
+  if (offset >= der.length) {
+    throw new Error('Invalid DER signature: truncated input (missing r length)')
+  }
+  const rLen = der[offset++]
+  if (rLen < 1 || rLen > 33) {
+    throw new Error(`Invalid DER signature: bad r length (${rLen})`)
+  }
+  if (offset + rLen > der.length) {
+    throw new Error('Invalid DER signature: truncated input (r extends past end)')
+  }
+  let r = der.slice(offset, offset + rLen)
+  offset += rLen
+
+  // Parse s
+  if (offset >= der.length || der[offset] !== 0x02) {
+    throw new Error('Invalid DER signature: expected INTEGER for s')
+  }
+  offset++
+  if (offset >= der.length) {
+    throw new Error('Invalid DER signature: truncated input (missing s length)')
+  }
+  const sLen = der[offset++]
+  if (sLen < 1 || sLen > 33) {
+    throw new Error(`Invalid DER signature: bad s length (${sLen})`)
+  }
+  if (offset + sLen > der.length) {
+    throw new Error('Invalid DER signature: truncated input (s extends past end)')
+  }
+  let s = der.slice(offset, offset + sLen)
+
+  // Remove leading zero bytes (used for sign in DER encoding)
+  if (r.length === 33 && r[0] === 0) {
+    r = r.slice(1)
+  }
+  if (s.length === 33 && s[0] === 0) {
+    s = s.slice(1)
+  }
+
+  // Pad to 32 bytes if needed
+  const raw = new Uint8Array(64)
+  raw.set(r, 32 - r.length)
+  raw.set(s, 64 - s.length)
+
+  return raw
+}

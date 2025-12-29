@@ -41,11 +41,15 @@ export async function derivePasskeyPublicId(masterKey: CryptoKey): Promise<Uint8
 
 /**
  * Get passkey master key (HKDF base key) from passkey authentication.
- * Returns the master key for subsequent identity + session derivations.
+ * Returns the master key and the credentialId used for authentication.
  *
  * @param credentialId - Optional base64url credential ID to use specific passkey (skips picker)
+ * @returns Object with masterKey (HKDF CryptoKey) and credentialId (base64url string)
  */
-export async function getPasskeyMasterKey(credentialId?: string): Promise<CryptoKey> {
+export async function getPasskeyMasterKey(credentialId?: string): Promise<{
+  masterKey: CryptoKey
+  credentialId: string
+}> {
   const prfInput = new TextEncoder().encode(PASSKEY_MASTER_LABEL)
 
   // Build allowCredentials if a specific credential is requested
@@ -104,7 +108,11 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<Crypto
   )
   // Best-effort cleanup of PRF bytes
   prfBytes.fill(0)
-  return masterKey
+
+  // Extract the credential ID from the response (base64url encoded)
+  const usedCredentialId = base64urlEncode(new Uint8Array(credential.rawId))
+
+  return { masterKey, credentialId: usedCredentialId }
 }
 
 /**
@@ -112,19 +120,20 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<Crypto
  * This is the main entry point for passkey identity info.
  *
  * @param credentialId - Optional base64url credential ID to use specific passkey (skips picker)
- * @returns Identity with prfSupported flag (true if we got here, throws otherwise)
+ * @returns Identity with prfSupported flag (true if we got here, throws otherwise), and credentialId used
  */
 export async function getPasskeyIdentity(credentialId?: string): Promise<{
   publicIdBytes: Uint8Array
   publicIdFingerprint: string
   prfSupported: boolean
+  credentialId: string
 }> {
-  const masterKey = await getPasskeyMasterKey(credentialId)
+  const { masterKey, credentialId: usedCredentialId } = await getPasskeyMasterKey(credentialId)
   const publicIdBytes = await derivePasskeyPublicId(masterKey)
   const publicIdFingerprint = await publicKeyToFingerprint(publicIdBytes)
 
   // If we got here, PRF worked (getPasskeyMasterKey throws if PRF fails)
-  return { publicIdBytes, publicIdFingerprint, prfSupported: true }
+  return { publicIdBytes, publicIdFingerprint, prfSupported: true, credentialId: usedCredentialId }
 }
 
 // publicKeyToFingerprint is used from ecdh.ts
@@ -198,7 +207,7 @@ function isIpAddress(hostname: string): boolean {
  */
 export async function createPasskeyCredential(
   userName: string
-): Promise<{ credentialId: string; prfSupported: boolean }> {
+): Promise<{ credentialId: string; prfSupported: boolean; credentialPublicKey: Uint8Array }> {
   // Generate random user ID (we don't persist this - it's just for WebAuthn ceremony)
   const userId = crypto.getRandomValues(new Uint8Array(32))
 
@@ -266,7 +275,354 @@ export async function createPasskeyCredential(
   const credentialIdBytes = new Uint8Array(credential.rawId)
   const credentialId = base64urlEncode(credentialIdBytes)
 
-  return { credentialId, prfSupported }
+  // Extract public key from attestation response
+  const response = credential.response as AuthenticatorAttestationResponse
+  const credentialPublicKey = extractPublicKeyFromAttestation(response)
+
+  // Store the public key for later signature verification
+  // This is critical - without the stored key, contact tokens cannot be created or verified
+  try {
+    storeCredentialPublicKey(credentialId, credentialPublicKey)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown error'
+    console.error('Failed to store credential public key:', message)
+    // IMPORTANT: At this point, the passkey has been created in the authenticator but
+    // the app cannot use it without the stored public key. The user may need to manually
+    // delete the orphaned passkey from their authenticator's settings.
+    throw new Error(
+      `Passkey created but failed to store credential key: ${message}. ` +
+        'This may be due to storage quota or private browsing mode. ' +
+        'The passkey was created in your authenticator but cannot be used by this app. ' +
+        'Please delete the orphaned passkey from your authenticator settings and try again ' +
+        'after ensuring storage is available (exit private browsing or clear browser data).'
+    )
+  }
+
+  return { credentialId, prfSupported, credentialPublicKey }
+}
+
+// ============================================================================
+// CREDENTIAL PUBLIC KEY EXTRACTION AND STORAGE
+// ============================================================================
+
+const CREDENTIAL_PUBKEY_STORAGE_KEY = 'secure-send-credential-pubkey'
+
+/**
+ * Extract the public key from WebAuthn attestation response.
+ * Returns the uncompressed P-256 public key (65 bytes: 0x04 || x || y)
+ */
+export function extractPublicKeyFromAttestation(
+  response: AuthenticatorAttestationResponse
+): Uint8Array {
+  const attestationObject = new Uint8Array(response.attestationObject)
+
+  // Parse CBOR attestation object to extract authData
+  const authData = parseCBORAttestationObject(attestationObject)
+
+  // Parse authData to extract COSE public key
+  // authData structure:
+  // - rpIdHash (32 bytes)
+  // - flags (1 byte)
+  // - signCount (4 bytes)
+  // - attestedCredentialData (if AT flag set):
+  //   - aaguid (16 bytes)
+  //   - credentialIdLength (2 bytes, big-endian)
+  //   - credentialId (variable)
+  //   - credentialPublicKey (COSE_Key, CBOR)
+
+  const flags = authData[32]
+  const hasAttestedCredentialData = (flags & 0x40) !== 0
+
+  if (!hasAttestedCredentialData) {
+    throw new Error('Attestation response missing credential data')
+  }
+
+  // Skip: rpIdHash (32) + flags (1) + signCount (4) + aaguid (16) = 53 bytes
+  const credIdLenOffset = 53
+  const credIdLen = (authData[credIdLenOffset] << 8) | authData[credIdLenOffset + 1]
+
+  // COSE public key starts after credentialId
+  const coseKeyOffset = credIdLenOffset + 2 + credIdLen
+  const coseKeyBytes = authData.slice(coseKeyOffset)
+
+  // Parse COSE_Key to extract raw P-256 public key
+  return parseCOSEPublicKey(coseKeyBytes)
+}
+
+/**
+ * Minimal CBOR parser for attestation object.
+ * Only handles the specific structure we need: { authData: bytes, fmt: string, attStmt: map }
+ */
+function parseCBORAttestationObject(data: Uint8Array): Uint8Array {
+  let offset = 0
+
+  // Expect map with 3 items (0xa3)
+  if ((data[offset] & 0xf0) !== 0xa0) {
+    throw new Error('Expected CBOR map')
+  }
+  const mapLen = data[offset] & 0x0f
+  offset++
+
+  let authData: Uint8Array | null = null
+
+  for (let i = 0; i < mapLen; i++) {
+    // Parse key (text string)
+    const keyInfo = parseCBORTextString(data, offset)
+    offset = keyInfo.nextOffset
+    const key = keyInfo.value
+
+    if (key === 'authData') {
+      // Parse value (byte string)
+      const valueInfo = parseCBORByteString(data, offset)
+      offset = valueInfo.nextOffset
+      authData = valueInfo.value
+    } else if (key === 'fmt') {
+      // Skip text string value
+      const valueInfo = parseCBORTextString(data, offset)
+      offset = valueInfo.nextOffset
+    } else if (key === 'attStmt') {
+      // Skip map (for attestation: 'none', this is empty map 0xa0)
+      if ((data[offset] & 0xf0) === 0xa0) {
+        const attStmtMapLen = data[offset] & 0x0f
+        offset++
+        // Skip map contents (should be empty for 'none' attestation)
+        for (let j = 0; j < attStmtMapLen; j++) {
+          offset = skipCBORValue(data, offset)
+          offset = skipCBORValue(data, offset)
+        }
+      } else {
+        throw new Error('Unexpected attStmt format')
+      }
+    }
+  }
+
+  if (!authData) {
+    throw new Error('authData not found in attestation object')
+  }
+
+  return authData
+}
+
+function parseCBORTextString(data: Uint8Array, offset: number): { value: string; nextOffset: number } {
+  const majorType = (data[offset] & 0xe0) >> 5
+  if (majorType !== 3) throw new Error('Expected CBOR text string')
+
+  const additionalInfo = data[offset] & 0x1f
+  offset++
+
+  let length: number
+  if (additionalInfo < 24) {
+    length = additionalInfo
+  } else if (additionalInfo === 24) {
+    length = data[offset++]
+  } else if (additionalInfo === 25) {
+    length = (data[offset] << 8) | data[offset + 1]
+    offset += 2
+  } else {
+    throw new Error('Unsupported CBOR text string length')
+  }
+
+  const value = new TextDecoder().decode(data.slice(offset, offset + length))
+  return { value, nextOffset: offset + length }
+}
+
+function parseCBORByteString(data: Uint8Array, offset: number): { value: Uint8Array; nextOffset: number } {
+  const majorType = (data[offset] & 0xe0) >> 5
+  if (majorType !== 2) throw new Error('Expected CBOR byte string')
+
+  const additionalInfo = data[offset] & 0x1f
+  offset++
+
+  let length: number
+  if (additionalInfo < 24) {
+    length = additionalInfo
+  } else if (additionalInfo === 24) {
+    length = data[offset++]
+  } else if (additionalInfo === 25) {
+    length = (data[offset] << 8) | data[offset + 1]
+    offset += 2
+  } else {
+    throw new Error('Unsupported CBOR byte string length')
+  }
+
+  return { value: data.slice(offset, offset + length), nextOffset: offset + length }
+}
+
+function skipCBORValue(data: Uint8Array, offset: number): number {
+  const majorType = (data[offset] & 0xe0) >> 5
+  const additionalInfo = data[offset] & 0x1f
+  offset++
+
+  let length = 0
+  if (additionalInfo < 24) {
+    length = additionalInfo
+  } else if (additionalInfo === 24) {
+    length = data[offset++]
+  } else if (additionalInfo === 25) {
+    length = (data[offset] << 8) | data[offset + 1]
+    offset += 2
+  } else if (additionalInfo === 26) {
+    // Use >>> 0 to ensure unsigned 32-bit result (bitwise ops produce signed int32)
+    length =
+      ((data[offset] << 24) |
+        (data[offset + 1] << 16) |
+        (data[offset + 2] << 8) |
+        data[offset + 3]) >>>
+      0
+    offset += 4
+  } else if (additionalInfo === 27) {
+    throw new Error('CBOR 8-byte lengths not supported')
+  }
+
+  if (majorType === 2 || majorType === 3) {
+    // byte string or text string - skip length bytes
+    return offset + length
+  } else if (majorType === 4) {
+    // array - skip items
+    for (let i = 0; i < length; i++) {
+      offset = skipCBORValue(data, offset)
+    }
+    return offset
+  } else if (majorType === 5) {
+    // map - skip key-value pairs
+    for (let i = 0; i < length; i++) {
+      offset = skipCBORValue(data, offset)
+      offset = skipCBORValue(data, offset)
+    }
+    return offset
+  }
+
+  return offset
+}
+
+/**
+ * Parse COSE_Key for EC2 P-256 and return uncompressed public key (65 bytes)
+ */
+function parseCOSEPublicKey(coseKey: Uint8Array): Uint8Array {
+  // COSE_Key for ES256:
+  // { 1: 2, 3: -7, -1: 1, -2: x (32 bytes), -3: y (32 bytes) }
+  // We need to extract x and y coordinates
+
+  let offset = 0
+  const majorType = (coseKey[offset] & 0xe0) >> 5
+  if (majorType !== 5) throw new Error('COSE_Key must be a map')
+
+  const mapLen = coseKey[offset] & 0x1f
+  offset++
+
+  let x: Uint8Array | null = null
+  let y: Uint8Array | null = null
+
+  for (let i = 0; i < mapLen; i++) {
+    // Parse key (integer, possibly negative)
+    const keyResult = parseCBORInteger(coseKey, offset)
+    offset = keyResult.nextOffset
+    const key = keyResult.value
+
+    if (key === -2) {
+      // x-coordinate
+      const valueResult = parseCBORByteString(coseKey, offset)
+      offset = valueResult.nextOffset
+      x = valueResult.value
+    } else if (key === -3) {
+      // y-coordinate
+      const valueResult = parseCBORByteString(coseKey, offset)
+      offset = valueResult.nextOffset
+      y = valueResult.value
+    } else {
+      // Skip other values
+      offset = skipCBORValue(coseKey, offset)
+    }
+  }
+
+  if (!x || !y || x.length !== 32 || y.length !== 32) {
+    throw new Error('Invalid COSE_Key: missing or invalid P-256 coordinates')
+  }
+
+  // Return uncompressed P-256 public key: 0x04 || x || y
+  const publicKey = new Uint8Array(65)
+  publicKey[0] = 0x04
+  publicKey.set(x, 1)
+  publicKey.set(y, 33)
+  return publicKey
+}
+
+function parseCBORInteger(data: Uint8Array, offset: number): { value: number; nextOffset: number } {
+  const majorType = (data[offset] & 0xe0) >> 5
+  const additionalInfo = data[offset] & 0x1f
+  offset++
+
+  let value: number
+  if (additionalInfo < 24) {
+    value = additionalInfo
+  } else if (additionalInfo === 24) {
+    value = data[offset++]
+  } else if (additionalInfo === 25) {
+    value = (data[offset] << 8) | data[offset + 1]
+    offset += 2
+  } else {
+    throw new Error('Unsupported CBOR integer size')
+  }
+
+  // Major type 0 = unsigned, major type 1 = negative
+  if (majorType === 1) {
+    value = -1 - value
+  }
+
+  return { value, nextOffset: offset }
+}
+
+/**
+ * Store credential public key in localStorage.
+ * The key is associated with the credential ID.
+ */
+export function storeCredentialPublicKey(credentialId: string, publicKey: Uint8Array): void {
+  const storage = getPublicKeyStorage()
+  storage[credentialId] = uint8ArrayToBase64(publicKey)
+  localStorage.setItem(CREDENTIAL_PUBKEY_STORAGE_KEY, JSON.stringify(storage))
+}
+
+/**
+ * Retrieve credential public key from localStorage.
+ */
+export function getCredentialPublicKey(credentialId: string): Uint8Array | null {
+  const storage = getPublicKeyStorage()
+  const base64 = storage[credentialId]
+  if (!base64) return null
+  return base64ToUint8Array(base64)
+}
+
+/**
+ * Get all stored credential public keys.
+ */
+export function getAllCredentialPublicKeys(): Array<{ credentialId: string; publicKey: Uint8Array }> {
+  const storage = getPublicKeyStorage()
+  return Object.entries(storage).map(([credentialId, base64]) => ({
+    credentialId,
+    publicKey: base64ToUint8Array(base64),
+  }))
+}
+
+function getPublicKeyStorage(): Record<string, string> {
+  try {
+    const stored = localStorage.getItem(CREDENTIAL_PUBKEY_STORAGE_KEY)
+    return stored ? JSON.parse(stored) : {}
+  } catch {
+    return {}
+  }
+}
+
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  return btoa(Array.from(bytes, (c) => String.fromCharCode(c)).join(''))
+}
+
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
 }
 
 // Base64url encoding utility
@@ -442,7 +798,7 @@ export async function getPasskeySessionKeypair(
   identitySharedSecretKey: CryptoKey // Non-extractable HKDF master key for session binding
 }> {
   // Get passkey master key
-  const masterKey = await getPasskeyMasterKey(credentialId)
+  const { masterKey } = await getPasskeyMasterKey(credentialId)
 
   // Derive stable public identifier from master key (for fingerprint display)
   const identityPublicKeyBytes = await derivePasskeyPublicId(masterKey)
