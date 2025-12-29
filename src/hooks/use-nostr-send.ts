@@ -349,7 +349,7 @@ export function useNostrSend(): UseNostrSendReturn {
         await client.waitForConnection()
 
         // Wait for receiver ready ACK (seq=0)
-        const { receiverPubkey, receiverEphemeralPub, receiverSessionBinding, receiverContactToken } = await new Promise<{
+        const { receiverPubkey, receiverHint, receiverEphemeralPub, receiverSessionBinding, receiverContactToken } = await new Promise<{
           receiverPubkey: string
           receiverHint?: string
           receiverEphemeralPub?: Uint8Array
@@ -428,6 +428,9 @@ export function useNostrSend(): UseNostrSendReturn {
             if (!receiverContactToken) {
               throw new Error('Security check failed: receiver did not provide contact token')
             }
+            if (!receiverHint) {
+              throw new Error('Security check failed: receiver did not provide identity hint')
+            }
             // Verify receiver's token: must target sender's public ID and be signed by receiver
             const verifiedReceiverToken = await verifyContactToken(receiverContactToken)
             // Token's recipient (sub) should be the sender's public ID
@@ -437,9 +440,14 @@ export function useNostrSend(): UseNostrSendReturn {
                 `Expected your ID (${senderFingerprint}).`
               )
             }
-            // Token's signer should match the receiver's hint (their fingerprint)
-            // Note: receiverHint should be the receiver's own fingerprint from the ACK
-            // For now, we trust the token signature verification proves the receiver created it
+            // Token's signer should match the receiver's hint (their fingerprint from the ACK)
+            // This ensures the token was actually created by the receiver, not by a third party
+            if (verifiedReceiverToken.signerFingerprint !== receiverHint) {
+              throw new Error(
+                `Receiver's token was signed by wrong identity (${verifiedReceiverToken.signerFingerprint}). ` +
+                `Expected receiver's ID (${receiverHint}).`
+              )
+            }
           }
 
           // For self-transfer: verify receiver's session binding (same passkey = same master key)
