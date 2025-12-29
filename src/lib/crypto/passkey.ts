@@ -286,10 +286,15 @@ export async function createPasskeyCredential(
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown error'
     console.error('Failed to store credential public key:', message)
+    // IMPORTANT: At this point, the passkey has been created in the authenticator but
+    // the app cannot use it without the stored public key. The user may need to manually
+    // delete the orphaned passkey from their authenticator's settings.
     throw new Error(
       `Passkey created but failed to store credential key: ${message}. ` +
-      'This may be due to storage quota or private browsing mode. ' +
-      'Contact token signing will not work until storage is available.'
+        'This may be due to storage quota or private browsing mode. ' +
+        'The passkey was created in your authenticator but cannot be used by this app. ' +
+        'Please delete the orphaned passkey from your authenticator settings and try again ' +
+        'after ensuring storage is available (exit private browsing or clear browser data).'
     )
   }
 
@@ -457,11 +462,13 @@ function skipCBORValue(data: Uint8Array, offset: number): number {
     length = (data[offset] << 8) | data[offset + 1]
     offset += 2
   } else if (additionalInfo === 26) {
+    // Use >>> 0 to ensure unsigned 32-bit result (bitwise ops produce signed int32)
     length =
-      (data[offset] << 24) |
-      (data[offset + 1] << 16) |
-      (data[offset + 2] << 8) |
-      data[offset + 3]
+      ((data[offset] << 24) |
+        (data[offset + 1] << 16) |
+        (data[offset + 2] << 8) |
+        data[offset + 3]) >>>
+      0
     offset += 4
   } else if (additionalInfo === 27) {
     throw new Error('CBOR 8-byte lengths not supported')

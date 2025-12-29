@@ -13,7 +13,7 @@
  * Verifies the WebAuthn ECDSA signature without needing a browser.
  */
 
-import { webcrypto } from 'crypto'
+import { webcrypto, timingSafeEqual } from 'crypto'
 
 const crypto = webcrypto
 const TOKEN_TYPE = 'sswct-es256'
@@ -163,8 +163,8 @@ async function verifyContactToken(token) {
     throw new Error(`Challenge length mismatch: expected ${expectedChallenge.length} bytes, got ${actualChallenge.length} bytes`)
   }
 
-  // Constant-time byte comparison
-  if (!expectedChallenge.every((b, i) => b === actualChallenge[i])) {
+  // Constant-time byte comparison using Node's timingSafeEqual
+  if (!timingSafeEqual(Buffer.from(expectedChallenge), Buffer.from(actualChallenge))) {
     throw new Error('Challenge mismatch - token data may be tampered')
   }
   console.log('\nChallenge: VALID (matches token data)')
