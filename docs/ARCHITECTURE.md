@@ -149,7 +149,7 @@ Passkeys provide an alternative to PIN-based authentication using the WebAuthn P
 
 #### Passkey Fingerprint
 
-- **Fingerprint**: SHA-256 hash of the passkey public ID (32 bytes derived via HKDF), encoded as 16 hex characters (formatted as `XXXX-XXXX-XXXX-XXXX` for display)
+- **Fingerprint**: Truncated SHA-256 hash of the passkey public ID (32 bytes derived via HKDF). We take the first 8 bytes (64 bits) of the hash and encode as 16 hex characters (formatted as `XXXX-XXXX-XXXX-XXXX` for display).
 - **Purpose**: Used for Nostr event filtering and verification that sender/receiver have the same passkey
 
 #### Passkey Public ID
