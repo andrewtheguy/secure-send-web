@@ -56,7 +56,7 @@ export interface UseNostrSendReturn {
   pin: string | null
   ownPublicKey: Uint8Array | null
   ownFingerprint: string | null
-  send: (content: File, options?: WebRTCOptions & { receiverPublicKey?: Uint8Array }) => Promise<void>
+  send: (content: File, options?: WebRTCOptions & { receiverPublicKey?: Uint8Array; selfTransfer?: boolean }) => Promise<void>
   cancel: () => void
 }
 
@@ -93,7 +93,7 @@ export function useNostrSend(): UseNostrSendReturn {
   }, [clearExpirationTimeout])
 
   const send = useCallback(
-    async (content: File, options?: WebRTCOptions & { receiverPublicKey?: Uint8Array }) => {
+    async (content: File, options?: WebRTCOptions & { receiverPublicKey?: Uint8Array; selfTransfer?: boolean }) => {
       // Guard against concurrent invocations
       if (sendingRef.current) return
       sendingRef.current = true
@@ -152,13 +152,13 @@ export function useNostrSend(): UseNostrSendReturn {
         let senderEphemeral: EphemeralSessionKeypair | undefined
         let identitySharedSecretKey: CryptoKey | undefined
 
-        if (options?.usePasskey && !options.receiverPublicKey) {
+        if (options?.usePasskey && !options.receiverPublicKey && !options.selfTransfer) {
           setState({ status: 'error', message: 'Receiver public ID required for passkey mode' })
           sendingRef.current = false
           return
         }
 
-        if (options?.usePasskey && options.receiverPublicKey) {
+        if (options?.usePasskey && (options.receiverPublicKey || options.selfTransfer)) {
           // MUTUAL TRUST MODE: Use passkey mutual trust with receiver's public ID
           // NOW WITH PERFECT FORWARD SECRECY via ephemeral session keys
           setState({ status: 'connecting', message: 'Authenticate with passkey...' })
@@ -180,6 +180,11 @@ export function useNostrSend(): UseNostrSendReturn {
             senderEphemeral = ephemeral
             identitySharedSecretKey = sharedSecret
 
+            // Determine receiver public key: use own identity for self-transfer, otherwise use provided
+            const receiverPublicKeyBytes = options.selfTransfer
+              ? ephemeral.identityPublicKeyBytes
+              : options.receiverPublicKey!
+
             // Derive AES key from passkey master key for initial payload encryption
             // NOTE: This is for the payload only. File data will use session key (PFS)
             key = await deriveAESKeyFromSecretKey(sharedSecret, salt)
@@ -193,7 +198,7 @@ export function useNostrSend(): UseNostrSendReturn {
 
             // 2. Receiver Public Key Commitment: Prevents relay MITM attacks
             // Sender commits to the receiver's identity public ID
-            receiverPkCommitment = await computePublicKeyCommitment(options.receiverPublicKey)
+            receiverPkCommitment = await computePublicKeyCommitment(receiverPublicKeyBytes)
 
             // 3. Replay Nonce: Prevents replay attacks within TTL window
             // Receiver must echo this nonce in their ready ACK
@@ -201,7 +206,7 @@ export function useNostrSend(): UseNostrSendReturn {
             replayNonce = uint8ArrayToBase64(nonceBytes)
 
             // Hint is receiver's public ID fingerprint (for event filtering)
-            hint = await publicKeyToFingerprint(options.receiverPublicKey)
+            hint = await publicKeyToFingerprint(receiverPublicKeyBytes)
           } catch (err) {
             setState({
               status: 'error',

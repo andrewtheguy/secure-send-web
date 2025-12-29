@@ -45,6 +45,7 @@ export function SendTab() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [methodChoice, setMethodChoice] = useState<MethodChoice>('nostr')
   const [usePasskey, setUsePasskey] = useState(false)
+  const [sendToSelf, setSendToSelf] = useState(false)
   const [activeMethod, setActiveMethod] = useState<SignalingMethod | null>(null)
   const [relayOnly, setRelayOnly] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
@@ -132,8 +133,8 @@ export function SendTab() {
 
   const canSendFiles = selectedFiles.length > 0 && !isFilesOverLimit && state.status === 'idle' && !isCompressing
   const canSendFolder = folderFiles && folderFiles.length > 0 && !isFolderOverLimit && state.status === 'idle' && !isCompressing
-  // When passkey mode is enabled, require valid receiver public ID
-  const passkeyRequirementsMet = !usePasskey || (receiverPublicKeyBytes !== null)
+  // When passkey mode is enabled, require valid receiver public ID OR sendToSelf
+  const passkeyRequirementsMet = !usePasskey || sendToSelf || (receiverPublicKeyBytes !== null)
   const canSend = (mode === 'file' ? canSendFiles : canSendFolder) && passkeyRequirementsMet
 
   const handleSend = async () => {
@@ -169,12 +170,13 @@ export function SendTab() {
     setActiveMethod(methodToUse)
 
     // Only Nostr hook supports relayOnly and usePasskey options
-    // Pass receiver public ID when in passkey mode
+    // Pass receiver public ID when in passkey mode (unless sending to self)
     const sendOptions = methodToUse === 'nostr'
       ? {
           relayOnly,
           usePasskey,
-          receiverPublicKey: usePasskey && receiverPublicKeyBytes ? receiverPublicKeyBytes : undefined,
+          selfTransfer: usePasskey && sendToSelf,
+          receiverPublicKey: usePasskey && !sendToSelf && receiverPublicKeyBytes ? receiverPublicKeyBytes : undefined,
         }
       : undefined
 
@@ -228,6 +230,7 @@ export function SendTab() {
     setReceiverPublicKeyInput('')
     setReceiverPublicKeyFingerprint(null)
     setReceiverPublicKeyError(null)
+    setSendToSelf(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
     if (folderInputRef.current) folderInputRef.current.value = ''
   }
@@ -590,44 +593,68 @@ export function SendTab() {
 
                     {/* Receiver public ID input - only shown when passkey enabled */}
                     {usePasskey && (
-                      <div className="space-y-2 pt-2 border-t border-dashed">
-                        <Label htmlFor="receiver-pubkey" className="text-sm font-medium">
-                          Receiver&apos;s Public ID
-                        </Label>
-                        <div className="flex gap-2">
-                          <Textarea
-                            id="receiver-pubkey"
-                            placeholder="Paste receiver's public ID (base64)..."
-                            value={receiverPublicKeyInput}
-                            onChange={(e) => setReceiverPublicKeyInput(e.target.value)}
-                            className="font-mono text-xs min-h-[60px] resize-none"
+                      <div className="space-y-3 pt-2 border-t border-dashed">
+                        {/* Send to self checkbox */}
+                        <div className="flex items-center gap-2">
+                          <input
+                            id="send-to-self"
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-gray-300"
+                            checked={sendToSelf}
+                            onChange={(e) => setSendToSelf(e.target.checked)}
                           />
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setShowPublicKeyModal(true)}
-                            className="flex-shrink-0"
-                            title="Enter public ID"
-                          >
-                            <Keyboard className="h-4 w-4" />
-                          </Button>
+                          <Label htmlFor="send-to-self" className="text-sm font-normal cursor-pointer">
+                            Send to myself
+                          </Label>
                         </div>
-                        {receiverPublicKeyError && (
-                          <p className="text-xs text-destructive">{receiverPublicKeyError}</p>
+                        {sendToSelf && (
+                          <p className="text-xs text-muted-foreground">
+                            Transfer files to yourself using the same passkey on another device.
+                          </p>
                         )}
-                        {receiverPublicKeyFingerprint && (
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Fingerprint className="h-3 w-3" />
-                            <span>Receiver fingerprint: </span>
-                            <span className="font-mono font-medium text-cyan-600">{receiverPublicKeyFingerprint}</span>
-                          </div>
+
+                        {/* Receiver public ID input - hidden when sending to self */}
+                        {!sendToSelf && (
+                          <>
+                            <Label htmlFor="receiver-pubkey" className="text-sm font-medium">
+                              Receiver&apos;s Public ID
+                            </Label>
+                            <div className="flex gap-2">
+                              <Textarea
+                                id="receiver-pubkey"
+                                placeholder="Paste receiver's public ID (base64)..."
+                                value={receiverPublicKeyInput}
+                                onChange={(e) => setReceiverPublicKeyInput(e.target.value)}
+                                className="font-mono text-xs min-h-[60px] resize-none"
+                              />
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setShowPublicKeyModal(true)}
+                                className="flex-shrink-0"
+                                title="Enter public ID"
+                              >
+                                <Keyboard className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            {receiverPublicKeyError && (
+                              <p className="text-xs text-destructive">{receiverPublicKeyError}</p>
+                            )}
+                            {receiverPublicKeyFingerprint && (
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Fingerprint className="h-3 w-3" />
+                                <span>Receiver fingerprint: </span>
+                                <span className="font-mono font-medium text-cyan-600">{receiverPublicKeyFingerprint}</span>
+                              </div>
+                            )}
+                            <p className="text-xs text-muted-foreground">
+                              Get the receiver&apos;s public ID from their{' '}
+                              <Link to="/passkey" className="text-primary hover:underline">
+                                Passkey page
+                              </Link>
+                            </p>
+                          </>
                         )}
-                        <p className="text-xs text-muted-foreground">
-                          Get the receiver&apos;s public ID from their{' '}
-                          <Link to="/passkey" className="text-primary hover:underline">
-                            Passkey page
-                          </Link>
-                        </p>
                       </div>
                     )}
                   </div>
@@ -647,7 +674,7 @@ export function SendTab() {
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
               <Fingerprint className="h-3 w-3" />
               <span>
-                Passkey mode{receiverPublicKeyFingerprint ? ` → ${receiverPublicKeyFingerprint}` : ' (enter receiver ID)'}
+                Passkey mode{sendToSelf ? ' → sending to self' : receiverPublicKeyFingerprint ? ` → ${receiverPublicKeyFingerprint}` : ' (enter receiver ID)'}
               </span>
             </div>
           )}

@@ -50,6 +50,7 @@ import {
 export interface ReceiveOptions {
   usePasskey?: boolean
   senderPublicKey?: Uint8Array // For mutual trust mode
+  selfTransfer?: boolean // For receiving from self
 }
 
 export interface UseNostrReceiveReturn {
@@ -100,7 +101,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
     // Determine mode
     const isMutualTrustMode =
-      'usePasskey' in arg && arg.usePasskey === true && 'senderPublicKey' in arg && arg.senderPublicKey
+      'usePasskey' in arg && arg.usePasskey === true && (('senderPublicKey' in arg && arg.senderPublicKey) || ('selfTransfer' in arg && arg.selfTransfer))
     const pinMaterial = !('usePasskey' in arg) ? (arg as PinKeyMaterial) : null
 
     // Closure variables for mutual trust mode - keeps sensitive data scoped
@@ -142,8 +143,13 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           receiverEphemeral = ephemeral
           identitySharedSecretKey = sharedSecret
 
+          // Determine sender public key: use own identity for self-transfer, otherwise use provided
+          const senderPublicKeyBytes = opts.selfTransfer
+            ? ephemeral.identityPublicKeyBytes
+            : opts.senderPublicKey!
+
           // Calculate expected sender fingerprint for verification
-          expectedSenderFingerprint = await publicKeyToFingerprint(opts.senderPublicKey!)
+          expectedSenderFingerprint = await publicKeyToFingerprint(senderPublicKeyBytes)
 
           // Store passkey master key for key derivation and binding verification
           // SECURITY: Raw secret bytes are never exposed to JavaScript
