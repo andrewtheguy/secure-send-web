@@ -155,6 +155,15 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             // This proves the token was signed by a specific passkey credential
             const verifiedToken = await verifyContactToken(opts.senderContactToken!)
 
+            // SECURITY: Verify the token was signed by THIS passkey, not someone else's
+            // Without this check, anyone could use a token signed by a different passkey
+            if (verifiedToken.signerFingerprint !== ephemeral.identityFingerprint) {
+              throw new Error(
+                `Token was signed by a different passkey (${verifiedToken.signerFingerprint}). ` +
+                `Expected your passkey (${ephemeral.identityFingerprint}). Please create a new bound token.`
+              )
+            }
+
             senderPublicKeyBytes = verifiedToken.recipientPublicId
           }
 
@@ -283,6 +292,20 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             continue
           }
 
+          // === SECURITY VERIFICATION 3: Sender's contact token ===
+          // This proves sender specifically chose to communicate with us (not a stolen token)
+          const verifiedSenderToken = await verifyContactToken(parsed.senderContactToken)
+          // Token's recipient (sub) should be our public ID
+          if (verifiedSenderToken.recipientFingerprint !== hint) {
+            console.log(`Sender's token targets wrong recipient (${verifiedSenderToken.recipientFingerprint}), expected us (${hint})`)
+            continue
+          }
+          // Token's signer should be the sender
+          if (verifiedSenderToken.signerFingerprint !== parsed.senderFingerprint) {
+            console.log(`Token signer (${verifiedSenderToken.signerFingerprint}) doesn't match sender (${parsed.senderFingerprint})`)
+            continue
+          }
+
           // NOTE: For cross-user passkey mode, we CANNOT verify session binding because:
           // - Session binding is created using the sender's passkey master key
           // - We don't have access to sender's master key (different passkeys = different PRF outputs)
@@ -290,7 +313,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           // 1. Fingerprint verification (above) - ensures sender identity
           // 2. RPKC verification (above) - ensures event is addressed to us
           // 3. Ephemeral ECDH - any MITM can't derive session key without both private keys
-          // 4. Contact token verification - already verified sender's WebAuthn signature
+          // 4. Contact token verification (above) - proves sender intended to reach us
 
           // Handshake verified - store info for session key derivation
           senderEphemeralPub = parsed.senderEphemeralPub
@@ -470,6 +493,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       // Send ready ACK (seq=0) - include nonce for replay protection in mutual trust mode
       // Include receiver's ephemeral key and binding for PFS
+      // For cross-user passkey: include receiver's contact token proving intent to communicate with sender
+      const receiverContactToken = isCrossUserPasskey && 'senderContactToken' in arg
+        ? (arg as ReceiveOptions).senderContactToken
+        : undefined
       const readyAck = createAckEvent(
         secretKey,
         senderPubkey,
@@ -478,7 +505,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         hint,
         eventNonce,
         receiverEphemeral?.ephemeralPublicKeyBytes,
-        receiverEphemeral?.sessionBinding
+        receiverEphemeral?.sessionBinding,
+        receiverContactToken
       )
       await client.publish(readyAck)
 
