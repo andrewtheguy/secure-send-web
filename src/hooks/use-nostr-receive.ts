@@ -155,15 +155,18 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             // This proves the token was signed by a specific passkey credential
             const verifiedToken = await verifyContactToken(opts.senderContactToken!)
 
-            // TEMPORARILY DISABLED: Local check - protocol-level verification handles this now
             // SECURITY: Verify the token was signed by THIS passkey, not someone else's
-            // Without this check, anyone could use a token signed by a different passkey
-            // if (verifiedToken.signerFingerprint !== ephemeral.identityFingerprint) {
-            //   throw new Error(
-            //     `Token was signed by a different passkey (${verifiedToken.signerFingerprint}). ` +
-            //     `Expected your passkey (${ephemeral.identityFingerprint}). Please create a new bound token.`
-            //   )
-            // }
+            // This is SEPARATE from protocol-level verification (lines 296-308) which checks
+            // the SENDER's token. This check ensures the RECEIVER's stored token was created
+            // by their own passkey, preventing token substitution attacks where an attacker
+            // replaces the receiver's stored token to redirect them to accept files from
+            // the wrong sender.
+            if (verifiedToken.signerFingerprint !== ephemeral.identityFingerprint) {
+              throw new Error(
+                `Token was signed by a different passkey (${verifiedToken.signerFingerprint}). ` +
+                `Expected your passkey (${ephemeral.identityFingerprint}). Please create a new bound token.`
+              )
+            }
 
             senderPublicKeyBytes = verifiedToken.recipientPublicId
           }
