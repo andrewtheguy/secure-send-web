@@ -226,15 +226,15 @@ export function useManualReceive(): UseManualReceiveReturn {
           if (typeof data === 'string') {
             if (data.startsWith('DONE:')) {
               const expectedChunks = Math.ceil(totalBytes! / ENCRYPTION_CHUNK_SIZE)
-              const receivedChunks = parseInt(data.split(':')[1], 10)
-              if (!Number.isFinite(receivedChunks) || receivedChunks <= 0) {
+              const receivedChunkCount = parseInt(data.split(':')[1], 10)
+              if (!Number.isFinite(receivedChunkCount) || receivedChunkCount <= 0) {
                 transferRejecter?.(new Error('Invalid DONE message: missing chunk count'))
                 return
               }
-              if (receivedChunks !== expectedChunks) {
+              if (receivedChunkCount !== expectedChunks) {
                 transferRejecter?.(
                   new Error(
-                    `Invalid DONE message: expected ${expectedChunks} chunks, got ${receivedChunks}`
+                    `Invalid DONE message: expected ${expectedChunks} chunks, got ${receivedChunkCount}`
                   )
                 )
                 return

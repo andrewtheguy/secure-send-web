@@ -493,21 +493,23 @@ function parseEphemeralKeys(tags: string[][]): {
     return {}
   }
 
+  let ephemeralPub: Uint8Array
+  let sessionBinding: Uint8Array
   try {
-    const ephemeralPub = base64ToUint8Array(ephemeralPubB64)
-    const sessionBinding = base64ToUint8Array(sessionBindingB64)
-    if (ephemeralPub.length !== EPHEMERAL_PUBKEY_BYTES) {
-      throw new Error(
-        `Invalid ephemeral public key length: expected ${EPHEMERAL_PUBKEY_BYTES} bytes, got ${ephemeralPub.length}`
-      )
-    }
-    if (sessionBinding.length !== EPHEMERAL_BINDING_BYTES) {
-      throw new Error(
-        `Invalid session binding length: expected ${EPHEMERAL_BINDING_BYTES} bytes, got ${sessionBinding.length}`
-      )
-    }
-    return { ephemeralPub, sessionBinding }
+    ephemeralPub = base64ToUint8Array(ephemeralPubB64)
+    sessionBinding = base64ToUint8Array(sessionBindingB64)
   } catch {
     throw new Error('Invalid ephemeral key tags: epk/esb are malformed or have invalid length')
   }
+  if (ephemeralPub.length !== EPHEMERAL_PUBKEY_BYTES) {
+    throw new Error(
+      `Invalid ephemeral public key length: expected ${EPHEMERAL_PUBKEY_BYTES} bytes, got ${ephemeralPub.length}`
+    )
+  }
+  if (sessionBinding.length !== EPHEMERAL_BINDING_BYTES) {
+    throw new Error(
+      `Invalid session binding length: expected ${EPHEMERAL_BINDING_BYTES} bytes, got ${sessionBinding.length}`
+    )
+  }
+  return { ephemeralPub, sessionBinding }
 }

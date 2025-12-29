@@ -432,15 +432,6 @@ export function ReceiveTab() {
                               ? 'Receive from a specific sender using their public ID. No PIN needed.'
                               : 'Use passkey-based encryption instead of PIN. Requires sender\'s public ID.'}
                           </p>
-                          {!usePasskey && (
-                            <p className="text-xs text-muted-foreground">
-                              Use the{' '}
-                              <Link to="/passkey" className="text-primary hover:underline">
-                                Passkey setup page
-                              </Link>{' '}
-                              to create, manage your passkey or get your passkey&apos;s public ID.
-                            </p>
-                          )}
                         </div>
                       </div>
                     )}
@@ -523,6 +514,15 @@ export function ReceiveTab() {
                               ? 'Skip PIN entry. Authenticate with the same synced passkey as the sender.'
                               : 'Use your passkey instead of entering a PIN. Both sender and receiver must have the same passkey.'}
                           </p>
+                          {!usePasskey && (
+                            <p className="text-xs text-muted-foreground">
+                              Use the{' '}
+                              <Link to="/passkey" className="text-primary hover:underline">
+                                Passkey setup page
+                              </Link>{' '}
+                              to create, manage your passkey or get your passkey&apos;s public ID.
+                            </p>
+                          )}
                         </div>
                       </div>
                     )}
