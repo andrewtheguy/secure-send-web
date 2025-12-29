@@ -95,31 +95,12 @@ export function PasskeyPage() {
     onError: () => void
   ) => {
     try {
-      // Try modern clipboard API first (requires secure context)
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        await navigator.clipboard.writeText(text)
-        onSuccess()
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+        onError()
         return
       }
-
-      // Fallback: use legacy execCommand method
-      const textarea = document.createElement('textarea')
-      textarea.value = text
-      textarea.style.position = 'fixed'
-      textarea.style.left = '-9999px'
-      textarea.style.top = '-9999px'
-      document.body.appendChild(textarea)
-      textarea.focus()
-      textarea.select()
-
-      const successful = document.execCommand('copy')
-      document.body.removeChild(textarea)
-
-      if (successful) {
-        onSuccess()
-      } else {
-        onError()
-      }
+      await navigator.clipboard.writeText(text)
+      onSuccess()
     } catch {
       onError()
     }

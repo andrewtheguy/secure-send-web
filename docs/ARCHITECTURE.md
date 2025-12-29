@@ -93,13 +93,8 @@ sequenceDiagram
 - Without internet: WebRTC discovers local ICE candidates directly, connection establishes via local IP addresses
 
 **QR Code Format:**
-- Binary payload: `[4 bytes: "SS01" magic][16 bytes: salt][encrypted deflate-compressed SignalingPayload]`
 - QR: binary → binary QR code (8-bit byte mode, ~2000 bytes capacity)
 - Copy/paste: base64 encode binary → text string for clipboard
-
-> **Note:** Prior to PR #15, QR codes used base45 encoding with multi-QR chunking.
-> For the previous implementation, see commit `89d935b3b61ea37c9f98bc85de4d4c78c7be3891`.
-
 ## Key Components
 
 ### Cryptography (`src/lib/crypto/`)
@@ -432,11 +427,6 @@ A 2-hour sliding window (current bucket + 1 previous bucket) is used to verify i
 -   **Clock Drift Tolerance**: The window provides inherent tolerance for clock drift (+/- 1 hour).
 -   **Boundary Transitions**: When the hour rolls over, the previous bucket is dropped, and the new hour becomes the current bucket.
 -   **Out-of-Sync Clocks**: If the sender and receiver clocks differ by more than the window's tolerance (e.g., >1 hour fast or slow), de-obfuscation will fail.
-
-**Legacy Format (SS01):**
-Prior to the full-payload obfuscation refactor, the format was:
-`[4 bytes: "SS01" magic][16 bytes: salt][encrypted deflate-compressed payload]`
-and it is no longer accepted by the backend.
 
 > [!NOTE]
 | The obfuscation's goal is simply to avoid casual inspection. The actual security of the transfer is provided by ECDH mutual exchange and AES-256-GCM encryption of the data channel.
