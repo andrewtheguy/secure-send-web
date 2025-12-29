@@ -12,7 +12,6 @@ import {
   Shield,
   ArrowLeft,
   ArrowRight,
-  Eye,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -41,8 +40,7 @@ type WizardStep =
   | 'authenticate' // Step 1
   | 'mode-select' // Step 2: Choose role
   | 'create-token' // Step 3A: Initiator flow (includes contact card)
-  | 'complete-token' // Step 3B: Countersigner flow
-  | 'view-card' // Step 3C: Just view contact card
+  | 'complete-token' // Step 3B: Non-initiator flow (includes contact card)
 
 // Contact card format: JSON with id (public ID) and cpk (credential public key)
 interface ContactCard {
@@ -146,7 +144,6 @@ export function PasskeyPage() {
   const getStep3Label = (): string => {
     if (wizardStep === 'create-token') return 'Create Token'
     if (wizardStep === 'complete-token') return 'Complete Token'
-    if (wizardStep === 'view-card') return 'View Card'
     return 'Token'
   }
 
@@ -632,7 +629,7 @@ export function PasskeyPage() {
   const renderModeSelectStep = () => (
     <div className="space-y-4">
       <div className="text-center mb-6">
-        <h3 className="text-lg font-semibold">What would you like to do?</h3>
+        <h3 className="text-lg font-semibold">Choose your role</h3>
         <p className="text-sm text-muted-foreground mt-1">
           Create a mutual token to securely identify your contacts
         </p>
@@ -646,10 +643,10 @@ export function PasskeyPage() {
         >
           <div className="flex items-center gap-2 font-semibold">
             <Plus className="h-5 w-5" />
-            Start New Exchange
+            I&apos;m starting the exchange
           </div>
           <p className="text-xs text-muted-foreground font-normal text-left">
-            You initiate the exchange by sharing your card and creating a pending token
+            Share your contact card and create a pending token for your contact to complete
           </p>
         </Button>
 
@@ -660,22 +657,11 @@ export function PasskeyPage() {
         >
           <div className="flex items-center gap-2 font-semibold">
             <CheckCircle2 className="h-5 w-5" />
-            Complete Pending Token
+            I&apos;m completing an exchange
           </div>
           <p className="text-xs text-muted-foreground font-normal text-left">
-            Your contact already sent you a pending token to sign
+            Share your contact card, then complete the pending token you receive
           </p>
-        </Button>
-      </div>
-
-      <div className="pt-4 border-t">
-        <Button
-          onClick={() => setWizardStep('view-card')}
-          variant="ghost"
-          className="w-full text-muted-foreground hover:text-foreground"
-        >
-          <Eye className="mr-2 h-4 w-4" />
-          Just view my contact card
         </Button>
       </div>
     </div>
@@ -792,7 +778,7 @@ export function PasskeyPage() {
     </div>
   )
 
-  // Step 3B: Complete Token
+  // Step 3B: Complete Token (with contact card at top)
   const renderCompleteTokenStep = () => (
     <div className="space-y-6">
       {/* Back button */}
@@ -806,6 +792,9 @@ export function PasskeyPage() {
         <ArrowLeft className="mr-2 h-4 w-4" />
         Back to options
       </Button>
+
+      {/* Contact card at top */}
+      {renderContactCard()}
 
       <div className="space-y-4 p-4 rounded-lg border border-amber-500/30 bg-amber-50/30 dark:bg-amber-950/10">
         <h3 className="font-semibold flex items-center gap-2">
@@ -888,24 +877,6 @@ export function PasskeyPage() {
     </div>
   )
 
-  // Step 3C: View Card Only
-  const renderViewCardStep = () => (
-    <div className="space-y-6">
-      {/* Back button */}
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={handleStartOver}
-        className="text-muted-foreground"
-      >
-        <ArrowLeft className="mr-2 h-4 w-4" />
-        Back to options
-      </Button>
-
-      {renderContactCard()}
-    </div>
-  )
-
   // Render current step content
   const renderStepContent = () => {
     switch (wizardStep) {
@@ -917,8 +888,6 @@ export function PasskeyPage() {
         return renderCreateTokenStep()
       case 'complete-token':
         return renderCompleteTokenStep()
-      case 'view-card':
-        return renderViewCardStep()
     }
   }
 
