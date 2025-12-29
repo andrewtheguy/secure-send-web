@@ -47,6 +47,7 @@ export function PasskeyPage() {
 
   // Bind Contact state
   const [contactToSign, setContactToSign] = useState('')
+  const [contactComment, setContactComment] = useState('')
   const [signedContact, setSignedContact] = useState<string | null>(null)
   const [signingError, setSigningError] = useState<string | null>(null)
   const [copiedSignedContact, setCopiedSignedContact] = useState(false)
@@ -193,10 +194,16 @@ export function PasskeyPage() {
       }
 
       // Create signed contact token using WebAuthn ECDSA signature
-      const token = await createContactToken(currentCredentialId, credentialPublicKey, trimmed)
+      const token = await createContactToken(
+        currentCredentialId,
+        credentialPublicKey,
+        trimmed,
+        contactComment.trim() || undefined
+      )
 
       setSignedContact(token)
       setContactToSign('') // Clear input after success
+      setContactComment('') // Clear comment after success
       setPageState('idle')
     } catch (err) {
       setSigningError(err instanceof Error ? err.message : 'Failed to bind contact')
@@ -450,6 +457,19 @@ export function PasskeyPage() {
                 disabled={isLoading}
                 className="font-mono text-xs min-h-[60px] resize-none"
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="contact-comment">Comment (optional)</Label>
+              <Input
+                id="contact-comment"
+                placeholder="e.g., Alice's work laptop"
+                value={contactComment}
+                onChange={(e) => setContactComment(e.target.value)}
+                disabled={isLoading}
+              />
+              <p className="text-xs text-muted-foreground">
+                Add a comment to identify this contact (like SSH keys).
+              </p>
             </div>
             <Button
               onClick={handleBindContact}

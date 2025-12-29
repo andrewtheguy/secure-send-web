@@ -5,12 +5,21 @@
  * Tokens bind a recipient's public ID to the signer's passkey using WebAuthn
  * ECDSA (ES256) signatures, ensuring the contact information hasn't been tampered with.
  *
+ * Token format (SSH public key style):
+ *   sswct-es256 <base64-payload> [optional comment]
+ *
+ * Example:
+ *   sswct-es256 eyJzdWIiOi... Alice's work laptop
+ *
  * SECURITY: WebAuthn ensures the private key never leaves the authenticator.
  * Verification can be done without authentication using the stored credential public key.
  */
 
 import { publicKeyToFingerprint, constantTimeEqualBytes } from './ecdh'
 import { getCredentialPublicKey, getAllCredentialPublicKeys } from './passkey'
+
+/** Token type identifier for SSH-like format */
+const TOKEN_TYPE = 'sswct-es256'
 
 /**
  * Token payload structure (encoded as JSON, then base64)
@@ -38,6 +47,32 @@ export interface VerifiedContactToken {
   signerCredentialPublicKey: Uint8Array
   signerFingerprint: string
   issuedAt: Date
+  comment?: string
+}
+
+/**
+ * Parse SSH-like token format into parts.
+ * Format: sswct-es256 <base64-payload> [comment]
+ */
+function parseTokenFormat(input: string): { payload: string; comment?: string } | null {
+  const trimmed = input.trim()
+  if (!trimmed.startsWith(TOKEN_TYPE + ' ')) {
+    return null
+  }
+
+  // Split into parts: type, payload, and optional comment
+  const afterType = trimmed.slice(TOKEN_TYPE.length + 1)
+  const spaceIndex = afterType.indexOf(' ')
+
+  if (spaceIndex === -1) {
+    // No comment
+    return { payload: afterType }
+  }
+
+  return {
+    payload: afterType.slice(0, spaceIndex),
+    comment: afterType.slice(spaceIndex + 1),
+  }
 }
 
 // Helper: base64 encode
@@ -73,14 +108,16 @@ function base64urlDecode(str: string): Uint8Array {
 /**
  * Check if a string looks like a valid contact token format.
  * Does NOT verify the signature - just checks structure.
+ *
+ * Format: sswct-es256 <base64-payload> [optional comment]
  */
 export function isContactTokenFormat(input: string): boolean {
-  const trimmed = input.trim()
-  if (!trimmed) return false
+  const parsed = parseTokenFormat(input)
+  if (!parsed) return false
 
   try {
-    // Token is base64-encoded JSON
-    const json = atob(trimmed)
+    // Payload is base64-encoded JSON
+    const json = atob(parsed.payload)
     const payload = JSON.parse(json) as unknown
 
     // Check required fields exist
@@ -109,12 +146,14 @@ export function isContactTokenFormat(input: string): boolean {
  * @param credentialId - Signer's credential ID (base64url)
  * @param credentialPublicKey - Signer's credential public key (65 bytes)
  * @param recipientPublicIdBase64 - Recipient's public ID (base64 encoded)
- * @returns Base64-encoded contact token
+ * @param comment - Optional comment to append (e.g., "Alice's work laptop")
+ * @returns Contact token in SSH-like format: sswct-es256 <payload> [comment]
  */
 export async function createContactToken(
   credentialId: string,
   credentialPublicKey: Uint8Array,
-  recipientPublicIdBase64: string
+  recipientPublicIdBase64: string,
+  comment?: string
 ): Promise<string> {
   // Decode and validate recipient public ID
   const recipientPublicId = base64ToUint8Array(recipientPublicIdBase64)
@@ -169,7 +208,13 @@ export async function createContactToken(
 
   // Encode as base64 JSON
   const json = JSON.stringify(payload)
-  return btoa(json)
+  const base64Payload = btoa(json)
+
+  // Return in SSH-like format: sswct-es256 <payload> [comment]
+  if (comment && comment.trim()) {
+    return `${TOKEN_TYPE} ${base64Payload} ${comment.trim()}`
+  }
+  return `${TOKEN_TYPE} ${base64Payload}`
 }
 
 /**
@@ -178,23 +223,32 @@ export async function createContactToken(
  * This does NOT require the signer to authenticate - verification uses
  * the credential public key stored in the token.
  *
+ * Token format: sswct-es256 <base64-payload> [optional comment]
+ *
  * @param token - The contact token string to verify
  * @param trustedCredentialPublicKey - Optional: if provided, token must be signed by this key
- * @returns Verified token data
+ * @returns Verified token data (including comment if present)
  * @throws Error if token is invalid or signature verification fails
  */
 export async function verifyContactToken(
   token: string,
   trustedCredentialPublicKey?: Uint8Array
 ): Promise<VerifiedContactToken> {
-  // Parse the token
-  const trimmed = token.trim()
+  // Parse SSH-like format
+  const parsed = parseTokenFormat(token)
+  if (!parsed) {
+    throw new Error('Invalid contact token format: expected "sswct-es256 <payload> [comment]"')
+  }
+
+  const { payload: base64Payload, comment } = parsed
+
+  // Parse the JSON payload
   let payload: ContactTokenPayload
   try {
-    const json = atob(trimmed)
+    const json = atob(base64Payload)
     payload = JSON.parse(json) as ContactTokenPayload
   } catch {
-    throw new Error('Invalid contact token format: failed to parse')
+    throw new Error('Invalid contact token format: failed to parse payload')
   }
 
   // Validate required fields
@@ -294,6 +348,7 @@ export async function verifyContactToken(
     signerCredentialPublicKey,
     signerFingerprint,
     issuedAt: new Date(payload.iat * 1000),
+    comment,
   }
 }
 

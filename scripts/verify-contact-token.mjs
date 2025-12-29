@@ -4,12 +4,39 @@
  *
  * Usage: node scripts/verify-contact-token.mjs <token>
  *
+ * Token format (SSH-like):
+ *   sswct-es256 <base64-payload> [optional comment]
+ *
+ * Example:
+ *   node scripts/verify-contact-token.mjs "sswct-es256 eyJzdWIi... Alice's work laptop"
+ *
  * Verifies the WebAuthn ECDSA signature without needing a browser.
  */
 
 import { webcrypto } from 'crypto'
 
 const crypto = webcrypto
+const TOKEN_TYPE = 'sswct-es256'
+
+// Parse SSH-like format
+function parseTokenFormat(input) {
+  const trimmed = input.trim()
+  if (!trimmed.startsWith(TOKEN_TYPE + ' ')) {
+    return null
+  }
+
+  const afterType = trimmed.slice(TOKEN_TYPE.length + 1)
+  const spaceIndex = afterType.indexOf(' ')
+
+  if (spaceIndex === -1) {
+    return { payload: afterType, comment: null }
+  }
+
+  return {
+    payload: afterType.slice(0, spaceIndex),
+    comment: afterType.slice(spaceIndex + 1),
+  }
+}
 
 // Base64 decode
 function base64Decode(str) {
@@ -60,11 +87,22 @@ async function fingerprint(data) {
 }
 
 async function verifyContactToken(token) {
-  // Parse token
-  const json = Buffer.from(token.trim(), 'base64').toString('utf8')
-  const payload = JSON.parse(json)
+  // Parse SSH-like format
+  const parsed = parseTokenFormat(token)
+  if (!parsed) {
+    throw new Error(`Invalid format: expected "${TOKEN_TYPE} <payload> [comment]"`)
+  }
 
   console.log('\n=== Contact Token ===\n')
+  console.log('Format:', TOKEN_TYPE)
+  if (parsed.comment) {
+    console.log('Comment:', parsed.comment)
+  }
+
+  // Decode payload
+  const json = Buffer.from(parsed.payload, 'base64').toString('utf8')
+  const payload = JSON.parse(json)
+
   console.log('Issued at:', new Date(payload.iat * 1000).toISOString())
 
   // Decode fields
@@ -85,7 +123,7 @@ async function verifyContactToken(token) {
   // Show fingerprints
   const recipientFp = await fingerprint(recipientPublicId)
   const signerFp = await fingerprint(signerPublicKey)
-  console.log('Recipient fingerprint:', recipientFp.match(/.{4}/g).join('-'))
+  console.log('\nRecipient fingerprint:', recipientFp.match(/.{4}/g).join('-'))
   console.log('Signer fingerprint:', signerFp.match(/.{4}/g).join('-'))
 
   // Parse clientDataJSON
@@ -151,14 +189,30 @@ async function verifyContactToken(token) {
     signerPublicKey: Buffer.from(signerPublicKey).toString('base64'),
     issuedAt: new Date(payload.iat * 1000),
     origin: clientData.origin,
+    comment: parsed.comment,
   }
 }
 
+// Read from stdin
+async function readStdin() {
+  const chunks = []
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks).toString('utf8').trim()
+}
+
 // Main
-const token = process.argv[2]
+const token = await readStdin()
 if (!token) {
-  console.error('Usage: node scripts/verify-contact-token.mjs <token>')
-  console.error('\nPaste the full contact token (base64 string) as argument.')
+  console.error('Usage: echo "sswct-es256 <payload> [comment]" | node scripts/verify-contact-token.mjs')
+  console.error('')
+  console.error('Token format: sswct-es256 <base64-payload> [optional comment]')
+  console.error('')
+  console.error('Examples:')
+  console.error('  echo "sswct-es256 eyJzdWIi... Alice" | node scripts/verify-contact-token.mjs')
+  console.error('  pbpaste | node scripts/verify-contact-token.mjs')
+  console.error('  cat token.txt | node scripts/verify-contact-token.mjs')
   process.exit(1)
 }
 
