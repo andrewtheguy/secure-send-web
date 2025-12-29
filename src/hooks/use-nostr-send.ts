@@ -50,13 +50,14 @@ import {
   constantTimeEqual,
 } from '@/lib/crypto/ecdh'
 import { uint8ArrayToBase64 } from '@/lib/nostr/events'
+import { verifyContactToken } from '@/lib/crypto/contact-token'
 
 export interface UseNostrSendReturn {
   state: TransferState
   pin: string | null
   ownPublicKey: Uint8Array | null
   ownFingerprint: string | null
-  send: (content: File, options?: WebRTCOptions & { receiverPublicKey?: Uint8Array; selfTransfer?: boolean }) => Promise<void>
+  send: (content: File, options?: WebRTCOptions & { receiverContactToken?: string; selfTransfer?: boolean }) => Promise<void>
   cancel: () => void
 }
 
@@ -93,7 +94,7 @@ export function useNostrSend(): UseNostrSendReturn {
   }, [clearExpirationTimeout])
 
   const send = useCallback(
-    async (content: File, options?: WebRTCOptions & { receiverPublicKey?: Uint8Array; selfTransfer?: boolean }) => {
+    async (content: File, options?: WebRTCOptions & { receiverContactToken?: string; selfTransfer?: boolean }) => {
       // Guard against concurrent invocations
       if (sendingRef.current) return
       sendingRef.current = true
@@ -152,13 +153,13 @@ export function useNostrSend(): UseNostrSendReturn {
         let senderEphemeral: EphemeralSessionKeypair | undefined
         let identitySharedSecretKey: CryptoKey | undefined
 
-        if (options?.usePasskey && !options.receiverPublicKey && !options.selfTransfer) {
-          setState({ status: 'error', message: 'Receiver public ID required for passkey mode' })
+        if (options?.usePasskey && !options.receiverContactToken && !options.selfTransfer) {
+          setState({ status: 'error', message: 'Receiver contact token required for passkey mode' })
           sendingRef.current = false
           return
         }
 
-        if (options?.usePasskey && (options.receiverPublicKey || options.selfTransfer)) {
+        if (options?.usePasskey && (options.receiverContactToken || options.selfTransfer)) {
           // MUTUAL TRUST MODE: Use passkey mutual trust with receiver's public ID
           // NOW WITH PERFECT FORWARD SECRECY via ephemeral session keys
           setState({ status: 'connecting', message: 'Authenticate with passkey...' })
@@ -180,10 +181,23 @@ export function useNostrSend(): UseNostrSendReturn {
             senderEphemeral = ephemeral
             identitySharedSecretKey = sharedSecret
 
-            // Determine receiver public key: use own identity for self-transfer, otherwise use provided
-            const receiverPublicKeyBytes = options.selfTransfer
-              ? ephemeral.identityPublicKeyBytes
-              : options.receiverPublicKey!
+            // Determine receiver public key: use own identity for self-transfer, otherwise verify token
+            let receiverPublicKeyBytes: Uint8Array
+            if (options.selfTransfer) {
+              receiverPublicKeyBytes = ephemeral.identityPublicKeyBytes
+            } else {
+              // Verify contact token binding before using recipient public ID
+              // This ensures the token was created by this sender's passkey
+              // Note: identitySharedSecretKey IS the master key returned by getPasskeySessionKeypair
+              const verifiedToken = await verifyContactToken(sharedSecret, options.receiverContactToken!)
+
+              // Verify the token was signed by this sender (fingerprint match)
+              if (verifiedToken.signerFingerprint.toUpperCase() !== ephemeral.identityFingerprint.toUpperCase()) {
+                throw new Error('Contact token was signed by a different passkey. Please create a new bound token on the Passkey page.')
+              }
+
+              receiverPublicKeyBytes = verifiedToken.recipientPublicId
+            }
 
             // Derive AES key from passkey master key for initial payload encryption
             // NOTE: This is for the payload only. File data will use session key (PFS)

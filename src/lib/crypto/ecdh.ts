@@ -355,3 +355,22 @@ export function constantTimeEqual(a: string, b: string): boolean {
 
   return result === 0
 }
+
+/**
+ * Constant-time comparison of two Uint8Arrays.
+ * Prevents timing attacks by always comparing all bytes regardless of mismatch.
+ */
+export function constantTimeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
+  // XOR lengths to detect mismatch
+  let result = a.length ^ b.length
+
+  // Compare all bytes up to the longer length
+  const maxLen = Math.max(a.length, b.length)
+  for (let i = 0; i < maxLen; i++) {
+    const byteA = i < a.length ? a[i] : 0
+    const byteB = i < b.length ? b[i] : 0
+    result |= byteA ^ byteB
+  }
+
+  return result === 0
+}

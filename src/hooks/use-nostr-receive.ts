@@ -46,10 +46,11 @@ import {
   verifyPublicKeyCommitment,
   constantTimeEqual,
 } from '@/lib/crypto/ecdh'
+import { verifyContactToken } from '@/lib/crypto/contact-token'
 
 export interface ReceiveOptions {
   usePasskey?: boolean
-  senderPublicKey?: Uint8Array // For mutual trust mode
+  senderContactToken?: string // Bound contact token for mutual trust mode
   selfTransfer?: boolean // For receiving from self
 }
 
@@ -101,7 +102,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
     // Determine mode
     const isMutualTrustMode =
-      'usePasskey' in arg && arg.usePasskey === true && (('senderPublicKey' in arg && arg.senderPublicKey) || ('selfTransfer' in arg && arg.selfTransfer))
+      'usePasskey' in arg && arg.usePasskey === true && (('senderContactToken' in arg && arg.senderContactToken) || ('selfTransfer' in arg && arg.selfTransfer))
     const pinMaterial = !('usePasskey' in arg) ? (arg as PinKeyMaterial) : null
 
     // Closure variables for mutual trust mode - keeps sensitive data scoped
@@ -143,10 +144,23 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           receiverEphemeral = ephemeral
           identitySharedSecretKey = sharedSecret
 
-          // Determine sender public key: use own identity for self-transfer, otherwise use provided
-          const senderPublicKeyBytes = opts.selfTransfer
-            ? ephemeral.identityPublicKeyBytes
-            : opts.senderPublicKey!
+          // Determine sender public key: use own identity for self-transfer, otherwise verify token
+          let senderPublicKeyBytes: Uint8Array
+          if (opts.selfTransfer) {
+            senderPublicKeyBytes = ephemeral.identityPublicKeyBytes
+          } else {
+            // Verify contact token binding before using sender public ID
+            // This ensures the token was created by this receiver's passkey
+            // Note: identitySharedSecretKey IS the master key returned by getPasskeySessionKeypair
+            const verifiedToken = await verifyContactToken(sharedSecret, opts.senderContactToken!)
+
+            // Verify the token was signed by this receiver (fingerprint match)
+            if (verifiedToken.signerFingerprint.toUpperCase() !== ephemeral.identityFingerprint.toUpperCase()) {
+              throw new Error('Contact token was signed by a different passkey. Please create a new bound token on the Passkey page.')
+            }
+
+            senderPublicKeyBytes = verifiedToken.recipientPublicId
+          }
 
           // Calculate expected sender fingerprint for verification
           expectedSenderFingerprint = await publicKeyToFingerprint(senderPublicKeyBytes)
