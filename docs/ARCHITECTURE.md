@@ -196,6 +196,7 @@ challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat)
 ```
 - IDs sorted lexicographically to ensure deterministic ordering
 - Both parties sign the same challenge
+- **Note:** The `comment` field is NOT included in the challenge - it is unsigned metadata that can be modified without invalidating signatures
 
 **Token Creation Flow:**
 ```mermaid

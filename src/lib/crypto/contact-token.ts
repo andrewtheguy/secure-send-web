@@ -443,12 +443,15 @@ export async function countersignMutualToken(
   const credential = assertion as PublicKeyCredential
   const response = credential.response as AuthenticatorAssertionResponse
 
-  // Build complete token
+  // Build complete token with comment at the end for readability
+  // Destructure to exclude comment, then add it back at the end
+  const { comment, ...pendingWithoutComment } = pending
   const complete: MutualContactTokenPayload = {
-    ...pending,
+    ...pendingWithoutComment,
     counter_authData: uint8ArrayToBase64(new Uint8Array(response.authenticatorData)),
     counter_clientDataJSON: uint8ArrayToBase64(new Uint8Array(response.clientDataJSON)),
     counter_sig: uint8ArrayToBase64(new Uint8Array(response.signature)),
+    ...(comment ? { comment } : {}),
   }
 
   return JSON.stringify(complete)
