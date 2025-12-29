@@ -578,6 +578,15 @@ export function SendTab() {
                         ? 'Send to a specific recipient using their public ID. No PIN needed.'
                         : 'Use passkey-based encryption instead of PIN. Requires receiver\'s public ID.'}
                     </p>
+                    {!usePasskey && (
+                      <p className="text-xs text-muted-foreground">
+                        Use the{' '}
+                        <Link to="/passkey" className="text-primary hover:underline">
+                          Passkey setup page
+                        </Link>{' '}
+                        to create, manage your passkey or get your passkey&apos;s public ID.
+                      </p>
+                    )}
 
                     {/* Receiver public ID input - only shown when passkey enabled */}
                     {usePasskey && (
