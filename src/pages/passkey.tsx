@@ -102,6 +102,7 @@ export function PasskeyPage() {
       setFingerprint(result.publicIdFingerprint)
       setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
       setPrfSupported(result.prfSupported)
+      setCurrentCredentialId(result.credentialId)
       setSuccess('Public ID retrieved! Share this with your contacts for secure file transfers.')
       setPageState('idle')
     } catch (err) {

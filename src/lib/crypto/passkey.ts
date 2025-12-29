@@ -41,11 +41,15 @@ export async function derivePasskeyPublicId(masterKey: CryptoKey): Promise<Uint8
 
 /**
  * Get passkey master key (HKDF base key) from passkey authentication.
- * Returns the master key for subsequent identity + session derivations.
+ * Returns the master key and the credentialId used for authentication.
  *
  * @param credentialId - Optional base64url credential ID to use specific passkey (skips picker)
+ * @returns Object with masterKey (HKDF CryptoKey) and credentialId (base64url string)
  */
-export async function getPasskeyMasterKey(credentialId?: string): Promise<CryptoKey> {
+export async function getPasskeyMasterKey(credentialId?: string): Promise<{
+  masterKey: CryptoKey
+  credentialId: string
+}> {
   const prfInput = new TextEncoder().encode(PASSKEY_MASTER_LABEL)
 
   // Build allowCredentials if a specific credential is requested
@@ -104,7 +108,11 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<Crypto
   )
   // Best-effort cleanup of PRF bytes
   prfBytes.fill(0)
-  return masterKey
+
+  // Extract the credential ID from the response (base64url encoded)
+  const usedCredentialId = base64urlEncode(new Uint8Array(credential.rawId))
+
+  return { masterKey, credentialId: usedCredentialId }
 }
 
 /**
@@ -112,19 +120,20 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<Crypto
  * This is the main entry point for passkey identity info.
  *
  * @param credentialId - Optional base64url credential ID to use specific passkey (skips picker)
- * @returns Identity with prfSupported flag (true if we got here, throws otherwise)
+ * @returns Identity with prfSupported flag (true if we got here, throws otherwise), and credentialId used
  */
 export async function getPasskeyIdentity(credentialId?: string): Promise<{
   publicIdBytes: Uint8Array
   publicIdFingerprint: string
   prfSupported: boolean
+  credentialId: string
 }> {
-  const masterKey = await getPasskeyMasterKey(credentialId)
+  const { masterKey, credentialId: usedCredentialId } = await getPasskeyMasterKey(credentialId)
   const publicIdBytes = await derivePasskeyPublicId(masterKey)
   const publicIdFingerprint = await publicKeyToFingerprint(publicIdBytes)
 
   // If we got here, PRF worked (getPasskeyMasterKey throws if PRF fails)
-  return { publicIdBytes, publicIdFingerprint, prfSupported: true }
+  return { publicIdBytes, publicIdFingerprint, prfSupported: true, credentialId: usedCredentialId }
 }
 
 // publicKeyToFingerprint is used from ecdh.ts
@@ -762,7 +771,7 @@ export async function getPasskeySessionKeypair(
   identitySharedSecretKey: CryptoKey // Non-extractable HKDF master key for session binding
 }> {
   // Get passkey master key
-  const masterKey = await getPasskeyMasterKey(credentialId)
+  const { masterKey } = await getPasskeyMasterKey(credentialId)
 
   // Derive stable public identifier from master key (for fingerprint display)
   const identityPublicKeyBytes = await derivePasskeyPublicId(masterKey)
