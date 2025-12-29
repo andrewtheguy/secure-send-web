@@ -17,6 +17,7 @@ import type { PinKeyMaterial } from '@/lib/types'
 import { Link } from 'react-router-dom'
 import { formatFingerprint } from '@/lib/crypto/ecdh'
 import { isMutualTokenFormat, verifyMutualToken, type VerifiedMutualToken } from '@/lib/crypto/contact-token'
+import { getSavedTokens, saveToken, type SavedToken } from '@/lib/saved-tokens'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -52,6 +53,10 @@ export function ReceiveTab() {
 
   // Verified token state (updated via useEffect since verification is async)
   const [verifiedToken, setVerifiedToken] = useState<VerifiedMutualToken | null>(null)
+
+  // Saved tokens for quick selection
+  const [savedTokens, setSavedTokens] = useState<SavedToken[]>([])
+  const [showTokenDropdown, setShowTokenDropdown] = useState(false)
 
   // Verify mutual contact token - debounced to reduce signature checks on every keystroke
   useEffect(() => {
@@ -99,6 +104,13 @@ export function ReceiveTab() {
     }
   }, [usePasskey])
 
+  // Load saved tokens when passkey mode is enabled
+  useEffect(() => {
+    if (usePasskey) {
+      setSavedTokens(getSavedTokens())
+    }
+  }, [usePasskey])
+
   // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrReceive()
   const manualHook = useManualReceive()
@@ -134,6 +146,26 @@ export function ReceiveTab() {
     typeof rawStateAny.clipboardData === 'string'
       ? rawStateAny.clipboardData
       : undefined
+
+  // Save token to localStorage on successful transfer (passkey mode with mutual token)
+  useEffect(() => {
+    if (
+      state.status === 'complete' &&
+      usePasskey &&
+      !receiveFromSelf &&
+      verifiedToken &&
+      senderPublicIdInput.trim()
+    ) {
+      saveToken(
+        senderPublicIdInput.trim(),
+        verifiedToken.partyAFingerprint,
+        verifiedToken.partyBFingerprint,
+        verifiedToken.comment
+      )
+      // Refresh saved tokens list
+      setSavedTokens(getSavedTokens())
+    }
+  }, [state.status, usePasskey, receiveFromSelf, verifiedToken, senderPublicIdInput])
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pinInactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -395,6 +427,44 @@ export function ReceiveTab() {
                               <Label htmlFor="sender-pubkey" className="text-sm font-medium">
                                 Mutual Contact Token
                               </Label>
+                              {/* Saved tokens dropdown */}
+                              {savedTokens.length > 0 && (
+                                <div className="relative">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="w-full justify-between text-xs"
+                                    onClick={() => setShowTokenDropdown(!showTokenDropdown)}
+                                  >
+                                    <span className="text-muted-foreground">Select from saved tokens ({savedTokens.length})</span>
+                                    <ChevronDown className={`h-3 w-3 transition-transform ${showTokenDropdown ? 'rotate-180' : ''}`} />
+                                  </Button>
+                                  {showTokenDropdown && (
+                                    <div className="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg max-h-48 overflow-y-auto">
+                                      {savedTokens.map((saved, index) => (
+                                        <button
+                                          key={index}
+                                          className="w-full px-3 py-2 text-left hover:bg-muted/50 border-b last:border-b-0 text-xs"
+                                          onClick={() => {
+                                            setSenderPublicIdInput(saved.token)
+                                            setShowTokenDropdown(false)
+                                          }}
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            <Fingerprint className="h-3 w-3 text-muted-foreground" />
+                                            <span className="font-mono">{formatFingerprint(saved.partyAFingerprint)}</span>
+                                            <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                                            <span className="font-mono">{formatFingerprint(saved.partyBFingerprint)}</span>
+                                          </div>
+                                          {saved.comment && (
+                                            <div className="text-muted-foreground mt-0.5 truncate">{saved.comment}</div>
+                                          )}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                               <div className="flex gap-2">
                                 <Textarea
                                   id="sender-pubkey"
