@@ -58,7 +58,6 @@ export function SendTab() {
   // Verify receiver contact token - debounced to reduce signature checks on every keystroke
   useEffect(() => {
     let cancelled = false
-    let timeoutId: ReturnType<typeof setTimeout> | undefined
 
     const input = receiverPublicKeyInput.trim()
     if (!input) {
@@ -75,7 +74,7 @@ export function SendTab() {
     }
 
     // Debounce the async signature verification
-    timeoutId = setTimeout(() => {
+    const timeoutId = setTimeout(() => {
       verifyContactToken(input)
         .then((verified) => {
           if (cancelled) return
@@ -91,9 +90,7 @@ export function SendTab() {
 
     return () => {
       cancelled = true
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId)
-      }
+      clearTimeout(timeoutId)
     }
   }, [receiverPublicKeyInput])
 
