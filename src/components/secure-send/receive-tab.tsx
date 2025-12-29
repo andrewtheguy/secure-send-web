@@ -43,6 +43,7 @@ export function ReceiveTab() {
   const [receiveMode, setReceiveMode] = useState<ReceiveMode>('pin')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [usePasskey, setUsePasskey] = useState(false)
+  const [receiveFromSelf, setReceiveFromSelf] = useState(false)
   const [passkeyAuthenticating, setPasskeyAuthenticating] = useState(false)
   const [senderPublicIdInput, setSenderPublicIdInput] = useState('')
   const [senderPublicIdFingerprint, setSenderPublicIdFingerprint] = useState<string | null>(null)
@@ -244,6 +245,11 @@ export function ReceiveTab() {
     setIsPinValid(false)
     pinInputRef.current?.clear()
     setPinExpired(false)
+    // Clear passkey state
+    setSenderPublicIdInput('')
+    setSenderPublicIdFingerprint(null)
+    setSenderPublicIdError(null)
+    setReceiveFromSelf(false)
   }
 
   const handlePinChange = useCallback((payload: PinChangePayload) => {
@@ -278,15 +284,16 @@ export function ReceiveTab() {
   // Handle passkey authentication for receiving
   const handlePasskeyAuth = async () => {
     if (passkeyAuthenticating) return
-    if (!senderPublicIdBytes) return // Require sender public ID
+    if (!receiveFromSelf && !senderPublicIdBytes) return // Require sender public ID unless receiving from self
 
     setPasskeyAuthenticating(true)
 
     try {
-      // Start receive with passkey mode and sender public ID
+      // Start receive with passkey mode and sender public ID (or self-transfer)
       await nostrHook.receive({
         usePasskey: true,
-        senderPublicKey: senderPublicIdBytes,
+        selfTransfer: receiveFromSelf,
+        senderPublicKey: !receiveFromSelf && senderPublicIdBytes ? senderPublicIdBytes : undefined,
       })
     } catch {
       // Error will be handled by the hook
@@ -295,8 +302,8 @@ export function ReceiveTab() {
     }
   }
 
-  // Whether passkey mode requirements are met
-  const passkeyRequirementsMet = senderPublicIdBytes !== null
+  // Whether passkey mode requirements are met (either have sender ID or receiving from self)
+  const passkeyRequirementsMet = receiveFromSelf || senderPublicIdBytes !== null
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
   const showQRInput = isManualMode && state.status === 'waiting_for_offer'
@@ -326,48 +333,71 @@ export function ReceiveTab() {
                   {/* Passkey mode - skip PIN entry, enter sender's public ID */}
                   <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
                     <Fingerprint className="h-3 w-3" />
-                    <span>Passkey mode - enter sender&apos;s public ID</span>
+                    <span>Passkey mode{receiveFromSelf ? ' - receiving from self' : ' - enter sender\'s public ID'}</span>
                   </div>
 
-                  {/* Sender public ID input */}
-                  <div className="space-y-2">
-                    <Label htmlFor="sender-pubkey" className="text-sm font-medium">
-                      Sender&apos;s Public ID
-                    </Label>
-                    <div className="flex gap-2">
-                      <Textarea
-                        id="sender-pubkey"
-                        placeholder="Paste sender's public ID (base64)..."
-                        value={senderPublicIdInput}
-                        onChange={(e) => setSenderPublicIdInput(e.target.value)}
-                        className="font-mono text-xs min-h-[60px] resize-none"
+                  {/* Receive from self checkbox */}
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="receive-from-self"
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-gray-300"
+                        checked={receiveFromSelf}
+                        onChange={(e) => setReceiveFromSelf(e.target.checked)}
                       />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowPublicIdModal(true)}
-                        className="flex-shrink-0"
-                        title="Enter public ID"
-                      >
-                        <Keyboard className="h-4 w-4" />
-                      </Button>
+                      <Label htmlFor="receive-from-self" className="text-sm font-normal cursor-pointer">
+                        Receive from myself
+                      </Label>
                     </div>
-                    {senderPublicIdError && (
-                      <p className="text-xs text-destructive">{senderPublicIdError}</p>
+                    {receiveFromSelf && (
+                      <p className="text-xs text-muted-foreground">
+                        Receive files you sent from another device using the same passkey.
+                      </p>
                     )}
-                    {senderPublicIdFingerprint && (
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Fingerprint className="h-3 w-3" />
-                        <span>Sender fingerprint: </span>
-                        <span className="font-mono font-medium text-cyan-600">{senderPublicIdFingerprint}</span>
-                      </div>
+
+                    {/* Sender public ID input - hidden when receiving from self */}
+                    {!receiveFromSelf && (
+                      <>
+                        <Label htmlFor="sender-pubkey" className="text-sm font-medium">
+                          Sender&apos;s Public ID
+                        </Label>
+                        <div className="flex gap-2">
+                          <Textarea
+                            id="sender-pubkey"
+                            placeholder="Paste sender's public ID (base64)..."
+                            value={senderPublicIdInput}
+                            onChange={(e) => setSenderPublicIdInput(e.target.value)}
+                            className="font-mono text-xs min-h-[60px] resize-none"
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowPublicIdModal(true)}
+                            className="flex-shrink-0"
+                            title="Enter public ID"
+                          >
+                            <Keyboard className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        {senderPublicIdError && (
+                          <p className="text-xs text-destructive">{senderPublicIdError}</p>
+                        )}
+                        {senderPublicIdFingerprint && (
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Fingerprint className="h-3 w-3" />
+                            <span>Sender fingerprint: </span>
+                            <span className="font-mono font-medium text-cyan-600">{senderPublicIdFingerprint}</span>
+                          </div>
+                        )}
+                        <p className="text-xs text-muted-foreground">
+                          Get the sender&apos;s public ID from their{' '}
+                          <Link to="/passkey" className="text-primary hover:underline">
+                            Passkey page
+                          </Link>
+                        </p>
+                      </>
                     )}
-                    <p className="text-xs text-muted-foreground">
-                      Get the sender&apos;s public ID from their{' '}
-                      <Link to="/passkey" className="text-primary hover:underline">
-                        Passkey page
-                      </Link>
-                    </p>
                   </div>
 
                   {/* Public ID entry modal */}
@@ -443,7 +473,7 @@ export function ReceiveTab() {
                     className="w-full bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700"
                   >
                     <Fingerprint className="mr-2 h-4 w-4" />
-                    {passkeyAuthenticating ? 'Authenticating...' : passkeyRequirementsMet ? 'Authenticate & Receive' : 'Enter sender\'s ID first'}
+                    {passkeyAuthenticating ? 'Authenticating...' : receiveFromSelf ? 'Authenticate & Receive from Self' : passkeyRequirementsMet ? 'Authenticate & Receive' : 'Enter sender\'s ID first'}
                   </Button>
                 </>
               ) : (
