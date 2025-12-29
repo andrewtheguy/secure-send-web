@@ -1,20 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
-  <defs>
-    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#1e293b"/>
-      <stop offset="100%" style="stop-color:#0f172a"/>
-    </linearGradient>
-  </defs>
-
   <!-- Background with rounded corners -->
-  <rect x="0" y="0" width="180" height="180" rx="36" fill="url(#bgGradient)"/>
+  <rect x="0" y="0" width="180" height="180" rx="36" fill="#2d4a5e"/>
 
   <!-- Folder -->
-  <path fill="#6B7280" d="M30 45C22.268 45 16 51.268 16 59V141C16 148.732 22.268 155 30 155H150C157.732 155 164 148.732 164 141V74C164 66.268 157.732 60 150 60H98.485C97.258 60 96.082 59.513 95.214 58.645L84.786 48.214C81.973 45.391 78.169 43.8 74.172 43.8L30 45Z"/>
+  <path fill="#7a8a9a" d="M30 45C22.268 45 16 51.268 16 59V141C16 148.732 22.268 155 30 155H150C157.732 155 164 148.732 164 141V74C164 66.268 157.732 60 150 60H98.485C97.258 60 96.082 59.513 95.214 58.645L84.786 48.214C81.973 45.391 78.169 43.8 74.172 43.8L30 45Z"/>
 
   <!-- Lock shackle (centered at x=90) -->
-  <path fill="none" stroke="#374151" stroke-width="8" stroke-linecap="round" d="M70 108V98C70 86.954 78.954 78 90 78C101.046 78 110 86.954 110 98V108"/>
+  <path fill="none" stroke="#3a4958" stroke-width="8" stroke-linecap="round" d="M70 108V98C70 86.954 78.954 78 90 78C101.046 78 110 86.954 110 98V108"/>
 
   <!-- Lock body (centered at x=90, width=50) -->
-  <rect x="65" y="108" width="50" height="32" rx="5" fill="#374151"/>
+  <rect x="65" y="108" width="50" height="32" rx="5" fill="#3a4958"/>
 </svg>
