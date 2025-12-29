@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   Fingerprint,
   Plus,
@@ -33,6 +33,7 @@ import {
   isPendingMutualToken,
 } from '@/lib/crypto/contact-token'
 import { PIN_WORDLIST } from '@/lib/crypto/constants'
+import { ValidationError } from '@/lib/errors'
 
 type PageState = 'idle' | 'checking' | 'creating' | 'getting_key' | 'binding_contact'
 
@@ -132,6 +133,14 @@ export function PasskeyPage() {
 
   // Check if authenticated (has contact card)
   const isAuthenticated = !!contactCard && !!fingerprint
+
+  // Auto-clear success message after 3 seconds
+  useEffect(() => {
+    if (success) {
+      const timer = setTimeout(() => setSuccess(null), 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [success])
 
   // Determine step number for display
   const getStepNumber = (step: WizardStep): number => {
@@ -303,17 +312,17 @@ export function PasskeyPage() {
       try {
         const idBytes = base64ToUint8Array(contactCardParsed.id)
         if (idBytes.length !== 32) {
-          throw new Error('Invalid contact public ID: expected 32 bytes')
+          throw new ValidationError('Invalid contact public ID: expected 32 bytes')
         }
         const cpkBytes = base64ToUint8Array(contactCardParsed.cpk)
         if (cpkBytes.length !== 65 || cpkBytes[0] !== 0x04) {
-          throw new Error('Invalid contact credential key: expected 65-byte P-256')
+          throw new ValidationError('Invalid contact credential key: expected 65-byte P-256')
         }
       } catch (e) {
-        if (e instanceof Error && e.message.includes('Invalid')) {
+        if (e instanceof ValidationError) {
           throw e
         }
-        throw new Error('Invalid base64 encoding in contact card')
+        throw new ValidationError('Invalid base64 encoding in contact card')
       }
 
       // Create pending mutual token
@@ -914,7 +923,7 @@ export function PasskeyPage() {
           )}
 
           {/* Success alert */}
-          {success && wizardStep === 'authenticate' && (
+          {success && (
             <Alert className="border-green-500/50 bg-green-50/50 dark:bg-green-950/20">
               <CheckCircle2 className="h-4 w-4 text-green-600" />
               <AlertTitle className="text-green-600">Success</AlertTitle>

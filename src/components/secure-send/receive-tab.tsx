@@ -147,6 +147,9 @@ export function ReceiveTab() {
       ? rawStateAny.clipboardData
       : undefined
 
+  // Track which token was already saved to prevent duplicate saves
+  const savedTokenKeyRef = useRef<string | null>(null)
+
   // Save token to localStorage on successful transfer (passkey mode with mutual token)
   useEffect(() => {
     if (
@@ -156,14 +159,24 @@ export function ReceiveTab() {
       verifiedToken &&
       senderPublicIdInput.trim()
     ) {
-      saveToken(
-        senderPublicIdInput.trim(),
-        verifiedToken.partyAFingerprint,
-        verifiedToken.partyBFingerprint,
-        verifiedToken.comment
-      )
-      // Refresh saved tokens list
-      setSavedTokens(getSavedTokens())
+      // Create a stable key for this token
+      const tokenKey = `${verifiedToken.partyAFingerprint}:${verifiedToken.partyBFingerprint}`
+
+      // Only save if we haven't already saved this token
+      if (savedTokenKeyRef.current !== tokenKey) {
+        saveToken(
+          senderPublicIdInput.trim(),
+          verifiedToken.partyAFingerprint,
+          verifiedToken.partyBFingerprint,
+          verifiedToken.comment
+        )
+        savedTokenKeyRef.current = tokenKey
+        // Refresh saved tokens list
+        setSavedTokens(getSavedTokens())
+      }
+    } else if (state.status !== 'complete') {
+      // Reset when status leaves 'complete' so future transfers can be saved
+      savedTokenKeyRef.current = null
     }
   }, [state.status, usePasskey, receiveFromSelf, verifiedToken, senderPublicIdInput])
 

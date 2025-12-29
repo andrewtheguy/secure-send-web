@@ -15,15 +15,61 @@ export interface SavedToken {
 }
 
 /**
+ * Validate that a value is a valid SavedToken
+ */
+function isValidSavedToken(value: unknown): value is SavedToken {
+  if (typeof value !== 'object' || value === null) return false
+  const obj = value as Record<string, unknown>
+  return (
+    typeof obj.token === 'string' &&
+    typeof obj.partyAFingerprint === 'string' &&
+    typeof obj.partyBFingerprint === 'string' &&
+    typeof obj.lastUsed === 'number' &&
+    (obj.comment === undefined || typeof obj.comment === 'string')
+  )
+}
+
+/**
  * Get all saved tokens, sorted by most recently used
  */
 export function getSavedTokens(): SavedToken[] {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (!stored) return []
-    const tokens = JSON.parse(stored) as SavedToken[]
+
+    const parsed: unknown = JSON.parse(stored)
+
+    // Validate it's an array
+    if (!Array.isArray(parsed)) {
+      console.error('Invalid saved tokens format: expected array')
+      localStorage.removeItem(STORAGE_KEY)
+      return []
+    }
+
+    // Validate each element and filter out invalid ones
+    const validTokens: SavedToken[] = []
+    let hasInvalid = false
+
+    for (const item of parsed) {
+      if (isValidSavedToken(item)) {
+        validTokens.push(item)
+      } else {
+        hasInvalid = true
+      }
+    }
+
+    // If some tokens were invalid, log and update storage with only valid ones
+    if (hasInvalid) {
+      console.error('Some saved tokens had invalid format and were removed')
+      if (validTokens.length > 0) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(validTokens))
+      } else {
+        localStorage.removeItem(STORAGE_KEY)
+      }
+    }
+
     // Sort by most recently used
-    return tokens.sort((a, b) => b.lastUsed - a.lastUsed)
+    return validTokens.sort((a, b) => b.lastUsed - a.lastUsed)
   } catch {
     return []
   }
