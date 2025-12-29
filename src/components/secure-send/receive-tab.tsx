@@ -244,6 +244,7 @@ export function ReceiveTab() {
     // Clear passkey state
     setSenderPublicIdInput('')
     setSenderPublicIdError(null)
+    setVerifiedToken(null)
     setReceiveFromSelf(false)
   }
 

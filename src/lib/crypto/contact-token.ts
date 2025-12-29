@@ -422,6 +422,9 @@ export function hasCredentialPublicKey(credentialId: string): boolean {
  */
 function derToRaw(der: Uint8Array): Uint8Array {
   // DER format: 0x30 <len> 0x02 <r-len> <r> 0x02 <s-len> <s>
+  if (der.length < 8) {
+    throw new Error('Invalid DER signature: truncated input (too short)')
+  }
   if (der[0] !== 0x30) {
     throw new Error('Invalid DER signature: expected SEQUENCE')
   }
@@ -432,23 +435,44 @@ function derToRaw(der: Uint8Array): Uint8Array {
   if (der[1] & 0x80) {
     const lenBytes = der[1] & 0x7f
     offset = 2 + lenBytes
+    if (offset >= der.length) {
+      throw new Error('Invalid DER signature: truncated input (bad length encoding)')
+    }
   }
 
   // Parse r
-  if (der[offset] !== 0x02) {
+  if (offset >= der.length || der[offset] !== 0x02) {
     throw new Error('Invalid DER signature: expected INTEGER for r')
   }
   offset++
+  if (offset >= der.length) {
+    throw new Error('Invalid DER signature: truncated input (missing r length)')
+  }
   const rLen = der[offset++]
+  if (rLen < 1 || rLen > 33) {
+    throw new Error(`Invalid DER signature: bad r length (${rLen})`)
+  }
+  if (offset + rLen > der.length) {
+    throw new Error('Invalid DER signature: truncated input (r extends past end)')
+  }
   let r = der.slice(offset, offset + rLen)
   offset += rLen
 
   // Parse s
-  if (der[offset] !== 0x02) {
+  if (offset >= der.length || der[offset] !== 0x02) {
     throw new Error('Invalid DER signature: expected INTEGER for s')
   }
   offset++
+  if (offset >= der.length) {
+    throw new Error('Invalid DER signature: truncated input (missing s length)')
+  }
   const sLen = der[offset++]
+  if (sLen < 1 || sLen > 33) {
+    throw new Error(`Invalid DER signature: bad s length (${sLen})`)
+  }
+  if (offset + sLen > der.length) {
+    throw new Error('Invalid DER signature: truncated input (s extends past end)')
+  }
   let s = der.slice(offset, offset + sLen)
 
   // Remove leading zero bytes (used for sign in DER encoding)

@@ -295,6 +295,11 @@ export function constantTimeEqual(a: string, b: string): boolean {
 /**
  * Constant-time comparison of two Uint8Arrays.
  * Prevents timing attacks by always comparing all bytes regardless of mismatch.
+ *
+ * Note: This is a best-effort constant-time mitigation in JavaScript.
+ * True constant-time guarantees are not possible in JS due to JIT optimization,
+ * garbage collection, and runtime engine behavior. However, this approach
+ * avoids obvious timing leaks from early returns or variable iteration counts.
  */
 export function constantTimeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
   // XOR lengths to detect mismatch

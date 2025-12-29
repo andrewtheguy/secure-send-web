@@ -252,6 +252,8 @@ export function createMutualTrustPayloadEvent(
   transferId: string,
   encryptedPayload: Uint8Array
 ): Event {
+  const expiration = Math.floor((Date.now() + TRANSFER_EXPIRATION_MS) / 1000)
+
   const event = finalizeEvent(
     {
       kind: EVENT_KIND_DATA_TRANSFER,
@@ -260,6 +262,7 @@ export function createMutualTrustPayloadEvent(
         ['p', receiverPubkey],
         ['t', transferId],
         ['type', 'mutual_trust_payload'],
+        ['expiration', expiration.toString()],
       ],
       created_at: Math.floor(Date.now() / 1000),
     },

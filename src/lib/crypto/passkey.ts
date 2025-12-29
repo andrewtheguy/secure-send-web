@@ -280,7 +280,18 @@ export async function createPasskeyCredential(
   const credentialPublicKey = extractPublicKeyFromAttestation(response)
 
   // Store the public key for later signature verification
-  storeCredentialPublicKey(credentialId, credentialPublicKey)
+  // This is critical - without the stored key, contact tokens cannot be created or verified
+  try {
+    storeCredentialPublicKey(credentialId, credentialPublicKey)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown error'
+    console.error('Failed to store credential public key:', message)
+    throw new Error(
+      `Passkey created but failed to store credential key: ${message}. ` +
+      'This may be due to storage quota or private browsing mode. ' +
+      'Contact token signing will not work until storage is available.'
+    )
+  }
 
   return { credentialId, prfSupported, credentialPublicKey }
 }
@@ -445,6 +456,15 @@ function skipCBORValue(data: Uint8Array, offset: number): number {
   } else if (additionalInfo === 25) {
     length = (data[offset] << 8) | data[offset + 1]
     offset += 2
+  } else if (additionalInfo === 26) {
+    length =
+      (data[offset] << 24) |
+      (data[offset + 1] << 16) |
+      (data[offset + 2] << 8) |
+      data[offset + 3]
+    offset += 4
+  } else if (additionalInfo === 27) {
+    throw new Error('CBOR 8-byte lengths not supported')
   }
 
   if (majorType === 2 || majorType === 3) {

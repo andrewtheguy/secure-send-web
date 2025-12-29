@@ -61,6 +61,7 @@ export function PasskeyPage() {
     setFingerprint(null)
     setPublicIdBase64(null)
     setPrfSupported(null)
+    setSignedContact(null)
     setPageState('checking')
 
     try {
@@ -96,6 +97,7 @@ export function PasskeyPage() {
   const handleGetPublicId = async () => {
     setError(null)
     setSuccess(null)
+    setSignedContact(null)
     setPageState('getting_key')
 
     try {

@@ -241,7 +241,7 @@ sequenceDiagram
 | Shared secret exists? | Yes (same PRF output) | No (different passkeys) |
 | Round trips | 1 | 2 |
 | Metadata encryption | Passkey-derived key | Session key (from ECDH) |
-| Session binding verification | Yes (same master key) | No (different master keys) |
+| Session binding verification | Yes (same master key) | N/A (different master keys prevent verification) |
 
 **How it works:**
 

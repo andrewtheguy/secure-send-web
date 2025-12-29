@@ -219,6 +219,7 @@ export function SendTab() {
     setNostrUnavailable(false)
     setReceiverPublicKeyInput('')
     setReceiverPublicKeyError(null)
+    setVerifiedToken(null)
     setSendToSelf(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
     if (folderInputRef.current) folderInputRef.current.value = ''
