@@ -16,7 +16,6 @@
  */
 
 import { publicKeyToFingerprint, constantTimeEqualBytes } from './ecdh'
-import { getCredentialPublicKey, getAllCredentialPublicKeys } from './passkey'
 
 /** Token type identifier for SSH-like format */
 const TOKEN_TYPE = 'sswct-es256'
@@ -386,34 +385,6 @@ export async function verifyContactToken(
     issuedAt: new Date(payload.iat * 1000),
     comment,
   }
-}
-
-/**
- * Check if a token was signed by one of our stored credentials.
- * Returns the matching credential ID if found.
- */
-export async function findSignerCredential(token: string): Promise<string | null> {
-  try {
-    const verified = await verifyContactToken(token)
-
-    const allCredentials = getAllCredentialPublicKeys()
-    for (const { credentialId, publicKey } of allCredentials) {
-      if (constantTimeEqualBytes(publicKey, verified.signerCredentialPublicKey)) {
-        return credentialId
-      }
-    }
-
-    return null
-  } catch {
-    return null
-  }
-}
-
-/**
- * Check if we have the credential public key for a given credential ID.
- */
-export function hasCredentialPublicKey(credentialId: string): boolean {
-  return getCredentialPublicKey(credentialId) !== null
 }
 
 /**
