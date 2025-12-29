@@ -191,12 +191,16 @@ interface MutualContactTokenPayload extends PendingMutualToken {
 
 **Challenge Computation:**
 ```
-challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat)
-                   32     65       32      65       8    = 202 bytes
+challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat || comment_bytes)
+                   32     65       32      65       8       variable
 ```
 - IDs sorted lexicographically to ensure deterministic ordering
 - Both parties sign the same challenge
-- **Note:** The `comment` field is NOT included in the challenge - it is unsigned metadata that can be modified without invalidating signatures
+- Comment is optional; if present, it is UTF-8 encoded and appended to the challenge input
+
+**What's Signed:**
+- **Data fields** (included in challenge): `a_id`, `a_cpk`, `b_id`, `b_cpk`, `iat`, `comment` — tampering with any of these invalidates signatures
+- **Signature fields** (WebAuthn output, not in challenge): `init_authData`, `init_clientDataJSON`, `init_sig`, `counter_authData`, `counter_clientDataJSON`, `counter_sig` — these ARE the signatures, cannot be part of the signed data
 
 **Token Creation Flow:**
 ```mermaid
@@ -208,7 +212,7 @@ sequenceDiagram
     Bob->>Alice: Bob's Contact Card (id + cpk)
     Note over Alice: 2. Alice creates pending token
     Alice->>Alice: Sort IDs lexicographically
-    Alice->>Alice: Compute challenge = SHA256(a_id||a_cpk||b_id||b_cpk||iat)
+    Alice->>Alice: Compute challenge = SHA256(a_id||a_cpk||b_id||b_cpk||iat||comment)
     Alice->>Alice: WebAuthn sign challenge
     Alice->>Bob: Pending token (init signature only)
     Note over Bob: 3. Bob countersigns
