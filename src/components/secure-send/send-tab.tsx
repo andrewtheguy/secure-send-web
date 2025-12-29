@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, AlertTriangle, Info, Fingerprint, ArrowRight, Keyboard } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -18,7 +18,7 @@ import { compressFilesToZip, getFolderName, getTotalSize, supportsFolderSelectio
 import type { SignalingMethod } from '@/lib/nostr/types'
 import { Link } from 'react-router-dom'
 import { formatFingerprint } from '@/lib/crypto/ecdh'
-import { isContactTokenFormat, parseContactTokenUnsafe } from '@/lib/crypto/contact-token'
+import { isContactTokenFormat, verifyContactToken, type VerifiedContactToken } from '@/lib/crypto/contact-token'
 
 type ContentMode = 'file' | 'folder'
 type MethodChoice = 'nostr' | 'manual'
@@ -53,50 +53,39 @@ export function SendTab() {
   const folderInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
 
-  // Parse and validate receiver contact token (pure computation - no verification yet)
-  // Verification happens at send time when passkey authenticates
-  const { parsedToken, validationError } = useMemo(() => {
+  // Verified token state (updated via useEffect since verification is async)
+  const [verifiedToken, setVerifiedToken] = useState<VerifiedContactToken | null>(null)
+
+  // Verify receiver contact token - now verifies signature immediately
+  useEffect(() => {
     const input = receiverPublicKeyInput.trim()
     if (!input) {
-      return { parsedToken: null, validationError: null }
-    }
-
-    // Must be a contact token format
-    if (!isContactTokenFormat(input)) {
-      return {
-        parsedToken: null,
-        validationError: 'Invalid format: expected bound contact token (create one on the Passkey page)',
-      }
-    }
-
-    // Parse without verification (for display purposes)
-    const parsed = parseContactTokenUnsafe(input)
-    if (!parsed) {
-      return {
-        parsedToken: null,
-        validationError: 'Invalid token structure',
-      }
-    }
-
-    return {
-      parsedToken: parsed,
-      validationError: null,
-    }
-  }, [receiverPublicKeyInput])
-
-  // Handle side effects separately
-  useEffect(() => {
-    setReceiverPublicKeyError(validationError)
-
-    if (!parsedToken) {
+      setVerifiedToken(null)
+      setReceiverPublicKeyError(null)
       setReceiverPublicKeyFingerprint(null)
       return
     }
 
-    // Use the signer fingerprint from the parsed token
-    // This shows who bound this contact (should match sender's fingerprint)
-    setReceiverPublicKeyFingerprint(formatFingerprint(parsedToken.signerFingerprint))
-  }, [parsedToken, validationError])
+    // Quick format check first
+    if (!isContactTokenFormat(input)) {
+      setVerifiedToken(null)
+      setReceiverPublicKeyError('Invalid format: expected bound contact token (create one on the Passkey page)')
+      setReceiverPublicKeyFingerprint(null)
+      return
+    }
+
+    // Verify token signature - no authentication required!
+    verifyContactToken(input).then(verified => {
+      setVerifiedToken(verified)
+      setReceiverPublicKeyError(null)
+      // Show signer fingerprint (now verified, not just parsed)
+      setReceiverPublicKeyFingerprint(formatFingerprint(verified.signerFingerprint))
+    }).catch((err) => {
+      setVerifiedToken(null)
+      setReceiverPublicKeyError(err instanceof Error ? err.message : 'Invalid or tampered token')
+      setReceiverPublicKeyFingerprint(null)
+    })
+  }, [receiverPublicKeyInput])
 
   // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrSend()
@@ -134,7 +123,7 @@ export function SendTab() {
   const canSendFiles = selectedFiles.length > 0 && !isFilesOverLimit && state.status === 'idle' && !isCompressing
   const canSendFolder = folderFiles && folderFiles.length > 0 && !isFolderOverLimit && state.status === 'idle' && !isCompressing
   // When passkey mode is enabled, require valid receiver contact token OR sendToSelf
-  const passkeyRequirementsMet = !usePasskey || sendToSelf || (parsedToken !== null)
+  const passkeyRequirementsMet = !usePasskey || sendToSelf || (verifiedToken !== null)
   const canSend = (mode === 'file' ? canSendFiles : canSendFolder) && passkeyRequirementsMet
 
   const handleSend = async () => {
@@ -642,11 +631,11 @@ export function SendTab() {
                               <p className="text-xs text-destructive">{receiverPublicKeyError}</p>
                             )}
                             {receiverPublicKeyFingerprint && (
-                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <Fingerprint className="h-3 w-3 text-amber-600" />
-                                <span>Bound by: </span>
-                                <span className="font-mono font-medium text-amber-600">{receiverPublicKeyFingerprint}</span>
-                                <span className="text-xs">(verified when you authenticate)</span>
+                              <div className="flex items-center gap-2 text-xs text-green-700 dark:text-green-400">
+                                <Fingerprint className="h-3 w-3" />
+                                <span>Signed by: </span>
+                                <span className="font-mono font-medium">{receiverPublicKeyFingerprint}</span>
+                                <span className="text-xs">(signature verified)</span>
                               </div>
                             )}
                             <p className="text-xs text-muted-foreground">

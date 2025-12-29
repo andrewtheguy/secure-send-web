@@ -186,15 +186,9 @@ export function useNostrSend(): UseNostrSendReturn {
             if (options.selfTransfer) {
               receiverPublicKeyBytes = ephemeral.identityPublicKeyBytes
             } else {
-              // Verify contact token binding before using recipient public ID
-              // This ensures the token was created by this sender's passkey
-              // Note: identitySharedSecretKey IS the master key returned by getPasskeySessionKeypair
-              const verifiedToken = await verifyContactToken(sharedSecret, options.receiverContactToken!)
-
-              // Verify the token was signed by this sender (fingerprint match)
-              if (verifiedToken.signerFingerprint.toUpperCase() !== ephemeral.identityFingerprint.toUpperCase()) {
-                throw new Error('Contact token was signed by a different passkey. Please create a new bound token on the Passkey page.')
-              }
+              // Verify contact token's WebAuthn signature (no authentication required)
+              // This proves the token was signed by a specific passkey credential
+              const verifiedToken = await verifyContactToken(options.receiverContactToken!)
 
               receiverPublicKeyBytes = verifiedToken.recipientPublicId
             }

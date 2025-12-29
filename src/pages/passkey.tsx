@@ -11,10 +11,9 @@ import {
   checkWebAuthnSupport,
   createPasskeyCredential,
   getPasskeyIdentity,
-  getPasskeyMasterKey,
-  derivePasskeyPublicId,
+  getCredentialPublicKey,
 } from '@/lib/crypto/passkey'
-import { formatFingerprint, publicKeyToFingerprint } from '@/lib/crypto/ecdh'
+import { formatFingerprint } from '@/lib/crypto/ecdh'
 import { createContactToken } from '@/lib/crypto/contact-token'
 
 type PageState = 'idle' | 'checking' | 'creating' | 'getting_key' | 'binding_contact'
@@ -40,6 +39,7 @@ export function PasskeyPage() {
   const [fingerprint, setFingerprint] = useState<string | null>(null)
   const [publicIdBase64, setPublicIdBase64] = useState<string | null>(null)
   const [prfSupported, setPrfSupported] = useState<boolean | null>(null)
+  const [currentCredentialId, setCurrentCredentialId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -73,9 +73,10 @@ export function PasskeyPage() {
 
       setPageState('creating')
 
-      // Create the passkey
+      // Create the passkey (also stores credential public key)
       const { credentialId } = await createPasskeyCredential(userName || 'Secure Transfer User')
       setUserName('') // Clear display name input after successful creation
+      setCurrentCredentialId(credentialId)
 
       // Immediately authenticate with the new credential to get the public ID (skips picker)
       setPageState('getting_key')
@@ -179,15 +180,19 @@ export function PasskeyPage() {
         throw new Error('Invalid public ID: expected 32 bytes')
       }
 
-      // Authenticate with passkey to get master key
-      const masterKey = await getPasskeyMasterKey()
+      // Check if we have a credential ID
+      if (!currentCredentialId) {
+        throw new Error('Please create or authenticate with a passkey first')
+      }
 
-      // Derive own public ID and fingerprint
-      const ownPublicId = await derivePasskeyPublicId(masterKey)
-      const ownFingerprint = await publicKeyToFingerprint(ownPublicId)
+      // Get the credential public key from storage
+      const credentialPublicKey = getCredentialPublicKey(currentCredentialId)
+      if (!credentialPublicKey) {
+        throw new Error('Credential public key not found. Please create a new passkey.')
+      }
 
-      // Create signed contact token
-      const token = await createContactToken(masterKey, ownFingerprint, trimmed)
+      // Create signed contact token using WebAuthn ECDSA signature
+      const token = await createContactToken(currentCredentialId, credentialPublicKey, trimmed)
 
       setSignedContact(token)
       setContactToSign('') // Clear input after success

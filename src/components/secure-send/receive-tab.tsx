@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ChevronDown, ChevronRight, ArrowRight, Keyboard } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -16,7 +16,7 @@ import type { SignalingMethod } from '@/lib/nostr/types'
 import type { PinKeyMaterial } from '@/lib/types'
 import { Link } from 'react-router-dom'
 import { formatFingerprint } from '@/lib/crypto/ecdh'
-import { isContactTokenFormat, parseContactTokenUnsafe } from '@/lib/crypto/contact-token'
+import { isContactTokenFormat, verifyContactToken, type VerifiedContactToken } from '@/lib/crypto/contact-token'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -51,53 +51,39 @@ export function ReceiveTab() {
   const [, setDetectedMethod] = useState<SignalingMethod>('nostr')
   const [pinFingerprint, setPinFingerprint] = useState<string | null>(null)
 
-  // Parse and validate sender contact token (pure computation - no verification yet)
-  // Verification happens at receive time when passkey authenticates
-  const { parsedToken, senderPublicIdBytes, validationError } = useMemo(() => {
+  // Verified token state (updated via useEffect since verification is async)
+  const [verifiedToken, setVerifiedToken] = useState<VerifiedContactToken | null>(null)
+
+  // Verify sender contact token - now verifies signature immediately
+  useEffect(() => {
     const input = senderPublicIdInput.trim()
     if (!input) {
-      return { parsedToken: null, senderPublicIdBytes: null, validationError: null }
-    }
-
-    // Must be a contact token format
-    if (!isContactTokenFormat(input)) {
-      return {
-        parsedToken: null,
-        senderPublicIdBytes: null,
-        validationError: 'Invalid format: expected bound contact token (create one on the Passkey page)',
-      }
-    }
-
-    // Parse without verification (for display purposes)
-    const parsed = parseContactTokenUnsafe(input)
-    if (!parsed) {
-      return {
-        parsedToken: null,
-        senderPublicIdBytes: null,
-        validationError: 'Invalid token structure',
-      }
-    }
-
-    return {
-      parsedToken: parsed,
-      senderPublicIdBytes: parsed.recipientPublicId,
-      validationError: null,
-    }
-  }, [senderPublicIdInput])
-
-  // Handle side effects separately
-  useEffect(() => {
-    setSenderPublicIdError(validationError)
-
-    if (!parsedToken) {
+      setVerifiedToken(null)
+      setSenderPublicIdError(null)
       setSenderPublicIdFingerprint(null)
       return
     }
 
-    // Use the signer fingerprint from the parsed token
-    // This shows who bound this contact (should match receiver's fingerprint)
-    setSenderPublicIdFingerprint(formatFingerprint(parsedToken.signerFingerprint))
-  }, [parsedToken, validationError])
+    // Quick format check first
+    if (!isContactTokenFormat(input)) {
+      setVerifiedToken(null)
+      setSenderPublicIdError('Invalid format: expected bound contact token (create one on the Passkey page)')
+      setSenderPublicIdFingerprint(null)
+      return
+    }
+
+    // Verify token signature - no authentication required!
+    verifyContactToken(input).then(verified => {
+      setVerifiedToken(verified)
+      setSenderPublicIdError(null)
+      // Show signer fingerprint (now verified, not just parsed)
+      setSenderPublicIdFingerprint(formatFingerprint(verified.signerFingerprint))
+    }).catch((err) => {
+      setVerifiedToken(null)
+      setSenderPublicIdError(err instanceof Error ? err.message : 'Invalid or tampered token')
+      setSenderPublicIdFingerprint(null)
+    })
+  }, [senderPublicIdInput])
 
   // Auto-expand Advanced Options when passkey mode is enabled
   useEffect(() => {
@@ -294,7 +280,7 @@ export function ReceiveTab() {
   // Handle passkey authentication for receiving
   const handlePasskeyAuth = async () => {
     if (passkeyAuthenticating) return
-    if (!receiveFromSelf && !senderPublicIdBytes) return // Require sender public ID unless receiving from self
+    if (!receiveFromSelf && !verifiedToken) return // Require verified sender token unless receiving from self
 
     setPasskeyAuthenticating(true)
 
@@ -313,8 +299,8 @@ export function ReceiveTab() {
     }
   }
 
-  // Whether passkey mode requirements are met (either have sender ID or receiving from self)
-  const passkeyRequirementsMet = receiveFromSelf || senderPublicIdBytes !== null
+  // Whether passkey mode requirements are met (either have verified sender token or receiving from self)
+  const passkeyRequirementsMet = receiveFromSelf || verifiedToken !== null
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
   const showQRInput = isManualMode && state.status === 'waiting_for_offer'
@@ -430,11 +416,11 @@ export function ReceiveTab() {
                                 <p className="text-xs text-destructive">{senderPublicIdError}</p>
                               )}
                               {senderPublicIdFingerprint && (
-                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                  <Fingerprint className="h-3 w-3 text-amber-600" />
-                                  <span>Bound by: </span>
-                                  <span className="font-mono font-medium text-amber-600">{senderPublicIdFingerprint}</span>
-                                  <span className="text-xs">(verified when you authenticate)</span>
+                                <div className="flex items-center gap-2 text-xs text-green-700 dark:text-green-400">
+                                  <Fingerprint className="h-3 w-3" />
+                                  <span>Signed by: </span>
+                                  <span className="font-mono font-medium">{senderPublicIdFingerprint}</span>
+                                  <span className="text-xs">(signature verified)</span>
                                 </div>
                               )}
                               <p className="text-xs text-muted-foreground">
