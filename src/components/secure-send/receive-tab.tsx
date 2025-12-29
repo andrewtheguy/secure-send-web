@@ -53,7 +53,7 @@ export function ReceiveTab() {
   // Verified token state (updated via useEffect since verification is async)
   const [verifiedToken, setVerifiedToken] = useState<VerifiedContactToken | null>(null)
 
-  // Verify sender contact token - now verifies signature immediately
+  // Verify sender contact token - debounced to reduce signature checks on every keystroke
   useEffect(() => {
     let cancelled = false
 
@@ -64,25 +64,32 @@ export function ReceiveTab() {
       return
     }
 
-    // Quick format check first
+    // Quick format check first (synchronous, no debounce needed)
     if (!isContactTokenFormat(input)) {
       setVerifiedToken(null)
       setSenderPublicIdError('Invalid format: expected bound contact token (create one on the Passkey page)')
       return
     }
 
-    // Verify token signature - no authentication required!
-    verifyContactToken(input).then(verified => {
-      if (cancelled) return
-      setVerifiedToken(verified)
-      setSenderPublicIdError(null)
-    }).catch((err) => {
-      if (cancelled) return
-      setVerifiedToken(null)
-      setSenderPublicIdError(err instanceof Error ? err.message : 'Invalid or tampered token')
-    })
+    // Debounce the async signature verification
+    const timeoutId = setTimeout(() => {
+      verifyContactToken(input)
+        .then((verified) => {
+          if (cancelled) return
+          setVerifiedToken(verified)
+          setSenderPublicIdError(null)
+        })
+        .catch((err) => {
+          if (cancelled) return
+          setVerifiedToken(null)
+          setSenderPublicIdError(err instanceof Error ? err.message : 'Invalid or tampered token')
+        })
+    }, 300)
 
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      clearTimeout(timeoutId)
+    }
   }, [senderPublicIdInput])
 
   // Auto-expand Advanced Options when passkey mode is enabled
