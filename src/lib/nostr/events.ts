@@ -2,6 +2,9 @@ import { finalizeEvent, generateSecretKey, getPublicKey, type Event } from 'nost
 import { EVENT_KIND_PIN_EXCHANGE, EVENT_KIND_DATA_TRANSFER, type ChunkNotifyPayload } from './types'
 import { TRANSFER_EXPIRATION_MS } from '../crypto/constants'
 
+const EPHEMERAL_PUBKEY_BYTES = 65
+const EPHEMERAL_BINDING_BYTES = 32
+
 /**
  * Generate ephemeral keypair for a transfer
  */
@@ -125,14 +128,14 @@ export function createMutualTrustEvent(
 
   // Add ephemeral key tags for Perfect Forward Secrecy
   if (senderEphemeralPub && senderSessionBinding) {
-    if (senderEphemeralPub.length !== 65) {
+    if (senderEphemeralPub.length !== EPHEMERAL_PUBKEY_BYTES) {
       throw new Error(
-        `Invalid sender ephemeral public key length: expected 65 bytes, got ${senderEphemeralPub.length}`
+        `Invalid sender ephemeral public key length: expected ${EPHEMERAL_PUBKEY_BYTES} bytes, got ${senderEphemeralPub.length}`
       )
     }
-    if (senderSessionBinding.length !== 32) {
+    if (senderSessionBinding.length !== EPHEMERAL_BINDING_BYTES) {
       throw new Error(
-        `Invalid sender session binding length: expected 32 bytes, got ${senderSessionBinding.length}`
+        `Invalid sender session binding length: expected ${EPHEMERAL_BINDING_BYTES} bytes, got ${senderSessionBinding.length}`
       )
     }
     tags.push(['epk', uint8ArrayToBase64(senderEphemeralPub)]) // Ephemeral public key
@@ -271,15 +274,18 @@ export function createAckEvent(
   }
 
   // Add ephemeral key tags for Perfect Forward Secrecy (receiver responds with their ephemeral key)
+  if ((receiverEphemeralPub && !receiverSessionBinding) || (!receiverEphemeralPub && receiverSessionBinding)) {
+    throw new Error('Invalid receiver ephemeral parameters: epk and esb must be provided together')
+  }
   if (receiverEphemeralPub && receiverSessionBinding) {
-    if (receiverEphemeralPub.length !== 65) {
+    if (receiverEphemeralPub.length !== EPHEMERAL_PUBKEY_BYTES) {
       throw new Error(
-        `Invalid receiver ephemeral public key length: expected 65 bytes, got ${receiverEphemeralPub.length}`
+        `Invalid receiver ephemeral public key length: expected ${EPHEMERAL_PUBKEY_BYTES} bytes, got ${receiverEphemeralPub.length}`
       )
     }
-    if (receiverSessionBinding.length !== 32) {
+    if (receiverSessionBinding.length !== EPHEMERAL_BINDING_BYTES) {
       throw new Error(
-        `Invalid receiver session binding length: expected 32 bytes, got ${receiverSessionBinding.length}`
+        `Invalid receiver session binding length: expected ${EPHEMERAL_BINDING_BYTES} bytes, got ${receiverSessionBinding.length}`
       )
     }
     tags.push(['epk', uint8ArrayToBase64(receiverEphemeralPub)]) // Receiver's ephemeral public key
@@ -480,6 +486,9 @@ function parseEphemeralKeys(tags: string[][]): {
   const ephemeralPubB64 = tags.find((t) => t[0] === 'epk')?.[1]
   const sessionBindingB64 = tags.find((t) => t[0] === 'esb')?.[1]
 
+  if ((ephemeralPubB64 && !sessionBindingB64) || (!ephemeralPubB64 && sessionBindingB64)) {
+    throw new Error('Invalid ephemeral key tags: epk and esb must be provided together')
+  }
   if (!ephemeralPubB64 || !sessionBindingB64) {
     return {}
   }
@@ -487,11 +496,18 @@ function parseEphemeralKeys(tags: string[][]): {
   try {
     const ephemeralPub = base64ToUint8Array(ephemeralPubB64)
     const sessionBinding = base64ToUint8Array(sessionBindingB64)
-    if (ephemeralPub.length !== 65 || sessionBinding.length !== 32) {
-      return {}
+    if (ephemeralPub.length !== EPHEMERAL_PUBKEY_BYTES) {
+      throw new Error(
+        `Invalid ephemeral public key length: expected ${EPHEMERAL_PUBKEY_BYTES} bytes, got ${ephemeralPub.length}`
+      )
+    }
+    if (sessionBinding.length !== EPHEMERAL_BINDING_BYTES) {
+      throw new Error(
+        `Invalid session binding length: expected ${EPHEMERAL_BINDING_BYTES} bytes, got ${sessionBinding.length}`
+      )
     }
     return { ephemeralPub, sessionBinding }
   } catch {
-    return {}
+    throw new Error('Invalid ephemeral key tags: epk/esb are malformed or have invalid length')
   }
 }
