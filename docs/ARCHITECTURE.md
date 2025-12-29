@@ -105,6 +105,7 @@ sequenceDiagram
 | `kdf.ts` | Key derivation using PBKDF2-SHA256 (600,000 iterations) |
 | `passkey.ts` | WebAuthn PRF extension for passkey-based key derivation |
 | `ecdh.ts` | ECDH key exchange (non-extractable keys), fingerprints, key confirmation, public key commitment, constant-time comparison |
+| `contact-token.ts` | Mutual contact token creation, countersigning, and verification for cross-user passkey mode |
 | `aes-gcm.ts` | AES-256-GCM encryption/decryption |
 | `stream-crypto.ts` | Streaming encryption/decryption (128KB chunks, protocol-agnostic) |
 | `constants.ts` | Crypto parameters, charsets (69 chars), BIP-39 wordlist (2048 words) |
@@ -151,6 +152,89 @@ Passkeys provide an alternative to PIN-based authentication using the WebAuthn P
 
 - **Public ID**: 32 bytes derived from the passkey master key via HKDF (shareable, non-secret), encoded as base64 for copy/QR
 - **Purpose**: Shared with contacts to target Nostr events and validate receiver commitments (`rpkc`)
+
+#### Mutual Contact Tokens (Cross-User Mode)
+
+For cross-user passkey transfers (different passkeys), a **mutual contact token** establishes trust between parties. Both parties sign the same token, creating a cryptographic proof of mutual agreement.
+
+**Contact Card Format:**
+```json
+{
+  "id": "<base64 public ID, 32 bytes>",
+  "cpk": "<base64 credential public key, 65 bytes uncompressed P-256>"
+}
+```
+
+**Pending Token (after initiator signs):**
+```typescript
+interface PendingMutualToken {
+  a_id: string       // Party A's public ID (lexicographically smaller)
+  a_cpk: string      // Party A's credential public key
+  b_id: string       // Party B's public ID (lexicographically larger)
+  b_cpk: string      // Party B's credential public key
+  iat: number        // Unix timestamp (seconds)
+  init_authData: string      // WebAuthn authenticator data
+  init_clientDataJSON: string // WebAuthn client data
+  init_sig: string           // Initiator's ECDSA signature
+  comment?: string   // Optional comment (max 256 chars)
+}
+```
+
+**Complete Token (after countersigning):**
+```typescript
+interface MutualContactTokenPayload extends PendingMutualToken {
+  counter_authData: string      // Countersigner's authenticator data
+  counter_clientDataJSON: string // Countersigner's client data
+  counter_sig: string           // Countersigner's ECDSA signature
+}
+```
+
+**Challenge Computation:**
+```
+challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat)
+                   32     65       32      65       8    = 202 bytes
+```
+- IDs sorted lexicographically to ensure deterministic ordering
+- Both parties sign the same challenge
+
+**Token Creation Flow:**
+```mermaid
+sequenceDiagram
+    participant Alice
+    participant Bob
+    Note over Alice,Bob: 1. Exchange Contact Cards
+    Alice->>Bob: Alice's Contact Card (id + cpk)
+    Bob->>Alice: Bob's Contact Card (id + cpk)
+    Note over Alice: 2. Alice creates pending token
+    Alice->>Alice: Sort IDs lexicographically
+    Alice->>Alice: Compute challenge = SHA256(a_id||a_cpk||b_id||b_cpk||iat)
+    Alice->>Alice: WebAuthn sign challenge
+    Alice->>Bob: Pending token (init signature only)
+    Note over Bob: 3. Bob countersigns
+    Bob->>Bob: Verify init signature (try both keys)
+    Bob->>Bob: WebAuthn sign same challenge
+    Bob->>Alice: Complete token (both signatures)
+    Note over Alice,Bob: 4. Both use same token for transfers
+```
+
+**Verification Process:**
+1. Parse token JSON and validate required fields
+2. Verify lexicographic ordering (`a_id < b_id`)
+3. Compute expected challenge from token data
+4. Verify initiator signature (try `a_cpk` then `b_cpk`)
+5. Verify countersigner signature (the other key)
+6. Verify caller is a party to the token (if `myPublicId` provided)
+
+**Security Properties:**
+- Both parties must control their passkey to sign
+- Tampering with any field invalidates both signatures
+- Lexicographic ordering prevents ambiguity
+- Same token used by both parties (no separate tokens)
+- **Only the two parties in the token can use it** - `verifyMutualToken()` checks that the caller's public ID matches either `a_id` or `b_id`; third parties are rejected with "You are not a party to this token"
+- **Token verified at multiple points:**
+  1. UI validation (send-tab/receive-tab) - immediate feedback when entering token
+  2. Before transfer starts (`use-nostr-send.ts`, `use-nostr-receive.ts`) - verifies own party membership
+  3. During handshake - sender's token verified by receiver, receiver echoes token in ACK, sender verifies counterparty matches
 
 #### Key Derivation Flow
 
@@ -215,7 +299,7 @@ sequenceDiagram
 
 ##### Cross-User Flow (Different Passkeys - Two Round Trips)
 
-When sender and receiver have different passkeys, there's no shared secret initially. An extra handshake round trip establishes the session key before metadata can be sent:
+When sender and receiver have different passkeys, there's no shared secret initially. Both parties must have a **mutual contact token** (see above) establishing their agreement to communicate. An extra handshake round trip establishes the session key before metadata can be sent:
 
 ```mermaid
 sequenceDiagram
@@ -363,8 +447,8 @@ Security-critical functions validate inputs before cryptographic operations:
 | Key Source | User-memorized PIN | Hardware secure element | Hardware secure element |
 | Brute Force Resistance | 600K PBKDF2 iterations | Hardware rate limiting | Hardware rate limiting |
 | Phishing Resistance | None | Origin-bound credentials | Origin-bound credentials |
-| Sync Method | Out-of-band sharing | Password manager sync | Contact token exchange |
-| Verification | PIN match | Fingerprint comparison | Fingerprint + contact token |
+| Sync Method | Out-of-band sharing | Password manager sync | Mutual contact token |
+| Verification | PIN match | Fingerprint comparison | Mutual token (dual signatures) |
 | Key Confirmation | N/A | HKDF-derived hash | N/A (no shared secret) |
 | Relay MITM Protection | N/A | Public ID commitment | Public ID commitment |
 | Replay Protection | TTL only | TTL + nonce | TTL + nonce |
@@ -372,6 +456,7 @@ Security-critical functions validate inputs before cryptographic operations:
 | Shared Secret Protection | Raw bytes in memory | Non-extractable CryptoKey | Non-extractable CryptoKey |
 | Perfect Forward Secrecy | No | Yes (ephemeral ECDH) | Yes (ephemeral ECDH) |
 | Round Trips | 1 | 1 | 2 (handshake + payload) |
+| Party Membership Check | N/A | N/A | Yes (during handshake) |
 
 ### User Interface Architecture
 
@@ -780,6 +865,8 @@ src/
 │   │   ├── pin.ts           # PIN generation/validation
 │   │   ├── kdf.ts           # Key derivation (PBKDF2)
 │   │   ├── passkey.ts       # Passkey/WebAuthn PRF key derivation
+│   │   ├── ecdh.ts          # ECDH key exchange, fingerprints
+│   │   ├── contact-token.ts # Mutual contact token (cross-user passkey)
 │   │   ├── aes-gcm.ts       # Encryption/decryption
 │   │   └── stream-crypto.ts # Streaming chunk encryption (P2P)
 │   ├── nostr/               # Nostr protocol (signaling option 1)

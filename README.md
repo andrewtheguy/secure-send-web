@@ -112,15 +112,53 @@ Receivers don't need to select a signaling method - it's automatically detected 
 Passkeys provide passwordless encryption using the WebAuthn PRF extension:
 
 1. **Setup**: Create a passkey at `/passkey` - it's stored in your password manager (1Password, iCloud Keychain, Google Password Manager, etc.)
-2. **Sync**: Both sender and receiver must have the same passkey synced via the same password manager
-3. **Send**: Enable "Use Passkey" in Advanced Options - the sender authenticates with biometrics/device unlock
-4. **Receive**: Select "Use Passkey" and authenticate - no PIN entry needed
+2. **Self-transfer**: Same passkey synced via password manager - encryption works automatically
+3. **Cross-user transfer**: Exchange a mutual contact token with your contact (see below)
+4. **Send/Receive**: Enable "Use Passkey" in Advanced Options and authenticate with biometrics/device unlock
 
 **Key differences from PIN mode:**
-- No PIN to memorize or share - just sync the passkey via your password manager
+- No PIN to memorize or share
 - Encryption keys derived from WebAuthn PRF extension (hardware-backed)
-- Fingerprint (11-char identifier) for verification that both parties have the same passkey
+- Fingerprint (16-char identifier) for verification
 - Same AES-256-GCM encryption strength as PIN mode
+
+### Mutual Contact Tokens (Cross-User Passkey Mode)
+
+When using passkey mode with a different person (cross-user), you need a **mutual contact token** - a cryptographic proof that both parties have agreed to communicate:
+
+**How to create a mutual contact token:**
+
+1. **Exchange Contact Cards**: On the `/passkey` page, copy your Contact Card (JSON with your public ID and credential key) and share it with your contact
+2. **Create Pending Token**: Paste your contact's card and click "Sign" to create a pending token (signed by you)
+3. **Send Pending Token**: Share the pending token with your contact
+4. **Complete Token**: Your contact pastes the pending token and clicks "Sign" to countersign it
+5. **Both Use Same Token**: The completed token (with both signatures) is used by both parties for transfers
+
+**Token flow:**
+```
+Alice (Initiator)                    Bob (Countersigner)
+      |                                     |
+      |  1. Exchange Contact Cards          |
+      v                                     v
+ Create pending token                       |
+      |                                     |
+      |  2. Pending token ----------------->|
+      |                                     v
+      |                          Countersign token
+      |                                     |
+      |<----------------- 3. Complete token |
+      |                                     |
+      v                                     v
+ +---------------------------------------------+
+ |  SAME TOKEN - Either can send/receive       |
+ +---------------------------------------------+
+```
+
+**Security properties:**
+- Both parties sign the same challenge (tamper-proof)
+- Token contains both parties' public IDs and credential keys
+- WebAuthn signatures prove each party controls their passkey
+- **Only the two parties in the token can use it** - party membership is cryptographically verified during the handshake; a third party cannot use someone else's token
 
 ### Cloud Storage Redundancy
 
