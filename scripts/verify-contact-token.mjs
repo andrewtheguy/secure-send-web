@@ -107,7 +107,11 @@ async function verifyContactToken(token) {
 
   // Decode fields
   const recipientPublicId = base64Decode(payload.sub)
-  const signerPublicKey = base64Decode(payload.cpk)
+  const signerCredentialPublicKey = base64Decode(payload.cpk)
+  if (!payload.spk) {
+    throw new Error('Missing signer public ID (spk) - token uses outdated format')
+  }
+  const signerPublicId = base64Decode(payload.spk)
   const authData = base64Decode(payload.authData)
   const clientDataJSON = base64Decode(payload.clientDataJSON)
   const signature = base64Decode(payload.sig)
@@ -116,15 +120,20 @@ async function verifyContactToken(token) {
   if (recipientPublicId.length !== 32) {
     throw new Error(`Invalid recipient public ID: expected 32 bytes, got ${recipientPublicId.length}`)
   }
-  if (signerPublicKey.length !== 65 || signerPublicKey[0] !== 0x04) {
+  if (signerCredentialPublicKey.length !== 65 || signerCredentialPublicKey[0] !== 0x04) {
     throw new Error('Invalid credential public key: expected 65-byte uncompressed P-256')
+  }
+  if (signerPublicId.length !== 32) {
+    throw new Error(`Invalid signer public ID: expected 32 bytes, got ${signerPublicId.length}`)
   }
 
   // Show fingerprints
   const recipientFp = await fingerprint(recipientPublicId)
-  const signerFp = await fingerprint(signerPublicKey)
+  const signerFp = await fingerprint(signerPublicId)
+  const credentialFp = await fingerprint(signerCredentialPublicKey)
   console.log('\nRecipient fingerprint:', recipientFp.match(/.{4}/g).join('-'))
-  console.log('Signer fingerprint:', signerFp.match(/.{4}/g).join('-'))
+  console.log('Signer fingerprint:', signerFp.match(/.{4}/g).join('-'), '(passkey public ID)')
+  console.log('Credential fingerprint:', credentialFp.match(/.{4}/g).join('-'), '(WebAuthn key)')
 
   // Parse clientDataJSON
   const clientData = JSON.parse(Buffer.from(clientDataJSON).toString('utf8'))
@@ -137,17 +146,24 @@ async function verifyContactToken(token) {
   }
 
   // Verify challenge matches expected value
-  // challenge = SHA256(sub || cpk || iat)
-  const dataToSign = new Uint8Array(32 + 65 + 8)
+  // challenge = SHA256(sub || spk || cpk || iat)
+  const dataToSign = new Uint8Array(32 + 32 + 65 + 8)
   dataToSign.set(recipientPublicId, 0)
-  dataToSign.set(signerPublicKey, 32)
+  dataToSign.set(signerPublicId, 32)
+  dataToSign.set(signerCredentialPublicKey, 64)
   const iatView = new DataView(new ArrayBuffer(8))
   iatView.setBigUint64(0, BigInt(payload.iat), false)
-  dataToSign.set(new Uint8Array(iatView.buffer), 97)
+  dataToSign.set(new Uint8Array(iatView.buffer), 129)
 
   const expectedChallenge = new Uint8Array(await crypto.subtle.digest('SHA-256', dataToSign))
   const actualChallenge = base64urlDecode(clientData.challenge)
 
+  // Verify lengths match before byte comparison
+  if (actualChallenge.length !== expectedChallenge.length) {
+    throw new Error(`Challenge length mismatch: expected ${expectedChallenge.length} bytes, got ${actualChallenge.length} bytes`)
+  }
+
+  // Constant-time byte comparison
   if (!expectedChallenge.every((b, i) => b === actualChallenge[i])) {
     throw new Error('Challenge mismatch - token data may be tampered')
   }
@@ -156,7 +172,7 @@ async function verifyContactToken(token) {
   // Import public key
   const publicKey = await crypto.subtle.importKey(
     'raw',
-    signerPublicKey,
+    signerCredentialPublicKey,
     { name: 'ECDSA', namedCurve: 'P-256' },
     false,
     ['verify']
@@ -186,7 +202,8 @@ async function verifyContactToken(token) {
 
   return {
     recipientPublicId: Buffer.from(recipientPublicId).toString('base64'),
-    signerPublicKey: Buffer.from(signerPublicKey).toString('base64'),
+    signerPublicId: Buffer.from(signerPublicId).toString('base64'),
+    signerCredentialPublicKey: Buffer.from(signerCredentialPublicKey).toString('base64'),
     issuedAt: new Date(payload.iat * 1000),
     origin: clientData.origin,
     comment: parsed.comment,

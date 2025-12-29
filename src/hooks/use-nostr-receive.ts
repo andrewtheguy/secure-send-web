@@ -522,12 +522,16 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
         // Wait for payload event from sender
         const payloadEvent = await new Promise<Event | null>((resolve) => {
+          // Declare subId before timeout so both can access it safely
+          // eslint-disable-next-line prefer-const
+          let subId: string | undefined
+
           const timeout = setTimeout(() => {
-            client.unsubscribe(subId)
+            if (subId !== undefined) client.unsubscribe(subId)
             resolve(null)
           }, 60000) // 1 minute timeout for payload
 
-          const subId = client.subscribe(
+          subId = client.subscribe(
             [
               {
                 kinds: [EVENT_KIND_DATA_TRANSFER],
@@ -539,7 +543,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               const parsed = parseMutualTrustPayloadEvent(event)
               if (parsed && parsed.transferId === transferId) {
                 clearTimeout(timeout)
-                client.unsubscribe(subId)
+                if (subId !== undefined) client.unsubscribe(subId)
                 resolve(event)
               }
             }
@@ -560,7 +564,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 const parsed = parseMutualTrustPayloadEvent(event)
                 if (parsed && parsed.transferId === transferId) {
                   clearTimeout(timeout)
-                  client.unsubscribe(subId)
+                  if (subId !== undefined) client.unsubscribe(subId)
                   resolve(event)
                   return
                 }
