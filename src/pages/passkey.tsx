@@ -646,7 +646,7 @@ export function PasskeyPage() {
             I&apos;m starting the exchange
           </div>
           <p className="text-xs text-muted-foreground font-normal text-left">
-            Share your contact card and create a pending token for your contact to complete
+            You have your contact&apos;s card and will create a pending token for them
           </p>
         </Button>
 
@@ -667,7 +667,7 @@ export function PasskeyPage() {
     </div>
   )
 
-  // Step 3A: Create Token (with contact card at top)
+  // Step 3A: Create Token (initiator flow)
   const renderCreateTokenStep = () => (
     <div className="space-y-6">
       {/* Back button */}
@@ -682,9 +682,6 @@ export function PasskeyPage() {
         Back to options
       </Button>
 
-      {/* Contact card at top */}
-      {renderContactCard()}
-
       {/* Token creation form */}
       <div className="space-y-4 p-4 rounded-lg border border-amber-500/30 bg-amber-50/30 dark:bg-amber-950/10">
         <h3 className="font-semibold flex items-center gap-2">
@@ -692,7 +689,7 @@ export function PasskeyPage() {
           Create Pending Token
         </h3>
         <p className="text-sm text-muted-foreground">
-          After sharing your card above, paste your contact&apos;s card to create a pending token.
+          Paste your contact&apos;s card to create a pending token for them to complete.
         </p>
 
         <div className="space-y-2">
