@@ -44,10 +44,10 @@ export function ReceiveTab() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [usePasskey, setUsePasskey] = useState(false)
   const [passkeyAuthenticating, setPasskeyAuthenticating] = useState(false)
-  const [senderPublicKeyInput, setSenderPublicKeyInput] = useState('')
-  const [senderPublicKeyFingerprint, setSenderPublicKeyFingerprint] = useState<string | null>(null)
-  const [senderPublicKeyError, setSenderPublicKeyError] = useState<string | null>(null)
-  const [showPublicKeyModal, setShowPublicKeyModal] = useState(false)
+  const [senderPublicIdInput, setSenderPublicIdInput] = useState('')
+  const [senderPublicIdFingerprint, setSenderPublicIdFingerprint] = useState<string | null>(null)
+  const [senderPublicIdError, setSenderPublicIdError] = useState<string | null>(null)
+  const [showPublicIdModal, setShowPublicIdModal] = useState(false)
 
   // Store PIN in ref to avoid React DevTools exposure
   const pinSecretRef = useRef<PinSecret | null>(null)
@@ -60,40 +60,40 @@ export function ReceiveTab() {
   const [pinFingerprint, setPinFingerprint] = useState<string | null>(null)
 
   // Parse and validate sender public ID (pure computation)
-  const { senderPublicKeyBytes, validationError } = useMemo(() => {
-    const input = senderPublicKeyInput.trim()
+  const { senderPublicIdBytes, validationError } = useMemo(() => {
+    const input = senderPublicIdInput.trim()
     if (!input) {
-      return { senderPublicKeyBytes: null, validationError: null }
+      return { senderPublicIdBytes: null, validationError: null }
     }
     try {
       const bytes = base64ToUint8Array(input)
       if (bytes.length !== 32) {
-        return { senderPublicKeyBytes: null, validationError: 'Invalid public ID format (expected 32 bytes)' }
+        return { senderPublicIdBytes: null, validationError: 'Invalid public ID format (expected 32 bytes)' }
       }
-      return { senderPublicKeyBytes: bytes, validationError: null }
+      return { senderPublicIdBytes: bytes, validationError: null }
     } catch {
-      return { senderPublicKeyBytes: null, validationError: 'Invalid base64 encoding' }
+      return { senderPublicIdBytes: null, validationError: 'Invalid base64 encoding' }
     }
-  }, [senderPublicKeyInput])
+  }, [senderPublicIdInput])
 
   // Handle side effects separately
   useEffect(() => {
-    setSenderPublicKeyError(validationError)
+    setSenderPublicIdError(validationError)
 
-    if (!senderPublicKeyBytes) {
-      setSenderPublicKeyFingerprint(null)
+    if (!senderPublicIdBytes) {
+      setSenderPublicIdFingerprint(null)
       return
     }
 
     let cancelled = false
-    publicKeyToFingerprint(senderPublicKeyBytes).then(fp => {
+    publicKeyToFingerprint(senderPublicIdBytes).then(fp => {
       if (!cancelled) {
-        setSenderPublicKeyFingerprint(formatFingerprint(fp))
+        setSenderPublicIdFingerprint(formatFingerprint(fp))
       }
     })
 
     return () => { cancelled = true }
-  }, [senderPublicKeyBytes, validationError])
+  }, [senderPublicIdBytes, validationError])
 
   // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrReceive()
@@ -278,7 +278,7 @@ export function ReceiveTab() {
   // Handle passkey authentication for receiving
   const handlePasskeyAuth = async () => {
     if (passkeyAuthenticating) return
-    if (!senderPublicKeyBytes) return // Require sender public ID
+    if (!senderPublicIdBytes) return // Require sender public ID
 
     setPasskeyAuthenticating(true)
 
@@ -286,7 +286,7 @@ export function ReceiveTab() {
       // Start receive with passkey mode and sender public ID
       await nostrHook.receive({
         usePasskey: true,
-        senderPublicKey: senderPublicKeyBytes,
+        senderPublicKey: senderPublicIdBytes,
       })
     } catch {
       // Error will be handled by the hook
@@ -296,7 +296,7 @@ export function ReceiveTab() {
   }
 
   // Whether passkey mode requirements are met
-  const passkeyRequirementsMet = senderPublicKeyBytes !== null
+  const passkeyRequirementsMet = senderPublicIdBytes !== null
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
   const showQRInput = isManualMode && state.status === 'waiting_for_offer'
@@ -338,28 +338,28 @@ export function ReceiveTab() {
                       <Textarea
                         id="sender-pubkey"
                         placeholder="Paste sender's public ID (base64)..."
-                        value={senderPublicKeyInput}
-                        onChange={(e) => setSenderPublicKeyInput(e.target.value)}
+                        value={senderPublicIdInput}
+                        onChange={(e) => setSenderPublicIdInput(e.target.value)}
                         className="font-mono text-xs min-h-[60px] resize-none"
                       />
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setShowPublicKeyModal(true)}
+                        onClick={() => setShowPublicIdModal(true)}
                         className="flex-shrink-0"
                         title="Enter public ID"
                       >
                         <Keyboard className="h-4 w-4" />
                       </Button>
                     </div>
-                    {senderPublicKeyError && (
-                      <p className="text-xs text-destructive">{senderPublicKeyError}</p>
+                    {senderPublicIdError && (
+                      <p className="text-xs text-destructive">{senderPublicIdError}</p>
                     )}
-                    {senderPublicKeyFingerprint && (
+                    {senderPublicIdFingerprint && (
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Fingerprint className="h-3 w-3" />
                         <span>Sender fingerprint: </span>
-                        <span className="font-mono font-medium text-cyan-600">{senderPublicKeyFingerprint}</span>
+                        <span className="font-mono font-medium text-cyan-600">{senderPublicIdFingerprint}</span>
                       </div>
                     )}
                     <p className="text-xs text-muted-foreground">
@@ -371,12 +371,12 @@ export function ReceiveTab() {
                   </div>
 
                   {/* Public ID entry modal */}
-                  {showPublicKeyModal && (
+                  {showPublicIdModal && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                       <div className="bg-background rounded-lg p-4 max-w-md w-full mx-4 space-y-4">
                         <div className="flex items-center justify-between">
                           <h3 className="font-medium">Enter Sender&apos;s Public ID</h3>
-                          <Button variant="ghost" size="sm" onClick={() => setShowPublicKeyModal(false)}>
+                          <Button variant="ghost" size="sm" onClick={() => setShowPublicIdModal(false)}>
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
@@ -385,12 +385,12 @@ export function ReceiveTab() {
                         </p>
                         <Textarea
                           placeholder="Paste public ID (base64)..."
-                          value={senderPublicKeyInput}
-                          onChange={(e) => setSenderPublicKeyInput(e.target.value)}
+                          value={senderPublicIdInput}
+                          onChange={(e) => setSenderPublicIdInput(e.target.value)}
                           className="font-mono text-xs min-h-[100px]"
                           autoFocus
                         />
-                        <Button onClick={() => setShowPublicKeyModal(false)} className="w-full">
+                        <Button onClick={() => setShowPublicIdModal(false)} className="w-full">
                           Done
                         </Button>
                       </div>

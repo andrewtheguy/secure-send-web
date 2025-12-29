@@ -8,6 +8,7 @@
 
 import {
   publicKeyToFingerprint,
+  importECDHPublicKey,
   generateECDHKeyPair,
 } from './ecdh'
 
@@ -338,7 +339,7 @@ export interface EphemeralSessionKeypair {
  *
  * Protocol flow:
  * 1. Sender generates ephemeral keypair with binding
- * 2. Sender includes ephemralPub + sessionBinding in initial event
+ * 2. Sender includes ephemeralPub + sessionBinding in initial event
  * 3. Receiver verifies binding using their copy of identitySharedSecret
  * 4. Receiver generates their ephemeral keypair with binding
  * 5. Receiver includes ephemeralPub + sessionBinding in ACK
@@ -474,7 +475,6 @@ export async function deriveSessionEncryptionKey(
   salt: Uint8Array
 ): Promise<CryptoKey> {
   // Import the peer's ephemeral public key and compute shared secret
-  const { importECDHPublicKey } = await import('./ecdh')
   const peerEphemeralPublicKey = await importECDHPublicKey(peerEphemeralPublicKeyBytes)
 
   // Derive shared secret as HKDF key (never exposed as raw bytes)

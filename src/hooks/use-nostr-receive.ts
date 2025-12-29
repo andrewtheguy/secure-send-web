@@ -394,6 +394,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       // PFS: Derive session encryption key from ephemeral ECDH
       // In passkey mode, this is mandatory - we already verified sender has ephemeral keys
+      if (isMutualTrustMode && (!receiverEphemeral || !senderEphemeralPub || !eventSalt)) {
+        throw new Error('Passkey mode requires ephemeral keys and salt for PFS key derivation')
+      }
       if (receiverEphemeral && senderEphemeralPub && eventSalt) {
         // Derive session key from ephemeral ECDH
         // SECURITY: This key is derived from ephemeral keys whose private material

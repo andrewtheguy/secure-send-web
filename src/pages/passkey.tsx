@@ -214,7 +214,7 @@ export function PasskeyPage() {
               )}
             </Button>
             <p className="text-xs text-muted-foreground text-center">
-              You'll be prompted twice: once to create, then to retrieve your public ID.
+              Two prompts are expected: first to create the passkey, then to authenticate and derive your public ID.
             </p>
           </div>
 

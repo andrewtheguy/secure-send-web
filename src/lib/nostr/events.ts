@@ -93,8 +93,8 @@ export function parsePinExchangeEvent(event: Event): {
  * @param keyConfirmHash - Hash of HKDF-derived key confirmation value (MITM detection)
  * @param receiverPkCommitment - Hash of receiver's public ID (relay MITM prevention)
  * @param nonce - Base64-encoded 16-byte random nonce (replay protection)
- * @param senderEphemeralPub - Optional: Sender's ephemeral public key for PFS (65 bytes, base64)
- * @param senderSessionBinding - Optional: Session binding proving ephemeral key is authorized (32 bytes, base64)
+ * @param senderEphemeralPub - Optional: Sender's ephemeral public key for PFS (Uint8Array, 65 bytes). Encoded as base64 in the event tag.
+ * @param senderSessionBinding - Optional: Session binding proving ephemeral key is authorized (Uint8Array, 32 bytes). Encoded as base64 in the event tag.
  */
 export function createMutualTrustEvent(
   secretKey: Uint8Array,
@@ -125,6 +125,16 @@ export function createMutualTrustEvent(
 
   // Add ephemeral key tags for Perfect Forward Secrecy
   if (senderEphemeralPub && senderSessionBinding) {
+    if (senderEphemeralPub.length !== 65) {
+      throw new Error(
+        `Invalid sender ephemeral public key length: expected 65 bytes, got ${senderEphemeralPub.length}`
+      )
+    }
+    if (senderSessionBinding.length !== 32) {
+      throw new Error(
+        `Invalid sender session binding length: expected 32 bytes, got ${senderSessionBinding.length}`
+      )
+    }
     tags.push(['epk', uint8ArrayToBase64(senderEphemeralPub)]) // Ephemeral public key
     tags.push(['esb', uint8ArrayToBase64(senderSessionBinding)]) // Ephemeral session binding
   }
@@ -207,28 +217,10 @@ export function parseMutualTrustEvent(event: Event): {
   }
 
   // Parse optional ephemeral key fields for PFS
-  const ephemeralPubB64 = event.tags.find((t) => t[0] === 'epk')?.[1]
-  const sessionBindingB64 = event.tags.find((t) => t[0] === 'esb')?.[1]
-
-  let senderEphemeralPub: Uint8Array | undefined
-  let senderSessionBinding: Uint8Array | undefined
-
-  if (ephemeralPubB64 && sessionBindingB64) {
-    try {
-      senderEphemeralPub = base64ToUint8Array(ephemeralPubB64)
-      senderSessionBinding = base64ToUint8Array(sessionBindingB64)
-      // Validate: ephemeral pub should be 65 bytes (uncompressed P-256), binding should be 32 bytes
-      if (senderEphemeralPub.length !== 65 || senderSessionBinding.length !== 32) {
-        // Invalid format, ignore ephemeral keys (fall back to legacy mode)
-        senderEphemeralPub = undefined
-        senderSessionBinding = undefined
-      }
-    } catch {
-      // Invalid base64, ignore ephemeral keys
-      senderEphemeralPub = undefined
-      senderSessionBinding = undefined
-    }
-  }
+  const {
+    ephemeralPub: senderEphemeralPub,
+    sessionBinding: senderSessionBinding,
+  } = parseEphemeralKeys(event.tags)
 
   return {
     receiverFingerprint,
@@ -280,6 +272,16 @@ export function createAckEvent(
 
   // Add ephemeral key tags for Perfect Forward Secrecy (receiver responds with their ephemeral key)
   if (receiverEphemeralPub && receiverSessionBinding) {
+    if (receiverEphemeralPub.length !== 65) {
+      throw new Error(
+        `Invalid receiver ephemeral public key length: expected 65 bytes, got ${receiverEphemeralPub.length}`
+      )
+    }
+    if (receiverSessionBinding.length !== 32) {
+      throw new Error(
+        `Invalid receiver session binding length: expected 32 bytes, got ${receiverSessionBinding.length}`
+      )
+    }
     tags.push(['epk', uint8ArrayToBase64(receiverEphemeralPub)]) // Receiver's ephemeral public key
     tags.push(['esb', uint8ArrayToBase64(receiverSessionBinding)]) // Receiver's session binding
   }
@@ -329,26 +331,10 @@ export function parseAckEvent(event: Event): {
   if (!Number.isInteger(seq) || seq < -1) return null
 
   // Parse optional ephemeral key fields for PFS (receiver's response)
-  const ephemeralPubB64 = event.tags.find((t) => t[0] === 'epk')?.[1]
-  const sessionBindingB64 = event.tags.find((t) => t[0] === 'esb')?.[1]
-
-  let receiverEphemeralPub: Uint8Array | undefined
-  let receiverSessionBinding: Uint8Array | undefined
-
-  if (ephemeralPubB64 && sessionBindingB64) {
-    try {
-      receiverEphemeralPub = base64ToUint8Array(ephemeralPubB64)
-      receiverSessionBinding = base64ToUint8Array(sessionBindingB64)
-      // Validate: ephemeral pub should be 65 bytes, binding should be 32 bytes
-      if (receiverEphemeralPub.length !== 65 || receiverSessionBinding.length !== 32) {
-        receiverEphemeralPub = undefined
-        receiverSessionBinding = undefined
-      }
-    } catch {
-      receiverEphemeralPub = undefined
-      receiverSessionBinding = undefined
-    }
-  }
+  const {
+    ephemeralPub: receiverEphemeralPub,
+    sessionBinding: receiverSessionBinding,
+  } = parseEphemeralKeys(event.tags)
 
   return { senderPubkey, transferId, seq, hint, nonce, receiverEphemeralPub, receiverSessionBinding }
 }
@@ -485,4 +471,27 @@ export function base64ToUint8Array(base64: string): Uint8Array {
     bytes[i] = binary.charCodeAt(i)
   }
   return bytes
+}
+
+function parseEphemeralKeys(tags: string[][]): {
+  ephemeralPub?: Uint8Array
+  sessionBinding?: Uint8Array
+} {
+  const ephemeralPubB64 = tags.find((t) => t[0] === 'epk')?.[1]
+  const sessionBindingB64 = tags.find((t) => t[0] === 'esb')?.[1]
+
+  if (!ephemeralPubB64 || !sessionBindingB64) {
+    return {}
+  }
+
+  try {
+    const ephemeralPub = base64ToUint8Array(ephemeralPubB64)
+    const sessionBinding = base64ToUint8Array(sessionBindingB64)
+    if (ephemeralPub.length !== 65 || sessionBinding.length !== 32) {
+      return {}
+    }
+    return { ephemeralPub, sessionBinding }
+  } catch {
+    return {}
+  }
 }
