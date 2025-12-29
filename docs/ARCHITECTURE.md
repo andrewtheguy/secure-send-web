@@ -198,9 +198,13 @@ challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat || comment_bytes)
 - Both parties sign the same challenge
 - Comment is optional; if present, it is UTF-8 encoded and appended to the challenge input
 
-**What's Signed:**
-- **Data fields** (included in challenge): `a_id`, `a_cpk`, `b_id`, `b_cpk`, `iat`, `comment` — tampering with any of these invalidates signatures
-- **Signature fields** (WebAuthn output, not in challenge): `init_authData`, `init_clientDataJSON`, `init_sig`, `counter_authData`, `counter_clientDataJSON`, `counter_sig` — these ARE the signatures, cannot be part of the signed data
+**Tamper Protection:**
+
+The entire token payload is tamper-proof:
+- **Data fields** (`a_id`, `a_cpk`, `b_id`, `b_cpk`, `iat`, `comment`): Included in the signed challenge. Tampering invalidates both signatures.
+- **Signature fields** (`init_authData`, `init_clientDataJSON`, `init_sig`, `counter_authData`, `counter_clientDataJSON`, `counter_sig`): These are the WebAuthn assertion outputs. They cannot be included in the challenge (circular dependency), but are cryptographically verified during `verifyMutualToken()`. Tampering causes verification to fail.
+
+**Result:** Modifying any field in the token — whether data or signature — will be detected and rejected.
 
 **Token Creation Flow:**
 ```mermaid
