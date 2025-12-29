@@ -14,6 +14,9 @@
 
 import { publicKeyToFingerprint, constantTimeEqualBytes } from './ecdh'
 
+/** Maximum length for comment field to prevent overly large tokens */
+const MAX_COMMENT_LENGTH = 256
+
 /**
  * Token payload structure (raw JSON)
  */
@@ -193,7 +196,11 @@ export async function createContactToken(
   }
 
   if (comment?.trim()) {
-    payload.comment = comment.trim()
+    const trimmedComment = comment.trim()
+    if (trimmedComment.length > MAX_COMMENT_LENGTH) {
+      throw new Error(`Comment exceeds maximum length of ${MAX_COMMENT_LENGTH} characters`)
+    }
+    payload.comment = trimmedComment
   }
 
   return JSON.stringify(payload)

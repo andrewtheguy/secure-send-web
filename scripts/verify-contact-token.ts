@@ -1,14 +1,14 @@
-#!/usr/bin/env node
+#!/usr/bin/env npx tsx
 /**
  * Standalone contact token verifier
  *
- * Usage: node scripts/verify-contact-token.mjs <token>
+ * Usage: npx tsx scripts/verify-contact-token.ts <token>
  *
  * Token format: Raw JSON object
  *   {"sub":"...","cpk":"...","spk":"...","iat":...,"authData":"...","clientDataJSON":"...","sig":"...","comment":"..."}
  *
  * Example:
- *   echo '{"sub":"...","cpk":"..."}' | node scripts/verify-contact-token.mjs
+ *   echo '{"sub":"...","cpk":"..."}' | npx tsx scripts/verify-contact-token.ts
  *
  * Verifies the WebAuthn ECDSA signature without needing a browser.
  */
@@ -17,13 +17,30 @@ import { webcrypto, timingSafeEqual } from 'crypto'
 
 const crypto = webcrypto
 
+interface ContactTokenPayload {
+  sub: string
+  cpk: string
+  spk: string
+  iat: number
+  authData: string
+  clientDataJSON: string
+  sig: string
+  comment?: string
+}
+
+interface ClientData {
+  type: string
+  challenge: string
+  origin: string
+}
+
 // Base64 decode
-function base64Decode(str) {
+function base64Decode(str: string): Uint8Array {
   return Uint8Array.from(Buffer.from(str, 'base64'))
 }
 
 // Base64url decode
-function base64urlDecode(str) {
+function base64urlDecode(str: string): Uint8Array {
   let base64 = str.replace(/-/g, '+').replace(/_/g, '/')
   const pad = base64.length % 4
   if (pad) base64 += '='.repeat(4 - pad)
@@ -31,7 +48,7 @@ function base64urlDecode(str) {
 }
 
 // Convert DER signature to raw (r || s) format
-function derToRaw(der) {
+function derToRaw(der: Uint8Array): Uint8Array {
   if (der[0] !== 0x30) throw new Error('Invalid DER: expected SEQUENCE')
 
   let offset = 2
@@ -60,18 +77,50 @@ function derToRaw(der) {
 }
 
 // Compute fingerprint (first 8 bytes of SHA-256, hex)
-async function fingerprint(data) {
+async function fingerprint(data: Uint8Array): Promise<string> {
   const hash = await crypto.subtle.digest('SHA-256', data)
   return Buffer.from(new Uint8Array(hash).slice(0, 8)).toString('hex').toUpperCase()
 }
 
-async function verifyContactToken(token) {
+interface VerificationResult {
+  recipientPublicId: string
+  signerPublicId: string
+  signerCredentialPublicKey: string
+  issuedAt: Date
+  origin: string
+  comment?: string
+}
+
+async function verifyContactToken(token: string): Promise<VerificationResult> {
   // Parse raw JSON
-  let payload
+  let payload: ContactTokenPayload
   try {
-    payload = JSON.parse(token.trim())
+    payload = JSON.parse(token.trim()) as ContactTokenPayload
   } catch {
     throw new Error('Invalid format: expected raw JSON object')
+  }
+
+  // Validate required fields exist and have correct types
+  if (typeof payload.sub !== 'string') {
+    throw new Error('Missing or invalid field: sub (expected base64 string)')
+  }
+  if (typeof payload.cpk !== 'string') {
+    throw new Error('Missing or invalid field: cpk (expected base64 string)')
+  }
+  if (typeof payload.spk !== 'string') {
+    throw new Error('Missing or invalid field: spk (expected base64 string)')
+  }
+  if (typeof payload.iat !== 'number' || !Number.isFinite(payload.iat)) {
+    throw new Error('Missing or invalid field: iat (expected numeric timestamp)')
+  }
+  if (typeof payload.authData !== 'string') {
+    throw new Error('Missing or invalid field: authData (expected base64 string)')
+  }
+  if (typeof payload.clientDataJSON !== 'string') {
+    throw new Error('Missing or invalid field: clientDataJSON (expected base64 string)')
+  }
+  if (typeof payload.sig !== 'string') {
+    throw new Error('Missing or invalid field: sig (expected base64 string)')
   }
 
   console.log('\n=== Contact Token ===\n')
@@ -80,12 +129,9 @@ async function verifyContactToken(token) {
   }
   console.log('Issued at:', new Date(payload.iat * 1000).toISOString())
 
-  // Decode fields
+  // Decode fields (safe after validation)
   const recipientPublicId = base64Decode(payload.sub)
   const signerCredentialPublicKey = base64Decode(payload.cpk)
-  if (!payload.spk) {
-    throw new Error('Missing signer public ID (spk)')
-  }
   const signerPublicId = base64Decode(payload.spk)
   const authData = base64Decode(payload.authData)
   const clientDataJSON = base64Decode(payload.clientDataJSON)
@@ -106,12 +152,12 @@ async function verifyContactToken(token) {
   const recipientFp = await fingerprint(recipientPublicId)
   const signerFp = await fingerprint(signerPublicId)
   const credentialFp = await fingerprint(signerCredentialPublicKey)
-  console.log('\nRecipient fingerprint:', recipientFp.match(/.{4}/g).join('-'))
-  console.log('Signer fingerprint:', signerFp.match(/.{4}/g).join('-'), '(passkey public ID)')
-  console.log('Credential fingerprint:', credentialFp.match(/.{4}/g).join('-'), '(WebAuthn key)')
+  console.log('\nRecipient fingerprint:', recipientFp.match(/.{4}/g)!.join('-'))
+  console.log('Signer fingerprint:', signerFp.match(/.{4}/g)!.join('-'), '(passkey public ID)')
+  console.log('Credential fingerprint:', credentialFp.match(/.{4}/g)!.join('-'), '(WebAuthn key)')
 
   // Parse clientDataJSON
-  const clientData = JSON.parse(Buffer.from(clientDataJSON).toString('utf8'))
+  const clientData = JSON.parse(Buffer.from(clientDataJSON).toString('utf8')) as ClientData
   console.log('\nClient data:')
   console.log('  Type:', clientData.type)
   console.log('  Origin:', clientData.origin)
@@ -135,7 +181,9 @@ async function verifyContactToken(token) {
 
   // Verify lengths match before byte comparison
   if (actualChallenge.length !== expectedChallenge.length) {
-    throw new Error(`Challenge length mismatch: expected ${expectedChallenge.length} bytes, got ${actualChallenge.length} bytes`)
+    throw new Error(
+      `Challenge length mismatch: expected ${expectedChallenge.length} bytes, got ${actualChallenge.length} bytes`
+    )
   }
 
   // Constant-time byte comparison using Node's timingSafeEqual
@@ -186,32 +234,36 @@ async function verifyContactToken(token) {
 }
 
 // Read from stdin
-async function readStdin() {
-  const chunks = []
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = []
   for await (const chunk of process.stdin) {
-    chunks.push(chunk)
+    chunks.push(chunk as Buffer)
   }
   return Buffer.concat(chunks).toString('utf8').trim()
 }
 
 // Main
-const token = await readStdin()
-if (!token) {
-  console.error('Usage: echo \'{"sub":"...","cpk":"..."}\' | node scripts/verify-contact-token.mjs')
-  console.error('')
-  console.error('Token format: Raw JSON object')
-  console.error('')
-  console.error('Examples:')
-  console.error('  echo \'{"sub":"...","cpk":"..."}\' | node scripts/verify-contact-token.mjs')
-  console.error('  pbpaste | node scripts/verify-contact-token.mjs')
-  console.error('  cat token.txt | node scripts/verify-contact-token.mjs')
-  process.exit(1)
+async function main(): Promise<void> {
+  const token = await readStdin()
+  if (!token) {
+    console.error("Usage: echo '{\"sub\":\"...\",\"cpk\":\"...\"}' | npx tsx scripts/verify-contact-token.ts")
+    console.error('')
+    console.error('Token format: Raw JSON object')
+    console.error('')
+    console.error('Examples:')
+    console.error("  echo '{\"sub\":\"...\",\"cpk\":\"...\"}' | npx tsx scripts/verify-contact-token.ts")
+    console.error('  pbpaste | npx tsx scripts/verify-contact-token.ts')
+    console.error('  cat token.txt | npx tsx scripts/verify-contact-token.ts')
+    process.exit(1)
+  }
+
+  try {
+    await verifyContactToken(token)
+  } catch (err) {
+    console.error('\n=== VERIFICATION FAILED ===')
+    console.error('Error:', err instanceof Error ? err.message : String(err))
+    process.exit(1)
+  }
 }
 
-try {
-  await verifyContactToken(token)
-} catch (err) {
-  console.error('\n=== VERIFICATION FAILED ===')
-  console.error('Error:', err.message)
-  process.exit(1)
-}
+main()
