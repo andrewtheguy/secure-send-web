@@ -37,7 +37,6 @@ export function ReceiveTab() {
   const [receiveFromSelf, setReceiveFromSelf] = useState(false)
   const [passkeyAuthenticating, setPasskeyAuthenticating] = useState(false)
   const [senderPublicIdInput, setSenderPublicIdInput] = useState('')
-  const [senderPublicIdFingerprint, setSenderPublicIdFingerprint] = useState<string | null>(null)
   const [senderPublicIdError, setSenderPublicIdError] = useState<string | null>(null)
   const [showPublicIdModal, setShowPublicIdModal] = useState(false)
 
@@ -60,7 +59,6 @@ export function ReceiveTab() {
     if (!input) {
       setVerifiedToken(null)
       setSenderPublicIdError(null)
-      setSenderPublicIdFingerprint(null)
       return
     }
 
@@ -68,7 +66,6 @@ export function ReceiveTab() {
     if (!isContactTokenFormat(input)) {
       setVerifiedToken(null)
       setSenderPublicIdError('Invalid format: expected bound contact token (create one on the Passkey page)')
-      setSenderPublicIdFingerprint(null)
       return
     }
 
@@ -76,12 +73,9 @@ export function ReceiveTab() {
     verifyContactToken(input).then(verified => {
       setVerifiedToken(verified)
       setSenderPublicIdError(null)
-      // Show the sender's fingerprint (the contact whose ID was bound in the token)
-      setSenderPublicIdFingerprint(formatFingerprint(verified.recipientFingerprint))
     }).catch((err) => {
       setVerifiedToken(null)
       setSenderPublicIdError(err instanceof Error ? err.message : 'Invalid or tampered token')
-      setSenderPublicIdFingerprint(null)
     })
   }, [senderPublicIdInput])
 
@@ -243,7 +237,6 @@ export function ReceiveTab() {
     setPinExpired(false)
     // Clear passkey state
     setSenderPublicIdInput('')
-    setSenderPublicIdFingerprint(null)
     setSenderPublicIdError(null)
     setReceiveFromSelf(false)
   }
@@ -327,12 +320,6 @@ export function ReceiveTab() {
             <>
               {usePasskey ? (
                 <>
-                  {/* Passkey mode - skip PIN entry, enter sender's contact token */}
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
-                    <Fingerprint className="h-3 w-3" />
-                    <span>Passkey mode{receiveFromSelf ? ' - receiving from self' : senderPublicIdFingerprint ? ` - bound by ${senderPublicIdFingerprint}` : ' (enter sender token in Advanced Options)'}</span>
-                  </div>
-
                   {/* Advanced Options containing passkey settings */}
                   <div className="border rounded-lg overflow-hidden">
                     <button
@@ -415,12 +402,18 @@ export function ReceiveTab() {
                               {senderPublicIdError && (
                                 <p className="text-xs text-destructive">{senderPublicIdError}</p>
                               )}
-                              {senderPublicIdFingerprint && (
-                                <div className="flex items-center gap-2 text-xs text-green-700 dark:text-green-400">
-                                  <Fingerprint className="h-3 w-3" />
-                                  <span>Signed by: </span>
-                                  <span className="font-mono font-medium">{senderPublicIdFingerprint}</span>
-                                  <span className="text-xs">(signature verified)</span>
+                              {verifiedToken && (
+                                <div className="space-y-1 text-xs">
+                                  <div className="flex items-center gap-2 text-green-700 dark:text-green-400">
+                                    <Fingerprint className="h-3 w-3" />
+                                    <span>Sender:</span>
+                                    <span className="font-mono font-medium">{formatFingerprint(verifiedToken.recipientFingerprint)}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-muted-foreground ml-5">
+                                    <span>Signed by:</span>
+                                    <span className="font-mono">{formatFingerprint(verifiedToken.signerFingerprint)}</span>
+                                    <span className="text-green-600 dark:text-green-400">(verified)</span>
+                                  </div>
                                 </div>
                               )}
                               <p className="text-xs text-muted-foreground">
@@ -463,6 +456,12 @@ export function ReceiveTab() {
                       </div>
                     </div>
                   )}
+
+                  {/* Passkey mode indicator */}
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
+                    <Fingerprint className="h-3 w-3" />
+                    <span>Passkey mode{receiveFromSelf ? ' → receiving from self' : verifiedToken ? ` → sender ${formatFingerprint(verifiedToken.recipientFingerprint)}` : ' (enter sender token in Advanced Options)'}</span>
+                  </div>
 
                   <Button
                     onClick={handlePasskeyAuth}

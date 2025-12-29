@@ -46,7 +46,6 @@ export function SendTab() {
   const [checkingNostr, setCheckingNostr] = useState(false)
   const [nostrUnavailable, setNostrUnavailable] = useState(false)
   const [receiverPublicKeyInput, setReceiverPublicKeyInput] = useState('')
-  const [receiverPublicKeyFingerprint, setReceiverPublicKeyFingerprint] = useState<string | null>(null)
   const [receiverPublicKeyError, setReceiverPublicKeyError] = useState<string | null>(null)
   const [showPublicKeyModal, setShowPublicKeyModal] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -62,7 +61,6 @@ export function SendTab() {
     if (!input) {
       setVerifiedToken(null)
       setReceiverPublicKeyError(null)
-      setReceiverPublicKeyFingerprint(null)
       return
     }
 
@@ -70,7 +68,6 @@ export function SendTab() {
     if (!isContactTokenFormat(input)) {
       setVerifiedToken(null)
       setReceiverPublicKeyError('Invalid format: expected bound contact token (create one on the Passkey page)')
-      setReceiverPublicKeyFingerprint(null)
       return
     }
 
@@ -78,12 +75,9 @@ export function SendTab() {
     verifyContactToken(input).then(verified => {
       setVerifiedToken(verified)
       setReceiverPublicKeyError(null)
-      // Show the receiver's fingerprint (the contact whose ID was bound in the token)
-      setReceiverPublicKeyFingerprint(formatFingerprint(verified.recipientFingerprint))
     }).catch((err) => {
       setVerifiedToken(null)
       setReceiverPublicKeyError(err instanceof Error ? err.message : 'Invalid or tampered token')
-      setReceiverPublicKeyFingerprint(null)
     })
   }, [receiverPublicKeyInput])
 
@@ -218,7 +212,6 @@ export function SendTab() {
     setActiveMethod(null)
     setNostrUnavailable(false)
     setReceiverPublicKeyInput('')
-    setReceiverPublicKeyFingerprint(null)
     setReceiverPublicKeyError(null)
     setSendToSelf(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -630,12 +623,18 @@ export function SendTab() {
                             {receiverPublicKeyError && (
                               <p className="text-xs text-destructive">{receiverPublicKeyError}</p>
                             )}
-                            {receiverPublicKeyFingerprint && (
-                              <div className="flex items-center gap-2 text-xs text-green-700 dark:text-green-400">
-                                <Fingerprint className="h-3 w-3" />
-                                <span>Signed by: </span>
-                                <span className="font-mono font-medium">{receiverPublicKeyFingerprint}</span>
-                                <span className="text-xs">(signature verified)</span>
+                            {verifiedToken && (
+                              <div className="space-y-1 text-xs">
+                                <div className="flex items-center gap-2 text-green-700 dark:text-green-400">
+                                  <Fingerprint className="h-3 w-3" />
+                                  <span>Receiver:</span>
+                                  <span className="font-mono font-medium">{formatFingerprint(verifiedToken.recipientFingerprint)}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-muted-foreground ml-5">
+                                  <span>Signed by:</span>
+                                  <span className="font-mono">{formatFingerprint(verifiedToken.signerFingerprint)}</span>
+                                  <span className="text-green-600 dark:text-green-400">(verified)</span>
+                                </div>
                               </div>
                             )}
                             <p className="text-xs text-muted-foreground">
@@ -666,7 +665,7 @@ export function SendTab() {
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
               <Fingerprint className="h-3 w-3" />
               <span>
-                Passkey mode{sendToSelf ? ' → sending to self' : receiverPublicKeyFingerprint ? ` → ${receiverPublicKeyFingerprint}` : ' (enter receiver ID)'}
+                Passkey mode{sendToSelf ? ' → sending to self' : verifiedToken ? ` → receiver ${formatFingerprint(verifiedToken.recipientFingerprint)}` : ' (enter receiver ID)'}
               </span>
             </div>
           )}
