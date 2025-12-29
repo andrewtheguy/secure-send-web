@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import {
   Fingerprint,
   Plus,
@@ -12,6 +12,9 @@ import {
   Shield,
   ArrowLeft,
   ArrowRight,
+  Camera,
+  X,
+  RefreshCw,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -34,6 +37,9 @@ import {
 } from '@/lib/crypto/contact-token'
 import { PIN_WORDLIST } from '@/lib/crypto/constants'
 import { ValidationError } from '@/lib/errors'
+import { useQRScanner } from '@/hooks/useQRScanner'
+import { generateTextQRCode } from '@/lib/qr-utils'
+import { isMobileDevice } from '@/lib/utils'
 
 type PageState = 'idle' | 'checking' | 'creating' | 'getting_key' | 'binding_contact'
 
@@ -122,6 +128,15 @@ export function PasskeyPage() {
   const [tokenError, setTokenError] = useState<string | null>(null)
   const [copiedToken, setCopiedToken] = useState(false)
 
+  // QR Scanner state
+  const [showQRScanner, setShowQRScanner] = useState(false)
+  const [qrScannerMode, setQRScannerMode] = useState<'contact-card' | 'token-request'>('contact-card')
+  const [qrScanError, setQRScanError] = useState<string | null>(null)
+  const [outputTokenQrUrl, setOutputTokenQrUrl] = useState<string | null>(null)
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>(
+    isMobileDevice() ? 'environment' : 'user'
+  )
+
   // Format fingerprint for display: XXXX-XXXX-XXXX-XXXX
   const formattedFingerprint = fingerprint ? formatFingerprint(fingerprint) : null
 
@@ -141,6 +156,79 @@ export function PasskeyPage() {
       return () => clearTimeout(timer)
     }
   }, [success])
+
+  // Generate QR code URL when outputToken changes
+  useEffect(() => {
+    if (outputToken) {
+      generateTextQRCode(outputToken, { width: 256, errorCorrectionLevel: 'L' })
+        .then(setOutputTokenQrUrl)
+        .catch((err) => console.error('Failed to generate QR code:', err))
+    } else {
+      setOutputTokenQrUrl(null)
+    }
+  }, [outputToken])
+
+  // QR Scanner handlers
+  const handleQRScan = useCallback(
+    (data: Uint8Array) => {
+      try {
+        // Decode Uint8Array to string (QR codes contain UTF-8 text)
+        const text = new TextDecoder().decode(data)
+
+        // Try to parse as JSON to validate format
+        const parsed = JSON.parse(text)
+
+        if (qrScannerMode === 'contact-card') {
+          // Validate contact card format
+          if (typeof parsed.id !== 'string' || typeof parsed.cpk !== 'string') {
+            setQRScanError('Invalid contact card format: missing "id" or "cpk"')
+            return
+          }
+        } else {
+          // Validate token request format (basic check)
+          if (typeof parsed.a_id !== 'string' || typeof parsed.init_sig !== 'string') {
+            setQRScanError('Invalid token request format')
+            return
+          }
+        }
+
+        // Success - populate input and close scanner
+        setContactInput(text)
+        setShowQRScanner(false)
+        setQRScanError(null)
+      } catch {
+        setQRScanError('Invalid QR code: not valid JSON')
+      }
+    },
+    [qrScannerMode]
+  )
+
+  const handleQRError = useCallback((error: string) => {
+    setQRScanError(error)
+  }, [])
+
+  const handleCameraReady = useCallback(() => {
+    setQRScanError(null)
+  }, [])
+
+  const handleSwitchCamera = useCallback(() => {
+    setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
+  }, [])
+
+  // QR Scanner hook
+  const { videoRef, canvasRef, availableCameras } = useQRScanner({
+    onScan: handleQRScan,
+    onError: handleQRError,
+    onCameraReady: handleCameraReady,
+    isScanning: showQRScanner,
+    facingMode,
+  })
+
+  const openQRScanner = (mode: 'contact-card' | 'token-request') => {
+    setQRScannerMode(mode)
+    setQRScanError(null)
+    setShowQRScanner(true)
+  }
 
   // Determine step number for display
   const getStepNumber = (step: WizardStep): number => {
@@ -697,14 +785,26 @@ export function PasskeyPage() {
 
         <div className="space-y-2">
           <Label htmlFor="contact-card">Contact&apos;s Card</Label>
-          <Textarea
-            id="contact-card"
-            placeholder={`Paste contact's card (JSON with "id" and "cpk")...`}
-            value={contactInput}
-            onChange={(e) => setContactInput(e.target.value)}
-            disabled={isLoading}
-            className="font-mono text-xs min-h-[60px] resize-none"
-          />
+          <div className="flex gap-2">
+            <Textarea
+              id="contact-card"
+              placeholder={`Paste contact's card (JSON with "id" and "cpk")...`}
+              value={contactInput}
+              onChange={(e) => setContactInput(e.target.value)}
+              disabled={isLoading}
+              className="font-mono text-xs min-h-[60px] resize-none flex-1"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => openQRScanner('contact-card')}
+              disabled={isLoading}
+              className="flex-shrink-0"
+              title="Scan QR code"
+            >
+              <Camera className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
         <div className="space-y-2">
           <Label htmlFor="token-comment">Comment (optional)</Label>
@@ -748,6 +848,19 @@ export function PasskeyPage() {
               <CheckCircle2 className="h-4 w-4 text-green-600" />
               <span className="text-sm font-medium text-green-600">Token Request Created</span>
             </div>
+
+            {/* QR Code for token request */}
+            {outputTokenQrUrl && (
+              <div className="flex flex-col items-center gap-2">
+                <div className="bg-white p-3 rounded-lg">
+                  <img src={outputTokenQrUrl} alt="Token Request QR Code" className="w-48 h-48" />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Let your contact scan this QR code
+                </p>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <Textarea
                 readOnly
@@ -807,14 +920,26 @@ export function PasskeyPage() {
 
         <div className="space-y-2">
           <Label htmlFor="token-request">Token Request</Label>
-          <Textarea
-            id="token-request"
-            placeholder="Paste the token request from your contact..."
-            value={contactInput}
-            onChange={(e) => setContactInput(e.target.value)}
-            disabled={isLoading}
-            className="font-mono text-xs min-h-[80px] resize-none"
-          />
+          <div className="flex gap-2">
+            <Textarea
+              id="token-request"
+              placeholder="Paste the token request from your contact..."
+              value={contactInput}
+              onChange={(e) => setContactInput(e.target.value)}
+              disabled={isLoading}
+              className="font-mono text-xs min-h-[80px] resize-none flex-1"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => openQRScanner('token-request')}
+              disabled={isLoading}
+              className="flex-shrink-0"
+              title="Scan QR code"
+            >
+              <Camera className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
         <Button
@@ -848,6 +973,19 @@ export function PasskeyPage() {
               <CheckCircle2 className="h-4 w-4 text-green-600" />
               <span className="text-sm font-medium text-green-600">Mutual Token Completed</span>
             </div>
+
+            {/* QR Code for mutual token */}
+            {outputTokenQrUrl && (
+              <div className="flex flex-col items-center gap-2">
+                <div className="bg-white p-3 rounded-lg">
+                  <img src={outputTokenQrUrl} alt="Mutual Token QR Code" className="w-48 h-48" />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Share this QR code with your contact
+                </p>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <Textarea
                 readOnly
@@ -944,6 +1082,73 @@ export function PasskeyPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* QR Scanner Modal */}
+      {showQRScanner && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="bg-background rounded-lg p-4 max-w-sm w-full mx-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-medium flex items-center gap-2">
+                <Camera className="h-5 w-5" />
+                {qrScannerMode === 'contact-card' ? 'Scan Contact Card' : 'Scan Token Request'}
+              </h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShowQRScanner(false)
+                  setQRScanError(null)
+                }}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="relative bg-black rounded-lg overflow-hidden aspect-square">
+              {qrScanError && (
+                <div className="absolute inset-0 flex items-center justify-center bg-muted/90 p-4 z-10">
+                  <div className="text-center">
+                    <AlertCircle className="h-8 w-8 mx-auto text-destructive mb-2" />
+                    <p className="text-sm text-destructive">{qrScanError}</p>
+                  </div>
+                </div>
+              )}
+
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+              <canvas ref={canvasRef} className="hidden" />
+
+              {/* Scanning overlay */}
+              <div className="absolute inset-0 pointer-events-none">
+                <div className="absolute inset-8 border-2 border-white/50 rounded-lg" />
+              </div>
+            </div>
+
+            {availableCameras.length > 1 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSwitchCamera}
+                className="w-full"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Switch Camera
+              </Button>
+            )}
+
+            <p className="text-xs text-muted-foreground text-center">
+              {qrScannerMode === 'contact-card'
+                ? 'Point camera at the contact card QR code'
+                : 'Point camera at the token request QR code'}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
