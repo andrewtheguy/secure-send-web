@@ -30,7 +30,7 @@ import { formatFingerprint } from '@/lib/crypto/ecdh'
 import {
   createMutualTokenInit,
   countersignMutualToken,
-  isPendingMutualToken,
+  isTokenRequest,
 } from '@/lib/crypto/contact-token'
 import { PIN_WORDLIST } from '@/lib/crypto/constants'
 import { ValidationError } from '@/lib/errors'
@@ -369,7 +369,7 @@ export function PasskeyPage() {
         throw new Error('Please authenticate with a passkey first to get your public ID')
       }
 
-      if (!isPendingMutualToken(trimmed)) {
+      if (!isTokenRequest(trimmed)) {
         throw new Error('Invalid token request format')
       }
 
@@ -668,8 +668,9 @@ export function PasskeyPage() {
             <CheckCircle2 className="h-5 w-5" />
             I&apos;m signing a token request
           </div>
-          <p className="text-xs text-muted-foreground font-normal text-left">
-            Share your contact card, then sign the token request you receive
+          <p className="text-xs text-muted-foreground font-normal text-left whitespace-normal">
+            Share your contact card, have them create a token request from it, then sign the request to
+            create the mutual token
           </p>
         </Button>
       </div>

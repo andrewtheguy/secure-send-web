@@ -22,9 +22,9 @@ import { publicKeyToFingerprint, constantTimeEqualBytes } from './ecdh'
 const MAX_COMMENT_LENGTH = 256
 
 /**
- * Pending mutual token - after initiator signs, before countersigning
+ * Token request - created by initiator, waiting for countersigner
  */
-export interface PendingMutualToken {
+export interface PendingTokenRequest {
   /** Party A's public ID (base64, 32 bytes) - lexicographically smaller */
   a_id: string
   /** Party A's credential public key (base64, 65 bytes P-256) */
@@ -48,7 +48,7 @@ export interface PendingMutualToken {
 /**
  * Complete mutual token - both parties have signed
  */
-export interface MutualContactTokenPayload extends PendingMutualToken {
+export interface MutualContactTokenPayload extends PendingTokenRequest {
   /** Countersigner's WebAuthn authenticator data (base64) */
   counter_authData: string
   /** Countersigner's WebAuthn client data JSON (base64) */
@@ -162,10 +162,10 @@ async function computeMutualChallenge(
 }
 
 /**
- * Check if a string looks like a pending mutual token (single signature).
+ * Check if a string looks like a token request (single signature).
  * Does NOT verify the signature - just checks structure.
  */
-export function isPendingMutualToken(input: string): boolean {
+export function isTokenRequest(input: string): boolean {
   try {
     const payload = JSON.parse(input.trim()) as unknown
     if (typeof payload !== 'object' || payload === null) return false
@@ -309,7 +309,7 @@ export async function createMutualTokenInit(
   const response = credential.response as AuthenticatorAssertionResponse
 
   // Build token request
-  const payload: PendingMutualToken = {
+  const payload: PendingTokenRequest = {
     a_id: uint8ArrayToBase64(aId),
     a_cpk: uint8ArrayToBase64(aCpk),
     b_id: uint8ArrayToBase64(bId),
@@ -350,9 +350,9 @@ export async function countersignMutualToken(
   signerPublicIdBase64: string
 ): Promise<string> {
   // Parse token request
-  let request: PendingMutualToken
+  let request: PendingTokenRequest
   try {
-    request = JSON.parse(tokenRequest.trim()) as PendingMutualToken
+    request = JSON.parse(tokenRequest.trim()) as PendingTokenRequest
   } catch {
     throw new Error('Invalid token request: failed to parse JSON')
   }
