@@ -49,23 +49,79 @@ function base64urlDecode(str: string): Uint8Array {
 
 // Convert DER signature to raw (r || s) format
 function derToRaw(der: Uint8Array): Uint8Array {
-  if (der[0] !== 0x30) throw new Error('Invalid DER: expected SEQUENCE')
+  // DER format: 0x30 <len> 0x02 <r-len> <r> 0x02 <s-len> <s>
+  if (der.length < 8) {
+    throw new Error('Invalid DER signature: truncated input (too short)')
+  }
+  if (der[0] !== 0x30) {
+    throw new Error('Invalid DER signature: expected SEQUENCE')
+  }
 
-  let offset = 2
-  if (der[1] & 0x80) offset = 2 + (der[1] & 0x7f)
+  let offset = 2 // Skip 0x30 and length byte
 
-  if (der[offset] !== 0x02) throw new Error('Invalid DER: expected INTEGER for r')
+  // Handle multi-byte length encoding
+  if (der[1] & 0x80) {
+    const lenBytes = der[1] & 0x7f
+    if (lenBytes === 0 || lenBytes > 2) {
+      throw new Error('Invalid DER signature: unsupported length encoding')
+    }
+    if (2 + lenBytes > der.length) {
+      throw new Error('Invalid DER signature: truncated length bytes')
+    }
+    // Parse the length (we don't actually need the value, just skip past it)
+    let seqLen = 0
+    for (let i = 0; i < lenBytes; i++) {
+      seqLen = (seqLen << 8) | der[2 + i]
+    }
+    offset = 2 + lenBytes
+    // Validate sequence length fits in buffer
+    if (offset + seqLen > der.length) {
+      throw new Error('Invalid DER signature: sequence length exceeds buffer')
+    }
+  } else {
+    // Short form length
+    const seqLen = der[1]
+    if (2 + seqLen > der.length) {
+      throw new Error('Invalid DER signature: sequence length exceeds buffer')
+    }
+  }
+
+  // Parse r INTEGER
+  if (offset >= der.length || der[offset] !== 0x02) {
+    throw new Error('Invalid DER signature: expected INTEGER for r')
+  }
   offset++
+  if (offset >= der.length) {
+    throw new Error('Invalid DER signature: truncated r length')
+  }
   const rLen = der[offset++]
+  if (rLen < 1 || rLen > 33) {
+    throw new Error(`Invalid DER signature: bad r length (${rLen})`)
+  }
+  if (offset + rLen > der.length) {
+    throw new Error('Invalid DER signature: r extends past buffer')
+  }
   let r = der.slice(offset, offset + rLen)
   offset += rLen
 
-  if (der[offset] !== 0x02) throw new Error('Invalid DER: expected INTEGER for s')
+  // Parse s INTEGER
+  if (offset >= der.length || der[offset] !== 0x02) {
+    throw new Error('Invalid DER signature: expected INTEGER for s')
+  }
   offset++
+  if (offset >= der.length) {
+    throw new Error('Invalid DER signature: truncated s length')
+  }
   const sLen = der[offset++]
+  if (sLen < 1 || sLen > 33) {
+    throw new Error(`Invalid DER signature: bad s length (${sLen})`)
+  }
+  if (offset + sLen > der.length) {
+    throw new Error('Invalid DER signature: s extends past buffer')
+  }
   let s = der.slice(offset, offset + sLen)
 
-  // Remove leading zero bytes
+  // Remove leading zero bytes (used for sign in DER encoding)
   if (r.length === 33 && r[0] === 0) r = r.slice(1)
   if (s.length === 33 && s[0] === 0) s = s.slice(1)
 
