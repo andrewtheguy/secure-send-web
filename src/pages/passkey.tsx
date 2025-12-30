@@ -13,7 +13,6 @@ import {
   Camera,
   X,
   RefreshCw,
-  LogOut,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -224,39 +223,6 @@ export function PasskeyPage() {
   }
 
 
-  // Helper to reset flow-specific state (soft reset - keeps auth)
-  const resetFlowState = () => {
-    setContactInput('')
-    setTokenComment('')
-    setOutputToken(null)
-    setTokenError(null)
-    setOutputTokenQrUrl(null)
-    setError(null)
-    setSuccess(null)
-  }
-
-  // Unified authentication handler
-  const handleAuthenticate = async (): Promise<boolean> => {
-    setError(null)
-    setSuccess(null)
-    setPageState('getting_key')
-
-    try {
-      const result = await getPasskeyIdentity()
-      setFingerprint(result.publicIdFingerprint)
-      setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
-      setPrfSupported(result.prfSupported)
-      setContactPublicKeyBase64(uint8ArrayToBase64(result.contactPublicKey))
-      setContactSigningKey(result.contactSigningKey)
-      setPageState('idle')
-      return true
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to authenticate')
-      setPageState('idle')
-      return false
-    }
-  }
-
   const handleCreatePasskey = async () => {
     setError(null)
     setSuccess(null)
@@ -293,31 +259,58 @@ export function PasskeyPage() {
     }
   }
 
-  // Handler for "Someone wants to add me as a contact"
+  // Handler for "Someone wants to add me as a contact" - auth immediately
   const handleSelectSigner = async () => {
-    // If already authenticated, just switch mode (no re-auth needed)
-    if (contactSigningKey) {
-      resetFlowState()
+    setError(null)
+    setSuccess(null)
+    setOutputToken(null)
+    setTokenError(null)
+    setContactInput('')
+    setPageState('getting_key')
+
+    try {
+      const result = await getPasskeyIdentity()
+      setFingerprint(result.publicIdFingerprint)
+      setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
+      setPrfSupported(result.prfSupported)
+
+      // Store derived contact key pair
+      setContactPublicKeyBase64(uint8ArrayToBase64(result.contactPublicKey))
+      setContactSigningKey(result.contactSigningKey)
+
+      setPageState('idle')
       setActiveMode('signer')
-      return
-    }
-    // Otherwise authenticate first
-    if (await handleAuthenticate()) {
-      setActiveMode('signer')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to authenticate')
+      setPageState('idle')
     }
   }
 
-  // Handler for "I want to add someone as a contact"
+  // Handler for "I want to add someone as a contact" - auth immediately (like signer)
   const handleSelectInitiator = async () => {
-    // If already authenticated, just switch mode (no re-auth needed)
-    if (contactSigningKey) {
-      resetFlowState()
+    setError(null)
+    setSuccess(null)
+    setOutputToken(null)
+    setTokenError(null)
+    setContactInput('')
+    setTokenComment('')
+    setPageState('getting_key')
+
+    try {
+      const result = await getPasskeyIdentity()
+      setFingerprint(result.publicIdFingerprint)
+      setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
+      setPrfSupported(result.prfSupported)
+
+      // Store derived contact key pair
+      setContactPublicKeyBase64(uint8ArrayToBase64(result.contactPublicKey))
+      setContactSigningKey(result.contactSigningKey)
+
+      setPageState('idle')
       setActiveMode('initiator')
-      return
-    }
-    // Otherwise authenticate first
-    if (await handleAuthenticate()) {
-      setActiveMode('initiator')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to authenticate')
+      setPageState('idle')
     }
   }
 
@@ -472,22 +465,17 @@ export function PasskeyPage() {
     )
   }
 
-  // Soft reset: go back to mode selection but keep auth state
   const handleStartOver = () => {
     setActiveMode('idle')
-    resetFlowState()
-    // Keep auth state: fingerprint, publicIdBase64, contactPublicKeyBase64, contactSigningKey
-  }
-
-  // Hard reset: clear everything including auth state (for "Use Different Passkey")
-  const handleSignOut = () => {
-    setActiveMode('idle')
-    resetFlowState()
+    setContactInput('')
+    setTokenComment('')
+    setOutputToken(null)
+    setTokenError(null)
+    // Reset auth state so user must re-authenticate when selecting a new mode
     setFingerprint(null)
     setPublicIdBase64(null)
     setContactPublicKeyBase64(null)
     setContactSigningKey(null)
-    setPrfSupported(null)
   }
 
   const isLoading = pageState !== 'idle'
@@ -630,31 +618,9 @@ export function PasskeyPage() {
         <Key className="h-4 w-4" />
         Already Have a Passkey?
       </h3>
-
-      {/* Show authenticated state if user has already authenticated */}
-      {contactSigningKey && formattedFingerprint ? (
-        <div className="flex items-center justify-between p-2 rounded bg-green-50/50 dark:bg-green-950/20 border border-green-500/30">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-green-600" />
-            <span className="text-sm text-green-700 dark:text-green-400">
-              Authenticated as <span className="font-mono">{formattedFingerprint}</span>
-            </span>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleSignOut}
-            className="text-muted-foreground hover:text-destructive"
-            title="Use a different passkey"
-          >
-            <LogOut className="h-4 w-4" />
-          </Button>
-        </div>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          Choose what you want to do to create a mutual contact token.
-        </p>
-      )}
+      <p className="text-sm text-muted-foreground">
+        Choose what you want to do to create a mutual contact token.
+      </p>
 
       <div className="grid gap-3">
         <Button
