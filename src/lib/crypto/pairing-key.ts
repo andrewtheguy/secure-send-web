@@ -127,6 +127,18 @@ function base64ToUint8Array(base64: string): Uint8Array {
 }
 
 /**
+ * Helper to get a proper ArrayBuffer from Uint8Array (handles subarray views).
+ * Required for crypto.subtle methods in TypeScript 5.9+ with strict ArrayBuffer typing.
+ */
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength) {
+    return bytes.buffer as ArrayBuffer
+  }
+  // Create a copy for subarray views
+  return bytes.slice().buffer as ArrayBuffer
+}
+
+/**
  * Compare two 32-byte public IDs lexicographically.
  * @returns negative if id1 < id2, positive if id1 > id2, 0 if equal
  */
@@ -203,11 +215,7 @@ async function computeVerificationSecret(
   data.set(label, 0)
   data.set(peerPpk, label.length)
 
-  const vsBuffer = await crypto.subtle.sign(
-    'HMAC',
-    hmacKey,
-    data as Uint8Array<ArrayBuffer>
-  )
+  const vsBuffer = await crypto.subtle.sign('HMAC', hmacKey, toArrayBuffer(data))
   return new Uint8Array(vsBuffer)
 }
 
@@ -230,7 +238,7 @@ export async function computeHandshakeProof(
   // Import VS as HMAC key
   const vsKey = await crypto.subtle.importKey(
     'raw',
-    verificationSecret as Uint8Array<ArrayBuffer>,
+    toArrayBuffer(verificationSecret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign']
@@ -246,11 +254,7 @@ export async function computeHandshakeProof(
   offset += nonce.length
   data.set(fingerprintBytes, offset)
 
-  const proofBuffer = await crypto.subtle.sign(
-    'HMAC',
-    vsKey,
-    data as Uint8Array<ArrayBuffer>
-  )
+  const proofBuffer = await crypto.subtle.sign('HMAC', vsKey, toArrayBuffer(data))
   return new Uint8Array(proofBuffer)
 }
 
@@ -274,7 +278,7 @@ export async function verifyHandshakeProof(
   // Import peer's VS as HMAC key
   const vsKey = await crypto.subtle.importKey(
     'raw',
-    peerVs as Uint8Array<ArrayBuffer>,
+    toArrayBuffer(peerVs),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['verify']
@@ -290,12 +294,7 @@ export async function verifyHandshakeProof(
   offset += nonce.length
   data.set(fingerprintBytes, offset)
 
-  return crypto.subtle.verify(
-    'HMAC',
-    vsKey,
-    proof as Uint8Array<ArrayBuffer>,
-    data as Uint8Array<ArrayBuffer>
-  )
+  return crypto.subtle.verify('HMAC', vsKey, toArrayBuffer(proof), toArrayBuffer(data))
 }
 
 /**
@@ -473,11 +472,7 @@ export async function createPairingRequest(
   const challenge = await computeMutualChallenge(aId, aPpk, bId, bPpk, iat, trimmedComment)
 
   // Sign with HMAC-SHA256 (32 bytes)
-  const signatureBuffer = await crypto.subtle.sign(
-    'HMAC',
-    hmacKey,
-    challenge as Uint8Array<ArrayBuffer>
-  )
+  const signatureBuffer = await crypto.subtle.sign('HMAC', hmacKey, toArrayBuffer(challenge))
   const signature = new Uint8Array(signatureBuffer)
 
   // Compute verification secret for handshake authentication
@@ -613,11 +608,7 @@ export async function confirmPairingRequest(
   const challenge = await computeMutualChallenge(aId, aPpk, bId, bPpk, request.iat, request.comment)
 
   // Sign with HMAC-SHA256 (32 bytes)
-  const signatureBuffer = await crypto.subtle.sign(
-    'HMAC',
-    hmacKey,
-    challenge as Uint8Array<ArrayBuffer>
-  )
+  const signatureBuffer = await crypto.subtle.sign('HMAC', hmacKey, toArrayBuffer(challenge))
   const signature = new Uint8Array(signatureBuffer)
 
   // Compute verification secret for handshake authentication
@@ -814,13 +805,9 @@ export async function verifyOwnSignature(
   const counterSig = base64ToUint8Array(payload.counter_sig)
 
   // Verify my signature with HMAC (using my own HMAC key, not the peer's)
+  const challengeBuffer = toArrayBuffer(challenge)
   const verifyHmac = async (sig: Uint8Array): Promise<boolean> => {
-    return crypto.subtle.verify(
-      'HMAC',
-      hmacKey,
-      sig as Uint8Array<ArrayBuffer>,
-      challenge as Uint8Array<ArrayBuffer>
-    )
+    return crypto.subtle.verify('HMAC', hmacKey, toArrayBuffer(sig), challengeBuffer)
   }
 
   const initSigValid = await verifyHmac(initSig)
