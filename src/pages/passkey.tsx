@@ -34,6 +34,8 @@ import {
   createPairingRequest,
   confirmPairingRequest,
   isPairingRequestFormat,
+  IDENTITY_CARD_TTL_SECONDS,
+  MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS,
 } from '@/lib/crypto/pairing-key'
 import { PIN_WORDLIST } from '@/lib/crypto/constants'
 import { ValidationError } from '@/lib/errors'
@@ -47,10 +49,11 @@ type PageState = 'idle' | 'checking' | 'creating' | 'getting_key' | 'pairing_pee
 // Active mode for "Already Have a Passkey?" section
 type ActiveMode = 'idle' | 'signer' | 'initiator'
 
-// Identity card format: JSON with id (public ID) and ppk (peer public key)
+// Identity card format: JSON with id (public ID), ppk (peer public key), and iat (issued-at)
 interface IdentityCard {
   id: string // base64 public ID (32 bytes)
   ppk: string // base64 peer public key (32 bytes, HKDF-derived)
+  iat: number // issued-at timestamp (Unix seconds) - valid for 24 hours
 }
 
 // Helper to convert Uint8Array to base64
@@ -73,15 +76,18 @@ function parseIdentityInput(input: string): IdentityCard | null {
   const trimmed = input.trim()
   if (!trimmed) return null
 
-  // Try parsing as JSON identity card first
+  // Try parsing as JSON identity card
   try {
     const parsed = JSON.parse(trimmed) as unknown
     if (typeof parsed === 'object' && parsed !== null && 'id' in parsed) {
       const obj = parsed as Record<string, unknown>
-      // Support both old 'cpk' and new 'ppk' field names
-      const ppk = obj.ppk ?? obj.cpk
-      if (typeof obj.id === 'string' && typeof ppk === 'string') {
-        return { id: obj.id, ppk: ppk as string }
+      if (
+        typeof obj.id === 'string' &&
+        typeof obj.ppk === 'string' &&
+        typeof obj.iat === 'number' &&
+        Number.isFinite(obj.iat)
+      ) {
+        return { id: obj.id, ppk: obj.ppk, iat: obj.iat }
       }
     }
   } catch {
@@ -110,6 +116,7 @@ export function PasskeyPage() {
   const [fingerprint, setFingerprint] = useState<string | null>(null)
   const [publicIdBase64, setPublicIdBase64] = useState<string | null>(null)
   const [peerPublicKeyBase64, setPeerPublicKeyBase64] = useState<string | null>(null)
+  const [identityCardIat, setIdentityCardIat] = useState<number | null>(null)
   const [prfSupported, setPrfSupported] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -136,10 +143,10 @@ export function PasskeyPage() {
   // Format fingerprint for display: XXXX-XXXX-XXXX-XXXX
   const formattedFingerprint = fingerprint ? formatFingerprint(fingerprint) : null
 
-  // Generate identity card JSON
+  // Generate identity card JSON (with 24-hour TTL)
   const identityCard: string | null =
-    publicIdBase64 && peerPublicKeyBase64
-      ? JSON.stringify({ id: publicIdBase64, ppk: peerPublicKeyBase64 })
+    publicIdBase64 && peerPublicKeyBase64 && identityCardIat
+      ? JSON.stringify({ id: publicIdBase64, ppk: peerPublicKeyBase64, iat: identityCardIat })
       : null
 
 
@@ -203,8 +210,9 @@ export function PasskeyPage() {
         if (qrScannerMode === 'identity-card') {
           // Validate identity card format (support both old 'cpk' and new 'ppk')
           const hasPpk = typeof parsed.ppk === 'string' || typeof parsed.cpk === 'string'
-          if (typeof parsed.id !== 'string' || !hasPpk) {
-            setQRScanError('Invalid identity card format: missing "id" or "ppk"')
+          const hasValidIat = typeof parsed.iat === 'number'
+          if (typeof parsed.id !== 'string' || !hasPpk || !hasValidIat) {
+            setQRScanError('Invalid identity card format: missing "id", "ppk", or "iat"')
             return
           }
         } else {
@@ -260,6 +268,7 @@ export function PasskeyPage() {
     setFingerprint(null)
     setPublicIdBase64(null)
     setPeerPublicKeyBase64(null)
+    setIdentityCardIat(null)
     setPrfSupported(null)
     setOutputPairingKey(null)
     setPageState('checking')
@@ -306,6 +315,9 @@ export function PasskeyPage() {
 
       // Store peer public key for display (signing key is NOT stored - derived fresh per sign)
       setPeerPublicKeyBase64(uint8ArrayToBase64(result.peerPublicKey))
+
+      // Set issued-at timestamp for identity card (24-hour TTL)
+      setIdentityCardIat(Math.floor(Date.now() / 1000))
 
       setPageState('idle')
       setActiveMode('signer')
@@ -383,7 +395,7 @@ export function PasskeyPage() {
       // Parse identity card first (before auth prompt)
       const identityCardParsed = parseIdentityInput(trimmed)
       if (!identityCardParsed) {
-        throw new Error('Invalid identity card format. Expected JSON with "id" and "ppk" fields.')
+        throw new Error('Invalid identity card format. Expected JSON with "id", "ppk", and "iat" (finite number) fields.')
       }
 
       // Validate identity card fields
@@ -403,6 +415,15 @@ export function PasskeyPage() {
         throw new ValidationError('Invalid base64 encoding in identity card')
       }
 
+      // Validate identity card TTL (24 hours)
+      const now = Math.floor(Date.now() / 1000)
+      if (identityCardParsed.iat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
+        throw new Error('Identity card iat is in the future. Check your device clock.')
+      }
+      if (now - identityCardParsed.iat > IDENTITY_CARD_TTL_SECONDS) {
+        throw new Error('Identity card has expired (valid for 24 hours). Ask your peer to generate a new one.')
+      }
+
       // Authenticate fresh to get HMAC key (key only exists during this operation)
       const identity = await getPasskeyIdentity()
 
@@ -413,6 +434,7 @@ export function PasskeyPage() {
         uint8ArrayToBase64(identity.publicIdBytes),
         identityCardParsed.id,
         identityCardParsed.ppk,
+        identityCardParsed.iat,
         pairingComment.trim() || undefined
       )
       // hmacKey goes out of scope here - no longer in memory
@@ -499,6 +521,7 @@ export function PasskeyPage() {
     setFingerprint(null)
     setPublicIdBase64(null)
     setPeerPublicKeyBase64(null)
+    setIdentityCardIat(null)
   }
 
   const isLoading = pageState !== 'idle'

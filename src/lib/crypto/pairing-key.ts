@@ -27,6 +27,12 @@ import { publicKeyToFingerprint, constantTimeEqualBytes } from './ecdh'
 /** Maximum byte length for comment field to prevent overly large keys */
 const MAX_COMMENT_BYTES = 256
 
+/** Identity card TTL in seconds (24 hours) */
+export const IDENTITY_CARD_TTL_SECONDS = 24 * 60 * 60
+
+/** Maximum acceptable clock skew for future timestamps (5 minutes) */
+export const MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS = 5 * 60
+
 /**
  * Pairing request - created by initiator, waiting for confirmation
  */
@@ -39,7 +45,7 @@ export interface PairingRequest {
   b_id: string
   /** Party B's peer public key (base64, 32 bytes) - derived from PRF */
   b_ppk: string
-  /** Created at timestamp (Unix seconds) - set by initiator */
+  /** Identity card issued-at timestamp (Unix seconds) - copied from Signer's identity card, valid for 24 hours */
   iat: number
   /** Which party initiated the pairing ('a' or 'b') */
   init_party: 'a' | 'b'
@@ -156,6 +162,7 @@ function compareIds(id1: Uint8Array, id2: Uint8Array): number {
  *
  * IDs are sorted lexicographically to ensure deterministic ordering.
  * Comment is optional; if provided, it is UTF-8 encoded and appended to the challenge input.
+ * iat is the Identity Card timestamp (copied from Signer's identity card).
  */
 async function computeMutualChallenge(
   aId: Uint8Array,
@@ -340,14 +347,11 @@ export function isPairingRequestFormat(input: string): boolean {
     const p = payload as Record<string, unknown>
 
     // Must have initiator signature but NOT confirmer signature
-    // Support both old (a_cpk/b_cpk) and new (a_ppk/b_ppk) field names
-    const hasOldFormat = typeof p.a_cpk === 'string' && typeof p.b_cpk === 'string'
-    const hasNewFormat = typeof p.a_ppk === 'string' && typeof p.b_ppk === 'string'
-
     return (
       typeof p.a_id === 'string' &&
-      (hasOldFormat || hasNewFormat) &&
+      typeof p.a_ppk === 'string' &&
       typeof p.b_id === 'string' &&
+      typeof p.b_ppk === 'string' &&
       typeof p.iat === 'number' &&
       (p.init_party === 'a' || p.init_party === 'b') &&
       typeof p.init_sig === 'string' &&
@@ -370,14 +374,11 @@ export function isPairingKeyFormat(input: string): boolean {
     const p = payload as Record<string, unknown>
 
     // Must have both initiator AND confirmer signatures and verification secrets
-    // Support both old (a_cpk/b_cpk) and new (a_ppk/b_ppk) field names
-    const hasOldFormat = typeof p.a_cpk === 'string' && typeof p.b_cpk === 'string'
-    const hasNewFormat = typeof p.a_ppk === 'string' && typeof p.b_ppk === 'string'
-
     return (
       typeof p.a_id === 'string' &&
-      (hasOldFormat || hasNewFormat) &&
+      typeof p.a_ppk === 'string' &&
       typeof p.b_id === 'string' &&
+      typeof p.b_ppk === 'string' &&
       typeof p.iat === 'number' &&
       (p.init_party === 'a' || p.init_party === 'b') &&
       typeof p.init_sig === 'string' &&
@@ -401,8 +402,10 @@ export function isPairingKeyFormat(input: string): boolean {
  * @param initiatorPublicIdBase64 - Initiator's passkey public ID (base64)
  * @param peerPublicIdBase64 - Peer's public ID (base64)
  * @param peerPpkBase64 - Peer's peer public key (base64)
+ * @param identityCardIat - Signer's identity card issued-at timestamp (Unix seconds)
  * @param comment - Optional comment (max 256 bytes)
  * @returns Pairing request (JSON string) to send to peer for confirmation
+ * @throws Error if the identity card has expired (>24 hours old)
  */
 export async function createPairingRequest(
   hmacKey: CryptoKey,
@@ -410,8 +413,17 @@ export async function createPairingRequest(
   initiatorPublicIdBase64: string,
   peerPublicIdBase64: string,
   peerPpkBase64: string,
+  identityCardIat: number,
   comment?: string
 ): Promise<string> {
+  // Validate identity card TTL
+  const now = Math.floor(Date.now() / 1000)
+  if (identityCardIat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
+    throw new Error(`Identity card iat is in the future: iat=${identityCardIat}, now=${now}, allowedSkewSeconds=${MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS}`)
+  }
+  if (now - identityCardIat > IDENTITY_CARD_TTL_SECONDS) {
+    throw new Error('Identity card has expired (valid for 24 hours)')
+  }
   // Decode and validate initiator's public ID
   const initiatorPublicId = base64ToUint8Array(initiatorPublicIdBase64)
   if (initiatorPublicId.length !== 32) {
@@ -457,8 +469,6 @@ export async function createPairingRequest(
     bPpk = peerPublicKey
   }
 
-  const iat = Math.floor(Date.now() / 1000)
-
   // Trim and validate comment before signing (byte length, not character count)
   const trimmedComment = comment?.trim()
   if (trimmedComment) {
@@ -468,8 +478,8 @@ export async function createPairingRequest(
     }
   }
 
-  // Compute challenge (includes comment if present)
-  const challenge = await computeMutualChallenge(aId, aPpk, bId, bPpk, iat, trimmedComment)
+  // Compute challenge using the Identity Card's iat (includes comment if present)
+  const challenge = await computeMutualChallenge(aId, aPpk, bId, bPpk, identityCardIat, trimmedComment)
 
   // Sign with HMAC-SHA256 (32 bytes)
   const signatureBuffer = await crypto.subtle.sign('HMAC', hmacKey, toArrayBuffer(challenge))
@@ -482,13 +492,13 @@ export async function createPairingRequest(
   // Determine initiator's party role
   const initParty: 'a' | 'b' = cmp < 0 ? 'a' : 'b'
 
-  // Build pairing request
+  // Build pairing request (iat is copied from Identity Card)
   const payload: PairingRequest = {
     a_id: uint8ArrayToBase64(aId),
     a_ppk: uint8ArrayToBase64(aPpk),
     b_id: uint8ArrayToBase64(bId),
     b_ppk: uint8ArrayToBase64(bPpk),
-    iat,
+    iat: identityCardIat,
     init_party: initParty,
     init_sig: uint8ArrayToBase64(signature),
     init_vs: uint8ArrayToBase64(initiatorVs),
@@ -545,6 +555,15 @@ export async function confirmPairingRequest(
     typeof request.init_vs !== 'string'
   ) {
     throw new Error('Invalid pairing request: missing required fields')
+  }
+
+  // Validate identity card TTL (protects confirmer even if initiator bypassed check)
+  const now = Math.floor(Date.now() / 1000)
+  if (request.iat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
+    throw new Error(`Identity card iat is in the future: iat=${request.iat}, now=${now}, allowedSkewSeconds=${MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS}`)
+  }
+  if (now - request.iat > IDENTITY_CARD_TTL_SECONDS) {
+    throw new Error('Identity card has expired (valid for 24 hours)')
   }
 
   // Validate comment byte length if present
