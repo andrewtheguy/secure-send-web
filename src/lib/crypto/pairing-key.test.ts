@@ -360,17 +360,6 @@ describe('Identity Card TTL Validation', () => {
   // Helper to create a valid 32-byte base64 string
   const validBase64_32bytes = btoa(String.fromCharCode(...new Array(32).fill(65))) // 32 'A' bytes
 
-  // Helper to create a mock HMAC key for testing
-  async function createMockHmacKey(): Promise<CryptoKey> {
-    return crypto.subtle.importKey(
-      'raw',
-      new Uint8Array(32), // 32 zero bytes
-      { name: 'HMAC', hash: 'SHA-256' },
-      false, // non-extractable
-      ['sign', 'verify']
-    )
-  }
-
   test('IDENTITY_CARD_TTL_SECONDS is 24 hours', () => {
     expect(IDENTITY_CARD_TTL_SECONDS).toBe(24 * 60 * 60)
   })
@@ -391,7 +380,7 @@ describe('Identity Card TTL Validation', () => {
       init_vs: validBase64_32bytes,
     })
 
-    const hmacKey = await createMockHmacKey()
+    const hmacKey = await createTestHmacKey()
     const signerPeerKey = new Uint8Array(32) // Mock 32-byte peer key
 
     // This should fail because the iat is expired
@@ -415,7 +404,7 @@ describe('Identity Card TTL Validation', () => {
       init_vs: validBase64_32bytes,
     })
 
-    const hmacKey = await createMockHmacKey()
+    const hmacKey = await createTestHmacKey()
     const signerPeerKey = new Uint8Array(32)
 
     await expect(
@@ -444,20 +433,15 @@ describe('Identity Card TTL Validation', () => {
       init_vs: validBase64_32bytes,
     })
 
-    const hmacKey = await createMockHmacKey()
+    const hmacKey = await createTestHmacKey()
     // Signer is party B, so signerPeerKey should match b_ppk
     const signerPeerKey = new Uint8Array(32).fill(65) // Matches validBase64_32bytes
 
-    // This should NOT throw the TTL error (it may fail for other reasons like
-    // "You are not a party to this pairing request" since we're using mock IDs,
-    // but that's expected - we just want to confirm TTL validation passes)
-    try {
-      await confirmPairingRequest(validRequest, hmacKey, signerPeerKey, bId)
-      // If it succeeds or fails for non-TTL reasons, TTL validation passed
-    } catch (error) {
-      // Should NOT be a TTL error
-      expect((error as Error).message).not.toContain('expired')
-    }
+    // TTL validation passes, confirm returns a completed pairing key with counter_sig
+    const result = await confirmPairingRequest(validRequest, hmacKey, signerPeerKey, bId)
+    const parsed = JSON.parse(result)
+    expect(parsed.counter_sig).toBeDefined()
+    expect(typeof parsed.counter_sig).toBe('string')
   })
 
   test('confirmPairingRequest accepts fresh iat (just created)', async () => {
@@ -479,15 +463,14 @@ describe('Identity Card TTL Validation', () => {
       init_vs: validBase64_32bytes,
     })
 
-    const hmacKey = await createMockHmacKey()
+    const hmacKey = await createTestHmacKey()
     const signerPeerKey = new Uint8Array(32).fill(65)
 
-    try {
-      await confirmPairingRequest(freshRequest, hmacKey, signerPeerKey, bId)
-    } catch (error) {
-      // Should NOT be a TTL error
-      expect((error as Error).message).not.toContain('expired')
-    }
+    // TTL validation passes, confirm returns a completed pairing key with counter_sig
+    const result = await confirmPairingRequest(freshRequest, hmacKey, signerPeerKey, bId)
+    const parsed = JSON.parse(result)
+    expect(parsed.counter_sig).toBeDefined()
+    expect(typeof parsed.counter_sig).toBe('string')
   })
 })
 
