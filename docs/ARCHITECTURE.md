@@ -385,20 +385,32 @@ Consider the analogy to HTTPS certificates:
 |-------|--------------|------------------------------|
 | HTTPS (CA-signed) | Certificate Authority chain | "A trusted CA vouches for this identity" |
 | HTTPS (self-signed) | None (or manual pinning) | "This cert was signed by... itself" (circular) |
-| Our tokens (ECDSA) | Out-of-band fingerprint | "This token was signed by the keypair in the token" (circular) |
-| Our tokens (HMAC) | Out-of-band fingerprint + **Handshake Proofs** | "This party controls the passkey right now" |
+| Our tokens | Out-of-band fingerprint | "This token was signed by the keypair in the token" (circular) |
 
 With ECDSA, verifying the counterparty's signature only proved the token was internally consistent - like a self-signed certificate, it provided no external trust. The *actual* trust anchor was always the out-of-band fingerprint verification during contact exchange.
 
-**HMAC + Handshake Proofs provides stronger security:**
+**HMAC vs ECDSA - what actually changed:**
 
-Instead of relying on signature verification (which was meaningless for self-signed tokens), we now use **Handshake Proofs (HP)** to prove passkey control at runtime:
+The switch from ECDSA to HMAC is purely about **key protection**, not about verification strength:
 
-1. **Token creation**: Both parties sign with their HMAC keys (proves passkey control at creation time)
-2. **Every handshake**: Both parties compute HP using their verification secrets (proves passkey control *right now*)
-3. **Stolen token defense**: An attacker with a stolen token cannot compute valid HP without the passkey
+| Aspect | ECDSA | HMAC |
+|--------|-------|------|
+| Key protection | Private key bytes briefly in JS memory | **Non-extractable** (never exposed) |
+| Counterparty sig verification | Yes (but meaningless for self-signed) | No |
+| Own sig verification | Yes | Yes (requires re-auth) |
 
-This is strictly stronger than ECDSA verification, which only proved "someone who had the signing key at token creation time signed this" - not "the person connecting right now controls the passkey."
+Losing counterparty signature verification has no security impact because it was meaningless anyway (circular trust). The benefit is strictly better key protection.
+
+**Handshake Proofs (HP) - a separate improvement:**
+
+Handshake Proofs are an **orthogonal security enhancement** that could have been implemented with ECDSA too. They address a different threat: stolen token impersonation.
+
+| Without HP | With HP |
+|------------|---------|
+| Token possession = can connect | Token possession alone is insufficient |
+| Attacker with stolen token can impersonate | Must prove passkey control at runtime |
+
+HP happens to reuse the HMAC key infrastructure for computing verification secrets, but this is implementation convenience - the concept of "prove you control the signing key at handshake time" is independent of whether that key is ECDSA or HMAC.
 
 **Operational implications of "Verify without auth: No"**:
 
