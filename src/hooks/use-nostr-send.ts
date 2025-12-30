@@ -893,6 +893,11 @@ export function useNostrSend(): UseNostrSendReturn {
 
 /**
  * Wait for ACK with specific sequence number from receiver.
+ *
+ * Uses subscribe-first pattern to avoid race conditions:
+ * 1. Subscribe first (to catch all new events)
+ * 2. Then query for existing events
+ * 3. Periodic re-query as safety net for relay propagation delays
  */
 async function waitForAck(
   client: NostrClient,
@@ -903,43 +908,53 @@ async function waitForAck(
   isCancelled: () => boolean,
   timeoutMs: number = 5 * 60 * 1000
 ): Promise<boolean> {
-  try {
-    const existingEvents = await client.query([
-      {
-        kinds: [EVENT_KIND_DATA_TRANSFER],
-        '#t': [transferId],
-        '#p': [senderPubkey],
-        authors: [receiverPubkey],
-        limit: 50,
-      },
-    ])
-
-    for (const event of existingEvents) {
-      const ack = parseAckEvent(event)
-      if (ack && ack.transferId === transferId && ack.seq === expectedSeq) {
-        return true
-      }
-    }
-  } catch (err) {
-    console.error('Failed to query for existing ACK:', err)
-  }
-
   if (isCancelled()) {
     return false
   }
 
   return new Promise((resolve) => {
     let resolved = false
+    let subId: string | null = null
+    let reQueryInterval: ReturnType<typeof setInterval> | null = null
+
+    const cleanup = () => {
+      if (subId) {
+        client.unsubscribe(subId)
+        subId = null
+      }
+      if (reQueryInterval) {
+        clearInterval(reQueryInterval)
+        reQueryInterval = null
+      }
+    }
 
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true
-        client.unsubscribe(subId)
+        cleanup()
         resolve(false)
       }
     }, timeoutMs)
 
-    const subId = client.subscribe(
+    const checkEvent = (event: Event): boolean => {
+      const ack = parseAckEvent(event)
+      if (ack && ack.transferId === transferId && ack.seq === expectedSeq) {
+        return true
+      }
+      return false
+    }
+
+    const onFound = () => {
+      if (!resolved) {
+        resolved = true
+        clearTimeout(timeout)
+        cleanup()
+        resolve(true)
+      }
+    }
+
+    // 1. Subscribe FIRST to avoid race condition
+    subId = client.subscribe(
       [
         {
           kinds: [EVENT_KIND_DATA_TRANSFER],
@@ -954,19 +969,53 @@ async function waitForAck(
         if (isCancelled()) {
           resolved = true
           clearTimeout(timeout)
-          client.unsubscribe(subId)
+          cleanup()
           resolve(false)
           return
         }
 
-        const ack = parseAckEvent(event)
-        if (ack && ack.transferId === transferId && ack.seq === expectedSeq) {
-          resolved = true
-          clearTimeout(timeout)
-          client.unsubscribe(subId)
-          resolve(true)
+        if (checkEvent(event)) {
+          onFound()
         }
       }
     )
+
+    // 2. THEN query for existing events (catches events that existed before subscribe)
+    const queryExisting = async () => {
+      if (resolved || isCancelled()) return
+
+      try {
+        const existingEvents = await client.query([
+          {
+            kinds: [EVENT_KIND_DATA_TRANSFER],
+            '#t': [transferId],
+            '#p': [senderPubkey],
+            authors: [receiverPubkey],
+            limit: 50,
+          },
+        ])
+
+        for (const event of existingEvents) {
+          if (resolved) return
+          if (checkEvent(event)) {
+            onFound()
+            return
+          }
+        }
+      } catch (err) {
+        console.error('Failed to query for existing ACK:', err)
+      }
+    }
+
+    // Initial query
+    queryExisting()
+
+    // 3. Periodic re-query as safety net for relay propagation delays
+    // Re-query every 3 seconds to catch any events that may have been missed
+    reQueryInterval = setInterval(() => {
+      if (!resolved && !isCancelled()) {
+        queryExisting()
+      }
+    }, 3000)
   })
 }
