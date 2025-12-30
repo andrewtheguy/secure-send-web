@@ -306,15 +306,43 @@ export function PasskeyPage() {
     }
   }
 
-  // Handler for "I want to add someone as a contact" - no auth yet
-  const handleSelectInitiator = () => {
+  // Handler for "I want to add someone as a contact" - auth immediately (like signer)
+  const handleSelectInitiator = async () => {
     setError(null)
     setSuccess(null)
     setOutputToken(null)
     setTokenError(null)
     setContactInput('')
     setTokenComment('')
-    setActiveMode('initiator')
+    setPageState('getting_key')
+
+    try {
+      const result = await getPasskeyIdentity()
+      setFingerprint(result.publicIdFingerprint)
+      setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
+      setPrfSupported(result.prfSupported)
+      setCurrentCredentialId(result.credentialId)
+
+      // Get the credential public key
+      const cpk = getCredentialPublicKey(result.credentialId)
+      if (cpk) {
+        setCredentialPublicKeyBase64(uint8ArrayToBase64(cpk))
+      } else {
+        setCredentialPublicKeyBase64(null)
+        setError(
+          'This passkey was created on another device. Its credential key is not available locally. ' +
+            'Please create a new passkey on this device to generate contact tokens.'
+        )
+        setPageState('idle')
+        return
+      }
+
+      setPageState('idle')
+      setActiveMode('initiator')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to authenticate')
+      setPageState('idle')
+    }
   }
 
   const copyToClipboard = async (text: string, onSuccess: () => void, onError: () => void) => {
@@ -363,6 +391,7 @@ export function PasskeyPage() {
   const handleCreateToken = async () => {
     setTokenError(null)
     setOutputToken(null)
+    setPageState('binding_contact')
 
     try {
       const trimmed = contactInput.trim()
@@ -370,13 +399,17 @@ export function PasskeyPage() {
         throw new Error("Please enter contact's card")
       }
 
-      // Parse contact card first (validate before auth)
+      if (!currentCredentialId || !publicIdBase64) {
+        throw new Error('Please authenticate first')
+      }
+
+      // Parse contact card
       const contactCardParsed = parseContactInput(trimmed)
       if (!contactCardParsed) {
         throw new Error('Invalid contact card format. Expected JSON with "id" and "cpk" fields.')
       }
 
-      // Validate contact card fields before auth
+      // Validate contact card fields
       try {
         const idBytes = base64ToUint8Array(contactCardParsed.id)
         if (idBytes.length !== 32) {
@@ -393,50 +426,16 @@ export function PasskeyPage() {
         throw new ValidationError('Invalid base64 encoding in contact card')
       }
 
-      // Now trigger auth if not already authenticated
-      let credId = currentCredentialId
-      let pubId = publicIdBase64
-
-      if (!credId || !pubId) {
-        setPageState('getting_key')
-        try {
-          const result = await getPasskeyIdentity()
-          setFingerprint(result.publicIdFingerprint)
-          setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
-          setPrfSupported(result.prfSupported)
-          setCurrentCredentialId(result.credentialId)
-          credId = result.credentialId
-          pubId = uint8ArrayToBase64(result.publicIdBytes)
-
-          // Get the credential public key
-          const cpk = getCredentialPublicKey(result.credentialId)
-          if (cpk) {
-            setCredentialPublicKeyBase64(uint8ArrayToBase64(cpk))
-          } else {
-            setCredentialPublicKeyBase64(null)
-            throw new Error(
-              'This passkey was created on another device. Its credential key is not available locally. ' +
-                'Please create a new passkey on this device to generate contact tokens.'
-            )
-          }
-        } catch (err) {
-          setPageState('idle')
-          throw err
-        }
-      }
-
-      setPageState('binding_contact')
-
-      const credentialPublicKey = getCredentialPublicKey(credId)
+      const credentialPublicKey = getCredentialPublicKey(currentCredentialId)
       if (!credentialPublicKey) {
         throw new Error('Credential public key not found. Please create a new passkey.')
       }
 
-      // Create pending mutual token
+      // Create pending mutual token (this triggers one WebAuthn assertion for signing)
       const token = await createMutualTokenInit(
-        credId,
+        currentCredentialId,
         credentialPublicKey,
-        pubId,
+        publicIdBase64,
         contactCardParsed.id,
         contactCardParsed.cpk,
         tokenComment.trim() || undefined
@@ -694,13 +693,22 @@ export function PasskeyPage() {
           variant="outline"
           disabled={isLoading}
         >
-          <div className="flex items-center gap-2 font-semibold">
-            <Plus className="h-5 w-5" />
-            I want to add someone as a contact
-          </div>
-          <p className="text-xs text-muted-foreground font-normal text-left">
-            You have their contact card and will create a token request for them to sign
-          </p>
+          {pageState === 'getting_key' ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Authenticating...</span>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 font-semibold">
+                <Plus className="h-5 w-5" />
+                I want to add someone as a contact
+              </div>
+              <p className="text-xs text-muted-foreground font-normal text-left">
+                You have their contact card and will create a token request for them to sign
+              </p>
+            </>
+          )}
         </Button>
       </div>
     </div>
@@ -778,10 +786,10 @@ export function PasskeyPage() {
           disabled={!contactInput.trim() || isLoading}
           className="w-full"
         >
-          {pageState === 'getting_key' || pageState === 'binding_contact' ? (
+          {pageState === 'binding_contact' ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              {pageState === 'getting_key' ? 'Authenticating...' : 'Creating...'}
+              Creating...
             </>
           ) : (
             <>
