@@ -128,10 +128,16 @@ When using passkey mode with a different person (cross-user), you need a **pairi
 
 **How to create a pairing key:**
 
-1. **Exchange Identity Cards**: On the `/passkey` page, copy your Identity Card (JSON with your public ID and peer key) and share it with your peer
+1. **Exchange Identity Cards**: On the `/passkey` page, copy your Identity Card (JSON with your public ID, peer key, and issued-at timestamp) and share it with your peer
 2. **Create & Send Pairing Request**: Paste your peer's card and click "Sign" to create and share the pairing request (signed by you)
 3. **Complete Pairing Key**: Your peer pastes the pairing request and clicks "Confirm" to complete it
 4. **Use Pairing Key**: The completed pairing key (with both signatures) is used by both parties for transfers
+
+**Identity Card TTL:**
+- Identity cards are valid for **24 hours** from creation (`iat` timestamp)
+- Both Step 2 (initiator) and Step 3 (confirmer) validate the TTL before proceeding
+- A maximum clock skew of **5 minutes** is allowed for future-dated timestamps
+- Expired identity cards must be regenerated
 
 **Pairing flow:**
 ```
@@ -159,6 +165,7 @@ Alice (Initiator)                    Bob (Confirmer)
 - Pairing key contains both parties' public IDs, peer public keys, and verification secrets
 - Each party can verify their own MAC by re-authenticating to derive their HMAC key
 - Peer's MAC cannot be verified cryptographically (no access to their key) - trust is established via out-of-band fingerprint verification during identity card exchange
+- **Identity Card TTL**: Cards expire after 24 hours; future timestamps beyond 5 minutes clock skew are rejected
 - **Handshake Proofs (HP)** provide runtime authentication: both parties prove passkey control at every handshake, preventing impersonation with stolen pairing keys
 - **Only the two parties in the pairing key can use it** - party membership is cryptographically verified during the handshake; a third party cannot use someone else's pairing key
 
