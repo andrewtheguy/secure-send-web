@@ -510,6 +510,9 @@ export function ReceiveTab() {
                               )}
                               {parsedToken && (
                                 <div className="space-y-1 text-xs">
+                                  <div className="flex items-center gap-1 text-amber-600 dark:text-amber-500 mb-1">
+                                    <span className="text-[10px]">⚠ Unverified fingerprints (will be verified via handshake proof)</span>
+                                  </div>
                                   <div className="flex items-center gap-2 text-cyan-700 dark:text-cyan-400">
                                     <Fingerprint className="h-3 w-3" />
                                     <span>Party A:</span>
