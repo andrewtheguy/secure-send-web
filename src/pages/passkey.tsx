@@ -283,31 +283,15 @@ export function PasskeyPage() {
     }
   }
 
-  // Handler for "I want to add someone as a contact" - auth to get identity for display
-  const handleSelectInitiator = async () => {
+  // Handler for "I want to add someone as a contact" - no auth needed, just switch mode
+  const handleSelectInitiator = () => {
     setError(null)
     setSuccess(null)
     setOutputToken(null)
     setTokenError(null)
     setContactInput('')
     setTokenComment('')
-    setPageState('getting_key')
-
-    try {
-      const result = await getPasskeyIdentity()
-      setFingerprint(result.publicIdFingerprint)
-      setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
-      setPrfSupported(result.prfSupported)
-
-      // Store contact public key for display (signing key is NOT stored - derived fresh per sign)
-      setContactPublicKeyBase64(uint8ArrayToBase64(result.contactPublicKey))
-
-      setPageState('idle')
-      setActiveMode('initiator')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to authenticate')
-      setPageState('idle')
-    }
+    setActiveMode('initiator')
   }
 
   const copyToClipboard = async (text: string, onSuccess: () => void, onError: () => void) => {
