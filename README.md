@@ -2,7 +2,7 @@
 
 A web application for sending encrypted text messages and files using PIN-based signaling protection and optional cloud encryption. Uses WebRTC for direct P2P connections with cloud fallback.
 
-**Demo:** [https://secure-send-web.andrewtheguy.com/](https://secure-send-web.andrewtheguy.com/)
+**Demo:** [https://securesend.kuvi.app/](https://securesend.kuvi.app/)
 
 ## Features
 
