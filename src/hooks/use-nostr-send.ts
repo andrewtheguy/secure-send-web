@@ -532,6 +532,12 @@ export function useNostrSend(): UseNostrSendReturn {
             salt
           )
 
+          // === MEMORY CLEANUP ===
+          // Now that we have the session key (key), we no longer need the passkey master secrets
+          // or the ephemeral private key. Explicitly clear them to minimize exposure window.
+          senderEphemeral = undefined
+          identitySharedSecretKey = undefined
+
           // Cross-user passkey mode: send encrypted payload now that we have session key
           // (For self-transfer, payload was already included in the initial mutual trust event)
           if (isCrossUserPasskey) {
@@ -539,6 +545,7 @@ export function useNostrSend(): UseNostrSendReturn {
 
             // Encrypt payload with session key
             const sessionEncryptedPayload = await encrypt(key, payloadBytes)
+
 
             // Publish payload event addressed to receiver
             const payloadEvent = createMutualTrustPayloadEvent(

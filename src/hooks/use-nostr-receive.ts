@@ -576,6 +576,15 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       )
       await client.publish(readyAck)
 
+      // === MEMORY CLEANUP ===
+      // Now that we have the session key (key) and have published the ACK (which needed the ephemeral public key),
+      // we no longer need the passkey master secrets or the ephemeral private key.
+      // Explicitly clear them to minimize exposure window.
+      receiverEphemeral = null
+      identitySharedSecretKey = null
+      sharedSecretKey = null
+      deriveKeyWithSalt = null // Release closure capturing master key
+
       if (cancelledRef.current) return
 
       // For handshake flow, wait for payload event and decrypt it
@@ -611,30 +620,30 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             }
           )
 
-          // Also check existing events
-          ;(async () => {
-            try {
-              const existingEvents = await client.query([
-                {
-                  kinds: [EVENT_KIND_DATA_TRANSFER],
-                  '#t': [transferId!],
-                  authors: [senderPubkey!],
-                  limit: 10,
-                },
-              ])
-              for (const event of existingEvents) {
-                const parsed = parseMutualTrustPayloadEvent(event)
-                if (parsed && parsed.transferId === transferId) {
-                  clearTimeout(timeout)
-                  if (subId !== undefined) client.unsubscribe(subId)
-                  resolve(event)
-                  return
+            // Also check existing events
+            ; (async () => {
+              try {
+                const existingEvents = await client.query([
+                  {
+                    kinds: [EVENT_KIND_DATA_TRANSFER],
+                    '#t': [transferId!],
+                    authors: [senderPubkey!],
+                    limit: 10,
+                  },
+                ])
+                for (const event of existingEvents) {
+                  const parsed = parseMutualTrustPayloadEvent(event)
+                  if (parsed && parsed.transferId === transferId) {
+                    clearTimeout(timeout)
+                    if (subId !== undefined) client.unsubscribe(subId)
+                    resolve(event)
+                    return
+                  }
                 }
+              } catch (err) {
+                console.error('Failed to query existing payload events:', err)
               }
-            } catch (err) {
-              console.error('Failed to query existing payload events:', err)
-            }
-          })()
+            })()
         })
 
         if (!payloadEvent) {
@@ -949,23 +958,23 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             processEvent
           )
 
-          ;(async () => {
-            try {
-              const existingEvents = await client.query([
-                {
-                  kinds: [EVENT_KIND_DATA_TRANSFER],
-                  '#t': [transferId!],
-                  authors: [senderPubkey!],
-                  limit: 50,
-                },
-              ])
-              for (const event of existingEvents) {
-                await processEvent(event)
+            ; (async () => {
+              try {
+                const existingEvents = await client.query([
+                  {
+                    kinds: [EVENT_KIND_DATA_TRANSFER],
+                    '#t': [transferId!],
+                    authors: [senderPubkey!],
+                    limit: 50,
+                  },
+                ])
+                for (const event of existingEvents) {
+                  await processEvent(event)
+                }
+              } catch (err) {
+                console.error('Failed to query existing events:', err)
               }
-            } catch (err) {
-              console.error('Failed to query existing events:', err)
-            }
-          })()
+            })()
         }
       )
 
