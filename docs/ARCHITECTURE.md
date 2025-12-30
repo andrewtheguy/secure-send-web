@@ -11,7 +11,7 @@ Secure Send is a browser-based encrypted file and message transfer application. 
 3. **Memory-Efficient Streaming**: Content is encrypted/decrypted in streaming chunks. All receivers (P2P and cloud) preallocate buffers and write directly to calculated positions - no intermediate chunk arrays.
 4. **Pluggable Signaling**: Signaling (Nostr, QR) is decoupled from the transfer layer. The same encryption/chunking logic is used regardless of signaling method.
 5. **Dual PIN Representation**: A 12-character alphanumeric PIN serves as the shared secret. To improve shareability (e.g., via voice), this PIN can be bijectively mapped to a 7-word sequence from the BIP-39 wordlist.
-6. **Passkey Support**: Alternative to PIN-based authentication using WebAuthn PRF extension. Keys are derived from hardware-backed secure elements (Touch ID, Face ID, Windows Hello) when passkeys are synced via password managers.
+6. **Passkey Support**: Alternative to PIN-based authentication using WebAuthn PRF extension. Keys are derived from hardware-backed secure elements (Touch ID, Face ID, Windows Hello) when passkeys are synced via password managers. See [Passkey Architecture](./PASSKEY_ARCHITECTURE.md#how-it-works) for details.
 
 ## Signaling Methods
 
@@ -103,9 +103,9 @@ sequenceDiagram
 |-----------|-------------|
 | `pin.ts` | Alphanumeric (12-char) and Word (7-word) PIN handling, weighted checksums, signaling detection |
 | `kdf.ts` | Key derivation using PBKDF2-SHA256 (600,000 iterations) |
-| `passkey.ts` | WebAuthn PRF extension for passkey-based key derivation |
-| `ecdh.ts` | ECDH key exchange (non-extractable keys), fingerprints, key confirmation, public key commitment, constant-time comparison |
-| `pairing-key.ts` | Pairing key creation, countersigning, and verification for cross-user passkey mode |
+| `passkey.ts` | WebAuthn PRF extension for passkey-based key derivation. See [Key Derivation Flow](./PASSKEY_ARCHITECTURE.md#key-derivation-flow) |
+| `ecdh.ts` | ECDH key exchange (non-extractable keys), fingerprints, key confirmation, public key commitment, constant-time comparison. See [Passkey Fingerprint](./PASSKEY_ARCHITECTURE.md#passkey-fingerprint) |
+| `pairing-key.ts` | Pairing key creation, countersigning, and verification for cross-user passkey mode. See [Pairing Keys](./PASSKEY_ARCHITECTURE.md#pairing-keys-cross-user-mode) |
 | `aes-gcm.ts` | AES-256-GCM encryption/decryption |
 | `stream-crypto.ts` | Streaming encryption/decryption (128KB chunks, protocol-agnostic) |
 | `constants.ts` | Crypto parameters, charsets (69 chars), BIP-39 wordlist (2048 words) |
@@ -396,12 +396,13 @@ interface PinExchangePayload {
 3. **Key Derivation**: PBKDF2-SHA256 with 600,000 iterations
 4. **Chunk Encryption**: AES-256-GCM with 12-byte nonce per 128KB chunk
 
-**Passkey Mode:**
+**Passkey Mode:** (See [Key Derivation Flow](./PASSKEY_ARCHITECTURE.md#key-derivation-flow) for details)
 1. **Passkey Authentication**: WebAuthn prompt (biometric/device unlock)
 2. **Master Key**: PRF extension output imported as HKDF key
 3. **Salt Generation**: 16 random bytes (included in signaling payload)
 4. **Key Derivation**: HKDF-SHA256 with salt derives per-transfer AES key
 5. **Chunk Encryption**: Same AES-256-GCM with 12-byte nonce per 128KB chunk
+6. **Perfect Forward Secrecy**: Ephemeral ECDH session keys protect each transfer. See [PFS](./PASSKEY_ARCHITECTURE.md#perfect-forward-secrecy-pfs)
 
 ### What's Encrypted Where
 
@@ -527,13 +528,13 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 6. **PIN/Passkey Role**: Encrypts signaling (preventing unauthorized P2P connection) AND content (defense in depth)
 7. **Transport Security**: All P2P transfers (Nostr, Manual Exchange) use both AES-256-GCM encryption (128KB chunks) and WebRTC DTLS
 8. **Protocol-Agnostic Security**: Same encryption layer used regardless of signaling method - no security difference between Nostr or Manual Exchange
-9. **Passkey Security**: WebAuthn PRF extension provides hardware-backed key derivation with origin-bound credentials and phishing resistance
-10. **Passkey Sync**: Requires same passkey synced via password manager (1Password, iCloud Keychain, Google Password Manager) - no out-of-band PIN sharing needed
+9. **Passkey Security**: WebAuthn PRF extension provides hardware-backed key derivation with origin-bound credentials and phishing resistance. See [Pairing Key Signing](./PASSKEY_ARCHITECTURE.md#pairing-key-signing-security-model)
+10. **Passkey Sync**: Requires same passkey synced via password manager (1Password, iCloud Keychain, Google Password Manager) - no out-of-band PIN sharing needed. For cross-user transfers, see [Pairing Keys](./PASSKEY_ARCHITECTURE.md#pairing-keys-cross-user-mode)
 11. **XSS Protection**: Sensitive cryptographic material (shared secrets, key derivation functions) stored in closure scope, not on global `window` object
 12. **Resource Cleanup**: All error paths properly clean up timeouts and subscriptions to prevent resource leaks
 13. **Input Validation**: Cryptographic functions validate inputs (nonce length, key confirmation size) before operations to provide deterministic errors
-14. **Non-Extractable Keys**: In passkey mutual trust mode, the passkey master key and the ephemeral ECDH shared secret are kept as non-extractable `CryptoKey` objects - raw bytes never exposed to JavaScript, preventing exfiltration via XSS or memory inspection
-15. **Perfect Forward Secrecy (PFS)**: Passkey mode uses ephemeral session keys generated via Web Crypto's `generateKey()` - raw private key material is NEVER exposed to JavaScript. Compromising the passkey public ID or a single session's memory does not help decrypt past or future sessions. PFS is mandatory in passkey mode.
+14. **Non-Extractable Keys**: In passkey mutual trust mode, the passkey master key and the ephemeral ECDH shared secret are kept as non-extractable `CryptoKey` objects - raw bytes never exposed to JavaScript, preventing exfiltration via XSS or memory inspection. See [Mutual Trust Key Derivation](./PASSKEY_ARCHITECTURE.md#mutual-trust-key-derivation-non-extractable-keys)
+15. **Perfect Forward Secrecy (PFS)**: Passkey mode uses ephemeral session keys generated via Web Crypto's `generateKey()` - raw private key material is NEVER exposed to JavaScript. Compromising the passkey public ID or a single session's memory does not help decrypt past or future sessions. PFS is mandatory in passkey mode. See [PFS](./PASSKEY_ARCHITECTURE.md#perfect-forward-secrecy-pfs)
 
 ### Security Properties by Mode
 
