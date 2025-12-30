@@ -113,7 +113,7 @@ Passkeys provide passwordless encryption using the WebAuthn PRF extension:
 
 1. **Setup**: Create a passkey at `/passkey` - it's stored in your password manager (1Password, iCloud Keychain, Google Password Manager, etc.)
 2. **Self-transfer**: Same passkey synced via password manager - encryption works automatically
-3. **Cross-user transfer**: Exchange a pairing key with your peer (see below)
+3. **Cross-user transfer**: Exchange a pairing key with your peer (see below). Your invite code is generated at `/passkey` when you select "I want to pair with someone" - share it with your peer to start the pairing process.
 4. **Send/Receive**: Enable "Use Passkey" in Advanced Options and authenticate with biometrics/device unlock
 
 **Key differences from PIN mode:**
@@ -141,7 +141,7 @@ When using passkey mode with a different person (cross-user), you need a **pairi
 
 **Pairing flow:**
 ```
-Alice (Initiator)                    Bob (Signer/Confirmer)
+Alice (Initiator)                    Bob (Confirmer)
       |                                     |
       |<------ 1. Bob's Invite Code --------|
       v                                     |

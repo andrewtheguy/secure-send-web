@@ -537,17 +537,12 @@ export async function confirmPairingRequest(
     throw new Error('Invalid pairing request: failed to parse JSON')
   }
 
-  // Support both old (a_cpk/b_cpk) and new (a_ppk/b_ppk) field names
-  const requestAny = request as unknown as Record<string, unknown>
-  const aPpkField = requestAny.a_ppk ?? requestAny.a_cpk
-  const bPpkField = requestAny.b_ppk ?? requestAny.b_cpk
-
   // Validate required fields
   if (
     typeof request.a_id !== 'string' ||
-    typeof aPpkField !== 'string' ||
+    typeof request.a_ppk !== 'string' ||
     typeof request.b_id !== 'string' ||
-    typeof bPpkField !== 'string' ||
+    typeof request.b_ppk !== 'string' ||
     typeof request.iat !== 'number' ||
     !Number.isFinite(request.iat) ||
     (request.init_party !== 'a' && request.init_party !== 'b') ||
@@ -579,9 +574,9 @@ export async function confirmPairingRequest(
 
   // Decode fields
   const aId = base64ToUint8Array(request.a_id)
-  const aPpk = base64ToUint8Array(aPpkField as string)
+  const aPpk = base64ToUint8Array(request.a_ppk)
   const bId = base64ToUint8Array(request.b_id)
-  const bPpk = base64ToUint8Array(bPpkField as string)
+  const bPpk = base64ToUint8Array(request.b_ppk)
   const initVs = base64ToUint8Array(request.init_vs)
 
   if (aId.length !== 32) throw new Error('Invalid a_id: expected 32 bytes')
@@ -676,17 +671,12 @@ export async function parsePairingKey(
     throw new Error('Invalid pairing key: failed to parse JSON')
   }
 
-  // Support both old (a_cpk/b_cpk) and new (a_ppk/b_ppk) field names
-  const payloadAny = payload as unknown as Record<string, unknown>
-  const aPpkField = payloadAny.a_ppk ?? payloadAny.a_cpk
-  const bPpkField = payloadAny.b_ppk ?? payloadAny.b_cpk
-
   // Validate required fields
   if (
     typeof payload.a_id !== 'string' ||
-    typeof aPpkField !== 'string' ||
+    typeof payload.a_ppk !== 'string' ||
     typeof payload.b_id !== 'string' ||
-    typeof bPpkField !== 'string' ||
+    typeof payload.b_ppk !== 'string' ||
     typeof payload.iat !== 'number' ||
     !Number.isFinite(payload.iat) ||
     (payload.init_party !== 'a' && payload.init_party !== 'b') ||
@@ -700,9 +690,9 @@ export async function parsePairingKey(
 
   // Decode fields
   const aId = base64ToUint8Array(payload.a_id)
-  const aPpk = base64ToUint8Array(aPpkField as string)
+  const aPpk = base64ToUint8Array(payload.a_ppk)
   const bId = base64ToUint8Array(payload.b_id)
-  const bPpk = base64ToUint8Array(bPpkField as string)
+  const bPpk = base64ToUint8Array(payload.b_ppk)
   const initVs = base64ToUint8Array(payload.init_vs)
   const counterVs = base64ToUint8Array(payload.counter_vs)
 
@@ -775,17 +765,12 @@ export async function verifyOwnSignature(
     throw new Error('Invalid pairing key: failed to parse JSON')
   }
 
-  // Support both old (a_cpk/b_cpk) and new (a_ppk/b_ppk) field names
-  const payloadAny = payload as unknown as Record<string, unknown>
-  const aPpkField = payloadAny.a_ppk ?? payloadAny.a_cpk
-  const bPpkField = payloadAny.b_ppk ?? payloadAny.b_cpk
-
   // Validate required fields
   if (
     typeof payload.a_id !== 'string' ||
-    typeof aPpkField !== 'string' ||
+    typeof payload.a_ppk !== 'string' ||
     typeof payload.b_id !== 'string' ||
-    typeof bPpkField !== 'string' ||
+    typeof payload.b_ppk !== 'string' ||
     typeof payload.iat !== 'number' ||
     !Number.isFinite(payload.iat) ||
     typeof payload.init_sig !== 'string' ||
@@ -796,9 +781,9 @@ export async function verifyOwnSignature(
 
   // Decode fields
   const aId = base64ToUint8Array(payload.a_id)
-  const aPpk = base64ToUint8Array(aPpkField as string)
+  const aPpk = base64ToUint8Array(payload.a_ppk)
   const bId = base64ToUint8Array(payload.b_id)
-  const bPpk = base64ToUint8Array(bPpkField as string)
+  const bPpk = base64ToUint8Array(payload.b_ppk)
 
   if (aId.length !== 32) throw new Error('Invalid a_id: expected 32 bytes')
   if (bId.length !== 32) throw new Error('Invalid b_id: expected 32 bytes')

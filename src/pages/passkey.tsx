@@ -208,10 +208,9 @@ export function PasskeyPage() {
         const parsed = JSON.parse(text)
 
         if (qrScannerMode === 'invite-code') {
-          // Validate invite code format (support both old 'cpk' and new 'ppk')
-          const hasPpk = typeof parsed.ppk === 'string' || typeof parsed.cpk === 'string'
+          // Validate invite code format
           const hasValidIat = typeof parsed.iat === 'number'
-          if (typeof parsed.id !== 'string' || !hasPpk || !hasValidIat) {
+          if (typeof parsed.id !== 'string' || typeof parsed.ppk !== 'string' || !hasValidIat) {
             setQRScanError('Invalid invite code format: missing "id", "ppk", or "iat"')
             return
           }
