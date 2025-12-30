@@ -419,7 +419,7 @@ export async function createPairingRequest(
   // Validate identity card TTL
   const now = Math.floor(Date.now() / 1000)
   if (identityCardIat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
-    throw new Error('Identity card iat is in the future')
+    throw new Error(`Identity card iat is in the future: iat=${identityCardIat}, now=${now}, allowedSkewSeconds=${MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS}`)
   }
   if (now - identityCardIat > IDENTITY_CARD_TTL_SECONDS) {
     throw new Error('Identity card has expired (valid for 24 hours)')
@@ -560,7 +560,7 @@ export async function confirmPairingRequest(
   // Validate identity card TTL (protects confirmer even if initiator bypassed check)
   const now = Math.floor(Date.now() / 1000)
   if (request.iat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
-    throw new Error('Identity card iat is in the future')
+    throw new Error(`Identity card iat is in the future: iat=${request.iat}, now=${now}, allowedSkewSeconds=${MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS}`)
   }
   if (now - request.iat > IDENTITY_CARD_TTL_SECONDS) {
     throw new Error('Identity card has expired (valid for 24 hours)')
