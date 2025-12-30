@@ -126,6 +126,7 @@ export function PasskeyPage() {
   const [qrScannerMode, setQRScannerMode] = useState<'contact-card' | 'token-request'>('contact-card')
   const [qrScanError, setQRScanError] = useState<string | null>(null)
   const [outputTokenQrUrl, setOutputTokenQrUrl] = useState<string | null>(null)
+  const [outputTokenQrError, setOutputTokenQrError] = useState<string | null>(null)
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>(
     isMobileDevice() ? 'environment' : 'user'
   )
@@ -151,11 +152,21 @@ export function PasskeyPage() {
   // Generate QR code URL when outputToken changes
   useEffect(() => {
     if (outputToken) {
+      // Clear previous error when retrying
+      setOutputTokenQrError(null)
       generateTextQRCode(outputToken, { width: 256, errorCorrectionLevel: 'L' })
-        .then(setOutputTokenQrUrl)
-        .catch((err) => console.error('Failed to generate QR code:', err))
+        .then((url) => {
+          setOutputTokenQrUrl(url)
+          setOutputTokenQrError(null)
+        })
+        .catch((err) => {
+          console.error('Failed to generate QR code:', err)
+          setOutputTokenQrUrl(null)
+          setOutputTokenQrError(err instanceof Error ? err.message : 'Failed to generate QR code')
+        })
     } else {
       setOutputTokenQrUrl(null)
+      setOutputTokenQrError(null)
     }
   }, [outputToken])
 
@@ -764,6 +775,12 @@ export function PasskeyPage() {
                 </p>
               </div>
             )}
+            {outputTokenQrError && (
+              <div className="flex flex-col items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
+                <p className="text-sm text-destructive">QR code generation failed: {outputTokenQrError}</p>
+                <p className="text-xs text-muted-foreground">Copy the token text below instead</p>
+              </div>
+            )}
 
             <div className="flex gap-2">
               <Textarea
@@ -906,6 +923,12 @@ export function PasskeyPage() {
                 <p className="text-xs text-muted-foreground">
                   Share this QR code with your contact
                 </p>
+              </div>
+            )}
+            {outputTokenQrError && (
+              <div className="flex flex-col items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
+                <p className="text-sm text-destructive">QR code generation failed: {outputTokenQrError}</p>
+                <p className="text-xs text-muted-foreground">Copy the token text below instead</p>
               </div>
             )}
 
