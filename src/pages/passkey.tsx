@@ -150,15 +150,25 @@ export function PasskeyPage() {
 
   // Generate QR code URL when outputPairingKey changes
   useEffect(() => {
+    let cancelled = false
+    let currentUrl: string | null = null
+
     if (outputPairingKey) {
       // Clear previous error when retrying
       setOutputPairingKeyQrError(null)
       generateTextQRCode(outputPairingKey, { width: 256, errorCorrectionLevel: 'L' })
         .then((url) => {
+          if (cancelled) {
+            // Component unmounted or effect re-ran - revoke the unused URL
+            URL.revokeObjectURL(url)
+            return
+          }
+          currentUrl = url
           setOutputPairingKeyQrUrl(url)
           setOutputPairingKeyQrError(null)
         })
         .catch((err) => {
+          if (cancelled) return
           console.error('Failed to generate QR code:', err)
           setOutputPairingKeyQrUrl(null)
           setOutputPairingKeyQrError(err instanceof Error ? err.message : 'Failed to generate QR code')
@@ -166,6 +176,14 @@ export function PasskeyPage() {
     } else {
       setOutputPairingKeyQrUrl(null)
       setOutputPairingKeyQrError(null)
+    }
+
+    return () => {
+      cancelled = true
+      // Revoke blob URL on cleanup to prevent memory leaks
+      if (currentUrl) {
+        URL.revokeObjectURL(currentUrl)
+      }
     }
   }, [outputPairingKey])
 
