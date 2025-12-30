@@ -153,11 +153,11 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           if (opts.selfTransfer) {
             senderPublicKeyBytes = ephemeral.identityPublicKeyBytes
           } else {
-            // Parse pairing key to extract counterparty info
+            // Parse pairing key to extract peer info
             // NOTE: With HMAC signatures, we cannot verify the other party's signature here.
             // Trust is established via out-of-band fingerprint verification.
-            // SECURITY: The actual counterparty check happens during handshake event processing
-            // at lines 303-306 where we verify the sender's identity matches the pairing key.
+            // SECURITY: The actual peer check happens during handshake event processing
+            // (see "SECURITY VERIFICATION 3: Sender's pairing key" below).
             const parsedPairingKey = await parsePairingKey(
               opts.senderPairingKey!,
               ephemeral.identityPublicKeyBytes // Verify we're a party to this pairing key
