@@ -16,7 +16,7 @@ import type { SignalingMethod } from '@/lib/nostr/types'
 import type { PinKeyMaterial } from '@/lib/types'
 import { Link } from 'react-router-dom'
 import { formatFingerprint } from '@/lib/crypto/ecdh'
-import { isMutualTokenFormat, verifyMutualToken, type VerifiedMutualToken } from '@/lib/crypto/contact-token'
+import { isMutualTokenFormat, parseToken, type ParsedMutualToken } from '@/lib/crypto/contact-token'
 import { getSavedTokens, saveToken, type SavedToken } from '@/lib/saved-tokens'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
@@ -51,44 +51,44 @@ export function ReceiveTab() {
   const [, setDetectedMethod] = useState<SignalingMethod>('nostr')
   const [pinFingerprint, setPinFingerprint] = useState<string | null>(null)
 
-  // Verified token state (updated via useEffect since verification is async)
-  const [verifiedToken, setVerifiedToken] = useState<VerifiedMutualToken | null>(null)
+  // Parsed token state (updated via useEffect since parsing is async)
+  const [parsedToken, setParsedToken] = useState<ParsedMutualToken | null>(null)
 
   // Saved tokens for quick selection
   const [savedTokens, setSavedTokens] = useState<SavedToken[]>([])
   const [showTokenDropdown, setShowTokenDropdown] = useState(false)
   const [loadedFromHistory, setLoadedFromHistory] = useState(false)
 
-  // Verify mutual contact token - debounced to reduce signature checks on every keystroke
+  // Parse mutual contact token - debounced to reduce parsing on every keystroke
   useEffect(() => {
     let cancelled = false
 
     const input = senderPublicIdInput.trim()
     if (!input) {
-      setVerifiedToken(null)
+      setParsedToken(null)
       setSenderPublicIdError(null)
       return
     }
 
     // Quick format check first (synchronous, no debounce needed)
     if (!isMutualTokenFormat(input)) {
-      setVerifiedToken(null)
+      setParsedToken(null)
       setSenderPublicIdError('Invalid format: expected mutual contact token (create one on the Passkey page)')
       return
     }
 
-    // Debounce the async signature verification
+    // Debounce the async parsing
     const timeoutId = setTimeout(() => {
-      verifyMutualToken(input)
-        .then((verified) => {
+      parseToken(input)
+        .then((parsed) => {
           if (cancelled) return
-          setVerifiedToken(verified)
+          setParsedToken(parsed)
           setSenderPublicIdError(null)
         })
         .catch((err: unknown) => {
           if (cancelled) return
-          setVerifiedToken(null)
-          setSenderPublicIdError(err instanceof Error ? err.message : 'Invalid or tampered token')
+          setParsedToken(null)
+          setSenderPublicIdError(err instanceof Error ? err.message : 'Invalid token format')
         })
     }, 300)
 
@@ -157,19 +157,19 @@ export function ReceiveTab() {
       state.status === 'complete' &&
       usePasskey &&
       !receiveFromSelf &&
-      verifiedToken &&
+      parsedToken &&
       senderPublicIdInput.trim()
     ) {
       // Create a stable key for this token
-      const tokenKey = `${verifiedToken.partyAFingerprint}:${verifiedToken.partyBFingerprint}`
+      const tokenKey = `${parsedToken.partyAFingerprint}:${parsedToken.partyBFingerprint}`
 
       // Only save if we haven't already saved this token
       if (savedTokenKeyRef.current !== tokenKey) {
         saveToken(
           senderPublicIdInput.trim(),
-          verifiedToken.partyAFingerprint,
-          verifiedToken.partyBFingerprint,
-          verifiedToken.comment
+          parsedToken.partyAFingerprint,
+          parsedToken.partyBFingerprint,
+          parsedToken.comment
         )
         savedTokenKeyRef.current = tokenKey
         // Refresh saved tokens list
@@ -179,7 +179,7 @@ export function ReceiveTab() {
       // Reset when status leaves 'complete' so future transfers can be saved
       savedTokenKeyRef.current = null
     }
-  }, [state.status, usePasskey, receiveFromSelf, verifiedToken, senderPublicIdInput])
+  }, [state.status, usePasskey, receiveFromSelf, parsedToken, senderPublicIdInput])
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pinInactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -297,7 +297,7 @@ export function ReceiveTab() {
     // Clear passkey state
     setSenderPublicIdInput('')
     setSenderPublicIdError(null)
-    setVerifiedToken(null)
+    setParsedToken(null)
     setReceiveFromSelf(false)
     setLoadedFromHistory(false)
   }
@@ -334,7 +334,7 @@ export function ReceiveTab() {
   // Handle passkey authentication for receiving
   const handlePasskeyAuth = async () => {
     if (passkeyAuthenticating) return
-    if (!receiveFromSelf && !verifiedToken) return // Require verified sender token unless receiving from self
+    if (!receiveFromSelf && !parsedToken) return // Require parsed sender token unless receiving from self
 
     setPasskeyAuthenticating(true)
 
@@ -353,8 +353,8 @@ export function ReceiveTab() {
     }
   }
 
-  // Whether passkey mode requirements are met (either have verified sender token or receiving from self)
-  const passkeyRequirementsMet = receiveFromSelf || verifiedToken !== null
+  // Whether passkey mode requirements are met (either have parsed sender token or receiving from self)
+  const passkeyRequirementsMet = receiveFromSelf || parsedToken !== null
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
   const showQRInput = isManualMode && state.status === 'waiting_for_offer'
@@ -481,8 +481,8 @@ export function ReceiveTab() {
                                   )}
                                 </div>
                               )}
-                              {/* Hide textarea when token is loaded from history and verified */}
-                              {!(loadedFromHistory && verifiedToken) && (
+                              {/* Hide textarea when token is loaded from history and parsed */}
+                              {!(loadedFromHistory && parsedToken) && (
                                 <div className="flex gap-2">
                                   <Textarea
                                     id="sender-pubkey"
@@ -508,24 +508,29 @@ export function ReceiveTab() {
                               {senderPublicIdError && (
                                 <p className="text-xs text-destructive">{senderPublicIdError}</p>
                               )}
-                              {verifiedToken && (
+                              {parsedToken && (
                                 <div className="space-y-1 text-xs">
-                                  <div className="flex items-center gap-2 text-green-700 dark:text-green-400">
+                                  <div className="flex items-center gap-1 text-amber-600 dark:text-amber-500 mb-1">
+                                    <span className="text-[10px]">⚠ Unverified fingerprints (will be verified via handshake proof)</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-cyan-700 dark:text-cyan-400">
                                     <Fingerprint className="h-3 w-3" />
                                     <span>Party A:</span>
-                                    <span className="font-mono font-medium">{formatFingerprint(verifiedToken.partyAFingerprint)}</span>
+                                    <span className="font-mono font-medium">{formatFingerprint(parsedToken.partyAFingerprint)}</span>
                                   </div>
-                                  <div className="flex items-center gap-2 text-green-700 dark:text-green-400 ml-5">
+                                  <div className="flex items-center gap-2 text-cyan-700 dark:text-cyan-400 ml-5">
                                     <span>Party B:</span>
-                                    <span className="font-mono font-medium">{formatFingerprint(verifiedToken.partyBFingerprint)}</span>
+                                    <span className="font-mono font-medium">{formatFingerprint(parsedToken.partyBFingerprint)}</span>
                                   </div>
-                                  {verifiedToken.comment && (
+                                  {parsedToken.comment && (
                                     <div className="flex items-center gap-2 text-muted-foreground ml-5">
-                                      <span className="italic">"{verifiedToken.comment}"</span>
+                                      <span className="italic">"{parsedToken.comment}"</span>
                                     </div>
                                   )}
                                   <div className="flex items-center gap-2 ml-5">
-                                    <span className="text-green-600 dark:text-green-400">(both signatures verified)</span>
+                                    <Link to="/passkey/verify-token" className="text-primary hover:underline text-xs">
+                                      Verify your signature →
+                                    </Link>
                                     {loadedFromHistory && (
                                       <Button
                                         variant="ghost"
@@ -533,7 +538,7 @@ export function ReceiveTab() {
                                         className="h-5 px-1 text-xs text-muted-foreground hover:text-foreground"
                                         onClick={() => {
                                           setSenderPublicIdInput('')
-                                          setVerifiedToken(null)
+                                          setParsedToken(null)
                                           setLoadedFromHistory(false)
                                         }}
                                       >
@@ -587,7 +592,7 @@ export function ReceiveTab() {
                   {/* Passkey mode indicator */}
                   <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
                     <Fingerprint className="h-3 w-3" />
-                    <span>Passkey mode{receiveFromSelf ? ' → receiving from self' : verifiedToken ? ' → mutual token verified' : ' (enter mutual token in Advanced Options)'}</span>
+                    <span>Passkey mode{receiveFromSelf ? ' → receiving from self' : parsedToken ? ' → token loaded' : ' (enter mutual token in Advanced Options)'}</span>
                   </div>
 
                   <Button

@@ -161,89 +161,223 @@ For cross-user passkey transfers (different passkeys), a **mutual contact token*
 ```json
 {
   "id": "<base64 public ID, 32 bytes>",
-  "cpk": "<base64 credential public key, 65 bytes uncompressed P-256>"
+  "cpk": "<base64 contact public key, 32 bytes HKDF-derived>"
 }
 ```
+
+**Why two separate 32-byte identifiers?**
+
+Both `id` (public ID) and `cpk` (contact public key) are derived from the passkey PRF master key via HKDF, but serve distinct purposes:
+
+| Field | HKDF Info String | Purpose | Published? |
+|-------|------------------|---------|------------|
+| `id` (public ID) | `secure-send-passkey-public-id-v1` | Event addressing/filtering on Nostr relays | Yes (in Nostr events) |
+| `cpk` (contact public key) | `secure-send-contact-public-key-v1` | Identity binding in token challenge; verification secret derivation | Yes (in contact cards/tokens) |
+
+**Why both are required (cannot reuse one identifier):**
+- **Separation of concerns**: The public ID is used for Nostr event routing (`rpkc` commitment, fingerprint filtering). The cpk is used exclusively in the authentication protocol (token challenge, handshake proofs).
+- **Unlinkability potential**: Different HKDF derivations allow future protocol changes to rotate one identifier without affecting the other.
+- **Defense in depth**: Compromising the public ID (visible in Nostr events) reveals nothing about the cpk used in cryptographic proofs.
 
 **Pending Token (after initiator signs):**
 ```typescript
 interface PendingMutualToken {
   a_id: string       // Party A's public ID (lexicographically smaller)
-  a_cpk: string      // Party A's credential public key
+  a_cpk: string      // Party A's contact public key (32 bytes)
   b_id: string       // Party B's public ID (lexicographically larger)
-  b_cpk: string      // Party B's credential public key
+  b_cpk: string      // Party B's contact public key (32 bytes)
   iat: number        // Unix timestamp (seconds)
-  init_authData: string      // WebAuthn authenticator data
-  init_clientDataJSON: string // WebAuthn client data
-  init_sig: string           // Initiator's ECDSA signature
-  comment?: string   // Optional comment (max 256 chars)
+  init_party: 'a' | 'b'  // Who initiated the token (for VS mapping)
+  init_sig: string   // Initiator's HMAC-SHA256 MAC (base64, 32 bytes)
+  init_vs: string    // Initiator's verification secret (base64, 32 bytes)
+  comment?: string   // Optional comment (max 256 bytes UTF-8)
 }
 ```
 
 **Complete Token (after countersigning):**
 ```typescript
 interface MutualContactTokenPayload extends PendingMutualToken {
-  counter_authData: string      // Countersigner's authenticator data
-  counter_clientDataJSON: string // Countersigner's client data
-  counter_sig: string           // Countersigner's ECDSA signature
+  counter_sig: string  // Countersigner's HMAC-SHA256 MAC (base64, 32 bytes)
+  counter_vs: string   // Countersigner's verification secret (base64, 32 bytes)
 }
 ```
+
+The `init_party` field tracks who initiated the token ('a' or 'b'), which is needed to correctly map verification secrets to parties during handshake authentication. The `init_vs` and `counter_vs` fields contain verification secrets used for Handshake Proofs (see below).
 
 **Challenge Computation:**
 ```
 challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat || comment_bytes)
-                   32     65       32      65       8     0-256 bytes
+                   32     32       32      32       8     0-256 bytes
 ```
 - IDs sorted lexicographically to ensure deterministic ordering
-- Both parties sign the same challenge
+- Both parties compute MACs over the same challenge with their respective HMAC keys
 - Comment is optional; if present, it is UTF-8 encoded (max 256 bytes) and appended to the challenge input
 
 **Tamper Protection:**
 
-The entire token payload is tamper-proof:
-- **Data fields** (`a_id`, `a_cpk`, `b_id`, `b_cpk`, `iat`, `comment`): Included in the signed challenge. Tampering invalidates both signatures.
-- **Signature fields** (`init_authData`, `init_clientDataJSON`, `init_sig`, `counter_authData`, `counter_clientDataJSON`, `counter_sig`): These are the WebAuthn assertion outputs. They cannot be included in the challenge (circular dependency), but are cryptographically verified during `verifyMutualToken()`. Tampering causes verification to fail.
+The entire token payload is tamper-proof via different mechanisms:
+- **Challenge-covered fields** (`a_id`, `a_cpk`, `b_id`, `b_cpk`, `iat`, `comment`): Included in the SHA256 challenge. Tampering invalidates both MACs (detected during `verifyOwnSignature()`).
+- **MAC fields** (`init_sig`, `counter_sig`): HMAC-SHA256 MACs over the challenge. Each party can verify only their own MAC via `verifyOwnSignature()` (requires passkey authentication). Trust in the counterparty's MAC is established via out-of-band fingerprint verification.
+- **Verification secret fields** (`init_vs`, `counter_vs`): Derived deterministically from each party's HMAC key. Tampering causes handshake proof verification to fail.
+- **Mapping field** (`init_party`): Not included in the challenge, but tampering is detected during handshake. This field maps `init_vs`/`counter_vs` to parties A/B. If tampered, the VS mapping becomes incorrect, causing handshake proof verification to fail (the counterparty's HP will use the wrong VS).
 
-**Result:** Modifying any field in the token — whether data or signature — will be detected and rejected.
+**Result:** Modifying any field in the token is detected — challenge-covered fields via MAC verification, other fields via handshake proof verification.
 
 **Token Creation Flow:**
 ```mermaid
 sequenceDiagram
     participant Alice
     participant Bob
-    Note over Alice,Bob: 1. Exchange Contact Cards
+    Note over Alice,Bob: 1. Exchange Contact Cards + Verify Fingerprints
     Alice->>Bob: Alice's Contact Card (id + cpk)
     Bob->>Alice: Bob's Contact Card (id + cpk)
+    Note over Alice,Bob: Out-of-band fingerprint verification (phone, in-person)
     Note over Alice: 2. Alice creates pending token
+    Alice->>Alice: Passkey auth → derive HMAC key from PRF
     Alice->>Alice: Sort IDs lexicographically
     Alice->>Alice: Compute challenge = SHA256(a_id||a_cpk||b_id||b_cpk||iat||comment)
-    Alice->>Alice: WebAuthn sign challenge
-    Alice->>Bob: Pending token (init signature only)
+    Alice->>Alice: HMAC-SHA256 sign challenge
+    Alice->>Bob: Pending token (init_sig only)
     Note over Bob: 3. Bob countersigns
-    Bob->>Bob: Verify init signature (try both keys)
-    Bob->>Bob: WebAuthn sign same challenge
+    Bob->>Bob: Passkey auth → derive HMAC key from PRF
+    Bob->>Bob: HMAC-SHA256 sign same challenge
     Bob->>Alice: Complete token (both signatures)
     Note over Alice,Bob: 4. Both use same token for transfers
 ```
 
+**Fingerprint Verification Details:**
+
+The out-of-band fingerprint verification in step 1 is the primary trust anchor for cross-user passkey mode. This section details the fingerprint format, exchange methods, and verification requirements.
+
+*Fingerprint Format:*
+- **Length**: 16 uppercase hexadecimal characters (64 bits)
+- **Derivation**: First 8 bytes of SHA-256 hash of the public ID
+- **Display format**: Hyphenated groups for readability: `XXXX-XXXX-XXXX-XXXX` (e.g., `A1B2-C3D4-E5F6-7890`)
+- **Collision resistance**: 64 bits provides ~2^32 resistance to birthday attacks, sufficient for personal contact verification
+
+*Supported Exchange Methods:*
+| Method | Description | Best For |
+|--------|-------------|----------|
+| **Verbal comparison** | Read fingerprint aloud over phone/video call | Remote contacts with voice channel |
+| **QR code scan** | Scan contact card QR code (contains id + cpk) | In-person exchange |
+| **Copy/paste** | Copy contact card JSON and send via secure channel | Existing encrypted chat (Signal, iMessage) |
+
+*Verification Requirements:*
+- **Not mandatory for functionality**: The token creation flow works without fingerprint verification. Verification is a security best practice, not a technical requirement.
+- **When verification matters**: Fingerprint verification is critical for **cross-user mode** (different passkeys) but not applicable to **self-transfer mode** (same passkey synced via password manager, where both parties are you).
+- **No enforcement**: The UI does not block or prompt for explicit fingerprint confirmation before proceeding
+- **User responsibility**: Verification is manual and relies on user diligence
+- **Current UX behavior**:
+  - Contact cards and fingerprints are displayed in the UI (`passkey.tsx`)
+  - Warning banner shown: "⚠ Unverified fingerprints (will be verified via handshake proof)"
+  - Users can proceed with token creation at any time
+- **Risk of skipping verification (cross-user only)**: If fingerprints are not verified and an attacker substitutes their contact card (MITM during exchange), the attacker can create a valid token and impersonate the intended party. Handshake Proofs (HP) detect impersonation with *stolen* tokens but cannot detect MITM during initial contact exchange. This risk does not apply to self-transfer mode since there is no counterparty to impersonate—both sender and receiver are the same person using the same synced passkey.
+
+*Implementation References:*
+| Function | File | Description |
+|----------|------|-------------|
+| `publicKeyToFingerprint()` | `src/lib/crypto/ecdh.ts:26-34` | SHA-256 hash → first 8 bytes → hex |
+| `formatFingerprint()` | `src/lib/crypto/ecdh.ts:42-55` | Add hyphen separators for display |
+| `getPasskeyIdentity()` | `src/lib/crypto/passkey.ts:188-213` | Returns `publicIdFingerprint` |
+| `parseToken()` | `src/lib/crypto/contact-token.ts:640-720` | Extracts `partyAFingerprint`, `partyBFingerprint` |
+| Contact card display | `src/pages/passkey.tsx:474-545` | UI for contact card + fingerprint |
+| Fingerprint tests | `src/lib/crypto/passkey.test.ts:5-53` | Unit tests for determinism/uniqueness |
+
 **Verification Process:**
-1. Parse token JSON and validate required fields
-2. Verify lexicographic ordering (`a_id < b_id`)
-3. Compute expected challenge from token data
-4. Verify initiator signature (try `a_cpk` then `b_cpk`)
-5. Verify countersigner signature (the other key)
-6. Verify caller is a party to the token (if `myPublicId` provided)
+
+With HMAC signatures, each party can only verify their own signature:
+
+1. **Parse token** (`parseToken()`): Validate JSON structure, field lengths, lexicographic ordering
+2. **Check party membership**: Verify caller's public ID matches either `a_id` or `b_id`
+3. **Verify own signature** (`verifyOwnSignature()`): Requires passkey auth to derive HMAC key, then verify signature matches
+4. **Trust counterparty**: The other party's signature cannot be verified without their passkey. Trust is established via out-of-band fingerprint verification during contact exchange.
 
 **Security Properties:**
 - Both parties must control their passkey to sign
 - Tampering with any field invalidates both signatures
 - Lexicographic ordering prevents ambiguity
 - Same token used by both parties (no separate tokens)
-- **Only the two parties in the token can use it** - `verifyMutualToken()` checks that the caller's public ID matches either `a_id` or `b_id`; third parties are rejected with "You are not a party to this token"
+- **Only the two parties in the token can use it** - `parseToken()` checks that the caller's public ID matches either `a_id` or `b_id`; third parties are rejected with "You are not a party to this token"
 - **Token verified at multiple points:**
-  1. UI validation (send-tab/receive-tab) - immediate feedback when entering token
-  2. Before transfer starts (`use-nostr-send.ts`, `use-nostr-receive.ts`) - verifies own party membership
-  3. During handshake - sender's token verified by receiver, receiver echoes token in ACK, sender verifies counterparty matches
+  1. UI validation (send-tab/receive-tab) - immediate format check when entering token
+  2. Before transfer starts (`use-nostr-send.ts`, `use-nostr-receive.ts`) - verifies party membership
+  3. During handshake - sender's token parsed by receiver, counterparty fingerprint verified against sender's claimed identity
+  4. **Handshake-time authentication** - both parties prove passkey control via ephemeral handshake proofs (see below)
+- **Trust model**: Security relies on out-of-band fingerprint verification during contact exchange, not on verifying the counterparty's signature
+
+#### Handshake-Time Authentication (Impersonation Prevention)
+
+The mutual contact token proves that both parties agreed to communicate, but possession of the token alone does not prove identity. An attacker who obtains a stolen token could impersonate either party. To prevent this, both sender and receiver must prove they control the original passkey used to sign the token during every handshake.
+
+**Verification Secret (VS):**
+
+Each party computes a verification secret when creating/countersigning the token:
+
+```
+VS = HMAC(contact_hmac_key, "verification-secret" || counterparty_cpk)
+```
+
+- `contact_hmac_key`: Non-extractable HMAC key derived from passkey PRF
+- `counterparty_cpk`: The other party's contact public key (32 bytes)
+- The VS is included in the token so the counterparty can verify handshake proofs
+
+The verification secret fields (`init_vs`, `counter_vs`) and initiator tracking (`init_party`) are included in the token format defined above (see `PendingMutualToken` and `MutualContactTokenPayload`).
+
+**Handshake Proof (HP):**
+
+At handshake time, each party computes a proof binding their identity to the session:
+
+```
+HP = HMAC(verification_secret, ephemeral_pub || nonce || counterparty_fingerprint)
+```
+
+- `verification_secret`: Their own VS (derived from their passkey)
+- `ephemeral_pub`: Their ephemeral ECDH public key for this session (65 bytes)
+- `nonce`: The replay protection nonce for this handshake (16 bytes)
+- `counterparty_fingerprint`: The fingerprint of the party they're connecting to
+
+**Handshake Flow:**
+```mermaid
+sequenceDiagram
+    participant Sender
+    participant Receiver
+    Note over Sender: Parse token, get own VS (via init_party mapping)
+    Note over Sender: Compute HP = HMAC(own_vs, epk||nonce||recv_fp)
+    Sender->>Receiver: Handshake Event + HP (ehp tag)
+    Note over Receiver: Parse token, extract Sender's VS via init_party
+    Note over Receiver: Verify Sender's HP using Sender's VS
+    Note over Receiver: Compute own HP = HMAC(own_vs, epk||nonce||sender_fp)
+    Receiver-->>Sender: ACK + HP (ehp tag)
+    Note over Sender: Extract Receiver's VS from token via init_party
+    Note over Sender: Verify Receiver's HP using Receiver's VS
+    Note over Sender,Receiver: Both parties authenticated
+```
+
+**VS Extraction via init_party:**
+
+Each party verifies the counterparty's HP using the counterparty's VS extracted from the token. The `init_party` field ('a' or 'b') determines which VS belongs to which party:
+- If `init_party = 'a'`: Party A was the initiator → `init_vs` = A's VS, `counter_vs` = B's VS
+- If `init_party = 'b'`: Party B was the initiator → `init_vs` = B's VS, `counter_vs` = A's VS
+
+The receiver uses `getCounterpartyVerificationSecret()` to extract the sender's VS, then calls `verifyHandshakeProof(sender_vs, sender_hp, ...)`. The sender does the same to verify the receiver's HP.
+
+**Event Tags:**
+```
+['ehp', handshakeProof]  // Base64-encoded 32-byte HMAC
+```
+
+**Security Properties:**
+- **Stolen token is useless**: Attacker cannot compute valid HP without the passkey-derived HMAC key
+- **Session binding**: HP includes ephemeral key and nonce, preventing replay
+- **Bidirectional**: Both parties prove their identity, not just one
+- **Non-extractable**: VS is computed from non-extractable HMAC key; raw key never exposed
+
+**Implementation:**
+- `computeVerificationSecret()`: Computes VS during token creation
+- `getOwnVerificationSecret()`: Retrieves caller's VS from token
+- `getCounterpartyVerificationSecret()`: Retrieves counterparty's VS from token
+- `computeHandshakeProof()`: Computes HP at handshake time
+- `verifyHandshakeProof()`: Verifies counterparty's HP
 
 **Role in Encryption:**
 - The mutual token is **NOT used for encryption key derivation** - encryption uses ephemeral ECDH session keys (PFS)
@@ -259,14 +393,99 @@ sequenceDiagram
 flowchart TD
     Passkey[Passkey Authentication] --> PRF[WebAuthn PRF Extension]
     PRF --> MasterKey[Master Key HKDF]
+    MasterKey --> PublicId[Public ID<br/>HKDF label: public-id]
+    MasterKey --> ContactHmac[Contact HMAC Key<br/>HKDF deriveKey: contact-hmac-key]
+    MasterKey --> ContactPub[Contact Public Key<br/>HKDF deriveBits: contact-public-key]
     Salt[Random Salt] --> HKDF[HKDF-SHA256]
     MasterKey --> HKDF
     HKDF --> AESKey[AES-256-GCM Key]
 ```
 
+**Non-extractable keys**: Keys marked as non-extractable cannot be exported from the Web Crypto key store, preventing extraction via XSS attacks or memory exfiltration and keeping raw key material confined to the browser's secure runtime.
+
 1. **Master Key**: Single passkey prompt derives HKDF master key via PRF
-2. **Per-Transfer Key**: HKDF with random salt derives unique AES key per transfer
-3. **No PIN Required**: Biometric/device unlock replaces PIN entry
+2. **Public ID**: HKDF with label derives a 32-byte shareable identifier
+3. **Contact HMAC Key**: HKDF `deriveKey()` derives a non-extractable HMAC-SHA256 key for token signing
+4. **Contact Public Key**: HKDF `deriveBits()` derives a 32-byte identifier for identity binding in tokens
+5. **Per-Transfer Key**: HKDF with random salt derives unique AES key per transfer
+6. **No PIN Required**: Biometric/device unlock replaces PIN entry
+
+#### Contact Token Signing: Security Model
+
+**HMAC-SHA256 signatures** are used for contact token signing instead of ECDSA. This provides a significant security improvement:
+
+```
+PRF → HKDF deriveKey() → non-extractable HMAC CryptoKey (never exposed)
+```
+
+**Trust Model: Two Security Layers**
+
+Security relies on two complementary mechanisms:
+
+1. **Out-of-band fingerprint verification** (primary trust anchor): During contact exchange, parties verify each other's fingerprints via a trusted channel (phone call, in-person, etc.). This establishes that "this public ID belongs to my intended contact."
+
+2. **Handshake Proofs (HP)** (mandatory impersonation defense): At every handshake, both parties must prove they control the passkey used to sign the token. This prevents stolen token impersonation - an attacker with a leaked token cannot connect without the passkey.
+
+**Why HMAC instead of ECDSA?**
+
+The choice between ECDSA and HMAC affects **key protection**, not trust establishment:
+
+| Aspect | ECDSA | HMAC |
+|--------|-------|------|
+| Private key in memory | ~μs during derivation | **Never** (non-extractable) |
+| Verify your own MAC/sig | ✅ Yes | ✅ Yes (requires re-auth) |
+| Verify counterparty's MAC/sig | ✅ Yes | ❌ No (don't have their key) |
+| XSS key extraction risk | Possible (timing window) | **None** (Web Crypto enforced) |
+
+**Why losing counterparty signature verification is acceptable:**
+
+With self-signed tokens (no CA), verifying the counterparty's signature only proves internal consistency - "this token was signed by the keypair in the token" (circular). The *actual* trust comes from out-of-band fingerprint verification, not cryptographic signature verification.
+
+| Model | Trust Anchor | What Signature Verification Proves |
+|-------|--------------|-----------------------------------|
+| HTTPS (CA-signed) | Certificate Authority | "A trusted CA vouches for this identity" |
+| HTTPS (self-signed) | Manual pinning | "This cert was signed by itself" (circular) |
+| Our tokens | Out-of-band fingerprint | "This token was signed by the keypair in the token" (circular) |
+
+**ECDSA+HP vs HMAC+HP comparison:**
+
+Both algorithms could support Handshake Proofs. The difference is purely in key protection:
+
+| Scheme | Counterparty sig verification | Private key exposure | HP support |
+|--------|------------------------------|---------------------|------------|
+| ECDSA + HP | ✅ Yes (but meaningless) | Risk: ~μs in JS memory | ✅ Yes |
+| HMAC + HP | ❌ No | **None** (non-extractable) | ✅ Yes |
+
+We chose HMAC because:
+- **Non-extractable keys** eliminate XSS/memory-inspection attacks on signing keys
+- **HP provides impersonation defense** regardless of MAC/signature algorithm
+- **Counterparty verification was never the trust anchor** - fingerprint verification was
+
+**HP is conceptually independent of ECDSA vs HMAC**: The concept of "prove passkey control at handshake time" works with either algorithm. Our implementation reuses the HMAC key infrastructure for computing verification secrets, but this is implementation convenience, not a requirement. For example, HP could be computed as `ECDSA_sign(private_key, epk||nonce||fingerprint)` instead of HMAC—the impersonation defense would be identical; only key-extractability differs.
+
+**Operational implications of "Verify without auth: No"**:
+
+The requirement to authenticate for verification has important operational consequences:
+
+| Aspect | Implication |
+|--------|-------------|
+| When is auth required? | **Every handshake** - both parties must compute handshake proofs (HP) that require deriving their HMAC key via passkey authentication |
+| Offline token validation | Not possible - cannot verify token validity without passkey access |
+| Passkey loss | Token becomes unusable - cannot derive HMAC key to compute handshake proofs |
+
+**Recovery path if passkey is lost:**
+
+Passkeys in this application are intentionally **disposable** - they bind to contact tokens, not to persistent identity:
+
+1. **Generate new passkey** at `/passkey`
+2. **Re-exchange contact cards** with counterparty (new public ID, new cpk)
+3. **Create new mutual contact token** with fresh signatures
+4. **Old tokens are abandoned** - they cannot be used without the original passkey
+
+This design prioritizes security (non-extractable keys) over convenience (offline verification). The trade-off is acceptable because:
+- Contact token creation is a one-time setup cost per relationship
+- Passkey loss is an exceptional event, not routine operation
+- No "recovery phrase" or key escrow is needed - just redo the exchange
 
 #### Mutual Trust Key Derivation (Non-Extractable Keys)
 
@@ -291,7 +510,7 @@ flowchart TD
 
 #### Perfect Forward Secrecy (PFS)
 
-Passkey mutual trust mode provides **Perfect Forward Secrecy** via ephemeral session keys, similar to TLS/HTTPS ECDHE. There are two flows depending on whether sender and receiver share the same passkey:
+Passkey mutual trust mode provides **Perfect Forward Secrecy** via ephemeral session keys, similar to TLS/HTTPS ECDHE. There are two flows depending on whether sender and receiver share the same passkey. For details on RPKC (receiver public key commitment), key confirmation, and nonce handling, see [Mutual Trust Security Enhancements](#mutual-trust-security-enhancements) below.
 
 ##### Self-Transfer Flow (Same Passkey - Optimized Single Round Trip)
 
@@ -474,6 +693,7 @@ Security-critical functions validate inputs before cryptographic operations:
 | Perfect Forward Secrecy | No | Yes (ephemeral ECDH) | Yes (ephemeral ECDH) |
 | Round Trips | 1 | 1 | 2 (handshake + payload) |
 | Party Membership Check | N/A | N/A | Yes (during handshake) |
+| Handshake Authentication | N/A | N/A | Yes (bidirectional HP) |
 
 ### User Interface Architecture
 

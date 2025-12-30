@@ -155,9 +155,12 @@ Alice (Initiator)                    Bob (Countersigner)
 ```
 
 **Security properties:**
-- Both parties sign the same challenge (tamper-proof)
-- Token contains both parties' public IDs and credential keys
-- WebAuthn signatures prove each party controls their passkey
+- Both parties compute HMAC-SHA256 MACs over the same challenge (tamper-proof)
+- Each party's HMAC key is derived from their passkey PRF (non-extractable, protected by passkey authentication)
+- Token contains both parties' public IDs, contact public keys, and verification secrets
+- Each party can verify their own MAC by re-authenticating to derive their HMAC key
+- Counterparty's MAC cannot be verified cryptographically (no access to their key) - trust is established via out-of-band fingerprint verification during contact exchange
+- **Handshake Proofs (HP)** provide runtime authentication: both parties prove passkey control at every handshake, preventing impersonation with stolen tokens
 - **Only the two parties in the token can use it** - party membership is cryptographically verified during the handshake; a third party cannot use someone else's token
 
 ### Cloud Storage Redundancy

@@ -4,13 +4,40 @@
 
 ### better issued date/expiration date logic for mutual tokens for request and final tokens
 
-### add options to scan qr codes of tokens
+### Include expiration date for the final token
 
 ### Improved Error Handling
 Better user feedback for network errors, relay failures, and WebRTC connection issues.
 
 ## Backlog (Future Considerations)
 - Better website UI/UX
+
+### Encrypted Mutual Contact Tokens
+Encrypt the mutual contact token payload so only the two parties can read it:
+
+**Current state:**
+- Token is plaintext JSON with both parties' public IDs, contact keys, and HMAC signatures
+- Anyone who intercepts the token can see who the parties are (via fingerprints)
+
+**Proposed improvement:**
+- Derive an AES-256-GCM encryption key from both parties' HMAC keys (or a shared HKDF derivation)
+- Encrypt the token payload; only parties with their HMAC key can decrypt
+- Token becomes opaque to third parties
+
+**Benefits:**
+- Privacy: Intercepted tokens reveal nothing about the parties
+- Metadata protection: Even party fingerprints are hidden
+- Same security model: Still requires out-of-band fingerprint verification
+
+**Implementation approach:**
+- During token creation, initiator encrypts with key derived from their HMAC key
+- Countersigner decrypts (derives same key from their HMAC key since challenge includes both cpks)
+- Or use a simpler scheme: encrypt with random key, include key encrypted to each party's cpk
+
+**Trade-offs:**
+- More complex token format
+- Both parties must authenticate to read token contents (already required for signing)
+- Slightly larger token size due to encryption overhead
 
 ### Asymmetric Encryption with Fixed Public Key
 Add an alternative flow that favors convenience over ephemeral security:

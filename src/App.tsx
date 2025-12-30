@@ -5,6 +5,7 @@ import { SendPage } from '@/pages/send'
 import { ReceivePage } from '@/pages/receive'
 import { AboutPage } from '@/pages/about'
 import { PasskeyPage } from '@/pages/passkey'
+import { PasskeyVerifyTokenPage } from '@/pages/passkey-verify-token'
 import { NotFoundPage } from '@/pages/not-found'
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
           <Route path="/" element={<SendPage />} />
           <Route path="/receive" element={<ReceivePage />} />
           <Route path="/passkey" element={<PasskeyPage />} />
+          <Route path="/passkey/verify-token" element={<PasskeyVerifyTokenPage />} />
           <Route path="/about" element={<AboutPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
