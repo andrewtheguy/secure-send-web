@@ -16,7 +16,7 @@ import {
 const PASSKEY_MASTER_LABEL = 'secure-send-passkey-master-v1'
 const PASSKEY_PUBLIC_ID_LABEL = 'secure-send-passkey-public-id-v1'
 const SESSION_BINDING_LABEL = 'secure-send-session-bind-v1'
-const HMAC_KEY_LABEL = 'secure-send-peer-hmac-key-v1' // Label kept for key derivation compatibility
+const HMAC_KEY_LABEL = 'secure-send-hmac-key-v1'
 const PEER_PUBLIC_KEY_LABEL = 'secure-send-peer-public-key-v1'
 
 /**
