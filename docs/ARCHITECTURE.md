@@ -412,56 +412,26 @@ flowchart TD
 
 #### Contact Token Signing: Security Model
 
-**HMAC-SHA256 signatures** are used for contact token signing instead of ECDSA. This provides a significant security improvement:
+**HMAC-SHA256 signatures** are used for contact token signing. This choice prioritizes **key protection** by keeping all signing keys as **non-extractable CryptoKeys** derived directly from the WebAuthn PRF output.
 
-```
-PRF → HKDF deriveKey() → non-extractable HMAC CryptoKey (never exposed)
-```
+**Trust Model:**
+Security relies on two layers:
+1. **Out-of-band fingerprint verification** provides the root of trust (binding Public ID to human).
+2. **Handshake Proofs (HP)** prevent impersonation by requiring active passkey control during every connection.
 
-**Trust Model: Two Security Layers**
+**Comparison with ECDSA:**
 
-Security relies on two complementary mechanisms:
+| Aspect | ECDSA | HMAC (Selected) |
+|--------|-------|-----------------|
+| **Key Protection** | Private key often momentarily exposed in memory | **Never exposed** (CryptoKey enforced) |
+| **XSS Resistance** | Vulnerable during key derivation window | **Immune** (keys managed by browser) |
+| **Verification** | Publicly verifiable by anyone | Verifiable only by the signer (requires auth) |
 
-1. **Out-of-band fingerprint verification** (primary trust anchor): During contact exchange, parties verify each other's fingerprints via a trusted channel (phone call, in-person, etc.). This establishes that "this public ID belongs to my intended contact."
+**Rationale:**
+While ECDSA allows verifying the counterparty's signature, this adds little security value in a self-signed model where trust ultimately comes from fingerprints. By choosing HMAC, we eliminate the risk of private key exfiltration via XSS/memory-scanning. The inability to cryptographically verify the counterparty's signature is mitigated by **Handshake Proofs**, which mandate that both parties prove identity at connection time.
 
-2. **Handshake Proofs (HP)** (mandatory impersonation defense): At every handshake, both parties must prove they control the passkey used to sign the token. This prevents stolen token impersonation - an attacker with a leaked token cannot connect without the passkey.
-
-**Why HMAC instead of ECDSA?**
-
-The choice between ECDSA and HMAC affects **key protection**, not trust establishment:
-
-| Aspect | ECDSA | HMAC |
-|--------|-------|------|
-| Private key in memory | ~μs during derivation | **Never** (non-extractable) |
-| Verify your own MAC/sig | ✅ Yes | ✅ Yes (requires re-auth) |
-| Verify counterparty's MAC/sig | ✅ Yes | ❌ No (don't have their key) |
-| XSS key extraction risk | Possible (timing window) | **None** (Web Crypto enforced) |
-
-**Why losing counterparty signature verification is acceptable:**
-
-With self-signed tokens (no CA), verifying the counterparty's signature only proves internal consistency - "this token was signed by the keypair in the token" (circular). The *actual* trust comes from out-of-band fingerprint verification, not cryptographic signature verification.
-
-| Model | Trust Anchor | What Signature Verification Proves |
-|-------|--------------|-----------------------------------|
-| HTTPS (CA-signed) | Certificate Authority | "A trusted CA vouches for this identity" |
-| HTTPS (self-signed) | Manual pinning | "This cert was signed by itself" (circular) |
-| Our tokens | Out-of-band fingerprint | "This token was signed by the keypair in the token" (circular) |
-
-**ECDSA+HP vs HMAC+HP comparison:**
-
-Both algorithms could support Handshake Proofs. The difference is purely in key protection:
-
-| Scheme | Counterparty sig verification | Private key exposure | HP support |
-|--------|------------------------------|---------------------|------------|
-| ECDSA + HP | ✅ Yes (but meaningless) | Risk: ~μs in JS memory | ✅ Yes |
-| HMAC + HP | ❌ No | **None** (non-extractable) | ✅ Yes |
-
-We chose HMAC because:
-- **Non-extractable keys** eliminate XSS/memory-inspection attacks on signing keys
-- **HP provides impersonation defense** regardless of MAC/signature algorithm
-- **Counterparty verification was never the trust anchor** - fingerprint verification was
-
-**HP is conceptually independent of ECDSA vs HMAC**: The concept of "prove passkey control at handshake time" works with either algorithm. Our implementation reuses the HMAC key infrastructure for computing verification secrets, but this is implementation convenience, not a requirement. For example, HP could be computed as `ECDSA_sign(private_key, epk||nonce||fingerprint)` instead of HMAC—the impersonation defense would be identical; only key-extractability differs.
+**HP Independence**:
+The concept of "proving passkey control at handshake time" is algorithm-independent. We implement it using the existing non-extractable HMAC infrastructure for efficiency, but the security guarantee (impersonation defense) would be identical if implemented with ECDSA signatures.
 
 **Operational implications of "Verify without auth: No"**:
 
