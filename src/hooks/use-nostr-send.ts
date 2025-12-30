@@ -52,7 +52,7 @@ import {
   constantTimeEqual,
 } from '@/lib/crypto/ecdh'
 import { uint8ArrayToBase64 } from '@/lib/nostr/events'
-import { verifyMutualToken, getCounterpartyFromToken } from '@/lib/crypto/contact-token'
+import { parseToken, getCounterpartyFromParsedToken } from '@/lib/crypto/contact-token'
 
 export interface UseNostrSendReturn {
   state: TransferState
@@ -183,22 +183,21 @@ export function useNostrSend(): UseNostrSendReturn {
             senderEphemeral = ephemeral
             identitySharedSecretKey = sharedSecret
 
-            // Determine receiver public key: use own identity for self-transfer, otherwise verify token
+            // Determine receiver public key: use own identity for self-transfer, otherwise parse token
             let receiverPublicKeyBytes: Uint8Array
             if (options.selfTransfer) {
               receiverPublicKeyBytes = ephemeral.identityPublicKeyBytes
             } else {
-              // Verify mutual contact token (both signatures verified)
-              // This proves both parties signed the token with their passkey credentials
-              const verifiedToken = await verifyMutualToken(
+              // Parse mutual contact token and verify we're a party
+              // NOTE: With HMAC signatures, we cannot verify the other party's signature
+              // Trust is established via out-of-band fingerprint verification
+              const parsedToken = await parseToken(
                 options.receiverContactToken!,
                 ephemeral.identityPublicKeyBytes // Verify we're a party to this token
               )
 
-              // SECURITY: The mutual token proves both parties agreed to communicate.
-              // verifyMutualToken already verified we're a party to the token.
-              // Now extract the counterparty (receiver) from the token.
-              const counterparty = getCounterpartyFromToken(verifiedToken, ephemeral.identityPublicKeyBytes)
+              // Extract the counterparty (receiver) from the token
+              const counterparty = getCounterpartyFromParsedToken(parsedToken, ephemeral.identityPublicKeyBytes)
               receiverPublicKeyBytes = counterparty.publicId
             }
 
@@ -429,13 +428,14 @@ export function useNostrSend(): UseNostrSendReturn {
             if (!receiverHint) {
               throw new Error('Security check failed: receiver did not provide identity hint')
             }
-            // Verify the mutual token: both signatures valid, and we're both parties
-            const verifiedReceiverToken = await verifyMutualToken(
+            // Parse the mutual token and verify we're a party
+            // NOTE: With HMAC signatures, we cannot verify the other party's signature
+            const parsedReceiverToken = await parseToken(
               receiverContactToken,
               senderEphemeral.identityPublicKeyBytes // Verify sender is a party
             )
-            // Extract the counterparty (receiver) from the verified token
-            const counterparty = getCounterpartyFromToken(verifiedReceiverToken, senderEphemeral.identityPublicKeyBytes)
+            // Extract the counterparty (receiver) from the parsed token
+            const counterparty = getCounterpartyFromParsedToken(parsedReceiverToken, senderEphemeral.identityPublicKeyBytes)
             // Verify the counterparty's fingerprint matches the receiver's identity hint
             // This ensures the receiver is actually the other party to this token
             if (counterparty.fingerprint !== receiverHint) {

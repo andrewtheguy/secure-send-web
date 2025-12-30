@@ -43,10 +43,10 @@ type PageState = 'idle' | 'checking' | 'creating' | 'getting_key' | 'binding_con
 // Active mode for "Already Have a Passkey?" section
 type ActiveMode = 'idle' | 'signer' | 'initiator'
 
-// Contact card format: JSON with id (public ID) and cpk (credential public key)
+// Contact card format: JSON with id (public ID) and cpk (contact public key)
 interface ContactCard {
   id: string // base64 public ID (32 bytes)
-  cpk: string // base64 credential public key (65 bytes)
+  cpk: string // base64 contact public key (32 bytes, HKDF-derived)
 }
 
 // Helper to convert Uint8Array to base64
@@ -361,8 +361,8 @@ export function PasskeyPage() {
           throw new ValidationError('Invalid contact public ID: expected 32 bytes')
         }
         const cpkBytes = base64ToUint8Array(contactCardParsed.cpk)
-        if (cpkBytes.length !== 65 || cpkBytes[0] !== 0x04) {
-          throw new ValidationError('Invalid contact public key: expected 65-byte P-256')
+        if (cpkBytes.length !== 32) {
+          throw new ValidationError('Invalid contact public key: expected 32 bytes')
         }
       } catch (e) {
         if (e instanceof ValidationError) {
@@ -371,19 +371,19 @@ export function PasskeyPage() {
         throw new ValidationError('Invalid base64 encoding in contact card')
       }
 
-      // Authenticate fresh to get signing key (key only exists during this operation)
+      // Authenticate fresh to get HMAC key (key only exists during this operation)
       const identity = await getPasskeyIdentity()
 
-      // Create pending mutual token using freshly derived signing key
+      // Create pending mutual token using freshly derived HMAC key
       const token = await createMutualTokenInit(
-        identity.contactSigningKey,
+        identity.contactHmacKey,
         identity.contactPublicKey,
         uint8ArrayToBase64(identity.publicIdBytes),
         contactCardParsed.id,
         contactCardParsed.cpk,
         tokenComment.trim() || undefined
       )
-      // contactSigningKey goes out of scope here - no longer in memory
+      // contactHmacKey goes out of scope here - no longer in memory
 
       setOutputToken(token)
       setContactInput('')
@@ -411,16 +411,16 @@ export function PasskeyPage() {
         throw new Error('Invalid token request format')
       }
 
-      // Authenticate fresh to get signing key (key only exists during this operation)
+      // Authenticate fresh to get HMAC key (key only exists during this operation)
       const identity = await getPasskeyIdentity()
 
       const token = await countersignMutualToken(
         trimmed,
-        identity.contactSigningKey,
+        identity.contactHmacKey,
         identity.contactPublicKey,
         uint8ArrayToBase64(identity.publicIdBytes)
       )
-      // contactSigningKey goes out of scope here - no longer in memory
+      // contactHmacKey goes out of scope here - no longer in memory
 
       setOutputToken(token)
       setContactInput('')

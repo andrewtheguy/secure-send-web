@@ -6,7 +6,6 @@
  * Supports cross-device derivation when passkeys are synced via 1Password/iCloud/Google.
  */
 
-import { p256 } from '@noble/curves/nist.js'
 import {
   publicKeyToFingerprint,
   importECDHPublicKey,
@@ -17,7 +16,8 @@ import {
 const PASSKEY_MASTER_LABEL = 'secure-send-passkey-master-v1'
 const PASSKEY_PUBLIC_ID_LABEL = 'secure-send-passkey-public-id-v1'
 const SESSION_BINDING_LABEL = 'secure-send-session-bind-v1'
-const CONTACT_SIGNING_KEY_LABEL = 'secure-send-contact-signing-key-v1'
+const CONTACT_HMAC_KEY_LABEL = 'secure-send-contact-hmac-key-v1'
+const CONTACT_PUBLIC_KEY_LABEL = 'secure-send-contact-public-key-v1'
 
 /**
  * Derive a stable, shareable public identifier from the passkey master key.
@@ -42,27 +42,47 @@ export async function derivePasskeyPublicId(masterKey: CryptoKey): Promise<Uint8
 }
 
 /**
- * Derive a P-256 ECDSA signing key pair from the passkey master key.
- * Used for signing contact tokens without requiring WebAuthn assertions.
- *
- * The private key is imported as non-extractable; only the public key can be exported.
- * The derived key pair is deterministic - same passkey always produces same key pair.
+ * Derive an HMAC-SHA256 key from the passkey master key for signing contact tokens.
  *
  * SECURITY:
- * - Private key bytes exist in memory momentarily during derivation, then zeroed
- * - Imported CryptoKey is non-extractable (can sign, but raw "d" cannot be read)
- * - Public key is safe to share (included in contact cards)
+ * - No raw key material is ever exposed to JavaScript
+ * - Key is derived directly via deriveKey() - fully non-extractable
+ * - Can sign and verify, but raw key bytes cannot be read
  *
  * @param masterKey - HKDF master key from passkey PRF
- * @returns Object with non-extractable private key and 65-byte uncompressed public key
+ * @returns Non-extractable HMAC CryptoKey for signing/verification
  */
-export async function deriveContactSigningKeyPair(masterKey: CryptoKey): Promise<{
-  privateKey: CryptoKey // non-extractable, for signing
-  publicKey: Uint8Array // 65 bytes uncompressed P-256 (0x04 || x || y)
-}> {
-  // Derive 32 bytes as the private key scalar
-  const info = new TextEncoder().encode(CONTACT_SIGNING_KEY_LABEL)
-  const privateKeyBits = await crypto.subtle.deriveBits(
+export async function deriveContactHmacKey(masterKey: CryptoKey): Promise<CryptoKey> {
+  const info = new TextEncoder().encode(CONTACT_HMAC_KEY_LABEL)
+  return crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: new Uint8Array(32), // Empty salt - label provides domain separation
+      info,
+    },
+    masterKey,
+    { name: 'HMAC', hash: 'SHA-256', length: 256 },
+    false, // non-extractable per CLAUDE.md
+    ['sign', 'verify']
+  )
+}
+
+/**
+ * Derive a contact public key (32 bytes) from the passkey master key.
+ * This is NOT an EC public key - it's a direct HKDF derivation used for identity binding.
+ *
+ * SECURITY:
+ * - No private key material involved (unlike EC key derivation)
+ * - This IS the public value - safe to share in contact cards
+ * - Used for identity binding during file transfers
+ *
+ * @param masterKey - HKDF master key from passkey PRF
+ * @returns 32-byte contact public key for identity binding
+ */
+export async function deriveContactPublicKey(masterKey: CryptoKey): Promise<Uint8Array> {
+  const info = new TextEncoder().encode(CONTACT_PUBLIC_KEY_LABEL)
+  const bits = await crypto.subtle.deriveBits(
     {
       name: 'HKDF',
       hash: 'SHA-256',
@@ -72,48 +92,7 @@ export async function deriveContactSigningKeyPair(masterKey: CryptoKey): Promise
     masterKey,
     256 // 32 bytes
   )
-  const privateKeyBytes = new Uint8Array(privateKeyBits)
-
-  // Use @noble/curves to compute public key point from private scalar
-  // This is required because Web Crypto can't derive public key from just "d"
-  const publicKeyPoint = p256.getPublicKey(privateKeyBytes, false) // uncompressed
-
-  // Extract x and y coordinates (skip the 0x04 prefix)
-  const x = publicKeyPoint.slice(1, 33)
-  const y = publicKeyPoint.slice(33, 65)
-
-  // Create JWK for import
-  // Base64url encode the components (no padding)
-  const toBase64url = (bytes: Uint8Array) =>
-    btoa(String.fromCharCode(...bytes))
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '')
-
-  const jwk: JsonWebKey = {
-    kty: 'EC',
-    crv: 'P-256',
-    x: toBase64url(x),
-    y: toBase64url(y),
-    d: toBase64url(privateKeyBytes),
-  }
-
-  // Import as non-extractable ECDSA private key
-  const privateKey = await crypto.subtle.importKey(
-    'jwk',
-    jwk,
-    { name: 'ECDSA', namedCurve: 'P-256' },
-    false, // non-extractable per CLAUDE.md
-    ['sign']
-  )
-
-  // Best-effort cleanup of private key bytes
-  privateKeyBytes.fill(0)
-
-  return {
-    privateKey,
-    publicKey: publicKeyPoint,
-  }
+  return new Uint8Array(bits)
 }
 
 /**
@@ -196,8 +175,12 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<{
  * Single call: authenticate with passkey and derive public identifier + fingerprint.
  * This is the main entry point for passkey identity info.
  *
- * Also derives a contact signing key pair for mutual token creation.
- * The signing key is deterministic - same passkey always produces same key.
+ * Also derives a contact HMAC key and public key for mutual token creation.
+ * Both are deterministic - same passkey always produces same keys.
+ *
+ * SECURITY:
+ * - HMAC key is fully non-extractable (no raw bytes ever exposed)
+ * - Contact public key is a 32-byte HKDF derivation (no EC private key involved)
  *
  * @param credentialId - Optional base64url credential ID to use specific passkey (skips picker)
  * @returns Identity with prfSupported flag (true if we got here, throws otherwise), and credentialId used
@@ -207,16 +190,17 @@ export async function getPasskeyIdentity(credentialId?: string): Promise<{
   publicIdFingerprint: string
   prfSupported: boolean
   credentialId: string
-  contactPublicKey: Uint8Array // 65 bytes uncompressed P-256 for contact card
-  contactSigningKey: CryptoKey // non-extractable private key for signing tokens
+  contactPublicKey: Uint8Array // 32 bytes for contact card and identity binding
+  contactHmacKey: CryptoKey // non-extractable HMAC key for signing tokens
 }> {
   const { masterKey, credentialId: usedCredentialId } = await getPasskeyMasterKey(credentialId)
   const publicIdBytes = await derivePasskeyPublicId(masterKey)
   const publicIdFingerprint = await publicKeyToFingerprint(publicIdBytes)
 
-  // Derive contact signing key pair from same master key
-  const { privateKey: contactSigningKey, publicKey: contactPublicKey } =
-    await deriveContactSigningKeyPair(masterKey)
+  // Derive contact keys from same master key
+  // SECURITY: HMAC key never exposed as raw bytes, contact public key is the public value itself
+  const contactHmacKey = await deriveContactHmacKey(masterKey)
+  const contactPublicKey = await deriveContactPublicKey(masterKey)
 
   // If we got here, PRF worked (getPasskeyMasterKey throws if PRF fails)
   return {
@@ -225,7 +209,7 @@ export async function getPasskeyIdentity(credentialId?: string): Promise<{
     prfSupported: true,
     credentialId: usedCredentialId,
     contactPublicKey,
-    contactSigningKey,
+    contactHmacKey,
   }
 }
 

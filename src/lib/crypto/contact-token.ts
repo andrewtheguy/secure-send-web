@@ -2,18 +2,22 @@
  * Mutual Contact Token - Countersigned tokens for bidirectional trust
  *
  * This module provides functions to create and verify mutual contact tokens.
- * A mutual token binds two parties together using ECDSA P-256 signatures
+ * A mutual token binds two parties together using HMAC-SHA256 signatures
  * from both parties, proving mutual consent to communicate.
  *
  * Token flow:
  * 1. Party A creates a token request with their signature (createMutualTokenInit)
- * 2. Party B verifies and signs the request (countersignMutualToken)
+ * 2. Party B signs the request (countersignMutualToken) - cannot verify A's signature
  * 3. Both parties use the same mutual token for send/receive
+ * 4. Each party can verify their OWN signature by authenticating (verifyOwnSignature)
  *
- * Token format: Raw JSON object with dual ECDSA signatures
+ * Token format: Raw JSON object with dual HMAC signatures
  *
- * SECURITY: Signing keys are derived from passkey PRF and are non-extractable.
- * Both signatures must be valid for the token to verify.
+ * SECURITY:
+ * - Signing keys are HMAC keys derived from passkey PRF - fully non-extractable
+ * - No private key bytes are ever exposed to JavaScript
+ * - Each party can only verify their own signature (requires passkey auth)
+ * - The other party's signature cannot be verified without their passkey
  */
 
 import { publicKeyToFingerprint, constantTimeEqualBytes } from './ecdh'
@@ -27,15 +31,15 @@ const MAX_COMMENT_BYTES = 256
 export interface PendingTokenRequest {
   /** Party A's public ID (base64, 32 bytes) - lexicographically smaller */
   a_id: string
-  /** Party A's contact public key (base64, 65 bytes P-256) - derived from PRF */
+  /** Party A's contact public key (base64, 32 bytes) - derived from PRF */
   a_cpk: string
   /** Party B's public ID (base64, 32 bytes) - lexicographically larger */
   b_id: string
-  /** Party B's contact public key (base64, 65 bytes P-256) - derived from PRF */
+  /** Party B's contact public key (base64, 32 bytes) - derived from PRF */
   b_cpk: string
   /** Created at timestamp (Unix seconds) - set by initiator */
   iat: number
-  /** Initiator's ECDSA signature (base64, raw 64 bytes r||s) */
+  /** Initiator's HMAC-SHA256 signature (base64, 32 bytes) */
   init_sig: string
   /** Optional comment (max 256 bytes) */
   comment?: string
@@ -45,28 +49,50 @@ export interface PendingTokenRequest {
  * Complete mutual token - both parties have signed
  */
 export interface MutualContactTokenPayload extends PendingTokenRequest {
-  /** Countersigner's ECDSA signature (base64, raw 64 bytes r||s) */
+  /** Countersigner's HMAC-SHA256 signature (base64, 32 bytes) */
   counter_sig: string
 }
 
 /**
- * Result of verifying a mutual token
+ * Result of parsing a mutual token (without signature verification)
  */
-export interface VerifiedMutualToken {
+export interface ParsedMutualToken {
   /** Party A's public ID (32 bytes) - lexicographically smaller */
   partyAPublicId: Uint8Array
   /** Party A's fingerprint */
   partyAFingerprint: string
-  /** Party A's contact public key (65 bytes P-256) - derived from PRF */
+  /** Party A's contact public key (32 bytes) - derived from PRF */
   partyAContactKey: Uint8Array
 
   /** Party B's public ID (32 bytes) - lexicographically larger */
   partyBPublicId: Uint8Array
   /** Party B's fingerprint */
   partyBFingerprint: string
-  /** Party B's contact public key (65 bytes P-256) - derived from PRF */
+  /** Party B's contact public key (32 bytes) - derived from PRF */
   partyBContactKey: Uint8Array
 
+  /** Token creation timestamp */
+  issuedAt: Date
+  /** Optional comment */
+  comment?: string
+}
+
+/**
+ * Result of verifying your own signature on a token
+ */
+export interface VerifiedOwnSignature {
+  /** Which party you are */
+  myRole: 'A' | 'B'
+  /** Your public ID */
+  myPublicId: Uint8Array
+  /** Your fingerprint */
+  myFingerprint: string
+  /** Counterparty's public ID */
+  counterpartyPublicId: Uint8Array
+  /** Counterparty's fingerprint */
+  counterpartyFingerprint: string
+  /** Counterparty's contact public key (for identity binding) */
+  counterpartyContactKey: Uint8Array
   /** Token creation timestamp */
   issuedAt: Date
   /** Optional comment */
@@ -118,19 +144,19 @@ async function computeMutualChallenge(
   // Encode comment as UTF-8 bytes (empty array if no comment)
   const commentBytes = comment ? new TextEncoder().encode(comment) : new Uint8Array(0)
 
-  // Total: 32 + 65 + 32 + 65 + 8 + commentBytes.length
-  const baseLength = 202
+  // Total: 32 + 32 + 32 + 32 + 8 + commentBytes.length = 136 + comment
+  const baseLength = 136
   const data = new Uint8Array(baseLength + commentBytes.length)
   let offset = 0
 
   data.set(aId, offset)
   offset += 32
   data.set(aCpk, offset)
-  offset += 65
+  offset += 32
   data.set(bId, offset)
   offset += 32
   data.set(bCpk, offset)
-  offset += 65
+  offset += 32
 
   const iatBytes = new DataView(new ArrayBuffer(8))
   iatBytes.setBigUint64(0, BigInt(iat), false) // big-endian
@@ -201,8 +227,8 @@ export function isMutualTokenFormat(input: string): boolean {
  * The initiator must know the counterparty's public ID and contact public key.
  * The token will contain both parties' identity information with the initiator's signature.
  *
- * @param contactSigningKey - Initiator's non-extractable ECDSA signing key (from PRF)
- * @param contactPublicKey - Initiator's contact public key (65 bytes, derived from PRF)
+ * @param contactHmacKey - Initiator's non-extractable HMAC signing key (from PRF)
+ * @param contactPublicKey - Initiator's contact public key (32 bytes, derived from PRF)
  * @param initiatorPublicIdBase64 - Initiator's passkey public ID (base64)
  * @param counterpartyPublicIdBase64 - Counterparty's public ID (base64)
  * @param counterpartyCpkBase64 - Counterparty's contact public key (base64)
@@ -210,7 +236,7 @@ export function isMutualTokenFormat(input: string): boolean {
  * @returns Token request (JSON string) to send to counterparty for signing
  */
 export async function createMutualTokenInit(
-  contactSigningKey: CryptoKey,
+  contactHmacKey: CryptoKey,
   contactPublicKey: Uint8Array,
   initiatorPublicIdBase64: string,
   counterpartyPublicIdBase64: string,
@@ -229,15 +255,15 @@ export async function createMutualTokenInit(
     throw new Error('Invalid counterparty public ID: expected 32 bytes')
   }
 
-  // Validate initiator's contact public key
-  if (contactPublicKey.length !== 65 || contactPublicKey[0] !== 0x04) {
-    throw new Error('Invalid initiator contact public key: expected 65-byte uncompressed P-256')
+  // Validate initiator's contact public key (now 32 bytes, not 65)
+  if (contactPublicKey.length !== 32) {
+    throw new Error('Invalid initiator contact public key: expected 32 bytes')
   }
 
   // Decode and validate counterparty's contact public key
   const counterpartyCpk = base64ToUint8Array(counterpartyCpkBase64)
-  if (counterpartyCpk.length !== 65 || counterpartyCpk[0] !== 0x04) {
-    throw new Error('Invalid counterparty contact public key: expected 65-byte uncompressed P-256')
+  if (counterpartyCpk.length !== 32) {
+    throw new Error('Invalid counterparty contact public key: expected 32 bytes')
   }
 
   // Determine lexicographic ordering
@@ -276,11 +302,11 @@ export async function createMutualTokenInit(
   // Compute challenge (includes comment if present)
   const challenge = await computeMutualChallenge(aId, aCpk, bId, bCpk, iat, trimmedComment)
 
-  // Sign with ECDSA P-256 (raw 64-byte r||s format)
+  // Sign with HMAC-SHA256 (32 bytes)
   const signatureBuffer = await crypto.subtle.sign(
-    { name: 'ECDSA', hash: 'SHA-256' },
-    contactSigningKey,
-    challenge as BufferSource
+    'HMAC',
+    contactHmacKey,
+    challenge as Uint8Array<ArrayBuffer>
   )
   const signature = new Uint8Array(signatureBuffer)
 
@@ -304,18 +330,18 @@ export async function createMutualTokenInit(
 /**
  * Sign a token request to create the final mutual token.
  *
- * The signer verifies the initiator's signature and adds their own.
- * The resulting mutual token can be used by both parties.
+ * NOTE: With HMAC, we CANNOT verify the initiator's signature (we don't have their key).
+ * We trust that the token came from the intended party via out-of-band verification.
  *
  * @param tokenRequest - The token request JSON from initiator
- * @param contactSigningKey - Signer's non-extractable ECDSA signing key (from PRF)
- * @param contactPublicKey - Signer's contact public key (65 bytes, derived from PRF)
+ * @param contactHmacKey - Signer's non-extractable HMAC signing key (from PRF)
+ * @param contactPublicKey - Signer's contact public key (32 bytes, derived from PRF)
  * @param signerPublicIdBase64 - Signer's passkey public ID (base64)
  * @returns Completed mutual token (JSON string)
  */
 export async function countersignMutualToken(
   tokenRequest: string,
-  contactSigningKey: CryptoKey,
+  contactHmacKey: CryptoKey,
   contactPublicKey: Uint8Array,
   signerPublicIdBase64: string
 ): Promise<string> {
@@ -359,8 +385,8 @@ export async function countersignMutualToken(
 
   if (aId.length !== 32) throw new Error('Invalid a_id: expected 32 bytes')
   if (bId.length !== 32) throw new Error('Invalid b_id: expected 32 bytes')
-  if (aCpk.length !== 65 || aCpk[0] !== 0x04) throw new Error('Invalid a_cpk: expected 65-byte P-256')
-  if (bCpk.length !== 65 || bCpk[0] !== 0x04) throw new Error('Invalid b_cpk: expected 65-byte P-256')
+  if (aCpk.length !== 32) throw new Error('Invalid a_cpk: expected 32 bytes')
+  if (bCpk.length !== 32) throw new Error('Invalid b_cpk: expected 32 bytes')
 
   // Verify lexicographic ordering
   if (compareIds(aId, bId) >= 0) {
@@ -374,8 +400,8 @@ export async function countersignMutualToken(
   }
 
   // Validate countersigner's contact public key
-  if (contactPublicKey.length !== 65 || contactPublicKey[0] !== 0x04) {
-    throw new Error('Invalid signer contact public key: expected 65-byte P-256')
+  if (contactPublicKey.length !== 32) {
+    throw new Error('Invalid signer contact public key: expected 32 bytes')
   }
 
   // Determine which party the countersigner is
@@ -392,22 +418,17 @@ export async function countersignMutualToken(
     throw new Error('Your contact public key does not match the token')
   }
 
-  // Determine initiator's contact key (the other party)
-  const initiatorCpk = isPartyA ? bCpk : aCpk
+  // NOTE: We cannot verify the initiator's signature with HMAC (we don't have their key)
+  // Trust is established via out-of-band fingerprint verification
 
-  // Verify initiator's signature first (challenge includes comment if present)
+  // Compute challenge (same for both signatures, includes comment if present)
   const challenge = await computeMutualChallenge(aId, aCpk, bId, bCpk, request.iat, request.comment)
-  await verifyECDSASignature(
-    initiatorCpk,
-    base64ToUint8Array(request.init_sig),
-    challenge
-  )
 
-  // Sign with ECDSA P-256 (raw 64-byte r||s format)
+  // Sign with HMAC-SHA256 (32 bytes)
   const signatureBuffer = await crypto.subtle.sign(
-    { name: 'ECDSA', hash: 'SHA-256' },
-    contactSigningKey,
-    challenge as BufferSource
+    'HMAC',
+    contactHmacKey,
+    challenge as Uint8Array<ArrayBuffer>
   )
   const signature = new Uint8Array(signatureBuffer)
 
@@ -427,55 +448,19 @@ export async function countersignMutualToken(
 }
 
 /**
- * Verify an ECDSA P-256 signature against data.
- * Internal helper used by both verification paths.
+ * Parse a mutual token WITHOUT verifying signatures.
+ * Use this to extract party information for display.
  *
- * @param contactPublicKey - 65-byte uncompressed P-256 public key
- * @param signature - Raw 64-byte ECDSA signature (r||s format)
- * @param data - The data that was signed
- */
-async function verifyECDSASignature(
-  contactPublicKey: Uint8Array,
-  signature: Uint8Array,
-  data: Uint8Array
-): Promise<void> {
-  // Import contact public key for verification
-  const publicKey = await crypto.subtle.importKey(
-    'raw',
-    contactPublicKey as BufferSource,
-    { name: 'ECDSA', namedCurve: 'P-256' },
-    false,
-    ['verify']
-  )
-
-  // Verify ECDSA signature (raw 64-byte r||s format)
-  const valid = await crypto.subtle.verify(
-    { name: 'ECDSA', hash: 'SHA-256' },
-    publicKey,
-    signature as BufferSource,
-    data as BufferSource
-  )
-
-  if (!valid) {
-    throw new Error('Signature verification failed')
-  }
-}
-
-/**
- * Verify a complete mutual token's signatures.
- *
- * This verifies both the initiator's and countersigner's signatures.
- * Optionally checks that a specific public ID is a party to the token.
+ * For signature verification, use verifyOwnSignature() which requires passkey auth.
  *
  * @param token - The mutual token JSON string
- * @param myPublicId - Optional: verifier's public ID to confirm they're a party
- * @returns Verified token data
- * @throws Error if invalid or verifier is not a party
+ * @param myPublicId - Optional: check that you're a party to the token
+ * @returns Parsed token data
  */
-export async function verifyMutualToken(
+export async function parseToken(
   token: string,
   myPublicId?: Uint8Array
-): Promise<VerifiedMutualToken> {
+): Promise<ParsedMutualToken> {
   // Parse token
   let payload: MutualContactTokenPayload
   try {
@@ -503,13 +488,11 @@ export async function verifyMutualToken(
   const aCpk = base64ToUint8Array(payload.a_cpk)
   const bId = base64ToUint8Array(payload.b_id)
   const bCpk = base64ToUint8Array(payload.b_cpk)
-  const initSig = base64ToUint8Array(payload.init_sig)
-  const counterSig = base64ToUint8Array(payload.counter_sig)
 
   if (aId.length !== 32) throw new Error('Invalid a_id: expected 32 bytes')
   if (bId.length !== 32) throw new Error('Invalid b_id: expected 32 bytes')
-  if (aCpk.length !== 65 || aCpk[0] !== 0x04) throw new Error('Invalid a_cpk: expected 65-byte P-256')
-  if (bCpk.length !== 65 || bCpk[0] !== 0x04) throw new Error('Invalid b_cpk: expected 65-byte P-256')
+  if (aCpk.length !== 32) throw new Error('Invalid a_cpk: expected 32 bytes')
+  if (bCpk.length !== 32) throw new Error('Invalid b_cpk: expected 32 bytes')
 
   // Verify lexicographic ordering
   if (compareIds(aId, bId) >= 0) {
@@ -524,31 +507,6 @@ export async function verifyMutualToken(
       throw new Error('You are not a party to this token')
     }
   }
-
-  // Compute challenge (same for both signatures, includes comment if present)
-  const challenge = await computeMutualChallenge(aId, aCpk, bId, bCpk, payload.iat, payload.comment)
-
-  // Determine which party was the initiator by trying both
-  // The initiator could be either party A or party B
-  let counterSignerCpk: Uint8Array
-
-  try {
-    await verifyECDSASignature(aCpk, initSig, challenge)
-    // aCpk signed the init signature, so bCpk must have signed the counter
-    counterSignerCpk = bCpk
-  } catch {
-    // Try with bCpk as initiator
-    try {
-      await verifyECDSASignature(bCpk, initSig, challenge)
-      // bCpk signed the init signature, so aCpk must have signed the counter
-      counterSignerCpk = aCpk
-    } catch {
-      throw new Error('Initiator signature verification failed')
-    }
-  }
-
-  // Verify countersigner's signature
-  await verifyECDSASignature(counterSignerCpk, counterSig, challenge)
 
   // Generate fingerprints
   const partyAFingerprint = await publicKeyToFingerprint(aId)
@@ -567,24 +525,125 @@ export async function verifyMutualToken(
 }
 
 /**
- * Get the counterparty's public ID from a verified mutual token.
+ * Verify YOUR OWN signature on a mutual token.
+ * Requires passkey authentication to derive the HMAC key.
+ *
+ * NOTE: You can only verify your own signature. The other party's signature
+ * cannot be verified without their passkey.
+ *
+ * @param token - The mutual token JSON string
+ * @param contactHmacKey - Your non-extractable HMAC key (from getPasskeyIdentity)
+ * @param myPublicId - Your public ID (from getPasskeyIdentity)
+ * @returns Verification result with party info
+ */
+export async function verifyOwnSignature(
+  token: string,
+  contactHmacKey: CryptoKey,
+  myPublicId: Uint8Array
+): Promise<VerifiedOwnSignature> {
+  // Parse token
+  let payload: MutualContactTokenPayload
+  try {
+    payload = JSON.parse(token.trim()) as MutualContactTokenPayload
+  } catch {
+    throw new Error('Invalid mutual token: failed to parse JSON')
+  }
+
+  // Validate required fields
+  if (
+    typeof payload.a_id !== 'string' ||
+    typeof payload.a_cpk !== 'string' ||
+    typeof payload.b_id !== 'string' ||
+    typeof payload.b_cpk !== 'string' ||
+    typeof payload.iat !== 'number' ||
+    !Number.isFinite(payload.iat) ||
+    typeof payload.init_sig !== 'string' ||
+    typeof payload.counter_sig !== 'string'
+  ) {
+    throw new Error('Invalid mutual token: missing required fields')
+  }
+
+  // Decode fields
+  const aId = base64ToUint8Array(payload.a_id)
+  const aCpk = base64ToUint8Array(payload.a_cpk)
+  const bId = base64ToUint8Array(payload.b_id)
+  const bCpk = base64ToUint8Array(payload.b_cpk)
+
+  if (aId.length !== 32) throw new Error('Invalid a_id: expected 32 bytes')
+  if (bId.length !== 32) throw new Error('Invalid b_id: expected 32 bytes')
+  if (aCpk.length !== 32) throw new Error('Invalid a_cpk: expected 32 bytes')
+  if (bCpk.length !== 32) throw new Error('Invalid b_cpk: expected 32 bytes')
+
+  // Determine which party I am
+  const isPartyA = constantTimeEqualBytes(myPublicId, aId)
+  const isPartyB = constantTimeEqualBytes(myPublicId, bId)
+
+  if (!isPartyA && !isPartyB) {
+    throw new Error('You are not a party to this token')
+  }
+
+  const myRole: 'A' | 'B' = isPartyA ? 'A' : 'B'
+
+  // Compute challenge
+  const challenge = await computeMutualChallenge(aId, aCpk, bId, bCpk, payload.iat, payload.comment)
+
+  // Determine which signature is mine (could be init_sig or counter_sig)
+  // We need to try both since we don't know if we were the initiator or countersigner
+  const initSig = base64ToUint8Array(payload.init_sig)
+  const counterSig = base64ToUint8Array(payload.counter_sig)
+
+  // Verify my signature with HMAC
+  const verifyHmac = async (sig: Uint8Array): Promise<boolean> => {
+    return crypto.subtle.verify(
+      'HMAC',
+      contactHmacKey,
+      sig as Uint8Array<ArrayBuffer>,
+      challenge as Uint8Array<ArrayBuffer>
+    )
+  }
+
+  const initSigValid = await verifyHmac(initSig)
+  const counterSigValid = await verifyHmac(counterSig)
+
+  if (!initSigValid && !counterSigValid) {
+    throw new Error('Your signature verification failed - this token was not signed by your passkey')
+  }
+
+  // Generate fingerprints
+  const partyAFingerprint = await publicKeyToFingerprint(aId)
+  const partyBFingerprint = await publicKeyToFingerprint(bId)
+
+  return {
+    myRole,
+    myPublicId: isPartyA ? aId : bId,
+    myFingerprint: isPartyA ? partyAFingerprint : partyBFingerprint,
+    counterpartyPublicId: isPartyA ? bId : aId,
+    counterpartyFingerprint: isPartyA ? partyBFingerprint : partyAFingerprint,
+    counterpartyContactKey: isPartyA ? bCpk : aCpk,
+    issuedAt: new Date(payload.iat * 1000),
+    comment: payload.comment,
+  }
+}
+
+/**
+ * Get the counterparty's info from a parsed mutual token.
  * Convenience helper for send/receive flows.
  */
-export function getCounterpartyFromToken(
-  verified: VerifiedMutualToken,
+export function getCounterpartyFromParsedToken(
+  parsed: ParsedMutualToken,
   myPublicId: Uint8Array
 ): { publicId: Uint8Array; fingerprint: string; contactKey: Uint8Array } {
-  if (constantTimeEqualBytes(myPublicId, verified.partyAPublicId)) {
+  if (constantTimeEqualBytes(myPublicId, parsed.partyAPublicId)) {
     return {
-      publicId: verified.partyBPublicId,
-      fingerprint: verified.partyBFingerprint,
-      contactKey: verified.partyBContactKey,
+      publicId: parsed.partyBPublicId,
+      fingerprint: parsed.partyBFingerprint,
+      contactKey: parsed.partyBContactKey,
     }
-  } else if (constantTimeEqualBytes(myPublicId, verified.partyBPublicId)) {
+  } else if (constantTimeEqualBytes(myPublicId, parsed.partyBPublicId)) {
     return {
-      publicId: verified.partyAPublicId,
-      fingerprint: verified.partyAFingerprint,
-      contactKey: verified.partyAContactKey,
+      publicId: parsed.partyAPublicId,
+      fingerprint: parsed.partyAFingerprint,
+      contactKey: parsed.partyAContactKey,
     }
   } else {
     throw new Error('You are not a party to this token')

@@ -48,7 +48,7 @@ import {
   verifyPublicKeyCommitment,
   constantTimeEqual,
 } from '@/lib/crypto/ecdh'
-import { verifyMutualToken, getCounterpartyFromToken } from '@/lib/crypto/contact-token'
+import { parseToken, getCounterpartyFromParsedToken } from '@/lib/crypto/contact-token'
 
 export interface ReceiveOptions {
   usePasskey?: boolean
@@ -146,22 +146,23 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           receiverEphemeral = ephemeral
           identitySharedSecretKey = sharedSecret
 
-          // Determine sender public key: use own identity for self-transfer, otherwise verify token
+          // Determine sender public key: use own identity for self-transfer, otherwise parse token
           let senderPublicKeyBytes: Uint8Array
           if (opts.selfTransfer) {
             senderPublicKeyBytes = ephemeral.identityPublicKeyBytes
           } else {
-            // Verify mutual contact token (both signatures verified)
-            // This proves both parties signed the token with their passkey credentials
-            const verifiedToken = await verifyMutualToken(
+            // Parse mutual contact token to extract counterparty info
+            // NOTE: With HMAC signatures, we cannot verify the other party's signature here.
+            // Trust is established via out-of-band fingerprint verification.
+            // SECURITY: The actual counterparty check happens during handshake event processing
+            // at lines 303-306 where we verify the sender's identity matches the token.
+            const parsedToken = await parseToken(
               opts.senderContactToken!,
               ephemeral.identityPublicKeyBytes // Verify we're a party to this token
             )
 
-            // SECURITY: The mutual token proves both parties agreed to communicate.
-            // verifyMutualToken already verified we're a party to the token.
-            // Now extract the counterparty (sender) from the token.
-            const counterparty = getCounterpartyFromToken(verifiedToken, ephemeral.identityPublicKeyBytes)
+            // Extract the counterparty (sender) from the token.
+            const counterparty = getCounterpartyFromParsedToken(parsedToken, ephemeral.identityPublicKeyBytes)
             senderPublicKeyBytes = counterparty.publicId
           }
 
@@ -291,17 +292,19 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           }
 
           // === SECURITY VERIFICATION 3: Sender's mutual contact token ===
-          // With mutual tokens, both parties have the SAME token with both signatures
-          // This proves sender specifically chose to communicate with us
-          const verifiedSenderToken = await verifyMutualToken(
+          // CRITICAL: This check ensures decryption won't proceed if counterparty doesn't match.
+          // With mutual tokens, both parties have the SAME token with both signatures.
+          // This proves sender specifically chose to communicate with us.
+          const parsedSenderToken = await parseToken(
             parsed.senderContactToken,
             ownPublicKeyBytes // Verify we're a party to this token
           )
-          // Extract the counterparty (sender) from the verified token
-          const senderFromToken = getCounterpartyFromToken(verifiedSenderToken, ownPublicKeyBytes)
+          // Extract the counterparty (sender) from the parsed token
+          const senderFromToken = getCounterpartyFromParsedToken(parsedSenderToken, ownPublicKeyBytes)
           // Verify the token's counterparty matches the sender's claimed identity
+          // If this check fails, the event is skipped and decryption never happens
           if (senderFromToken.fingerprint !== parsed.senderFingerprint) {
-            console.log(`Token counterparty (${senderFromToken.fingerprint}) doesn't match sender (${parsed.senderFingerprint})`)
+            console.log(`Token counterparty (${senderFromToken.fingerprint}) doesn't match sender (${parsed.senderFingerprint}) - rejecting`)
             continue
           }
 

@@ -18,7 +18,7 @@ import { compressFilesToZip, getFolderName, getTotalSize, supportsFolderSelectio
 import type { SignalingMethod } from '@/lib/nostr/types'
 import { Link } from 'react-router-dom'
 import { formatFingerprint } from '@/lib/crypto/ecdh'
-import { isMutualTokenFormat, verifyMutualToken, type VerifiedMutualToken } from '@/lib/crypto/contact-token'
+import { isMutualTokenFormat, parseToken, type ParsedMutualToken } from '@/lib/crypto/contact-token'
 import { getSavedTokens, saveToken, type SavedToken } from '@/lib/saved-tokens'
 
 type ContentMode = 'file' | 'folder'
@@ -53,44 +53,44 @@ export function SendTab() {
   const folderInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
 
-  // Verified token state (updated via useEffect since verification is async)
-  const [verifiedToken, setVerifiedToken] = useState<VerifiedMutualToken | null>(null)
+  // Parsed token state (updated via useEffect since parsing is async)
+  const [parsedToken, setParsedToken] = useState<ParsedMutualToken | null>(null)
 
   // Saved tokens for quick selection
   const [savedTokens, setSavedTokens] = useState<SavedToken[]>([])
   const [showTokenDropdown, setShowTokenDropdown] = useState(false)
   const [loadedFromHistory, setLoadedFromHistory] = useState(false)
 
-  // Verify mutual contact token - debounced to reduce signature checks on every keystroke
+  // Parse mutual contact token - debounced to reduce parsing on every keystroke
   useEffect(() => {
     let cancelled = false
 
     const input = receiverPublicKeyInput.trim()
     if (!input) {
-      setVerifiedToken(null)
+      setParsedToken(null)
       setReceiverPublicKeyError(null)
       return
     }
 
     // Quick format check first (synchronous, no debounce needed)
     if (!isMutualTokenFormat(input)) {
-      setVerifiedToken(null)
+      setParsedToken(null)
       setReceiverPublicKeyError('Invalid format: expected mutual contact token (create one on the Passkey page)')
       return
     }
 
-    // Debounce the async signature verification
+    // Debounce the async parsing
     const timeoutId = setTimeout(() => {
-      verifyMutualToken(input)
-        .then((verified) => {
+      parseToken(input)
+        .then((parsed) => {
           if (cancelled) return
-          setVerifiedToken(verified)
+          setParsedToken(parsed)
           setReceiverPublicKeyError(null)
         })
         .catch((err: unknown) => {
           if (cancelled) return
-          setVerifiedToken(null)
-          setReceiverPublicKeyError(err instanceof Error ? err.message : 'Invalid or tampered token')
+          setParsedToken(null)
+          setReceiverPublicKeyError(err instanceof Error ? err.message : 'Invalid token format')
         })
     }, 300)
 
@@ -141,19 +141,19 @@ export function SendTab() {
       state.status === 'complete' &&
       usePasskey &&
       !sendToSelf &&
-      verifiedToken &&
+      parsedToken &&
       receiverPublicKeyInput.trim()
     ) {
       saveToken(
         receiverPublicKeyInput.trim(),
-        verifiedToken.partyAFingerprint,
-        verifiedToken.partyBFingerprint,
-        verifiedToken.comment
+        parsedToken.partyAFingerprint,
+        parsedToken.partyBFingerprint,
+        parsedToken.comment
       )
       // Refresh saved tokens list
       setSavedTokens(getSavedTokens())
     }
-  }, [state.status, usePasskey, sendToSelf, verifiedToken, receiverPublicKeyInput])
+  }, [state.status, usePasskey, sendToSelf, parsedToken, receiverPublicKeyInput])
 
   const filesTotalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0)
   const folderTotalSize = folderFiles ? getTotalSize(folderFiles) : 0
@@ -163,7 +163,7 @@ export function SendTab() {
   const canSendFiles = selectedFiles.length > 0 && !isFilesOverLimit && state.status === 'idle' && !isCompressing
   const canSendFolder = folderFiles && folderFiles.length > 0 && !isFolderOverLimit && state.status === 'idle' && !isCompressing
   // When passkey mode is enabled, require valid receiver contact token OR sendToSelf
-  const passkeyRequirementsMet = !usePasskey || sendToSelf || (verifiedToken !== null)
+  const passkeyRequirementsMet = !usePasskey || sendToSelf || (parsedToken !== null)
   const canSend = (mode === 'file' ? canSendFiles : canSendFolder) && passkeyRequirementsMet
 
   const handleSend = async () => {
@@ -259,7 +259,7 @@ export function SendTab() {
     setNostrUnavailable(false)
     setReceiverPublicKeyInput('')
     setReceiverPublicKeyError(null)
-    setVerifiedToken(null)
+    setParsedToken(null)
     setSendToSelf(false)
     setLoadedFromHistory(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -689,8 +689,8 @@ export function SendTab() {
                                 )}
                               </div>
                             )}
-                            {/* Hide textarea when token is loaded from history and verified */}
-                            {!(loadedFromHistory && verifiedToken) && (
+                            {/* Hide textarea when token is loaded from history and parsed */}
+                            {!(loadedFromHistory && parsedToken) && (
                               <div className="flex gap-2">
                                 <Textarea
                                   id="receiver-pubkey"
@@ -716,24 +716,26 @@ export function SendTab() {
                             {receiverPublicKeyError && (
                               <p className="text-xs text-destructive">{receiverPublicKeyError}</p>
                             )}
-                            {verifiedToken && (
+                            {parsedToken && (
                               <div className="space-y-1 text-xs">
-                                <div className="flex items-center gap-2 text-green-700 dark:text-green-400">
+                                <div className="flex items-center gap-2 text-cyan-700 dark:text-cyan-400">
                                   <Fingerprint className="h-3 w-3" />
                                   <span>Party A:</span>
-                                  <span className="font-mono font-medium">{formatFingerprint(verifiedToken.partyAFingerprint)}</span>
+                                  <span className="font-mono font-medium">{formatFingerprint(parsedToken.partyAFingerprint)}</span>
                                 </div>
-                                <div className="flex items-center gap-2 text-green-700 dark:text-green-400 ml-5">
+                                <div className="flex items-center gap-2 text-cyan-700 dark:text-cyan-400 ml-5">
                                   <span>Party B:</span>
-                                  <span className="font-mono font-medium">{formatFingerprint(verifiedToken.partyBFingerprint)}</span>
+                                  <span className="font-mono font-medium">{formatFingerprint(parsedToken.partyBFingerprint)}</span>
                                 </div>
-                                {verifiedToken.comment && (
+                                {parsedToken.comment && (
                                   <div className="flex items-center gap-2 text-muted-foreground ml-5">
-                                    <span className="italic">"{verifiedToken.comment}"</span>
+                                    <span className="italic">"{parsedToken.comment}"</span>
                                   </div>
                                 )}
                                 <div className="flex items-center gap-2 ml-5">
-                                  <span className="text-green-600 dark:text-green-400">(both signatures verified)</span>
+                                  <Link to="/passkey/verify-token" className="text-primary hover:underline text-xs">
+                                    Verify your signature →
+                                  </Link>
                                   {loadedFromHistory && (
                                     <Button
                                       variant="ghost"
@@ -741,7 +743,7 @@ export function SendTab() {
                                       className="h-5 px-1 text-xs text-muted-foreground hover:text-foreground"
                                       onClick={() => {
                                         setReceiverPublicKeyInput('')
-                                        setVerifiedToken(null)
+                                        setParsedToken(null)
                                         setLoadedFromHistory(false)
                                       }}
                                     >
@@ -779,7 +781,7 @@ export function SendTab() {
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
               <Fingerprint className="h-3 w-3" />
               <span>
-                Passkey mode{sendToSelf ? ' → sending to self' : verifiedToken ? ' → mutual token verified' : ' (enter mutual token)'}
+                Passkey mode{sendToSelf ? ' → sending to self' : parsedToken ? ' → token loaded' : ' (enter mutual token)'}
               </span>
             </div>
           )}
