@@ -264,13 +264,14 @@ The out-of-band fingerprint verification in step 1 is the primary trust anchor f
 
 *Verification Requirements:*
 - **Not mandatory for functionality**: The token creation flow works without fingerprint verification. Verification is a security best practice, not a technical requirement.
+- **When verification matters**: Fingerprint verification is critical for **cross-user mode** (different passkeys) but not applicable to **self-transfer mode** (same passkey synced via password manager, where both parties are you).
 - **No enforcement**: The UI does not block or prompt for explicit fingerprint confirmation before proceeding
 - **User responsibility**: Verification is manual and relies on user diligence
 - **Current UX behavior**:
   - Contact cards and fingerprints are displayed in the UI (`passkey.tsx`)
   - Warning banner shown: "⚠ Unverified fingerprints (will be verified via handshake proof)"
   - Users can proceed with token creation at any time
-- **Risk of skipping verification**: If fingerprints are not verified and an attacker substitutes their contact card (MITM during exchange), the attacker can create a valid token and impersonate the intended party. Handshake Proofs (HP) detect impersonation with *stolen* tokens but cannot detect MITM during initial contact exchange.
+- **Risk of skipping verification (cross-user only)**: If fingerprints are not verified and an attacker substitutes their contact card (MITM during exchange), the attacker can create a valid token and impersonate the intended party. Handshake Proofs (HP) detect impersonation with *stolen* tokens but cannot detect MITM during initial contact exchange. This risk does not apply to self-transfer mode since there is no counterparty to impersonate—both sender and receiver are the same person using the same synced passkey.
 
 *Implementation References:*
 | Function | File | Description |
@@ -340,17 +341,25 @@ HP = HMAC(verification_secret, ephemeral_pub || nonce || counterparty_fingerprin
 sequenceDiagram
     participant Sender
     participant Receiver
-    Note over Sender: Parse token, get own VS
+    Note over Sender: Parse token, get own VS (via init_party mapping)
     Note over Sender: Compute HP = HMAC(own_vs, epk||nonce||recv_fp)
     Sender->>Receiver: Handshake Event + HP (ehp tag)
-    Note over Receiver: Parse token, get sender's VS from token
-    Note over Receiver: Verify HP matches expected value
+    Note over Receiver: Parse token, extract Sender's VS via init_party
+    Note over Receiver: Verify Sender's HP using Sender's VS
     Note over Receiver: Compute own HP = HMAC(own_vs, epk||nonce||sender_fp)
     Receiver-->>Sender: ACK + HP (ehp tag)
-    Note over Sender: Get receiver's VS from token
-    Note over Sender: Verify HP matches expected value
+    Note over Sender: Extract Receiver's VS from token via init_party
+    Note over Sender: Verify Receiver's HP using Receiver's VS
     Note over Sender,Receiver: Both parties authenticated
 ```
+
+**VS Extraction via init_party:**
+
+Each party verifies the counterparty's HP using the counterparty's VS extracted from the token. The `init_party` field ('a' or 'b') determines which VS belongs to which party:
+- If `init_party = 'a'`: Party A was the initiator → `init_vs` = A's VS, `counter_vs` = B's VS
+- If `init_party = 'b'`: Party B was the initiator → `init_vs` = B's VS, `counter_vs` = A's VS
+
+The receiver uses `getCounterpartyVerificationSecret()` to extract the sender's VS, then calls `verifyHandshakeProof(sender_vs, sender_hp, ...)`. The sender does the same to verify the receiver's HP.
 
 **Event Tags:**
 ```
@@ -391,6 +400,8 @@ flowchart TD
     MasterKey --> HKDF
     HKDF --> AESKey[AES-256-GCM Key]
 ```
+
+**Non-extractable keys**: Keys marked as non-extractable cannot be exported from the Web Crypto key store, preventing extraction via XSS attacks or memory exfiltration and keeping raw key material confined to the browser's secure runtime.
 
 1. **Master Key**: Single passkey prompt derives HKDF master key via PRF
 2. **Public ID**: HKDF with label derives a 32-byte shareable identifier
@@ -450,7 +461,7 @@ We chose HMAC because:
 - **HP provides impersonation defense** regardless of MAC/signature algorithm
 - **Counterparty verification was never the trust anchor** - fingerprint verification was
 
-**HP is conceptually independent of ECDSA vs HMAC**: The concept of "prove passkey control at handshake time" works with either algorithm. Our implementation reuses the HMAC key infrastructure for computing verification secrets, but this is implementation convenience, not a requirement.
+**HP is conceptually independent of ECDSA vs HMAC**: The concept of "prove passkey control at handshake time" works with either algorithm. Our implementation reuses the HMAC key infrastructure for computing verification secrets, but this is implementation convenience, not a requirement. For example, HP could be computed as `ECDSA_sign(private_key, epk||nonce||fingerprint)` instead of HMAC—the impersonation defense would be identical; only key-extractability differs.
 
 **Operational implications of "Verify without auth: No"**:
 
@@ -499,7 +510,7 @@ flowchart TD
 
 #### Perfect Forward Secrecy (PFS)
 
-Passkey mutual trust mode provides **Perfect Forward Secrecy** via ephemeral session keys, similar to TLS/HTTPS ECDHE. There are two flows depending on whether sender and receiver share the same passkey:
+Passkey mutual trust mode provides **Perfect Forward Secrecy** via ephemeral session keys, similar to TLS/HTTPS ECDHE. There are two flows depending on whether sender and receiver share the same passkey. For details on RPKC (receiver public key commitment), key confirmation, and nonce handling, see [Mutual Trust Security Enhancements](#mutual-trust-security-enhancements) below.
 
 ##### Self-Transfer Flow (Same Passkey - Optimized Single Round Trip)
 
