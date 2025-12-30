@@ -272,6 +272,44 @@ flowchart TD
 4. **Per-Transfer Key**: HKDF with random salt derives unique AES key per transfer
 5. **No PIN Required**: Biometric/device unlock replaces PIN entry
 
+#### Contact Signing Key: Security Consideration
+
+**Known limitation**: The contact signing key derivation briefly exposes private key bytes in JavaScript memory.
+
+```
+PRF → HKDF deriveBits → [private bytes in JS ~μs] → importKey(extractable:false) → fill(0)
+```
+
+**Why this is necessary**: The Web Crypto API cannot derive asymmetric ECDSA key pairs directly from HKDF. The `deriveKey()` method only supports symmetric keys (AES, HMAC). To get an ECDSA key pair, we must:
+1. Use `deriveBits()` to get raw bytes
+2. Compute the public key point using `@noble/curves` (requires bytes)
+3. Import via JWK format with `extractable: false`
+4. Zero the bytes immediately after import
+
+**Impact if private key bytes are leaked**:
+| Aspect | Impact |
+|--------|--------|
+| Forge contact tokens | 🔴 Attacker can impersonate you to new contacts |
+| Decrypt transfers | ✅ None - transfers use ephemeral ECDH session keys (PFS) |
+| Access master key | ✅ None - signing key is derived FROM master key, not reversible |
+| Compromise passkey | ✅ None - passkey is hardware-backed |
+
+**Mitigations in place**:
+- Private bytes exist for ~microseconds before zeroing
+- Imported key is non-extractable (cannot be exported later)
+- No logging or serialization of the bytes
+
+**Potential future improvement**: Replace ECDSA with HMAC for token signing. HMAC keys can be derived directly via `deriveKey()` without exposing raw bytes:
+
+| Aspect | ECDSA (current) | HMAC (alternative) |
+|--------|-----------------|-------------------|
+| Private key exposure | ~μs in JS memory | None (fully non-extractable) |
+| Verify other party's sig | ✅ Yes (using their `cpk`) | ❌ No (don't have their key) |
+| Verify your own sig | ✅ Yes | ✅ Yes (re-authenticate to derive key) |
+| Verify without auth | ✅ Yes | ❌ No (must authenticate) |
+
+HMAC is viable because each party only needs to verify their own half of the token when using it. The tradeoff is losing the ability to inspect/verify tokens without authenticating.
+
 #### Mutual Trust Key Derivation (Non-Extractable Keys)
 
 When using passkey mutual trust mode, the passkey master key is kept as a **non-extractable CryptoKey** and used directly for key confirmation and session binding:
