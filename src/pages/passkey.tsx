@@ -8,10 +8,8 @@ import {
   Copy,
   Check,
   Key,
-  QrCode,
   Shield,
   ArrowLeft,
-  ArrowRight,
   Camera,
   X,
   RefreshCw,
@@ -43,11 +41,8 @@ import { isMobileDevice } from '@/lib/utils'
 
 type PageState = 'idle' | 'checking' | 'creating' | 'getting_key' | 'binding_contact'
 
-type WizardStep =
-  | 'authenticate' // Step 1
-  | 'mode-select' // Step 2: Choose role
-  | 'create-request' // Step 3A: Initiator creates token request
-  | 'sign-request' // Step 3B: Countersigner signs token request
+// Active mode for "Already Have a Passkey?" section
+type ActiveMode = 'idle' | 'signer' | 'initiator'
 
 // Contact card format: JSON with id (public ID) and cpk (credential public key)
 interface ContactCard {
@@ -108,7 +103,7 @@ function generateRandomName(): string {
 
 export function PasskeyPage() {
   const [pageState, setPageState] = useState<PageState>('idle')
-  const [wizardStep, setWizardStep] = useState<WizardStep>('authenticate')
+  const [activeMode, setActiveMode] = useState<ActiveMode>('idle')
   const [userName, setUserName] = useState('')
   const defaultUserName = useMemo(() => generateRandomName(), [])
   const [fingerprint, setFingerprint] = useState<string | null>(null)
@@ -146,8 +141,6 @@ export function PasskeyPage() {
       ? JSON.stringify({ id: publicIdBase64, cpk: credentialPublicKeyBase64 })
       : null
 
-  // Check if authenticated (has contact card)
-  const isAuthenticated = !!contactCard && !!fingerprint
 
   // Auto-clear success message after 3 seconds
   useEffect(() => {
@@ -230,19 +223,6 @@ export function PasskeyPage() {
     setShowQRScanner(true)
   }
 
-  // Determine step number for display
-  const getStepNumber = (step: WizardStep): number => {
-    if (step === 'authenticate') return 1
-    if (step === 'mode-select') return 2
-    return 3
-  }
-
-  // Get step 3 label based on current mode
-  const getStep3Label = (): string => {
-    if (wizardStep === 'create-request') return 'Create Request'
-    if (wizardStep === 'sign-request') return 'Sign Request'
-    return 'Token'
-  }
 
   const handleCreatePasskey = async () => {
     setError(null)
@@ -286,10 +266,13 @@ export function PasskeyPage() {
     }
   }
 
-  const handleGetPublicId = async () => {
+  // Handler for "Someone wants to add me as a contact" - auth immediately
+  const handleSelectSigner = async () => {
     setError(null)
     setSuccess(null)
     setOutputToken(null)
+    setTokenError(null)
+    setContactInput('')
     setPageState('getting_key')
 
     try {
@@ -315,15 +298,23 @@ export function PasskeyPage() {
         return
       }
 
-      setSuccess('Authenticated successfully!')
       setPageState('idle')
-
-      // Auto-advance to mode selection
-      setWizardStep('mode-select')
+      setActiveMode('signer')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to get public ID')
+      setError(err instanceof Error ? err.message : 'Failed to authenticate')
       setPageState('idle')
     }
+  }
+
+  // Handler for "I want to add someone as a contact" - no auth yet
+  const handleSelectInitiator = () => {
+    setError(null)
+    setSuccess(null)
+    setOutputToken(null)
+    setTokenError(null)
+    setContactInput('')
+    setTokenComment('')
+    setActiveMode('initiator')
   }
 
   const copyToClipboard = async (text: string, onSuccess: () => void, onError: () => void) => {
@@ -372,7 +363,6 @@ export function PasskeyPage() {
   const handleCreateToken = async () => {
     setTokenError(null)
     setOutputToken(null)
-    setPageState('binding_contact')
 
     try {
       const trimmed = contactInput.trim()
@@ -380,26 +370,13 @@ export function PasskeyPage() {
         throw new Error("Please enter contact's card")
       }
 
-      if (!currentCredentialId) {
-        throw new Error('Please create or authenticate with a passkey first')
-      }
-
-      const credentialPublicKey = getCredentialPublicKey(currentCredentialId)
-      if (!credentialPublicKey) {
-        throw new Error('Credential public key not found. Please create a new passkey.')
-      }
-
-      if (!publicIdBase64) {
-        throw new Error('Please authenticate with a passkey first to get your public ID')
-      }
-
-      // Parse contact card
+      // Parse contact card first (validate before auth)
       const contactCardParsed = parseContactInput(trimmed)
       if (!contactCardParsed) {
         throw new Error('Invalid contact card format. Expected JSON with "id" and "cpk" fields.')
       }
 
-      // Validate contact card fields
+      // Validate contact card fields before auth
       try {
         const idBytes = base64ToUint8Array(contactCardParsed.id)
         if (idBytes.length !== 32) {
@@ -416,11 +393,50 @@ export function PasskeyPage() {
         throw new ValidationError('Invalid base64 encoding in contact card')
       }
 
+      // Now trigger auth if not already authenticated
+      let credId = currentCredentialId
+      let pubId = publicIdBase64
+
+      if (!credId || !pubId) {
+        setPageState('getting_key')
+        try {
+          const result = await getPasskeyIdentity()
+          setFingerprint(result.publicIdFingerprint)
+          setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
+          setPrfSupported(result.prfSupported)
+          setCurrentCredentialId(result.credentialId)
+          credId = result.credentialId
+          pubId = uint8ArrayToBase64(result.publicIdBytes)
+
+          // Get the credential public key
+          const cpk = getCredentialPublicKey(result.credentialId)
+          if (cpk) {
+            setCredentialPublicKeyBase64(uint8ArrayToBase64(cpk))
+          } else {
+            setCredentialPublicKeyBase64(null)
+            throw new Error(
+              'This passkey was created on another device. Its credential key is not available locally. ' +
+                'Please create a new passkey on this device to generate contact tokens.'
+            )
+          }
+        } catch (err) {
+          setPageState('idle')
+          throw err
+        }
+      }
+
+      setPageState('binding_contact')
+
+      const credentialPublicKey = getCredentialPublicKey(credId)
+      if (!credentialPublicKey) {
+        throw new Error('Credential public key not found. Please create a new passkey.')
+      }
+
       // Create pending mutual token
       const token = await createMutualTokenInit(
-        currentCredentialId,
+        credId,
         credentialPublicKey,
-        publicIdBase64,
+        pubId,
         contactCardParsed.id,
         contactCardParsed.cpk,
         tokenComment.trim() || undefined
@@ -496,7 +512,7 @@ export function PasskeyPage() {
   }
 
   const handleStartOver = () => {
-    setWizardStep('mode-select')
+    setActiveMode('idle')
     setContactInput('')
     setTokenComment('')
     setOutputToken(null)
@@ -504,96 +520,35 @@ export function PasskeyPage() {
   }
 
   const isLoading = pageState !== 'idle'
-  const currentStepNumber = getStepNumber(wizardStep)
 
-  // Render step indicator
-  const renderStepIndicator = () => {
-    const steps = [
-      { num: 1, label: 'Authenticate' },
-      { num: 2, label: 'Choose Role' },
-      { num: 3, label: getStep3Label() },
-    ]
-
-    return (
-      <div className="flex items-center justify-center gap-2 mb-6">
-        {steps.map((step, index) => {
-          const isCompleted = step.num < currentStepNumber
-          const isCurrent = step.num === currentStepNumber
-          const canClick = isCompleted || (step.num === 1 && isAuthenticated)
-
-          return (
-            <div key={step.num} className="flex items-center">
-              <button
-                type="button"
-                onClick={() => {
-                  if (step.num === 1 && isAuthenticated) {
-                    // Re-authenticate
-                    handleGetPublicId()
-                  } else if (step.num === 2 && isAuthenticated) {
-                    setWizardStep('mode-select')
-                    setOutputToken(null)
-                    setTokenError(null)
-                  }
-                }}
-                disabled={!canClick || isLoading}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                  isCurrent
-                    ? 'bg-primary text-primary-foreground'
-                    : isCompleted
-                      ? 'bg-primary/20 text-primary hover:bg-primary/30 cursor-pointer'
-                      : 'bg-muted text-muted-foreground'
-                } ${canClick && !isCurrent ? 'cursor-pointer' : ''} ${isLoading ? 'opacity-50' : ''}`}
-              >
-                <span
-                  className={`flex h-5 w-5 items-center justify-center rounded-full text-xs ${
-                    isCurrent
-                      ? 'bg-primary-foreground text-primary'
-                      : isCompleted
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted-foreground/20'
-                  }`}
-                >
-                  {isCompleted ? <Check className="h-3 w-3" /> : step.num}
-                </span>
-                <span className="hidden sm:inline">{step.label}</span>
-              </button>
-              {index < steps.length - 1 && (
-                <ArrowRight className="h-4 w-4 mx-1 text-muted-foreground" />
-              )}
-            </div>
-          )
-        })}
-      </div>
-    )
-  }
-
-  // Render contact card section (used in create-token and view-card steps)
-  const renderContactCard = () => {
+  // Render contact card with numbered step (for signer flow step 1)
+  const renderContactCardStep = () => {
     if (!contactCard || !fingerprint) return null
 
     return (
       <div className="p-4 rounded-lg border border-cyan-500/50 bg-cyan-50/30 dark:bg-cyan-950/20 space-y-4">
+        <div className="flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-600 text-white text-sm font-medium">
+            1
+          </span>
+          <span className="font-semibold text-cyan-700 dark:text-cyan-400">Your Contact Card</span>
+        </div>
+
         {/* QR Code */}
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <QrCode className="h-5 w-5 text-primary" />
-            <span className="text-sm font-semibold text-primary">Your Contact Card</span>
+        <div className="flex flex-col items-center gap-4">
+          <div className="bg-white p-4 rounded-lg">
+            <QRCodeSVG value={contactCard} size={200} level="M" />
           </div>
-          <div className="flex flex-col items-center gap-4">
-            <div className="bg-white p-4 rounded-lg">
-              <QRCodeSVG value={contactCard} size={200} level="M" />
-            </div>
-            <p className="text-xs text-muted-foreground text-center max-w-xs">
-              Let contacts scan this QR code, or copy the card below to share via other means.
-            </p>
-          </div>
+          <p className="text-xs text-muted-foreground text-center max-w-xs">
+            Share this QR code with your contact so they can create a token request.
+          </p>
         </div>
 
         {/* Copy Contact Card */}
-        <div className="pt-4 border-t">
+        <div className="pt-4 border-t border-cyan-500/30">
           <div className="flex items-center gap-2 mb-2">
-            <Key className="h-5 w-5 text-primary" />
-            <span className="text-sm font-semibold text-primary">Contact Card (JSON)</span>
+            <Key className="h-4 w-4 text-cyan-600" />
+            <span className="text-sm font-medium text-cyan-600">Contact Card (JSON)</span>
           </div>
           <div className="flex gap-2">
             <textarea
@@ -601,13 +556,13 @@ export function PasskeyPage() {
               value={contactCard}
               onClick={(e) => e.currentTarget.select()}
               rows={2}
-              className="flex-1 text-xs bg-primary/10 border border-primary/20 p-2 rounded font-mono text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+              className="flex-1 text-xs bg-cyan-500/10 border border-cyan-500/20 p-2 rounded font-mono focus:outline-none focus:ring-2 focus:ring-cyan-500/30 resize-none"
             />
             <Button
               variant="outline"
               size="sm"
               onClick={handleCopyContactCard}
-              className={`flex-shrink-0 ${copiedContactCard ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-primary/10'}`}
+              className={`flex-shrink-0 ${copiedContactCard ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-cyan-500/10'}`}
             >
               {copiedContactCard ? (
                 <Check className="h-4 w-4 text-white" />
@@ -616,13 +571,10 @@ export function PasskeyPage() {
               )}
             </Button>
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Contains your public ID and credential key. Share this with contacts.
-          </p>
         </div>
 
         {/* Fingerprint */}
-        <div className="pt-4 border-t">
+        <div className="pt-4 border-t border-cyan-500/30">
           <div className="flex items-center gap-2">
             <Fingerprint className="h-4 w-4 text-cyan-600" />
             <span className="text-xs font-medium text-cyan-600">Fingerprint</span>
@@ -654,122 +606,116 @@ export function PasskeyPage() {
     )
   }
 
-  // Step 1: Authenticate
-  const renderAuthenticateStep = () => (
-    <div className="space-y-6">
-      {/* Create passkey section - Primary action */}
-      <div className="space-y-4 p-4 rounded-lg border-2 border-primary/30 bg-primary/5">
-        <h3 className="text-lg font-semibold flex items-center gap-2">
-          <Plus className="h-5 w-5" />
-          Create New Passkey
-        </h3>
-        <p className="text-sm">
-          Create a passkey to generate your contact card. Share it with contacts for secure file
-          transfers without needing PINs.
-        </p>
-        <div className="space-y-2">
-          <Label htmlFor="userName">Display Name</Label>
-          <Input
-            id="userName"
-            placeholder={defaultUserName}
-            value={userName}
-            onChange={(e) => setUserName(e.target.value)}
-            disabled={isLoading}
-          />
-          <p className="text-xs text-muted-foreground">
-            Helps identify this passkey in your password manager.
-          </p>
-        </div>
-        <Button onClick={handleCreatePasskey} disabled={isLoading} className="w-full" size="lg">
-          {pageState !== 'idle' ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              {pageState === 'checking' && 'Checking support...'}
-              {pageState === 'creating' && 'Creating passkey...'}
-              {pageState === 'getting_key' && 'Getting public ID...'}
-            </>
-          ) : (
-            <>
-              <Plus className="mr-2 h-4 w-4" />
-              Create Passkey
-            </>
-          )}
-        </Button>
-        <p className="text-xs text-muted-foreground text-center">
-          Two prompts are expected: first to create the passkey, then to authenticate and derive
-          your public ID.
+  // Render Create Passkey section
+  const renderCreatePasskeySection = () => (
+    <div className="space-y-4 p-4 rounded-lg border-2 border-primary/30 bg-primary/5">
+      <h3 className="text-lg font-semibold flex items-center gap-2">
+        <Plus className="h-5 w-5" />
+        Create New Passkey
+      </h3>
+      <p className="text-sm">
+        Create a passkey to generate your contact card. Share it with contacts for secure file
+        transfers without needing PINs.
+      </p>
+      <div className="space-y-2">
+        <Label htmlFor="userName">Display Name</Label>
+        <Input
+          id="userName"
+          placeholder={defaultUserName}
+          value={userName}
+          onChange={(e) => setUserName(e.target.value)}
+          disabled={isLoading}
+        />
+        <p className="text-xs text-muted-foreground">
+          Helps identify this passkey in your password manager.
         </p>
       </div>
-
-      {/* Get My Public ID section - Secondary action */}
-      <div className="space-y-3 p-4 rounded-lg border">
-        <h3 className="font-medium flex items-center gap-2">
-          <Key className="h-4 w-4" />
-          Already Have a Passkey?
-        </h3>
-        <p className="text-sm text-muted-foreground">Authenticate to continue.</p>
-        <Button onClick={handleGetPublicId} disabled={isLoading} className="w-full">
-          {pageState === 'getting_key' ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Authenticating...
-            </>
-          ) : (
-            <>
-              <Fingerprint className="mr-2 h-4 w-4" />
-              Authenticate
-            </>
-          )}
-        </Button>
-      </div>
+      <Button onClick={handleCreatePasskey} disabled={isLoading} className="w-full" size="lg">
+        {pageState !== 'idle' ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            {pageState === 'checking' && 'Checking support...'}
+            {pageState === 'creating' && 'Creating passkey...'}
+            {pageState === 'getting_key' && 'Getting public ID...'}
+          </>
+        ) : (
+          <>
+            <Plus className="mr-2 h-4 w-4" />
+            Create Passkey
+          </>
+        )}
+      </Button>
+      <p className="text-xs text-muted-foreground text-center">
+        Two prompts are expected: first to create the passkey, then to authenticate and derive
+        your public ID.
+      </p>
     </div>
   )
 
-  // Step 2: Mode Select
-  const renderModeSelectStep = () => (
-    <div className="space-y-4">
-      <div className="text-center mb-6">
-        <h3 className="text-lg font-semibold">Choose your role</h3>
-        <p className="text-sm text-muted-foreground mt-1">
-          Create a mutual token to securely identify your contacts
-        </p>
-      </div>
+  // Render "Already Have a Passkey?" section with mode selection
+  const renderAlreadyHavePasskeySection = () => (
+    <div className="space-y-4 p-4 rounded-lg border">
+      <h3 className="font-medium flex items-center gap-2">
+        <Key className="h-4 w-4" />
+        Already Have a Passkey?
+      </h3>
+      <p className="text-sm text-muted-foreground">
+        Choose what you want to do to create a mutual contact token.
+      </p>
 
-      <div className="grid gap-4">
+      <div className="grid gap-3">
         <Button
-          onClick={() => setWizardStep('create-request')}
+          onClick={handleSelectSigner}
           className="h-auto py-4 flex flex-col items-start gap-1"
           variant="outline"
+          disabled={isLoading}
+        >
+          {pageState === 'getting_key' ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Authenticating...</span>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 font-semibold">
+                <CheckCircle2 className="h-5 w-5" />
+                Someone wants to add me as a contact
+              </div>
+              <p className="text-xs text-muted-foreground font-normal text-left whitespace-normal">
+                Share your contact card, have them create a token request, then sign it
+              </p>
+            </>
+          )}
+        </Button>
+
+        <Button
+          onClick={handleSelectInitiator}
+          className="h-auto py-4 flex flex-col items-start gap-1"
+          variant="outline"
+          disabled={isLoading}
         >
           <div className="flex items-center gap-2 font-semibold">
             <Plus className="h-5 w-5" />
-            I&apos;m starting the exchange
+            I want to add someone as a contact
           </div>
           <p className="text-xs text-muted-foreground font-normal text-left">
-            You have your contact&apos;s card and will create a token request for them to sign
-          </p>
-        </Button>
-
-        <Button
-          onClick={() => setWizardStep('sign-request')}
-          className="h-auto py-4 flex flex-col items-start gap-1"
-          variant="outline"
-        >
-          <div className="flex items-center gap-2 font-semibold">
-            <CheckCircle2 className="h-5 w-5" />
-            I&apos;m signing a token request
-          </div>
-          <p className="text-xs text-muted-foreground font-normal text-left whitespace-normal">
-            Share your contact card, have them create a token request from it, then sign the request to
-            create the mutual token
+            You have their contact card and will create a token request for them to sign
           </p>
         </Button>
       </div>
     </div>
   )
 
-  // Step 3A: Create Request (initiator flow)
-  const renderCreateRequestStep = () => (
+  // Render idle state (create passkey + already have passkey)
+  const renderIdleState = () => (
+    <div className="space-y-6">
+      {renderCreatePasskeySection()}
+      {renderAlreadyHavePasskeySection()}
+    </div>
+  )
+
+  // Initiator flow: Create Token Request
+  const renderInitiatorFlow = () => (
     <div className="space-y-6">
       {/* Back button */}
       <Button
@@ -780,7 +726,7 @@ export function PasskeyPage() {
         disabled={isLoading}
       >
         <ArrowLeft className="mr-2 h-4 w-4" />
-        Back to options
+        Back
       </Button>
 
       {/* Token request creation form */}
@@ -832,10 +778,10 @@ export function PasskeyPage() {
           disabled={!contactInput.trim() || isLoading}
           className="w-full"
         >
-          {pageState === 'binding_contact' ? (
+          {pageState === 'getting_key' || pageState === 'binding_contact' ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Authenticating...
+              {pageState === 'getting_key' ? 'Authenticating...' : 'Creating...'}
             </>
           ) : (
             <>
@@ -901,8 +847,8 @@ export function PasskeyPage() {
     </div>
   )
 
-  // Step 3B: Sign Request (with contact card at top)
-  const renderSignRequestStep = () => (
+  // Signer flow: Show contact card + sign token request (with numbered steps)
+  const renderSignerFlow = () => (
     <div className="space-y-6">
       {/* Back button */}
       <Button
@@ -913,18 +859,37 @@ export function PasskeyPage() {
         disabled={isLoading}
       >
         <ArrowLeft className="mr-2 h-4 w-4" />
-        Back to options
+        Back
       </Button>
 
-      {/* Contact card at top */}
-      {renderContactCard()}
+      {/* Step 1: Contact Card */}
+      {renderContactCardStep()}
 
+      {/* Step 2: Instructions */}
+      <div className="p-4 rounded-lg border border-muted bg-muted/30">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted-foreground/50 text-white text-sm font-medium">
+            2
+          </span>
+          <span className="font-semibold text-muted-foreground">Wait for Token Request</span>
+        </div>
+        <p className="text-sm text-muted-foreground ml-8">
+          Ask your contact to scan your contact card above and create a token request. They will
+          send it back to you.
+        </p>
+      </div>
+
+      {/* Step 3: Sign Token Request */}
       <div className="space-y-4 p-4 rounded-lg border border-amber-500/30 bg-amber-50/30 dark:bg-amber-950/10">
-        <h3 className="font-semibold flex items-center gap-2">
-          <Shield className="h-5 w-5 text-amber-600" />
-          Sign Token Request
-        </h3>
-        <p className="text-sm text-muted-foreground">
+        <div className="flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-600 text-white text-sm font-medium">
+            3
+          </span>
+          <span className="font-semibold text-amber-700 dark:text-amber-400">
+            Sign Token Request
+          </span>
+        </div>
+        <p className="text-sm text-muted-foreground ml-8">
           Paste the token request your contact sent you to create the mutual token.
         </p>
 
@@ -960,7 +925,7 @@ export function PasskeyPage() {
           {pageState === 'binding_contact' ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Authenticating...
+              Signing...
             </>
           ) : (
             <>
@@ -1025,17 +990,15 @@ export function PasskeyPage() {
     </div>
   )
 
-  // Render current step content
-  const renderStepContent = () => {
-    switch (wizardStep) {
-      case 'authenticate':
-        return renderAuthenticateStep()
-      case 'mode-select':
-        return renderModeSelectStep()
-      case 'create-request':
-        return renderCreateRequestStep()
-      case 'sign-request':
-        return renderSignRequestStep()
+  // Render content based on active mode
+  const renderContent = () => {
+    switch (activeMode) {
+      case 'signer':
+        return renderSignerFlow()
+      case 'initiator':
+        return renderInitiatorFlow()
+      default:
+        return renderIdleState()
     }
   }
 
@@ -1052,9 +1015,6 @@ export function PasskeyPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Step indicator */}
-          {renderStepIndicator()}
-
           {/* Error alert */}
           {error && (
             <Alert variant="destructive">
@@ -1073,8 +1033,8 @@ export function PasskeyPage() {
             </Alert>
           )}
 
-          {/* Current step content */}
-          {renderStepContent()}
+          {/* Main content based on active mode */}
+          {renderContent()}
 
           {/* Technical details */}
           <div className="text-xs text-muted-foreground space-y-1 border-t pt-4">
