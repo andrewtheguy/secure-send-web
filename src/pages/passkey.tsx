@@ -25,7 +25,6 @@ import {
   checkWebAuthnSupport,
   createPasskeyCredential,
   getPasskeyIdentity,
-  getCredentialPublicKey,
 } from '@/lib/crypto/passkey'
 import { formatFingerprint } from '@/lib/crypto/ecdh'
 import {
@@ -108,9 +107,9 @@ export function PasskeyPage() {
   const defaultUserName = useMemo(() => generateRandomName(), [])
   const [fingerprint, setFingerprint] = useState<string | null>(null)
   const [publicIdBase64, setPublicIdBase64] = useState<string | null>(null)
-  const [credentialPublicKeyBase64, setCredentialPublicKeyBase64] = useState<string | null>(null)
+  const [contactPublicKeyBase64, setContactPublicKeyBase64] = useState<string | null>(null)
+  const [contactSigningKey, setContactSigningKey] = useState<CryptoKey | null>(null)
   const [prfSupported, setPrfSupported] = useState<boolean | null>(null)
-  const [currentCredentialId, setCurrentCredentialId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -137,8 +136,8 @@ export function PasskeyPage() {
 
   // Generate contact card JSON
   const contactCard: string | null =
-    publicIdBase64 && credentialPublicKeyBase64
-      ? JSON.stringify({ id: publicIdBase64, cpk: credentialPublicKeyBase64 })
+    publicIdBase64 && contactPublicKeyBase64
+      ? JSON.stringify({ id: publicIdBase64, cpk: contactPublicKeyBase64 })
       : null
 
 
@@ -229,7 +228,8 @@ export function PasskeyPage() {
     setSuccess(null)
     setFingerprint(null)
     setPublicIdBase64(null)
-    setCredentialPublicKeyBase64(null)
+    setContactPublicKeyBase64(null)
+    setContactSigningKey(null)
     setPrfSupported(null)
     setOutputToken(null)
     setPageState('checking')
@@ -245,20 +245,13 @@ export function PasskeyPage() {
 
       setPageState('creating')
 
-      // Create the passkey (also stores credential public key)
-      const { credentialId } = await createPasskeyCredential(userName || defaultUserName)
+      // Create the passkey
+      await createPasskeyCredential(userName || defaultUserName)
       setUserName('') // Clear display name input after successful creation
-      setCurrentCredentialId(credentialId)
-
-      // Get the credential public key
-      const cpk = getCredentialPublicKey(credentialId)
-      if (cpk) {
-        setCredentialPublicKeyBase64(uint8ArrayToBase64(cpk))
-      }
 
       // Show success and let user manually authenticate
       // (Auto-authenticating immediately can fail on some authenticators like 1Password mobile)
-      setSuccess('Passkey created! Click "Authenticate" below to continue.')
+      setSuccess('Passkey created! Choose an option below to continue.')
       setPageState('idle')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create passkey')
@@ -280,23 +273,10 @@ export function PasskeyPage() {
       setFingerprint(result.publicIdFingerprint)
       setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
       setPrfSupported(result.prfSupported)
-      setCurrentCredentialId(result.credentialId)
 
-      // Get the credential public key
-      const cpk = getCredentialPublicKey(result.credentialId)
-      if (cpk) {
-        setCredentialPublicKeyBase64(uint8ArrayToBase64(cpk))
-      } else {
-        // Credential public key not found - passkey was created elsewhere (synced via iCloud/Google)
-        // User needs to create a new passkey on this device to get the public key
-        setCredentialPublicKeyBase64(null)
-        setError(
-          'This passkey was created on another device. Its credential key is not available locally. ' +
-            'Please create a new passkey on this device to generate contact tokens.'
-        )
-        setPageState('idle')
-        return
-      }
+      // Store derived contact key pair
+      setContactPublicKeyBase64(uint8ArrayToBase64(result.contactPublicKey))
+      setContactSigningKey(result.contactSigningKey)
 
       setPageState('idle')
       setActiveMode('signer')
@@ -321,21 +301,10 @@ export function PasskeyPage() {
       setFingerprint(result.publicIdFingerprint)
       setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
       setPrfSupported(result.prfSupported)
-      setCurrentCredentialId(result.credentialId)
 
-      // Get the credential public key
-      const cpk = getCredentialPublicKey(result.credentialId)
-      if (cpk) {
-        setCredentialPublicKeyBase64(uint8ArrayToBase64(cpk))
-      } else {
-        setCredentialPublicKeyBase64(null)
-        setError(
-          'This passkey was created on another device. Its credential key is not available locally. ' +
-            'Please create a new passkey on this device to generate contact tokens.'
-        )
-        setPageState('idle')
-        return
-      }
+      // Store derived contact key pair
+      setContactPublicKeyBase64(uint8ArrayToBase64(result.contactPublicKey))
+      setContactSigningKey(result.contactSigningKey)
 
       setPageState('idle')
       setActiveMode('initiator')
@@ -399,7 +368,7 @@ export function PasskeyPage() {
         throw new Error("Please enter contact's card")
       }
 
-      if (!currentCredentialId || !publicIdBase64) {
+      if (!contactSigningKey || !contactPublicKeyBase64 || !publicIdBase64) {
         throw new Error('Please authenticate first')
       }
 
@@ -417,7 +386,7 @@ export function PasskeyPage() {
         }
         const cpkBytes = base64ToUint8Array(contactCardParsed.cpk)
         if (cpkBytes.length !== 65 || cpkBytes[0] !== 0x04) {
-          throw new ValidationError('Invalid contact credential key: expected 65-byte P-256')
+          throw new ValidationError('Invalid contact public key: expected 65-byte P-256')
         }
       } catch (e) {
         if (e instanceof ValidationError) {
@@ -426,15 +395,10 @@ export function PasskeyPage() {
         throw new ValidationError('Invalid base64 encoding in contact card')
       }
 
-      const credentialPublicKey = getCredentialPublicKey(currentCredentialId)
-      if (!credentialPublicKey) {
-        throw new Error('Credential public key not found. Please create a new passkey.')
-      }
-
-      // Create pending mutual token (this triggers one WebAuthn assertion for signing)
+      // Create pending mutual token using derived signing key
       const token = await createMutualTokenInit(
-        currentCredentialId,
-        credentialPublicKey,
+        contactSigningKey,
+        base64ToUint8Array(contactPublicKeyBase64),
         publicIdBase64,
         contactCardParsed.id,
         contactCardParsed.cpk,
@@ -462,17 +426,8 @@ export function PasskeyPage() {
         throw new Error('Please enter token request')
       }
 
-      if (!currentCredentialId) {
-        throw new Error('Please create or authenticate with a passkey first')
-      }
-
-      const credentialPublicKey = getCredentialPublicKey(currentCredentialId)
-      if (!credentialPublicKey) {
-        throw new Error('Credential public key not found. Please create a new passkey.')
-      }
-
-      if (!publicIdBase64) {
-        throw new Error('Please authenticate with a passkey first to get your public ID')
+      if (!contactSigningKey || !contactPublicKeyBase64 || !publicIdBase64) {
+        throw new Error('Please authenticate with a passkey first')
       }
 
       if (!isTokenRequest(trimmed)) {
@@ -481,8 +436,8 @@ export function PasskeyPage() {
 
       const token = await countersignMutualToken(
         trimmed,
-        currentCredentialId,
-        credentialPublicKey,
+        contactSigningKey,
+        base64ToUint8Array(contactPublicKeyBase64),
         publicIdBase64
       )
 
@@ -516,6 +471,11 @@ export function PasskeyPage() {
     setTokenComment('')
     setOutputToken(null)
     setTokenError(null)
+    // Reset auth state so user must re-authenticate when selecting a new mode
+    setFingerprint(null)
+    setPublicIdBase64(null)
+    setContactPublicKeyBase64(null)
+    setContactSigningKey(null)
   }
 
   const isLoading = pageState !== 'idle'

@@ -161,31 +161,29 @@ For cross-user passkey transfers (different passkeys), a **mutual contact token*
 ```json
 {
   "id": "<base64 public ID, 32 bytes>",
-  "cpk": "<base64 credential public key, 65 bytes uncompressed P-256>"
+  "cpk": "<base64 contact signing public key, 65 bytes uncompressed P-256>"
 }
 ```
+
+The `cpk` (contact public key) is derived deterministically from the passkey PRF master key via HKDF, enabling signing without requiring the credential public key from attestation (which is only available during credential creation and not synced across devices).
 
 **Pending Token (after initiator signs):**
 ```typescript
 interface PendingMutualToken {
   a_id: string       // Party A's public ID (lexicographically smaller)
-  a_cpk: string      // Party A's credential public key
+  a_cpk: string      // Party A's contact public key
   b_id: string       // Party B's public ID (lexicographically larger)
-  b_cpk: string      // Party B's credential public key
+  b_cpk: string      // Party B's contact public key
   iat: number        // Unix timestamp (seconds)
-  init_authData: string      // WebAuthn authenticator data
-  init_clientDataJSON: string // WebAuthn client data
-  init_sig: string           // Initiator's ECDSA signature
-  comment?: string   // Optional comment (max 256 chars)
+  init_sig: string   // Initiator's ECDSA P-256 signature (base64)
+  comment?: string   // Optional comment (max 256 bytes UTF-8)
 }
 ```
 
 **Complete Token (after countersigning):**
 ```typescript
 interface MutualContactTokenPayload extends PendingMutualToken {
-  counter_authData: string      // Countersigner's authenticator data
-  counter_clientDataJSON: string // Countersigner's client data
-  counter_sig: string           // Countersigner's ECDSA signature
+  counter_sig: string // Countersigner's ECDSA P-256 signature (base64)
 }
 ```
 
@@ -202,7 +200,7 @@ challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat || comment_bytes)
 
 The entire token payload is tamper-proof:
 - **Data fields** (`a_id`, `a_cpk`, `b_id`, `b_cpk`, `iat`, `comment`): Included in the signed challenge. Tampering invalidates both signatures.
-- **Signature fields** (`init_authData`, `init_clientDataJSON`, `init_sig`, `counter_authData`, `counter_clientDataJSON`, `counter_sig`): These are the WebAuthn assertion outputs. They cannot be included in the challenge (circular dependency), but are cryptographically verified during `verifyMutualToken()`. Tampering causes verification to fail.
+- **Signature fields** (`init_sig`, `counter_sig`): ECDSA P-256 signatures over the challenge. They cannot be included in the challenge (circular dependency), but are cryptographically verified during `verifyMutualToken()`. Tampering causes verification to fail.
 
 **Result:** Modifying any field in the token — whether data or signature — will be detected and rejected.
 
@@ -215,13 +213,15 @@ sequenceDiagram
     Alice->>Bob: Alice's Contact Card (id + cpk)
     Bob->>Alice: Bob's Contact Card (id + cpk)
     Note over Alice: 2. Alice creates pending token
+    Alice->>Alice: Passkey auth → derive contact signing key from PRF
     Alice->>Alice: Sort IDs lexicographically
     Alice->>Alice: Compute challenge = SHA256(a_id||a_cpk||b_id||b_cpk||iat||comment)
-    Alice->>Alice: WebAuthn sign challenge
-    Alice->>Bob: Pending token (init signature only)
+    Alice->>Alice: ECDSA sign challenge with contact key
+    Alice->>Bob: Pending token (init_sig only)
     Note over Bob: 3. Bob countersigns
-    Bob->>Bob: Verify init signature (try both keys)
-    Bob->>Bob: WebAuthn sign same challenge
+    Bob->>Bob: Passkey auth → derive contact signing key from PRF
+    Bob->>Bob: Verify init_sig (try both cpk keys)
+    Bob->>Bob: ECDSA sign same challenge with contact key
     Bob->>Alice: Complete token (both signatures)
     Note over Alice,Bob: 4. Both use same token for transfers
 ```
@@ -230,8 +230,8 @@ sequenceDiagram
 1. Parse token JSON and validate required fields
 2. Verify lexicographic ordering (`a_id < b_id`)
 3. Compute expected challenge from token data
-4. Verify initiator signature (try `a_cpk` then `b_cpk`)
-5. Verify countersigner signature (the other key)
+4. Verify initiator ECDSA signature (try `a_cpk` then `b_cpk`)
+5. Verify countersigner ECDSA signature (the other key)
 6. Verify caller is a party to the token (if `myPublicId` provided)
 
 **Security Properties:**
@@ -259,14 +259,18 @@ sequenceDiagram
 flowchart TD
     Passkey[Passkey Authentication] --> PRF[WebAuthn PRF Extension]
     PRF --> MasterKey[Master Key HKDF]
+    MasterKey --> PublicId[Public ID<br/>HKDF label: public-id]
+    MasterKey --> ContactKey[Contact Signing Key<br/>HKDF label: contact-signing-key]
     Salt[Random Salt] --> HKDF[HKDF-SHA256]
     MasterKey --> HKDF
     HKDF --> AESKey[AES-256-GCM Key]
 ```
 
 1. **Master Key**: Single passkey prompt derives HKDF master key via PRF
-2. **Per-Transfer Key**: HKDF with random salt derives unique AES key per transfer
-3. **No PIN Required**: Biometric/device unlock replaces PIN entry
+2. **Public ID**: HKDF with label derives a 32-byte shareable identifier
+3. **Contact Signing Key**: HKDF with label derives a P-256 signing key pair (deterministic, works across synced devices)
+4. **Per-Transfer Key**: HKDF with random salt derives unique AES key per transfer
+5. **No PIN Required**: Biometric/device unlock replaces PIN entry
 
 #### Mutual Trust Key Derivation (Non-Extractable Keys)
 
