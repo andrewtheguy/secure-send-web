@@ -30,6 +30,14 @@ export function downloadFile(data: Uint8Array, fileName: string, mimeType: strin
 }
 
 /**
+ * Trigger a text file download in the browser
+ */
+export function downloadTextFile(content: string, fileName: string, mimeType: string): void {
+  const bytes = new TextEncoder().encode(content)
+  downloadFile(bytes, fileName, mimeType)
+}
+
+/**
  * Format file size in human-readable format
  */
 export function formatFileSize(bytes: number): string {

@@ -14,6 +14,8 @@ import {
   Camera,
   X,
   RefreshCw,
+  Download,
+  Info,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -38,6 +40,7 @@ import { ValidationError } from '@/lib/errors'
 import { useQRScanner } from '@/hooks/useQRScanner'
 import { generateTextQRCode } from '@/lib/qr-utils'
 import { isMobileDevice } from '@/lib/utils'
+import { downloadTextFile } from '@/lib/file-utils'
 
 type PageState = 'idle' | 'checking' | 'creating' | 'getting_key' | 'pairing_peer'
 
@@ -646,11 +649,11 @@ export function PasskeyPage() {
           ) : (
             <>
               <div className="flex items-center gap-2 font-semibold">
-                <CheckCircle2 className="h-5 w-5" />
-                Someone wants to pair with me
+                <Plus className="h-5 w-5" />
+                I want to pair with someone
               </div>
               <p className="text-xs text-muted-foreground font-normal text-left whitespace-normal">
-                Share your identity card, have them create a pairing request, then confirm it
+                Share your identity card first, then confirm their pairing request
               </p>
             </>
           )}
@@ -670,11 +673,11 @@ export function PasskeyPage() {
           ) : (
             <>
               <div className="flex items-center gap-2 font-semibold">
-                <Plus className="h-5 w-5" />
-                I want to pair with someone
+                <CheckCircle2 className="h-5 w-5" />
+                I have someone's identity card
               </div>
               <p className="text-xs text-muted-foreground font-normal text-left">
-                You have their identity card and will create a pairing request for them to confirm
+                Create a pairing request for them to confirm
               </p>
             </>
           )}
@@ -795,6 +798,9 @@ export function PasskeyPage() {
                 <div className="bg-white p-3 rounded-lg">
                   <img src={outputPairingKeyQrUrl} alt="Pairing Request QR Code" className="w-48 h-48" />
                 </div>
+                <span className="text-xs font-medium text-amber-600 bg-amber-100 px-2 py-0.5 rounded">
+                  Pairing Request
+                </span>
                 <p className="text-xs text-muted-foreground">
                   Let your peer scan this QR code
                 </p>
@@ -815,15 +821,34 @@ export function PasskeyPage() {
                 rows={4}
                 className="flex-1 text-xs bg-amber-500/10 border border-amber-500/20 p-2 rounded font-mono focus:outline-none focus:ring-2 focus:ring-amber-500/30 resize-none"
               />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleCopyPairingKey}
-                className={`flex-shrink-0 ${copiedPairingKey ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-amber-500/10'}`}
-              >
-                {copiedPairingKey ? <Check className="h-4 w-4 text-white" /> : <Copy className="h-4 w-4" />}
-              </Button>
+              <div className="flex flex-col gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopyPairingKey}
+                  className={`flex-shrink-0 ${copiedPairingKey ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-amber-500/10'}`}
+                >
+                  {copiedPairingKey ? <Check className="h-4 w-4 text-white" /> : <Copy className="h-4 w-4" />}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => downloadTextFile(outputPairingKey, `pairing-request-${Date.now()}.json`, 'application/json')}
+                  className="flex-shrink-0 hover:bg-amber-500/10"
+                >
+                  <Download className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
+
+            <Alert className="bg-blue-50 border-blue-200">
+              <Info className="h-4 w-4 text-blue-600" />
+              <AlertDescription className="text-blue-800 text-xs">
+                This can be shared publicly — it contains no secrets, only public identifiers and
+                your digital signature.
+              </AlertDescription>
+            </Alert>
+
             <p className="text-xs text-muted-foreground">
               Send this pairing request to your peer. They will confirm it and send back the final
               pairing key.
@@ -934,6 +959,12 @@ export function PasskeyPage() {
 
         {outputPairingKey && (
           <div className="space-y-3 pt-3 border-t border-amber-500/30">
+            {/* Step 4: Share with Your Peer */}
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-600 text-white text-xs font-medium">4</span>
+              <span className="font-medium">Share with Your Peer</span>
+            </div>
+
             <div className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-green-600" />
               <span className="text-sm font-medium text-green-600">Pairing Key Completed</span>
@@ -945,6 +976,9 @@ export function PasskeyPage() {
                 <div className="bg-white p-3 rounded-lg">
                   <img src={outputPairingKeyQrUrl} alt="Pairing Key QR Code" className="w-48 h-48" />
                 </div>
+                <span className="text-xs font-medium text-green-600 bg-green-100 px-2 py-0.5 rounded">
+                  Pairing Key
+                </span>
                 <p className="text-xs text-muted-foreground">
                   Share this QR code with your peer
                 </p>
@@ -965,18 +999,35 @@ export function PasskeyPage() {
                 rows={4}
                 className="flex-1 text-xs bg-amber-500/10 border border-amber-500/20 p-2 rounded font-mono focus:outline-none focus:ring-2 focus:ring-amber-500/30 resize-none"
               />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleCopyPairingKey}
-                className={`flex-shrink-0 ${copiedPairingKey ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-amber-500/10'}`}
-              >
-                {copiedPairingKey ? <Check className="h-4 w-4 text-white" /> : <Copy className="h-4 w-4" />}
-              </Button>
+              <div className="flex flex-col gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopyPairingKey}
+                  className={`flex-shrink-0 ${copiedPairingKey ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-amber-500/10'}`}
+                >
+                  {copiedPairingKey ? <Check className="h-4 w-4 text-white" /> : <Copy className="h-4 w-4" />}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => downloadTextFile(outputPairingKey, `pairing-key-${Date.now()}.json`, 'application/json')}
+                  className="flex-shrink-0 hover:bg-amber-500/10"
+                >
+                  <Download className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              This pairing key can now be used by both peers for secure file transfers.
-            </p>
+
+            <Alert className="bg-blue-50 border-blue-200">
+              <Info className="h-4 w-4 text-blue-600" />
+              <AlertDescription className="text-blue-800 text-xs">
+                This pairing key can be shared publicly — it contains no secrets, only public
+                identifiers and digital signatures proving mutual consent. Both you and your peer
+                need this same key for secure transfers.
+              </AlertDescription>
+            </Alert>
+
             <Button variant="outline" onClick={handleStartOver} className="w-full">
               Start Over
             </Button>
