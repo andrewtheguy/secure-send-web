@@ -35,6 +35,7 @@ import {
   confirmPairingRequest,
   isPairingRequestFormat,
   IDENTITY_CARD_TTL_SECONDS,
+  MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS,
 } from '@/lib/crypto/pairing-key'
 import { PIN_WORDLIST } from '@/lib/crypto/constants'
 import { ValidationError } from '@/lib/errors'
@@ -209,8 +210,9 @@ export function PasskeyPage() {
         if (qrScannerMode === 'identity-card') {
           // Validate identity card format (support both old 'cpk' and new 'ppk')
           const hasPpk = typeof parsed.ppk === 'string' || typeof parsed.cpk === 'string'
-          if (typeof parsed.id !== 'string' || !hasPpk) {
-            setQRScanError('Invalid identity card format: missing "id" or "ppk"')
+          const hasValidIat = typeof parsed.iat === 'number'
+          if (typeof parsed.id !== 'string' || !hasPpk || !hasValidIat) {
+            setQRScanError('Invalid identity card format: missing "id", "ppk", or "iat"')
             return
           }
         } else {
@@ -393,7 +395,7 @@ export function PasskeyPage() {
       // Parse identity card first (before auth prompt)
       const identityCardParsed = parseIdentityInput(trimmed)
       if (!identityCardParsed) {
-        throw new Error('Invalid identity card format. Expected JSON with "id" and "ppk" fields.')
+        throw new Error('Invalid identity card format. Expected JSON with "id", "ppk", and "iat" (finite number) fields.')
       }
 
       // Validate identity card fields
@@ -415,6 +417,9 @@ export function PasskeyPage() {
 
       // Validate identity card TTL (24 hours)
       const now = Math.floor(Date.now() / 1000)
+      if (identityCardParsed.iat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
+        throw new Error('Identity card iat is in the future. Check your device clock.')
+      }
       if (now - identityCardParsed.iat > IDENTITY_CARD_TTL_SECONDS) {
         throw new Error('Identity card has expired (valid for 24 hours). Ask your peer to generate a new one.')
       }

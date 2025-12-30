@@ -30,6 +30,9 @@ const MAX_COMMENT_BYTES = 256
 /** Identity card TTL in seconds (24 hours) */
 export const IDENTITY_CARD_TTL_SECONDS = 24 * 60 * 60
 
+/** Maximum acceptable clock skew for future timestamps (5 minutes) */
+export const MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS = 5 * 60
+
 /**
  * Pairing request - created by initiator, waiting for confirmation
  */
@@ -415,6 +418,9 @@ export async function createPairingRequest(
 ): Promise<string> {
   // Validate identity card TTL
   const now = Math.floor(Date.now() / 1000)
+  if (identityCardIat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
+    throw new Error('Identity card iat is in the future')
+  }
   if (now - identityCardIat > IDENTITY_CARD_TTL_SECONDS) {
     throw new Error('Identity card has expired (valid for 24 hours)')
   }
@@ -553,6 +559,9 @@ export async function confirmPairingRequest(
 
   // Validate identity card TTL (protects confirmer even if initiator bypassed check)
   const now = Math.floor(Date.now() / 1000)
+  if (request.iat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
+    throw new Error('Identity card iat is in the future')
+  }
   if (now - request.iat > IDENTITY_CARD_TTL_SECONDS) {
     throw new Error('Identity card has expired (valid for 24 hours)')
   }
