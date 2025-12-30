@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ChevronDown, ChevronRight, ArrowRight, Keyboard } from 'lucide-react'
+import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ChevronDown, ChevronRight, ArrowRight, Keyboard, Camera, RefreshCw, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
@@ -18,6 +18,8 @@ import { Link } from 'react-router-dom'
 import { formatFingerprint } from '@/lib/crypto/ecdh'
 import { isMutualTokenFormat, parseToken, type ParsedMutualToken } from '@/lib/crypto/contact-token'
 import { getSavedTokens, saveToken, type SavedToken } from '@/lib/saved-tokens'
+import { useQRScanner } from '@/hooks/useQRScanner'
+import { isMobileDevice } from '@/lib/utils'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -39,7 +41,6 @@ export function ReceiveTab() {
   const [passkeyAuthenticating, setPasskeyAuthenticating] = useState(false)
   const [senderPublicIdInput, setSenderPublicIdInput] = useState('')
   const [senderPublicIdError, setSenderPublicIdError] = useState<string | null>(null)
-  const [showPublicIdModal, setShowPublicIdModal] = useState(false)
 
   // Store PIN in ref to avoid React DevTools exposure
   const pinSecretRef = useRef<PinSecret | null>(null)
@@ -58,6 +59,60 @@ export function ReceiveTab() {
   const [savedTokens, setSavedTokens] = useState<SavedToken[]>([])
   const [showTokenDropdown, setShowTokenDropdown] = useState(false)
   const [loadedFromHistory, setLoadedFromHistory] = useState(false)
+
+  // QR scanner state for token scanning
+  const [showTokenQRScanner, setShowTokenQRScanner] = useState(false)
+  const [tokenQRError, setTokenQRError] = useState<string | null>(null)
+  const [tokenCameraReady, setTokenCameraReady] = useState(false)
+  const [selectedTokenCamera, setSelectedTokenCamera] = useState<string>(
+    isMobileDevice() ? 'environment' : 'user'
+  )
+
+  // QR scanner handlers
+  const handleTokenQRScan = useCallback((data: Uint8Array) => {
+    // Decode bytes to string (mutual tokens are JSON text)
+    const text = new TextDecoder().decode(data)
+    // Check if it looks like a mutual token
+    if (isMutualTokenFormat(text)) {
+      setSenderPublicIdInput(text)
+      setLoadedFromHistory(false)
+      setShowTokenQRScanner(false)
+      setTokenQRError(null)
+    } else {
+      setTokenQRError('Not a valid mutual contact token')
+    }
+  }, [])
+
+  const handleTokenQRError = useCallback((error: string) => {
+    setTokenQRError(error)
+  }, [])
+
+  const handleTokenCameraReady = useCallback(() => {
+    setTokenCameraReady(true)
+    setTokenQRError(null)
+  }, [])
+
+  const { videoRef: tokenVideoRef, canvasRef: tokenCanvasRef, availableCameras: tokenAvailableCameras } = useQRScanner({
+    onScan: handleTokenQRScan,
+    onError: handleTokenQRError,
+    onCameraReady: handleTokenCameraReady,
+    facingMode: selectedTokenCamera as 'environment' | 'user',
+    isScanning: showTokenQRScanner,
+  })
+
+  // Reset tokenCameraReady when scanner closes
+  useEffect(() => {
+    if (!showTokenQRScanner) {
+      setTokenCameraReady(false)
+    }
+  }, [showTokenQRScanner])
+
+  // Reset tokenCameraReady when camera selection changes while scanner is open
+  useEffect(() => {
+    if (showTokenQRScanner) {
+      setTokenCameraReady(false)
+    }
+  }, [selectedTokenCamera, showTokenQRScanner])
 
   // Parse mutual contact token - debounced to reduce parsing on every keystroke
   useEffect(() => {
@@ -497,11 +552,38 @@ export function ReceiveTab() {
                                   <Button
                                     variant="outline"
                                     size="sm"
-                                    onClick={() => setShowPublicIdModal(true)}
+                                    onClick={() => setShowTokenQRScanner(true)}
                                     className="flex-shrink-0"
-                                    title="Enter contact token"
+                                    title="Scan token QR code"
                                   >
-                                    <Keyboard className="h-4 w-4" />
+                                    <Camera className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              )}
+                              {/* Show entry options when token is loaded from history */}
+                              {loadedFromHistory && parsedToken && (
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-xs"
+                                    onClick={() => {
+                                      setSenderPublicIdInput('')
+                                      setParsedToken(null)
+                                      setLoadedFromHistory(false)
+                                    }}
+                                  >
+                                    <Keyboard className="h-3 w-3 mr-1" />
+                                    Enter manually
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-xs"
+                                    onClick={() => setShowTokenQRScanner(true)}
+                                  >
+                                    <Camera className="h-3 w-3 mr-1" />
+                                    Scan QR
                                   </Button>
                                 </div>
                               )}
@@ -531,20 +613,6 @@ export function ReceiveTab() {
                                     <Link to="/passkey/verify-token" className="text-primary hover:underline text-xs">
                                       Verify your signature →
                                     </Link>
-                                    {loadedFromHistory && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-5 px-1 text-xs text-muted-foreground hover:text-foreground"
-                                        onClick={() => {
-                                          setSenderPublicIdInput('')
-                                          setParsedToken(null)
-                                          setLoadedFromHistory(false)
-                                        }}
-                                      >
-                                        Change
-                                      </Button>
-                                    )}
                                   </div>
                                 </div>
                               )}
@@ -562,29 +630,82 @@ export function ReceiveTab() {
                     )}
                   </div>
 
-                  {/* Contact token entry modal */}
-                  {showPublicIdModal && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-                      <div className="bg-background rounded-lg p-4 max-w-md w-full mx-4 space-y-4">
+                  {/* Token QR Scanner Modal */}
+                  {showTokenQRScanner && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+                      <div className="bg-background rounded-lg p-4 max-w-sm w-full mx-4 space-y-4">
                         <div className="flex items-center justify-between">
-                          <h3 className="font-medium">Enter Mutual Contact Token</h3>
-                          <Button variant="ghost" size="sm" onClick={() => setShowPublicIdModal(false)}>
+                          <h3 className="font-medium flex items-center gap-2">
+                            <Camera className="h-5 w-5" />
+                            Scan Token QR Code
+                          </h3>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setShowTokenQRScanner(false)
+                              setTokenQRError(null)
+                            }}
+                          >
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                          Paste the mutual contact token you exchanged with your contact on your Passkey page.
+
+                        <div className="relative bg-black rounded-lg overflow-hidden aspect-square">
+                          {tokenQRError && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
+                              <div className="text-center p-4">
+                                <p className="text-red-400 text-sm mb-2">{tokenQRError}</p>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setTokenQRError(null)}
+                                >
+                                  <RefreshCw className="h-4 w-4 mr-1" />
+                                  Retry
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                          <video
+                            ref={tokenVideoRef}
+                            className="w-full h-full object-cover"
+                            autoPlay
+                            playsInline
+                            muted
+                          />
+                          <canvas ref={tokenCanvasRef} className="hidden" />
+                          {!tokenCameraReady && !tokenQRError && (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <Loader2 className="h-8 w-8 animate-spin text-white" />
+                            </div>
+                          )}
+                        </div>
+
+                        {tokenAvailableCameras.length > 1 && (
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant={selectedTokenCamera === 'environment' ? 'default' : 'outline'}
+                              onClick={() => setSelectedTokenCamera('environment')}
+                              className="flex-1"
+                            >
+                              Back Camera
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={selectedTokenCamera === 'user' ? 'default' : 'outline'}
+                              onClick={() => setSelectedTokenCamera('user')}
+                              className="flex-1"
+                            >
+                              Front Camera
+                            </Button>
+                          </div>
+                        )}
+
+                        <p className="text-xs text-muted-foreground text-center">
+                          Point camera at the mutual contact token QR code
                         </p>
-                        <Textarea
-                          placeholder="Paste mutual contact token..."
-                          value={senderPublicIdInput}
-                          onChange={(e) => setSenderPublicIdInput(e.target.value)}
-                          className="font-mono text-xs min-h-[100px]"
-                          autoFocus
-                        />
-                        <Button onClick={() => setShowPublicIdModal(false)} className="w-full">
-                          Done
-                        </Button>
                       </div>
                     </div>
                   )}
