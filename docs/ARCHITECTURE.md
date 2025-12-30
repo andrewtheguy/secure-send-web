@@ -245,7 +245,82 @@ With HMAC signatures, each party can only verify their own signature:
   1. UI validation (send-tab/receive-tab) - immediate format check when entering token
   2. Before transfer starts (`use-nostr-send.ts`, `use-nostr-receive.ts`) - verifies party membership
   3. During handshake - sender's token parsed by receiver, counterparty fingerprint verified against sender's claimed identity
+  4. **Handshake-time authentication** - both parties prove passkey control via ephemeral handshake proofs (see below)
 - **Trust model**: Security relies on out-of-band fingerprint verification during contact exchange, not on verifying the counterparty's signature
+
+#### Handshake-Time Authentication (Impersonation Prevention)
+
+The mutual contact token proves that both parties agreed to communicate, but possession of the token alone does not prove identity. An attacker who obtains a stolen token could impersonate either party. To prevent this, both sender and receiver must prove they control the original passkey used to sign the token during every handshake.
+
+**Verification Secret (VS):**
+
+Each party computes a verification secret when creating/countersigning the token:
+
+```
+VS = HMAC(contact_hmac_key, "verification-secret" || counterparty_cpk)
+```
+
+- `contact_hmac_key`: Non-extractable HMAC key derived from passkey PRF
+- `counterparty_cpk`: The other party's contact public key (32 bytes)
+- The VS is included in the token so the counterparty can verify handshake proofs
+
+**Token Format with Verification Secrets:**
+```typescript
+interface MutualContactTokenPayload {
+  // ... existing fields ...
+  init_party: 'a' | 'b'  // Who initiated the token (for VS mapping)
+  init_vs: string        // Initiator's verification secret (base64, 32 bytes)
+  counter_vs: string     // Countersigner's verification secret (base64, 32 bytes)
+}
+```
+
+**Handshake Proof (HP):**
+
+At handshake time, each party computes a proof binding their identity to the session:
+
+```
+HP = HMAC(verification_secret, ephemeral_pub || nonce || counterparty_fingerprint)
+```
+
+- `verification_secret`: Their own VS (derived from their passkey)
+- `ephemeral_pub`: Their ephemeral ECDH public key for this session (65 bytes)
+- `nonce`: The replay protection nonce for this handshake (16 bytes)
+- `counterparty_fingerprint`: The fingerprint of the party they're connecting to
+
+**Handshake Flow:**
+```mermaid
+sequenceDiagram
+    participant Sender
+    participant Receiver
+    Note over Sender: Parse token, get own VS
+    Note over Sender: Compute HP = HMAC(own_vs, epk||nonce||recv_fp)
+    Sender->>Receiver: Handshake Event + HP (ehp tag)
+    Note over Receiver: Parse token, get sender's VS from token
+    Note over Receiver: Verify HP matches expected value
+    Note over Receiver: Compute own HP = HMAC(own_vs, epk||nonce||sender_fp)
+    Receiver-->>Sender: ACK + HP (ehp tag)
+    Note over Sender: Get receiver's VS from token
+    Note over Sender: Verify HP matches expected value
+    Note over Sender,Receiver: Both parties authenticated
+```
+
+**Event Tags:**
+```
+['ehp', handshakeProof]  // Base64-encoded 32-byte HMAC
+```
+
+**Security Properties:**
+- **Stolen token is useless**: Attacker cannot compute valid HP without the passkey-derived HMAC key
+- **Session binding**: HP includes ephemeral key and nonce, preventing replay
+- **Bidirectional**: Both parties prove their identity, not just one
+- **Non-extractable**: VS is computed from non-extractable HMAC key; raw key never exposed
+
+**Implementation:**
+- `computeVerificationSecret()`: Computes VS during token creation
+- `getOwnVerificationSecret()`: Retrieves caller's VS from token
+- `getCounterpartyVerificationSecret()`: Retrieves counterparty's VS from token
+- `computeHandshakeProof()`: Computes HP at handshake time
+- `verifyHandshakeProof()`: Verifies counterparty's HP
 
 **Role in Encryption:**
 - The mutual token is **NOT used for encryption key derivation** - encryption uses ephemeral ECDH session keys (PFS)
@@ -509,6 +584,7 @@ Security-critical functions validate inputs before cryptographic operations:
 | Perfect Forward Secrecy | No | Yes (ephemeral ECDH) | Yes (ephemeral ECDH) |
 | Round Trips | 1 | 1 | 2 (handshake + payload) |
 | Party Membership Check | N/A | N/A | Yes (during handshake) |
+| Handshake Authentication | N/A | N/A | Yes (bidirectional HP) |
 
 ### User Interface Architecture
 

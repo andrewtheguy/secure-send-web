@@ -108,6 +108,7 @@ export function parsePinExchangeEvent(event: Event): {
  * @param senderEphemeralPub - Sender's ephemeral public key for ECDH (required, 65 bytes)
  * @param senderSessionBinding - Session binding proving ephemeral key is authorized (required, 32 bytes)
  * @param senderContactToken - Sender's bound contact token proving intent to communicate with receiver
+ * @param senderHandshakeProof - Optional: Handshake proof proving sender controls their passkey (32 bytes). Required for cross-user mode.
  */
 export function createMutualTrustHandshakeEvent(
   secretKey: Uint8Array,
@@ -119,7 +120,8 @@ export function createMutualTrustHandshakeEvent(
   nonce: string,
   senderEphemeralPub: Uint8Array,
   senderSessionBinding: Uint8Array,
-  senderContactToken: string
+  senderContactToken: string,
+  senderHandshakeProof?: Uint8Array
 ): Event {
   const expiration = Math.floor((Date.now() + TRANSFER_EXPIRATION_MS) / 1000)
 
@@ -132,6 +134,13 @@ export function createMutualTrustHandshakeEvent(
   if (senderSessionBinding.length !== EPHEMERAL_BINDING_BYTES) {
     throw new Error(
       `Invalid sender session binding length: expected ${EPHEMERAL_BINDING_BYTES} bytes, got ${senderSessionBinding.length}`
+    )
+  }
+
+  // Validate handshake proof if provided
+  if (senderHandshakeProof && senderHandshakeProof.length !== 32) {
+    throw new Error(
+      `Invalid sender handshake proof length: expected 32 bytes, got ${senderHandshakeProof.length}`
     )
   }
 
@@ -148,6 +157,11 @@ export function createMutualTrustHandshakeEvent(
     ['esb', uint8ArrayToBase64(senderSessionBinding)], // Ephemeral session binding
     ['ctk', senderContactToken], // Sender's bound contact token (proves intent)
   ]
+
+  // Add handshake proof if provided (for cross-user mode)
+  if (senderHandshakeProof) {
+    tags.push(['ehp', uint8ArrayToBase64(senderHandshakeProof)]) // Ephemeral handshake proof
+  }
 
   const event = finalizeEvent(
     {
@@ -176,6 +190,7 @@ export function parseMutualTrustHandshakeEvent(event: Event): {
   senderEphemeralPub: Uint8Array
   senderSessionBinding: Uint8Array
   senderContactToken: string
+  senderHandshakeProof?: Uint8Array
 } | null {
   if (event.kind !== EVENT_KIND_PIN_EXCHANGE) return null
 
@@ -224,6 +239,20 @@ export function parseMutualTrustHandshakeEvent(event: Event): {
   }
   if (!ephemeralPub || !sessionBinding) return null
 
+  // Parse optional handshake proof (for cross-user mode)
+  let handshakeProof: Uint8Array | undefined
+  const ehpB64 = event.tags.find((t) => t[0] === 'ehp')?.[1]
+  if (ehpB64) {
+    try {
+      handshakeProof = base64ToUint8Array(ehpB64)
+      if (handshakeProof.length !== 32) {
+        handshakeProof = undefined // Invalid length, ignore
+      }
+    } catch {
+      // Malformed ehp tag, ignore
+    }
+  }
+
   return {
     receiverFingerprint,
     senderFingerprint,
@@ -234,6 +263,7 @@ export function parseMutualTrustHandshakeEvent(event: Event): {
     senderEphemeralPub: ephemeralPub,
     senderSessionBinding: sessionBinding,
     senderContactToken,
+    senderHandshakeProof: handshakeProof,
   }
 }
 
@@ -470,6 +500,7 @@ export function parseMutualTrustEvent(event: Event): {
  * nonce is optional - echoed from sender's mutual trust event for replay protection
  * receiverEphemeralPub/receiverSessionBinding - for PFS (Perfect Forward Secrecy)
  * receiverContactToken - for cross-user passkey: receiver's bound token proving intent
+ * receiverHandshakeProof - for cross-user passkey: proves receiver controls their passkey (32 bytes)
  */
 export function createAckEvent(
   secretKey: Uint8Array,
@@ -480,7 +511,8 @@ export function createAckEvent(
   nonce?: string,
   receiverEphemeralPub?: Uint8Array,
   receiverSessionBinding?: Uint8Array,
-  receiverContactToken?: string
+  receiverContactToken?: string,
+  receiverHandshakeProof?: Uint8Array
 ): Event {
   const tags: string[][] = [
     ['p', senderPubkey],
@@ -523,6 +555,16 @@ export function createAckEvent(
     tags.push(['ctk', receiverContactToken])
   }
 
+  // Add receiver's handshake proof for cross-user passkey transfers
+  if (receiverHandshakeProof) {
+    if (receiverHandshakeProof.length !== 32) {
+      throw new Error(
+        `Invalid receiver handshake proof length: expected 32 bytes, got ${receiverHandshakeProof.length}`
+      )
+    }
+    tags.push(['ehp', uint8ArrayToBase64(receiverHandshakeProof)])
+  }
+
   const event = finalizeEvent(
     {
       kind: EVENT_KIND_DATA_TRANSFER,
@@ -550,6 +592,8 @@ export function parseAckEvent(event: Event): {
   receiverSessionBinding?: Uint8Array
   // Optional contact token for cross-user passkey transfers
   receiverContactToken?: string
+  // Optional handshake proof for cross-user passkey transfers
+  receiverHandshakeProof?: Uint8Array
 } | null {
   if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null
 
@@ -582,7 +626,21 @@ export function parseAckEvent(event: Event): {
     return null
   }
 
-  return { senderPubkey, transferId, seq, hint, nonce, receiverEphemeralPub, receiverSessionBinding, receiverContactToken }
+  // Parse optional handshake proof for cross-user passkey transfers
+  let receiverHandshakeProof: Uint8Array | undefined
+  const ehpB64 = event.tags.find((t) => t[0] === 'ehp')?.[1]
+  if (ehpB64) {
+    try {
+      receiverHandshakeProof = base64ToUint8Array(ehpB64)
+      if (receiverHandshakeProof.length !== 32) {
+        receiverHandshakeProof = undefined // Invalid length, ignore
+      }
+    } catch {
+      // Malformed ehp tag, ignore
+    }
+  }
+
+  return { senderPubkey, transferId, seq, hint, nonce, receiverEphemeralPub, receiverSessionBinding, receiverContactToken, receiverHandshakeProof }
 }
 
 /**

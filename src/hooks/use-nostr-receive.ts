@@ -48,7 +48,7 @@ import {
   verifyPublicKeyCommitment,
   constantTimeEqual,
 } from '@/lib/crypto/ecdh'
-import { parseToken, getCounterpartyFromParsedToken } from '@/lib/crypto/contact-token'
+import { parseToken, getCounterpartyFromParsedToken, getOwnVerificationSecret, getCounterpartyVerificationSecret, computeHandshakeProof, verifyHandshakeProof } from '@/lib/crypto/contact-token'
 
 export interface ReceiveOptions {
   usePasskey?: boolean
@@ -115,6 +115,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     // PFS: Ephemeral session keypair for Perfect Forward Secrecy
     let receiverEphemeral: EphemeralSessionKeypair | null = null
     let identitySharedSecretKey: CryptoKey | null = null
+    // Parsed token for handshake proof computation (cross-user mode)
+    let receiverParsedToken: Awaited<ReturnType<typeof parseToken>> | null = null
 
     try {
       let hint: string
@@ -308,14 +310,42 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             continue
           }
 
+          // === SECURITY VERIFICATION 4: Sender's handshake proof ===
+          // CRITICAL: This proves the sender controls their passkey, preventing impersonation with stolen tokens
+          if (!parsed.senderHandshakeProof) {
+            console.log('Sender did not provide handshake proof - rejecting')
+            continue
+          }
+          // Get the sender's verification secret from the token
+          const senderVs = getCounterpartyVerificationSecret(parsedSenderToken, ownPublicKeyBytes)
+          // Decode the nonce from base64 for verification
+          const nonceBytes = Uint8Array.from(atob(parsed.nonce), c => c.charCodeAt(0))
+          // Verify the sender's proof: HMAC(sender_vs, sender_epk || nonce || receiver_fingerprint)
+          const ownFingerprint = await publicKeyToFingerprint(ownPublicKeyBytes)
+          const senderProofValid = await verifyHandshakeProof(
+            senderVs,
+            parsed.senderHandshakeProof,
+            parsed.senderEphemeralPub,
+            nonceBytes,
+            ownFingerprint
+          )
+          if (!senderProofValid) {
+            console.log('Invalid sender handshake proof - sender does not control their passkey')
+            continue
+          }
+
+          // Store parsed token for computing receiver's handshake proof in ACK
+          receiverParsedToken = parsedSenderToken
+
           // NOTE: For cross-user passkey mode, we CANNOT verify session binding because:
           // - Session binding is created using the sender's passkey master key
           // - We don't have access to sender's master key (different passkeys = different PRF outputs)
           // Security relies on:
           // 1. Fingerprint verification (above) - ensures sender identity
           // 2. RPKC verification (above) - ensures event is addressed to us
-          // 3. Ephemeral ECDH - any MITM can't derive session key without both private keys
-          // 4. Contact token verification (above) - proves sender intended to reach us
+          // 3. Handshake proof verification (above) - proves sender controls their passkey
+          // 4. Ephemeral ECDH - any MITM can't derive session key without both private keys
+          // 5. Contact token verification (above) - proves sender intended to reach us
 
           // Handshake verified - store info for session key derivation
           senderEphemeralPub = parsed.senderEphemeralPub
@@ -499,6 +529,25 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       const receiverContactToken = isCrossUserPasskey && 'senderContactToken' in arg
         ? (arg as ReceiveOptions).senderContactToken
         : undefined
+
+      // Compute receiver's handshake proof for cross-user mode
+      let receiverHandshakeProof: Uint8Array | undefined
+      if (isCrossUserPasskey && receiverParsedToken && ownPublicKeyBytes && receiverEphemeral && eventNonce) {
+        // Get receiver's verification secret from the parsed token
+        const receiverVs = getOwnVerificationSecret(receiverParsedToken, ownPublicKeyBytes)
+        // Decode the nonce from base64 for proof computation
+        const nonceBytes = Uint8Array.from(atob(eventNonce), c => c.charCodeAt(0))
+        // Get the sender's fingerprint from the parsed token
+        const senderFromToken = getCounterpartyFromParsedToken(receiverParsedToken, ownPublicKeyBytes)
+        // Compute the receiver's proof: HMAC(receiver_vs, receiver_epk || nonce || sender_fingerprint)
+        receiverHandshakeProof = await computeHandshakeProof(
+          receiverVs,
+          receiverEphemeral.ephemeralPublicKeyBytes,
+          nonceBytes,
+          senderFromToken.fingerprint
+        )
+      }
+
       const readyAck = createAckEvent(
         secretKey,
         senderPubkey,
@@ -508,7 +557,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         eventNonce,
         receiverEphemeral?.ephemeralPublicKeyBytes,
         receiverEphemeral?.sessionBinding,
-        receiverContactToken
+        receiverContactToken,
+        receiverHandshakeProof
       )
       await client.publish(readyAck)
 
