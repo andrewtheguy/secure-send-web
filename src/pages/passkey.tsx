@@ -764,7 +764,7 @@ export function PasskeyPage() {
           <div className="flex gap-2">
             <Textarea
               id="invite-code"
-              placeholder={`Paste peer's invite code (JSON with "id" and "ppk")...`}
+              placeholder={`Paste peer's invite code (JSON with "id", "ppk", and "iat")...`}
               value={peerInput}
               onChange={(e) => setPeerInput(e.target.value)}
               disabled={isLoading}
