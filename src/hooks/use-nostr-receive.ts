@@ -103,9 +103,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     setReceivedContent(null)
 
     // Determine mode
-    const isMutualTrustMode =
-      'usePasskey' in arg && arg.usePasskey === true && (('senderPairingKey' in arg && arg.senderPairingKey) || ('selfTransfer' in arg && arg.selfTransfer))
-    const pinMaterial = !('usePasskey' in arg) ? (arg as PinKeyMaterial) : null
+    const usePasskey = 'usePasskey' in arg && arg.usePasskey === true
+    const hasSenderOrSelf =
+      ('senderPairingKey' in arg && arg.senderPairingKey) ||
+      ('selfTransfer' in arg && arg.selfTransfer)
+    const isMutualTrustMode = usePasskey && hasSenderOrSelf
+    const pinMaterial = !usePasskey ? (arg as PinKeyMaterial) : null
 
     // Closure variables for mutual trust mode - keeps sensitive data scoped
     let ownPublicKeyBytes: Uint8Array | null = null
