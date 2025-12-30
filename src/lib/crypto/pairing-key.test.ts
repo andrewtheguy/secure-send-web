@@ -5,7 +5,7 @@ import {
   confirmPairingRequest,
   createPairingRequest,
   verifyOwnSignature,
-  IDENTITY_CARD_TTL_SECONDS,
+  INVITE_CODE_TTL_SECONDS,
 } from './pairing-key'
 
 /**
@@ -23,7 +23,7 @@ import {
  * - Neither party can verify the other's signature (HMAC requires the signer's key)
  */
 
-/** Sample issued-at timestamp for test fixtures (from Identity Card) */
+/** Sample issued-at timestamp for test fixtures (from Invite Code) */
 const TEST_IAT = 1234567890
 
 /**
@@ -69,7 +69,7 @@ describe('Pairing Key HMAC Key Ownership', () => {
     //   publicIdFingerprint: string,
     //   prfSupported: boolean,
     //   credentialId: string,
-    //   peerPublicKey: Uint8Array,   // 32 bytes for identity card
+    //   peerPublicKey: Uint8Array,   // 32 bytes for invite code
     //   hmacKey: CryptoKey,          // YOUR OWN signing key (NOT the peer's!)
     // }
     //
@@ -350,23 +350,23 @@ describe('Pairing Key Format Validation', () => {
 })
 
 /**
- * Identity Card TTL Validation Tests
+ * Invite Code TTL Validation Tests
  *
  * These tests ensure that confirmPairingRequest (Step 3) validates the TTL
  * even if the initiator (Step 2) bypassed or tampered with the validation.
- * This protects the Signer from confirming expired identity cards.
+ * This protects the Signer from confirming expired invite codes.
  */
-describe('Identity Card TTL Validation', () => {
+describe('Invite Code TTL Validation', () => {
   // Helper to create a valid 32-byte base64 string
   const validBase64_32bytes = btoa(String.fromCharCode(...new Array(32).fill(65))) // 32 'A' bytes
 
-  test('IDENTITY_CARD_TTL_SECONDS is 24 hours', () => {
-    expect(IDENTITY_CARD_TTL_SECONDS).toBe(24 * 60 * 60)
+  test('INVITE_CODE_TTL_SECONDS is 24 hours', () => {
+    expect(INVITE_CODE_TTL_SECONDS).toBe(24 * 60 * 60)
   })
 
   test('confirmPairingRequest rejects expired iat even if initiator bypassed check', async () => {
     // Simulate a malicious initiator who bypassed client-side TTL validation
-    // and created a pairing request with an expired identity card timestamp
+    // and created a pairing request with an expired invite code timestamp
     const expiredIat = Math.floor(Date.now() / 1000) - (25 * 60 * 60) // 25 hours ago
 
     const expiredRequest = JSON.stringify({
@@ -386,12 +386,12 @@ describe('Identity Card TTL Validation', () => {
     // This should fail because the iat is expired
     await expect(
       confirmPairingRequest(expiredRequest, hmacKey, signerPeerKey, validBase64_32bytes)
-    ).rejects.toThrow('Identity card has expired (valid for 24 hours)')
+    ).rejects.toThrow('Invite code has expired (valid for 24 hours)')
   })
 
   test('confirmPairingRequest rejects iat exactly at TTL boundary', async () => {
     // Edge case: iat is exactly 24 hours + 1 second ago
-    const boundaryIat = Math.floor(Date.now() / 1000) - IDENTITY_CARD_TTL_SECONDS - 1
+    const boundaryIat = Math.floor(Date.now() / 1000) - INVITE_CODE_TTL_SECONDS - 1
 
     const boundaryRequest = JSON.stringify({
       a_id: validBase64_32bytes,
@@ -409,7 +409,7 @@ describe('Identity Card TTL Validation', () => {
 
     await expect(
       confirmPairingRequest(boundaryRequest, hmacKey, signerPeerKey, validBase64_32bytes)
-    ).rejects.toThrow('Identity card has expired (valid for 24 hours)')
+    ).rejects.toThrow('Invite code has expired (valid for 24 hours)')
   })
 
   test('confirmPairingRequest accepts valid iat within 24 hours', async () => {

@@ -157,7 +157,7 @@ Passkeys provide an alternative to PIN-based authentication using the WebAuthn P
 
 For cross-user passkey transfers (different passkeys), a **mutual contact token** establishes trust between parties. Both parties sign the same token, creating a cryptographic proof of mutual agreement.
 
-**Identity Card Format:**
+**Invite Code Format:**
 ```json
 {
   "id": "<base64 public ID, 32 bytes>",
@@ -166,11 +166,11 @@ For cross-user passkey transfers (different passkeys), a **mutual contact token*
 }
 ```
 
-**Identity Card TTL:**
-- Identity cards are valid for **24 hours** from creation (`IDENTITY_CARD_TTL_SECONDS = 86400`)
+**Invite Code TTL:**
+- Invite codes are valid for **24 hours** from creation (`INVITE_CODE_TTL_SECONDS = 86400`)
 - A maximum clock skew of **5 minutes** is allowed (`MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS = 300`)
 - TTL is validated at two points:
-  1. **Initiator (Step 2)**: When creating the pairing request from peer's identity card
+  1. **Initiator (Step 2)**: When creating the pairing request from peer's invite code
   2. **Confirmer (Step 3)**: When confirming the pairing request (protects even if initiator bypassed check)
 - The `iat` timestamp is included in the challenge hash, making it tamper-proof
 
@@ -181,7 +181,7 @@ Both `id` (public ID) and `ppk` (peer public key) are derived from the passkey P
 | Field | HKDF Info String | Purpose | Published? |
 |-------|------------------|---------|------------|
 | `id` (public ID) | `secure-send-passkey-public-id-v1` | Event addressing/filtering on Nostr relays | Yes (in Nostr events) |
-| `ppk` (peer public key) | `secure-send-peer-public-key-v1` | Identity binding in token challenge; verification secret derivation | Yes (in identity cards/tokens) |
+| `ppk` (peer public key) | `secure-send-peer-public-key-v1` | Identity binding in token challenge; verification secret derivation | Yes (in invite codes/tokens) |
 
 **Why both are required (cannot reuse one identifier):**
 - **Separation of concerns**: The public ID is used for Nostr event routing (`rpkc` commitment, fingerprint filtering). The ppk is used exclusively in the authentication protocol (token challenge, handshake proofs).
@@ -195,7 +195,7 @@ interface PendingMutualToken {
   a_ppk: string      // Party A's peer public key (32 bytes)
   b_id: string       // Party B's public ID (lexicographically larger)
   b_ppk: string      // Party B's peer public key (32 bytes)
-  iat: number        // Identity card issued-at timestamp (Unix seconds, valid for 24 hours)
+  iat: number        // Invite code issued-at timestamp (Unix seconds, valid for 24 hours)
   init_party: 'a' | 'b'  // Who initiated the token (for VS mapping)
   init_sig: string   // Initiator's HMAC-SHA256 MAC (base64, 32 bytes)
   init_vs: string    // Initiator's verification secret (base64, 32 bytes)
@@ -238,13 +238,12 @@ The entire token payload is tamper-proof via different mechanisms:
 sequenceDiagram
     participant Alice
     participant Bob
-    Note over Alice,Bob: 1. Exchange Identity Cards + Verify Fingerprints
-    Alice->>Bob: Alice's Identity Card (id + ppk + iat)
-    Bob->>Alice: Bob's Identity Card (id + ppk + iat)
+    Note over Alice,Bob: 1. Bob shares Invite Code + Verify Fingerprints
+    Bob->>Alice: Bob's Invite Code (id + ppk + iat)
     Note over Alice,Bob: Out-of-band fingerprint verification (phone, in-person)
     Note over Alice: 2. Alice creates pending token (validates Bob's iat TTL)
     Alice->>Alice: Passkey auth → derive HMAC key from PRF
-    Alice->>Alice: Validate Bob's identity card iat (24h TTL, 5min clock skew)
+    Alice->>Alice: Validate Bob's invite code iat (24h TTL, 5min clock skew)
     Alice->>Alice: Sort IDs lexicographically
     Alice->>Alice: Compute challenge = SHA256(a_id||a_ppk||b_id||b_ppk||iat||comment)
     Alice->>Alice: HMAC-SHA256 sign challenge
@@ -271,8 +270,8 @@ The out-of-band fingerprint verification in step 1 is the primary trust anchor f
 | Method | Description | Best For |
 |--------|-------------|----------|
 | **Verbal comparison** | Read fingerprint aloud over phone/video call | Remote contacts with voice channel |
-| **QR code scan** | Scan identity card QR code (contains id + ppk + iat) | In-person exchange |
-| **Copy/paste** | Copy identity card JSON and send via secure channel | Existing encrypted chat (Signal, iMessage) |
+| **QR code scan** | Scan invite code QR code (contains id + ppk + iat) | In-person exchange |
+| **Copy/paste** | Copy invite code JSON and send via secure channel | Existing encrypted chat (Signal, iMessage) |
 
 *Verification Requirements:*
 - **Not mandatory for functionality**: The token creation flow works without fingerprint verification. Verification is a security best practice, not a technical requirement.
@@ -460,7 +459,7 @@ The requirement to authenticate for verification has important operational conse
 Passkeys in this application are intentionally **disposable** - they bind to contact tokens, not to persistent identity:
 
 1. **Generate new passkey** at `/passkey`
-2. **Re-exchange identity cards** with counterparty (new public ID, new ppk)
+2. **Re-exchange invite codes** with counterparty (new public ID, new ppk)
 3. **Create new mutual contact token** with fresh signatures
 4. **Old tokens are abandoned** - they cannot be used without the original passkey
 
