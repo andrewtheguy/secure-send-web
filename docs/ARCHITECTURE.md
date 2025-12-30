@@ -105,7 +105,7 @@ sequenceDiagram
 | `kdf.ts` | Key derivation using PBKDF2-SHA256 (600,000 iterations) |
 | `passkey.ts` | WebAuthn PRF extension for passkey-based key derivation |
 | `ecdh.ts` | ECDH key exchange (non-extractable keys), fingerprints, key confirmation, public key commitment, constant-time comparison |
-| `contact-token.ts` | Mutual contact token creation, countersigning, and verification for cross-user passkey mode |
+| `pairing-key.ts` | Pairing key creation, countersigning, and verification for cross-user passkey mode |
 | `aes-gcm.ts` | AES-256-GCM encryption/decryption |
 | `stream-crypto.ts` | Streaming encryption/decryption (128KB chunks, protocol-agnostic) |
 | `constants.ts` | Crypto parameters, charsets (69 chars), BIP-39 wordlist (2048 words) |
@@ -153,9 +153,9 @@ Passkeys provide an alternative to PIN-based authentication using the WebAuthn P
 - **Public ID**: 32 bytes derived from the passkey master key via HKDF (shareable, non-secret), encoded as base64 for copy/QR
 - **Purpose**: Shared with contacts to target Nostr events and validate receiver commitments (`rpkc`)
 
-#### Mutual Contact Tokens (Cross-User Mode)
+#### Pairing Keys (Cross-User Mode)
 
-For cross-user passkey transfers (different passkeys), a **mutual contact token** establishes trust between parties. Both parties sign the same token, creating a cryptographic proof of mutual agreement.
+For cross-user passkey transfers (different passkeys), a **pairing key** establishes trust between parties. Both parties sign the same key, creating a cryptographic proof of mutual agreement.
 
 **Invite Code Format:**
 ```json
@@ -188,30 +188,30 @@ Both `id` (public ID) and `ppk` (peer public key) are derived from the passkey P
 - **Unlinkability potential**: Different HKDF derivations allow future protocol changes to rotate one identifier without affecting the other.
 - **Defense in depth**: Compromising the public ID (visible in Nostr events) reveals nothing about the ppk used in cryptographic proofs.
 
-**Pending Token (after initiator signs):**
+**Pairing Request (after initiator signs):**
 ```typescript
-interface PendingMutualToken {
+interface PairingRequest {
   a_id: string       // Party A's public ID (lexicographically smaller)
   a_ppk: string      // Party A's peer public key (32 bytes)
   b_id: string       // Party B's public ID (lexicographically larger)
   b_ppk: string      // Party B's peer public key (32 bytes)
   iat: number        // Invite code issued-at timestamp (Unix seconds, valid for 24 hours)
-  init_party: 'a' | 'b'  // Who initiated the token (for VS mapping)
+  init_party: 'a' | 'b'  // Who initiated (for VS mapping)
   init_sig: string   // Initiator's HMAC-SHA256 MAC (base64, 32 bytes)
   init_vs: string    // Initiator's verification secret (base64, 32 bytes)
   comment?: string   // Optional comment (max 256 bytes UTF-8)
 }
 ```
 
-**Complete Token (after countersigning):**
+**Pairing Key (after countersigning):**
 ```typescript
-interface MutualContactTokenPayload extends PendingMutualToken {
+interface PairingKeyPayload extends PairingRequest {
   counter_sig: string  // Countersigner's HMAC-SHA256 MAC (base64, 32 bytes)
   counter_vs: string   // Countersigner's verification secret (base64, 32 bytes)
 }
 ```
 
-The `init_party` field tracks who initiated the token ('a' or 'b'), which is needed to correctly map verification secrets to parties during handshake authentication. The `init_vs` and `counter_vs` fields contain verification secrets used for Handshake Proofs (see below).
+The `init_party` field tracks who initiated ('a' or 'b'), which is needed to correctly map verification secrets to parties during handshake authentication. The `init_vs` and `counter_vs` fields contain verification secrets used for Handshake Proofs (see below).
 
 **Challenge Computation:**
 ```
@@ -241,19 +241,19 @@ sequenceDiagram
     Note over Alice,Bob: 1. Bob shares Invite Code + Verify Fingerprints
     Bob->>Alice: Bob's Invite Code (id + ppk + iat)
     Note over Alice,Bob: Out-of-band fingerprint verification (phone, in-person)
-    Note over Alice: 2. Alice creates pending token (validates Bob's iat TTL)
+    Note over Alice: 2. Alice creates pairing request (validates Bob's iat TTL)
     Alice->>Alice: Passkey auth → derive HMAC key from PRF
     Alice->>Alice: Validate Bob's invite code iat (24h TTL, 5min clock skew)
     Alice->>Alice: Sort IDs lexicographically
     Alice->>Alice: Compute challenge = SHA256(a_id||a_ppk||b_id||b_ppk||iat||comment)
     Alice->>Alice: HMAC-SHA256 sign challenge
-    Alice->>Bob: Pending token (init_sig only)
+    Alice->>Bob: Pairing request (init_sig only)
     Note over Bob: 3. Bob countersigns (validates iat TTL again)
     Bob->>Bob: Passkey auth → derive HMAC key from PRF
     Bob->>Bob: Validate iat TTL (protects even if Alice bypassed check)
     Bob->>Bob: HMAC-SHA256 sign same challenge
-    Bob->>Alice: Complete token (both signatures)
-    Note over Alice,Bob: 4. Both use same token for transfers
+    Bob->>Alice: Pairing key (both signatures)
+    Note over Alice,Bob: 4. Both use same pairing key for transfers
 ```
 
 **Fingerprint Verification Details:**
@@ -318,11 +318,11 @@ With HMAC signatures, each party can only verify their own signature:
 
 #### Handshake-Time Authentication (Impersonation Prevention)
 
-The mutual contact token proves that both parties agreed to communicate, but possession of the token alone does not prove identity. An attacker who obtains a stolen token could impersonate either party. To prevent this, both sender and receiver must prove they control the original passkey used to sign the token during every handshake.
+The pairing key proves that both parties agreed to communicate, but possession of the key alone does not prove identity. An attacker who obtains a stolen pairing key could impersonate either party. To prevent this, both sender and receiver must prove they control the original passkey used to sign the pairing key during every handshake.
 
 **Verification Secret (VS):**
 
-Each party computes a verification secret when creating/countersigning the token:
+Each party computes a verification secret when creating/countersigning the pairing key:
 
 ```
 VS = HMAC(contact_hmac_key, "verification-secret" || counterparty_ppk)
@@ -330,9 +330,9 @@ VS = HMAC(contact_hmac_key, "verification-secret" || counterparty_ppk)
 
 - `contact_hmac_key`: Non-extractable HMAC key derived from passkey PRF
 - `counterparty_ppk`: The other party's peer public key (32 bytes)
-- The VS is included in the token so the counterparty can verify handshake proofs
+- The VS is included in the pairing key so the counterparty can verify handshake proofs
 
-The verification secret fields (`init_vs`, `counter_vs`) and initiator tracking (`init_party`) are included in the token format defined above (see `PendingMutualToken` and `MutualContactTokenPayload`).
+The verification secret fields (`init_vs`, `counter_vs`) and initiator tracking (`init_party`) are included in the pairing key format defined above (see `PairingRequest` and `PairingKeyPayload`).
 
 **Handshake Proof (HP):**
 
@@ -456,15 +456,15 @@ The requirement to authenticate for verification has important operational conse
 
 **Recovery path if passkey is lost:**
 
-Passkeys in this application are intentionally **disposable** - they bind to contact tokens, not to persistent identity:
+Passkeys in this application are intentionally **disposable** - they bind to pairing keys, not to persistent identity:
 
 1. **Generate new passkey** at `/passkey`
 2. **Re-exchange invite codes** with counterparty (new public ID, new ppk)
-3. **Create new mutual contact token** with fresh signatures
-4. **Old tokens are abandoned** - they cannot be used without the original passkey
+3. **Create new pairing key** with fresh signatures
+4. **Old pairing keys are abandoned** - they cannot be used without the original passkey
 
 This design prioritizes security (non-extractable keys) over convenience (offline verification). The trade-off is acceptable because:
-- Contact token creation is a one-time setup cost per relationship
+- Pairing key creation is a one-time setup cost per relationship
 - Passkey loss is an exceptional event, not routine operation
 - No "recovery phrase" or key escrow is needed - just redo the exchange
 
@@ -516,7 +516,7 @@ sequenceDiagram
 
 ##### Cross-User Flow (Different Passkeys - Two Round Trips)
 
-When sender and receiver have different passkeys, there's no shared secret initially. Both parties must have a **mutual contact token** (see above) establishing their agreement to communicate. An extra handshake round trip establishes the session key before metadata can be sent:
+When sender and receiver have different passkeys, there's no shared secret initially. Both parties must have a **pairing key** (see above) establishing their agreement to communicate. An extra handshake round trip establishes the session key before metadata can be sent:
 
 ```mermaid
 sequenceDiagram
@@ -664,8 +664,8 @@ Security-critical functions validate inputs before cryptographic operations:
 | Key Source | User-memorized PIN | Hardware secure element | Hardware secure element |
 | Brute Force Resistance | 600K PBKDF2 iterations | Hardware rate limiting | Hardware rate limiting |
 | Phishing Resistance | None | Origin-bound credentials | Origin-bound credentials |
-| Sync Method | Out-of-band sharing | Password manager sync | Mutual contact token |
-| Verification | PIN match | Fingerprint comparison | Mutual token (dual signatures) |
+| Sync Method | Out-of-band sharing | Password manager sync | Pairing key exchange |
+| Verification | PIN match | Fingerprint comparison | Pairing key (dual signatures) |
 | Key Confirmation | N/A | HKDF-derived hash | N/A (no shared secret) |
 | Relay MITM Protection | N/A | Public ID commitment | Public ID commitment |
 | Replay Protection | TTL only | TTL + nonce | TTL + nonce |
@@ -1084,7 +1084,7 @@ src/
 │   │   ├── kdf.ts           # Key derivation (PBKDF2)
 │   │   ├── passkey.ts       # Passkey/WebAuthn PRF key derivation
 │   │   ├── ecdh.ts          # ECDH key exchange, fingerprints
-│   │   ├── contact-token.ts # Mutual contact token (cross-user passkey)
+│   │   ├── pairing-key.ts   # Pairing key (cross-user passkey)
 │   │   ├── aes-gcm.ts       # Encryption/decryption
 │   │   └── stream-crypto.ts # Streaming chunk encryption (P2P)
 │   ├── nostr/               # Nostr protocol (signaling option 1)
