@@ -257,7 +257,7 @@ The receiver uses `getCounterpartyVerificationSecret()` to extract the sender's 
 - `verifyHandshakeProof()`: Verifies counterparty's HP
 
 **Role in Encryption:**
-- The mutual token is **NOT used for encryption key derivation** - encryption uses ephemeral ECDH session keys (PFS)
+- The pairing key is **NOT used for encryption key derivation** - encryption uses ephemeral ECDH session keys (PFS)
 - However, the token is **required for the protocol to function**:
   - Provides the counterparty's public ID for Nostr event targeting (`rpkc` commitment)
   - Handshake fails if token is invalid or caller is not a party
@@ -287,9 +287,9 @@ flowchart TD
 5. **Per-Transfer Key**: HKDF with random salt derives unique AES key per transfer
 6. **No PIN Required**: Biometric/device unlock replaces PIN entry
 
-## Contact Token Signing: Security Model
+## Pairing Key Signing: Security Model
 
-**HMAC-SHA256 signatures** are used for contact token signing. This choice prioritizes **key protection** by keeping all signing keys as **non-extractable CryptoKeys** derived directly from the WebAuthn PRF output.
+**HMAC-SHA256 signatures** are used for pairing key signing. This choice prioritizes **key protection** by keeping all signing keys as **non-extractable CryptoKeys** derived directly from the WebAuthn PRF output.
 
 **Trust Model:**
 Security relies on two layers:
@@ -416,7 +416,7 @@ sequenceDiagram
 2. **Ephemeral Keys**: Each session generates fresh ECDH keypairs using `crypto.subtle.generateKey()` - raw private key material is **NEVER** exposed to JavaScript
 3. **Session Binding**: `HKDF(masterKey, ephemeralPub)` proves ephemeral keys are authorized by the passkey identity
    - **Self-transfer**: Both parties can verify each other's binding (same master key)
-   - **Cross-user**: Binding cannot be verified (different master keys), security relies on fingerprint verification, RPKC, and contact token WebAuthn signature
+   - **Cross-user**: Binding cannot be verified (different master keys), security relies on fingerprint verification, RPKC, and pairing key signature
 4. **Session Key**: `ECDH(ownEphemeralPriv, peerEphemeralPub)` derives the actual encryption key
 
 **Security benefit**: Compromising the passkey public ID or a single session's memory does NOT help decrypt past or future sessions because:
