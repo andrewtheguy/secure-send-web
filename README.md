@@ -100,12 +100,11 @@ See [Architecture](./docs/ARCHITECTURE.md) for detailed transfer flows and encry
 
 ### PIN Auto-Detection
 
-The signaling method and authentication mode are encoded in the PIN's first character:
-- **Uppercase letter** (A-Z): Nostr signaling with PIN
+The signaling method is encoded in the PIN's first character:
+- **Uppercase letter** (A-Z): Nostr signaling
 - **Digit "2"**: Manual exchange (QR or copy/paste)
-- **Letter "P"**: Passkey mode (no PIN needed)
 
-Receivers don't need to select a signaling method - it's automatically detected from the PIN.
+Receivers don't need to select a signaling method - it's automatically detected from the PIN. Passkey mode uses fingerprints instead of PINs for identification.
 
 ### Passkey Mode
 
