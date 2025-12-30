@@ -191,15 +191,16 @@ export async function getPasskeyIdentity(credentialId?: string): Promise<{
   prfSupported: boolean
   credentialId: string
   peerPublicKey: Uint8Array // 32 bytes for identity card and identity binding
-  peerHmacKey: CryptoKey // non-extractable HMAC key for signing pairing keys
+  /** Your own non-extractable HMAC signing key (NOT the peer's key) for pairing keys */
+  hmacKey: CryptoKey
 }> {
   const { masterKey, credentialId: usedCredentialId } = await getPasskeyMasterKey(credentialId)
   const publicIdBytes = await derivePasskeyPublicId(masterKey)
   const publicIdFingerprint = await publicKeyToFingerprint(publicIdBytes)
 
-  // Derive peer keys from same master key
+  // Derive keys from same master key
   // SECURITY: HMAC key never exposed as raw bytes, peer public key is the public value itself
-  const peerHmacKey = await derivePeerHmacKey(masterKey)
+  const hmacKey = await derivePeerHmacKey(masterKey)
   const peerPublicKey = await derivePeerPublicKey(masterKey)
 
   // If we got here, PRF worked (getPasskeyMasterKey throws if PRF fails)
@@ -209,7 +210,7 @@ export async function getPasskeyIdentity(credentialId?: string): Promise<{
     prfSupported: true,
     credentialId: usedCredentialId,
     peerPublicKey,
-    peerHmacKey,
+    hmacKey,
   }
 }
 

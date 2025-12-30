@@ -185,14 +185,17 @@ async function computeMutualChallenge(
 
 /**
  * Compute a verification secret for handshake authentication.
- * VS = HMAC(peer_hmac_key, "verification-secret" || peer_ppk)
+ * VS = HMAC(hmac_key, "verification-secret" || peer_ppk)
  *
  * This secret is included in the pairing key and allows the peer to verify
  * that you control your passkey during the handshake (preventing impersonation
  * with a stolen key).
+ *
+ * @param hmacKey - Your own non-extractable HMAC signing key (NOT the peer's)
+ * @param peerPpk - The peer's public key for binding
  */
 async function computeVerificationSecret(
-  peerHmacKey: CryptoKey,
+  hmacKey: CryptoKey,
   peerPpk: Uint8Array
 ): Promise<Uint8Array> {
   const label = new TextEncoder().encode('verification-secret')
@@ -202,7 +205,7 @@ async function computeVerificationSecret(
 
   const vsBuffer = await crypto.subtle.sign(
     'HMAC',
-    peerHmacKey,
+    hmacKey,
     data as Uint8Array<ArrayBuffer>
   )
   return new Uint8Array(vsBuffer)
@@ -394,7 +397,7 @@ export function isPairingKeyFormat(input: string): boolean {
  * The initiator must know the peer's public ID and peer public key.
  * The request will contain both peers' identity information with the initiator's signature.
  *
- * @param peerHmacKey - Initiator's non-extractable HMAC signing key (from PRF)
+ * @param hmacKey - Your own non-extractable HMAC signing key (NOT the peer's - from PRF)
  * @param peerPublicKey - Initiator's peer public key (32 bytes, derived from PRF)
  * @param initiatorPublicIdBase64 - Initiator's passkey public ID (base64)
  * @param peerPublicIdBase64 - Peer's public ID (base64)
@@ -403,7 +406,7 @@ export function isPairingKeyFormat(input: string): boolean {
  * @returns Pairing request (JSON string) to send to peer for confirmation
  */
 export async function createPairingRequest(
-  peerHmacKey: CryptoKey,
+  hmacKey: CryptoKey,
   peerPublicKey: Uint8Array,
   initiatorPublicIdBase64: string,
   peerPublicIdBase64: string,
@@ -472,14 +475,14 @@ export async function createPairingRequest(
   // Sign with HMAC-SHA256 (32 bytes)
   const signatureBuffer = await crypto.subtle.sign(
     'HMAC',
-    peerHmacKey,
+    hmacKey,
     challenge as Uint8Array<ArrayBuffer>
   )
   const signature = new Uint8Array(signatureBuffer)
 
   // Compute verification secret for handshake authentication
-  // VS = HMAC(peer_hmac_key, "verification-secret" || peer_ppk)
-  const initiatorVs = await computeVerificationSecret(peerHmacKey, peerPpk)
+  // VS = HMAC(hmac_key, "verification-secret" || peer_ppk)
+  const initiatorVs = await computeVerificationSecret(hmacKey, peerPpk)
 
   // Determine initiator's party role
   const initParty: 'a' | 'b' = cmp < 0 ? 'a' : 'b'
@@ -510,14 +513,14 @@ export async function createPairingRequest(
  * We trust that the request came from the intended peer via out-of-band verification.
  *
  * @param pairingRequest - The pairing request JSON from initiator
- * @param peerHmacKey - Signer's non-extractable HMAC signing key (from PRF)
+ * @param hmacKey - Your own non-extractable HMAC signing key (NOT the peer's - from PRF)
  * @param peerPublicKey - Signer's peer public key (32 bytes, derived from PRF)
  * @param signerPublicIdBase64 - Signer's passkey public ID (base64)
  * @returns Completed pairing key (JSON string)
  */
 export async function confirmPairingRequest(
   pairingRequest: string,
-  peerHmacKey: CryptoKey,
+  hmacKey: CryptoKey,
   peerPublicKey: Uint8Array,
   signerPublicIdBase64: string
 ): Promise<string> {
@@ -612,7 +615,7 @@ export async function confirmPairingRequest(
   // Sign with HMAC-SHA256 (32 bytes)
   const signatureBuffer = await crypto.subtle.sign(
     'HMAC',
-    peerHmacKey,
+    hmacKey,
     challenge as Uint8Array<ArrayBuffer>
   )
   const signature = new Uint8Array(signatureBuffer)
@@ -621,7 +624,7 @@ export async function confirmPairingRequest(
   // Confirmer's VS is computed against the initiator's ppk
   // Use init_party to determine who the initiator was (not inferred from confirmer position)
   const initiatorPpk = request.init_party === 'a' ? aPpk : bPpk
-  const counterVs = await computeVerificationSecret(peerHmacKey, initiatorPpk)
+  const counterVs = await computeVerificationSecret(hmacKey, initiatorPpk)
 
   // Build complete pairing key with comment at the end for readability
   const complete: PairingKeyPayload = {
@@ -745,13 +748,13 @@ export async function parsePairingKey(
  * cannot be verified without their passkey.
  *
  * @param pairingKey - The pairing key JSON string
- * @param peerHmacKey - Your non-extractable HMAC key (from getPasskeyIdentity)
+ * @param hmacKey - Your own non-extractable HMAC key (NOT the peer's - from getPasskeyIdentity)
  * @param myPublicId - Your public ID (from getPasskeyIdentity)
  * @returns Verification result with party info
  */
 export async function verifyOwnSignature(
   pairingKey: string,
-  peerHmacKey: CryptoKey,
+  hmacKey: CryptoKey,
   myPublicId: Uint8Array
 ): Promise<VerifiedOwnSignature> {
   // Parse pairing key
@@ -810,11 +813,11 @@ export async function verifyOwnSignature(
   const initSig = base64ToUint8Array(payload.init_sig)
   const counterSig = base64ToUint8Array(payload.counter_sig)
 
-  // Verify my signature with HMAC
+  // Verify my signature with HMAC (using my own HMAC key, not the peer's)
   const verifyHmac = async (sig: Uint8Array): Promise<boolean> => {
     return crypto.subtle.verify(
       'HMAC',
-      peerHmacKey,
+      hmacKey,
       sig as Uint8Array<ArrayBuffer>,
       challenge as Uint8Array<ArrayBuffer>
     )

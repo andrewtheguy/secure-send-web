@@ -387,14 +387,14 @@ export function PasskeyPage() {
 
       // Create pairing request using freshly derived HMAC key
       const pairingRequest = await createPairingRequest(
-        identity.peerHmacKey,
+        identity.hmacKey,
         identity.peerPublicKey,
         uint8ArrayToBase64(identity.publicIdBytes),
         identityCardParsed.id,
         identityCardParsed.ppk,
         pairingComment.trim() || undefined
       )
-      // peerHmacKey goes out of scope here - no longer in memory
+      // hmacKey goes out of scope here - no longer in memory
 
       setOutputPairingKey(pairingRequest)
       setPeerInput('')
@@ -427,11 +427,11 @@ export function PasskeyPage() {
 
       const pairingKey = await confirmPairingRequest(
         trimmed,
-        identity.peerHmacKey,
+        identity.hmacKey,
         identity.peerPublicKey,
         uint8ArrayToBase64(identity.publicIdBytes)
       )
-      // peerHmacKey goes out of scope here - no longer in memory
+      // hmacKey goes out of scope here - no longer in memory
 
       setOutputPairingKey(pairingKey)
       setPeerInput('')

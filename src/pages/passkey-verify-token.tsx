@@ -46,10 +46,17 @@ export function PasskeyVerifyTokenPage() {
       // Authenticate with passkey to get HMAC key
       const identity = await getPasskeyIdentity()
 
-      // Verify our own signature on the pairing key
+      // Guard: ensure HMAC key was derived (should always exist after successful auth)
+      if (!identity.hmacKey) {
+        throw new Error('Failed to derive HMAC signing key from passkey')
+      }
+
+      // Verify our own signature on the pairing key.
+      // NOTE: identity.hmacKey is YOUR OWN signing key (derived from your passkey),
+      // not the peer's key. Each party can only verify their own signature.
       const result = await verifyOwnSignature(
         pairingKey,
-        identity.peerHmacKey,
+        identity.hmacKey,
         identity.publicIdBytes
       )
 
