@@ -16,7 +16,7 @@ import {
 const PASSKEY_MASTER_LABEL = 'secure-send-passkey-master-v1'
 const PASSKEY_PUBLIC_ID_LABEL = 'secure-send-passkey-public-id-v1'
 const SESSION_BINDING_LABEL = 'secure-send-session-bind-v1'
-const PEER_HMAC_KEY_LABEL = 'secure-send-peer-hmac-key-v1'
+const HMAC_KEY_LABEL = 'secure-send-peer-hmac-key-v1' // Label kept for key derivation compatibility
 const PEER_PUBLIC_KEY_LABEL = 'secure-send-peer-public-key-v1'
 
 /**
@@ -42,7 +42,8 @@ export async function derivePasskeyPublicId(masterKey: CryptoKey): Promise<Uint8
 }
 
 /**
- * Derive an HMAC-SHA256 key from the passkey master key for signing pairing keys.
+ * Derive your own HMAC-SHA256 signing key from the passkey master key.
+ * Used for signing pairing keys (NOT the peer's key - each party has their own).
  *
  * SECURITY:
  * - No raw key material is ever exposed to JavaScript
@@ -52,8 +53,8 @@ export async function derivePasskeyPublicId(masterKey: CryptoKey): Promise<Uint8
  * @param masterKey - HKDF master key from passkey PRF
  * @returns Non-extractable HMAC CryptoKey for signing/verification
  */
-export async function derivePeerHmacKey(masterKey: CryptoKey): Promise<CryptoKey> {
-  const info = new TextEncoder().encode(PEER_HMAC_KEY_LABEL)
+export async function deriveHmacKey(masterKey: CryptoKey): Promise<CryptoKey> {
+  const info = new TextEncoder().encode(HMAC_KEY_LABEL)
   return crypto.subtle.deriveKey(
     {
       name: 'HKDF',
@@ -200,7 +201,7 @@ export async function getPasskeyIdentity(credentialId?: string): Promise<{
 
   // Derive keys from same master key
   // SECURITY: HMAC key never exposed as raw bytes, peer public key is the public value itself
-  const hmacKey = await derivePeerHmacKey(masterKey)
+  const hmacKey = await deriveHmacKey(masterKey)
   const peerPublicKey = await derivePeerPublicKey(masterKey)
 
   // If we got here, PRF worked (getPasskeyMasterKey throws if PRF fails)
