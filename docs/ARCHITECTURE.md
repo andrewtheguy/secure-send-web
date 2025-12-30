@@ -376,7 +376,53 @@ PRF → HKDF deriveKey() → non-extractable HMAC CryptoKey (never exposed)
 **Trust model change**:
 - Each party can only verify their **own** signature (requires passkey auth)
 - Trust in the counterparty's signature is established via **out-of-band fingerprint verification** during contact exchange
-- This is acceptable because the fingerprint verification was always the actual trust anchor - ECDSA signature verification only proved "this token was signed by the keypair in the token", not "this is actually my intended contact"
+
+**Why losing ECDSA verification is acceptable:**
+
+Consider the analogy to HTTPS certificates:
+
+| Model | Trust Anchor | Signature Verification Proves |
+|-------|--------------|------------------------------|
+| HTTPS (CA-signed) | Certificate Authority chain | "A trusted CA vouches for this identity" |
+| HTTPS (self-signed) | None (or manual pinning) | "This cert was signed by... itself" (circular) |
+| Our tokens (ECDSA) | Out-of-band fingerprint | "This token was signed by the keypair in the token" (circular) |
+| Our tokens (HMAC) | Out-of-band fingerprint + **Handshake Proofs** | "This party controls the passkey right now" |
+
+With ECDSA, verifying the counterparty's signature only proved the token was internally consistent - like a self-signed certificate, it provided no external trust. The *actual* trust anchor was always the out-of-band fingerprint verification during contact exchange.
+
+**HMAC + Handshake Proofs provides stronger security:**
+
+Instead of relying on signature verification (which was meaningless for self-signed tokens), we now use **Handshake Proofs (HP)** to prove passkey control at runtime:
+
+1. **Token creation**: Both parties sign with their HMAC keys (proves passkey control at creation time)
+2. **Every handshake**: Both parties compute HP using their verification secrets (proves passkey control *right now*)
+3. **Stolen token defense**: An attacker with a stolen token cannot compute valid HP without the passkey
+
+This is strictly stronger than ECDSA verification, which only proved "someone who had the signing key at token creation time signed this" - not "the person connecting right now controls the passkey."
+
+**Operational implications of "Verify without auth: No"**:
+
+The requirement to authenticate for verification has important operational consequences:
+
+| Aspect | Implication |
+|--------|-------------|
+| When is auth required? | **Every handshake** - both parties must compute handshake proofs (HP) that require deriving their HMAC key via passkey authentication |
+| Offline token validation | Not possible - cannot verify token validity without passkey access |
+| Passkey loss | Token becomes unusable - cannot derive HMAC key to compute handshake proofs |
+
+**Recovery path if passkey is lost:**
+
+Passkeys in this application are intentionally **disposable** - they bind to contact tokens, not to persistent identity:
+
+1. **Generate new passkey** at `/passkey`
+2. **Re-exchange contact cards** with counterparty (new public ID, new cpk)
+3. **Create new mutual contact token** with fresh signatures
+4. **Old tokens are abandoned** - they cannot be used without the original passkey
+
+This design prioritizes security (non-extractable keys) over convenience (offline verification). The trade-off is acceptable because:
+- Contact token creation is a one-time setup cost per relationship
+- Passkey loss is an exceptional event, not routine operation
+- No "recovery phrase" or key escrow is needed - just redo the exchange
 
 #### Mutual Trust Key Derivation (Non-Extractable Keys)
 
