@@ -25,6 +25,7 @@ import {
   parseSignalingEvent,
   createChunkNotifyEvent,
   DEFAULT_RELAYS,
+  base64ToUint8Array,
   type TransferState,
   type PinExchangePayload,
   type ContentType,
@@ -474,10 +475,19 @@ export function useNostrSend(): UseNostrSendReturn {
             if (!replayNonce) {
               throw new Error('Security check failed: missing replay nonce for handshake verification')
             }
+            // Validate nonce format before decoding (standard base64: A-Z, a-z, 0-9, +, /, =)
+            if (!/^[A-Za-z0-9+/]+=*$/.test(replayNonce)) {
+              throw new Error('Security check failed: invalid or corrupted replay nonce (malformed base64)')
+            }
             // Get the receiver's verification secret from the token
             const receiverVs = getCounterpartyVerificationSecret(parsedReceiverToken, senderEphemeral.identityPublicKeyBytes)
             // Decode the nonce from base64 for verification
-            const nonceBytes = Uint8Array.from(atob(replayNonce), c => c.charCodeAt(0))
+            let nonceBytes: Uint8Array
+            try {
+              nonceBytes = base64ToUint8Array(replayNonce)
+            } catch {
+              throw new Error('Security check failed: invalid or corrupted replay nonce (decode failed)')
+            }
             // Verify the receiver's proof: HMAC(receiver_vs, receiver_epk || nonce || sender_fingerprint)
             const proofValid = await verifyHandshakeProof(
               receiverVs,

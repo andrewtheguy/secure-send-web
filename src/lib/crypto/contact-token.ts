@@ -608,7 +608,8 @@ export async function countersignMutualToken(
 
   // Compute verification secret for handshake authentication
   // Countersigner's VS is computed against the initiator's cpk
-  const initiatorCpk = isPartyA ? bCpk : aCpk
+  // Use init_party to determine who the initiator was (not inferred from countersigner position)
+  const initiatorCpk = request.init_party === 'a' ? aCpk : bCpk
   const counterVs = await computeVerificationSecret(contactHmacKey, initiatorCpk)
 
   // Build complete token with comment at the end for readability
