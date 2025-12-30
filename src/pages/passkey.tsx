@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Fingerprint,
   Plus,
@@ -662,6 +663,13 @@ export function PasskeyPage() {
           )}
         </Button>
       </div>
+
+      <p className="text-xs text-muted-foreground text-center pt-2">
+        Already have a token?{' '}
+        <Link to="/passkey/verify-token" className="text-primary hover:underline">
+          Verify it here
+        </Link>
+      </p>
     </div>
   )
 
