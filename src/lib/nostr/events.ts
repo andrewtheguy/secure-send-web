@@ -155,7 +155,7 @@ export function createMutualTrustHandshakeEvent(
     ['expiration', expiration.toString()],
     ['epk', uint8ArrayToBase64(senderEphemeralPub)], // Ephemeral public key
     ['esb', uint8ArrayToBase64(senderSessionBinding)], // Ephemeral session binding
-    ['ctk', senderPairingKey], // Sender's pairing key (proves intent)
+    ['pk', senderPairingKey], // Sender's pairing key (proves intent)
   ]
 
   // Add handshake proof if provided (for cross-user mode)
@@ -203,7 +203,7 @@ export function parseMutualTrustHandshakeEvent(event: Event): {
   const nonceB64 = event.tags.find((t) => t[0] === 'n')?.[1]
   const saltB64 = event.tags.find((t) => t[0] === 's')?.[1]
   const transferId = event.tags.find((t) => t[0] === 't')?.[1]
-  const senderPairingKey = event.tags.find((t) => t[0] === 'ctk')?.[1]
+  const senderPairingKey = event.tags.find((t) => t[0] === 'pk')?.[1]
 
   if (!receiverFingerprint || !senderFingerprint ||
       !receiverPkCommitment || !nonceB64 || !saltB64 || !transferId || !senderPairingKey) return null
@@ -552,7 +552,7 @@ export function createAckEvent(
 
   // Add receiver's pairing key for cross-user passkey transfers
   if (receiverPairingKey) {
-    tags.push(['ctk', receiverPairingKey])
+    tags.push(['pk', receiverPairingKey])
   }
 
   // Add receiver's handshake proof for cross-user passkey transfers
@@ -605,7 +605,7 @@ export function parseAckEvent(event: Event): {
   const seqStr = event.tags.find((t) => t[0] === 'seq')?.[1]
   const hint = event.tags.find((t) => t[0] === 'h')?.[1]
   const nonce = event.tags.find((t) => t[0] === 'n')?.[1]
-  const receiverPairingKey = event.tags.find((t) => t[0] === 'ctk')?.[1]
+  const receiverPairingKey = event.tags.find((t) => t[0] === 'pk')?.[1]
 
   if (!senderPubkey || !transferId || !seqStr) return null
 
