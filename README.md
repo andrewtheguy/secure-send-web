@@ -129,10 +129,9 @@ When using passkey mode with a different person (cross-user), you need a **pairi
 **How to create a pairing key:**
 
 1. **Exchange Identity Cards**: On the `/passkey` page, copy your Identity Card (JSON with your public ID and peer key) and share it with your peer
-2. **Create Pairing Request**: Paste your peer's card and click "Sign" to create a pairing request (signed by you)
-3. **Send Pairing Request**: Share the pairing request with your peer
-4. **Confirm Pairing**: Your peer pastes the pairing request and clicks "Confirm" to complete it
-5. **Both Use Same Pairing Key**: The completed pairing key (with both signatures) is used by both parties for transfers
+2. **Create & Send Pairing Request**: Paste your peer's card and click "Sign" to create and share the pairing request (signed by you)
+3. **Complete Pairing Key**: Your peer pastes the pairing request and clicks "Confirm" to complete it
+4. **Use Pairing Key**: The completed pairing key (with both signatures) is used by both parties for transfers
 
 **Pairing flow:**
 ```
