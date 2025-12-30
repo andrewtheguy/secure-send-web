@@ -161,21 +161,21 @@ For cross-user passkey transfers (different passkeys), a **mutual contact token*
 ```json
 {
   "id": "<base64 public ID, 32 bytes>",
-  "cpk": "<base64 contact signing public key, 65 bytes uncompressed P-256>"
+  "cpk": "<base64 contact public key, 32 bytes HKDF-derived>"
 }
 ```
 
-The `cpk` (contact public key) is derived deterministically from the passkey PRF master key via HKDF, enabling signing without requiring the credential public key from attestation (which is only available during credential creation and not synced across devices).
+The `cpk` (contact public key) is derived deterministically from the passkey PRF master key via HKDF. It serves as an identity binding - each party's cpk is included in the token challenge to prove they control a specific passkey.
 
 **Pending Token (after initiator signs):**
 ```typescript
 interface PendingMutualToken {
   a_id: string       // Party A's public ID (lexicographically smaller)
-  a_cpk: string      // Party A's contact public key
+  a_cpk: string      // Party A's contact public key (32 bytes)
   b_id: string       // Party B's public ID (lexicographically larger)
-  b_cpk: string      // Party B's contact public key
+  b_cpk: string      // Party B's contact public key (32 bytes)
   iat: number        // Unix timestamp (seconds)
-  init_sig: string   // Initiator's ECDSA P-256 signature (base64)
+  init_sig: string   // Initiator's HMAC-SHA256 signature (base64, 32 bytes)
   comment?: string   // Optional comment (max 256 bytes UTF-8)
 }
 ```
@@ -183,67 +183,69 @@ interface PendingMutualToken {
 **Complete Token (after countersigning):**
 ```typescript
 interface MutualContactTokenPayload extends PendingMutualToken {
-  counter_sig: string // Countersigner's ECDSA P-256 signature (base64)
+  counter_sig: string // Countersigner's HMAC-SHA256 signature (base64, 32 bytes)
 }
 ```
 
 **Challenge Computation:**
 ```
 challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat || comment_bytes)
-                   32     65       32      65       8     0-256 bytes
+                   32     32       32      32       8     0-256 bytes
 ```
 - IDs sorted lexicographically to ensure deterministic ordering
-- Both parties sign the same challenge
+- Both parties sign the same challenge with their respective HMAC keys
 - Comment is optional; if present, it is UTF-8 encoded (max 256 bytes) and appended to the challenge input
 
 **Tamper Protection:**
 
 The entire token payload is tamper-proof:
 - **Data fields** (`a_id`, `a_cpk`, `b_id`, `b_cpk`, `iat`, `comment`): Included in the signed challenge. Tampering invalidates both signatures.
-- **Signature fields** (`init_sig`, `counter_sig`): ECDSA P-256 signatures over the challenge. They cannot be included in the challenge (circular dependency), but are cryptographically verified during `verifyMutualToken()`. Tampering causes verification to fail.
+- **Signature fields** (`init_sig`, `counter_sig`): HMAC-SHA256 signatures over the challenge. Each party can verify only their own signature via `verifyOwnSignature()` (requires passkey authentication). Trust in the counterparty's signature is established via out-of-band fingerprint verification.
 
-**Result:** Modifying any field in the token — whether data or signature — will be detected and rejected.
+**Result:** Modifying any field in the token — whether data or signature — will be detected when the affected party verifies their signature.
 
 **Token Creation Flow:**
 ```mermaid
 sequenceDiagram
     participant Alice
     participant Bob
-    Note over Alice,Bob: 1. Exchange Contact Cards
+    Note over Alice,Bob: 1. Exchange Contact Cards + Verify Fingerprints
     Alice->>Bob: Alice's Contact Card (id + cpk)
     Bob->>Alice: Bob's Contact Card (id + cpk)
+    Note over Alice,Bob: Out-of-band fingerprint verification (phone, in-person)
     Note over Alice: 2. Alice creates pending token
-    Alice->>Alice: Passkey auth → derive contact signing key from PRF
+    Alice->>Alice: Passkey auth → derive HMAC key from PRF
     Alice->>Alice: Sort IDs lexicographically
     Alice->>Alice: Compute challenge = SHA256(a_id||a_cpk||b_id||b_cpk||iat||comment)
-    Alice->>Alice: ECDSA sign challenge with contact key
+    Alice->>Alice: HMAC-SHA256 sign challenge
     Alice->>Bob: Pending token (init_sig only)
     Note over Bob: 3. Bob countersigns
-    Bob->>Bob: Passkey auth → derive contact signing key from PRF
-    Bob->>Bob: Verify init_sig (try both cpk keys)
-    Bob->>Bob: ECDSA sign same challenge with contact key
+    Bob->>Bob: Passkey auth → derive HMAC key from PRF
+    Bob->>Bob: HMAC-SHA256 sign same challenge
     Bob->>Alice: Complete token (both signatures)
     Note over Alice,Bob: 4. Both use same token for transfers
 ```
 
 **Verification Process:**
-1. Parse token JSON and validate required fields
-2. Verify lexicographic ordering (`a_id < b_id`)
-3. Compute expected challenge from token data
-4. Verify initiator ECDSA signature (try `a_cpk` then `b_cpk`)
-5. Verify countersigner ECDSA signature (the other key)
-6. Verify caller is a party to the token (if `myPublicId` provided)
+
+With HMAC signatures, each party can only verify their own signature:
+
+1. **Parse token** (`parseToken()`): Validate JSON structure, field lengths, lexicographic ordering
+2. **Check party membership**: Verify caller's public ID matches either `a_id` or `b_id`
+3. **Verify own signature** (`verifyOwnSignature()`): Requires passkey auth to derive HMAC key, then verify signature matches
+4. **Trust counterparty**: The other party's signature cannot be verified without their passkey. Trust is established via out-of-band fingerprint verification during contact exchange.
 
 **Security Properties:**
 - Both parties must control their passkey to sign
 - Tampering with any field invalidates both signatures
 - Lexicographic ordering prevents ambiguity
 - Same token used by both parties (no separate tokens)
-- **Only the two parties in the token can use it** - `verifyMutualToken()` checks that the caller's public ID matches either `a_id` or `b_id`; third parties are rejected with "You are not a party to this token"
+- **Only the two parties in the token can use it** - `parseToken()` checks that the caller's public ID matches either `a_id` or `b_id`; third parties are rejected with "You are not a party to this token"
 - **Token verified at multiple points:**
-  1. UI validation (send-tab/receive-tab) - immediate feedback when entering token
-  2. Before transfer starts (`use-nostr-send.ts`, `use-nostr-receive.ts`) - verifies own party membership
-  3. During handshake - sender's token verified by receiver, receiver echoes token in ACK, sender verifies counterparty matches
+  1. UI validation (send-tab/receive-tab) - immediate format check when entering token
+  2. Before transfer starts (`use-nostr-send.ts`, `use-nostr-receive.ts`) - verifies party membership
+  3. During handshake - sender's token parsed by receiver, counterparty fingerprint verified against sender's claimed identity
+- **Trust model**: Security relies on out-of-band fingerprint verification during contact exchange, not on verifying the counterparty's signature
 
 **Role in Encryption:**
 - The mutual token is **NOT used for encryption key derivation** - encryption uses ephemeral ECDH session keys (PFS)
@@ -260,7 +262,8 @@ flowchart TD
     Passkey[Passkey Authentication] --> PRF[WebAuthn PRF Extension]
     PRF --> MasterKey[Master Key HKDF]
     MasterKey --> PublicId[Public ID<br/>HKDF label: public-id]
-    MasterKey --> ContactKey[Contact Signing Key<br/>HKDF label: contact-signing-key]
+    MasterKey --> ContactHmac[Contact HMAC Key<br/>HKDF deriveKey: contact-hmac-key]
+    MasterKey --> ContactPub[Contact Public Key<br/>HKDF deriveBits: contact-public-key]
     Salt[Random Salt] --> HKDF[HKDF-SHA256]
     MasterKey --> HKDF
     HKDF --> AESKey[AES-256-GCM Key]
@@ -268,48 +271,37 @@ flowchart TD
 
 1. **Master Key**: Single passkey prompt derives HKDF master key via PRF
 2. **Public ID**: HKDF with label derives a 32-byte shareable identifier
-3. **Contact Signing Key**: HKDF with label derives a P-256 signing key pair (deterministic, works across synced devices)
-4. **Per-Transfer Key**: HKDF with random salt derives unique AES key per transfer
-5. **No PIN Required**: Biometric/device unlock replaces PIN entry
+3. **Contact HMAC Key**: HKDF `deriveKey()` derives a non-extractable HMAC-SHA256 key for token signing
+4. **Contact Public Key**: HKDF `deriveBits()` derives a 32-byte identifier for identity binding in tokens
+5. **Per-Transfer Key**: HKDF with random salt derives unique AES key per transfer
+6. **No PIN Required**: Biometric/device unlock replaces PIN entry
 
-#### Contact Signing Key: Security Consideration
+#### Contact Token Signing: Security Model
 
-**Known limitation**: The contact signing key derivation briefly exposes private key bytes in JavaScript memory.
+**HMAC-SHA256 signatures** are used for contact token signing instead of ECDSA. This provides a significant security improvement:
 
 ```
-PRF → HKDF deriveBits → [private bytes in JS ~μs] → importKey(extractable:false) → fill(0)
+PRF → HKDF deriveKey() → non-extractable HMAC CryptoKey (never exposed)
 ```
 
-**Why this is necessary**: The Web Crypto API cannot derive asymmetric ECDSA key pairs directly from HKDF. The `deriveKey()` method only supports symmetric keys (AES, HMAC). To get an ECDSA key pair, we must:
-1. Use `deriveBits()` to get raw bytes
-2. Compute the public key point using `@noble/curves` (requires bytes)
-3. Import via JWK format with `extractable: false`
-4. Zero the bytes immediately after import
+**Why HMAC instead of ECDSA?**
 
-**Impact if private key bytes are leaked**:
-| Aspect | Impact |
-|--------|--------|
-| Forge contact tokens | 🔴 Attacker can impersonate you to new contacts |
-| Decrypt transfers | ✅ None - transfers use ephemeral ECDH session keys (PFS) |
-| Access master key | ✅ None - signing key is derived FROM master key, not reversible |
-| Compromise passkey | ✅ None - passkey is hardware-backed |
-
-**Mitigations in place**:
-- Private bytes exist for ~microseconds before zeroing
-- Imported key is non-extractable (cannot be exported later)
-- No logging or serialization of the bytes
-- CryptoKey is NOT stored in React state - derived fresh per signing operation and immediately discarded
-
-**Potential future improvement**: Replace ECDSA with HMAC for token signing. HMAC keys can be derived directly via `deriveKey()` without exposing raw bytes:
-
-| Aspect | ECDSA (current) | HMAC (alternative) |
-|--------|-----------------|-------------------|
-| Private key exposure | ~μs in JS memory | None (fully non-extractable) |
+| Aspect | ECDSA (previous) | HMAC (current) |
+|--------|------------------|----------------|
+| Private key exposure | ~μs in JS memory | **None** (fully non-extractable) |
 | Verify other party's sig | ✅ Yes (using their `cpk`) | ❌ No (don't have their key) |
 | Verify your own sig | ✅ Yes | ✅ Yes (re-authenticate to derive key) |
 | Verify without auth | ✅ Yes | ❌ No (must authenticate) |
 
-HMAC is viable because each party only needs to verify their own half of the token when using it. The tradeoff is losing the ability to inspect/verify tokens without authenticating.
+**Security benefits**:
+- **No private key bytes ever exposed to JavaScript** - the HMAC key is derived directly via Web Crypto `deriveKey()` with `extractable: false`
+- **XSS-resistant** - even if an attacker has full JavaScript access, they cannot extract the signing key
+- **No timing window** - unlike ECDSA which briefly exposed private bytes during derivation
+
+**Trust model change**:
+- Each party can only verify their **own** signature (requires passkey auth)
+- Trust in the counterparty's signature is established via **out-of-band fingerprint verification** during contact exchange
+- This is acceptable because the fingerprint verification was always the actual trust anchor - ECDSA signature verification only proved "this token was signed by the keypair in the token", not "this is actually my intended contact"
 
 #### Mutual Trust Key Derivation (Non-Extractable Keys)
 

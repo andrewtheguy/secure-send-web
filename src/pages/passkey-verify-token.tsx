@@ -1,0 +1,221 @@
+import { useState, useCallback } from 'react'
+import {
+  Fingerprint,
+  AlertCircle,
+  Loader2,
+  ArrowLeft,
+  ShieldCheck,
+  ShieldAlert,
+  Info,
+} from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { getPasskeyIdentity } from '@/lib/crypto/passkey'
+import { verifyOwnSignature, isMutualTokenFormat, type VerifiedOwnSignature } from '@/lib/crypto/contact-token'
+import { formatFingerprint } from '@/lib/crypto/ecdh'
+
+type PageState = 'idle' | 'verifying' | 'verified' | 'error'
+
+export function PasskeyVerifyTokenPage() {
+  const [state, setState] = useState<PageState>('idle')
+  const [tokenInput, setTokenInput] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [verificationResult, setVerificationResult] = useState<VerifiedOwnSignature | null>(null)
+
+  const handleVerify = useCallback(async () => {
+    const token = tokenInput.trim()
+    if (!token) {
+      setError('Please paste a mutual contact token')
+      return
+    }
+
+    // Quick format check
+    if (!isMutualTokenFormat(token)) {
+      setError('Invalid format: expected a mutual contact token with both signatures')
+      return
+    }
+
+    setState('verifying')
+    setError(null)
+
+    try {
+      // Authenticate with passkey to get HMAC key
+      const identity = await getPasskeyIdentity()
+
+      // Verify our own signature on the token
+      const result = await verifyOwnSignature(
+        token,
+        identity.contactHmacKey,
+        identity.publicIdBytes
+      )
+
+      setVerificationResult(result)
+      setState('verified')
+    } catch (err) {
+      setState('error')
+      setError(err instanceof Error ? err.message : 'Verification failed')
+    }
+  }, [tokenInput])
+
+  const handleReset = useCallback(() => {
+    setState('idle')
+    setTokenInput('')
+    setError(null)
+    setVerificationResult(null)
+  }, [])
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      {/* Back navigation */}
+      <Link
+        to="/"
+        className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back to Send
+      </Link>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Fingerprint className="h-5 w-5" />
+            Verify Token Signature
+          </CardTitle>
+          <CardDescription>
+            Verify that you signed a mutual contact token with your passkey
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Info alert */}
+          <Alert>
+            <Info className="h-4 w-4" />
+            <AlertTitle>How token verification works</AlertTitle>
+            <AlertDescription className="text-sm">
+              With HMAC signatures, each party can only verify their own signature.
+              This proves <strong>you</strong> signed the token with your passkey.
+              The counterparty&apos;s identity was established during contact exchange
+              via fingerprint verification.
+            </AlertDescription>
+          </Alert>
+
+          {state === 'idle' && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="token">Mutual Contact Token</Label>
+                <Textarea
+                  id="token"
+                  placeholder='Paste your mutual contact token here (JSON with both signatures)'
+                  value={tokenInput}
+                  onChange={(e) => {
+                    setTokenInput(e.target.value)
+                    setError(null)
+                  }}
+                  className="min-h-[120px] font-mono text-xs"
+                />
+              </div>
+
+              {error && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
+              <Button
+                onClick={handleVerify}
+                disabled={!tokenInput.trim()}
+                className="w-full"
+              >
+                <Fingerprint className="mr-2 h-4 w-4" />
+                Verify with Passkey
+              </Button>
+            </div>
+          )}
+
+          {state === 'verifying' && (
+            <div className="flex flex-col items-center gap-4 py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-muted-foreground">Authenticating with passkey...</p>
+            </div>
+          )}
+
+          {state === 'verified' && verificationResult && (
+            <div className="space-y-4">
+              <Alert className="border-green-500 bg-green-50 dark:bg-green-950/20">
+                <ShieldCheck className="h-4 w-4 text-green-600" />
+                <AlertTitle className="text-green-700 dark:text-green-400">
+                  Your signature verified
+                </AlertTitle>
+                <AlertDescription className="text-green-600 dark:text-green-300">
+                  This token was signed by your passkey. You are Party {verificationResult.myRole}.
+                </AlertDescription>
+              </Alert>
+
+              <div className="rounded-lg border p-4 space-y-3">
+                <div>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide">Your Fingerprint</div>
+                  <div className="font-mono text-sm text-green-600 dark:text-green-400">
+                    {formatFingerprint(verificationResult.myFingerprint)}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide">Counterparty Fingerprint</div>
+                  <div className="font-mono text-sm">
+                    {formatFingerprint(verificationResult.counterpartyFingerprint)}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide">Token Created</div>
+                  <div className="text-sm">
+                    {verificationResult.issuedAt.toLocaleString()}
+                  </div>
+                </div>
+
+                {verificationResult.comment && (
+                  <div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wide">Comment</div>
+                    <div className="text-sm">{verificationResult.comment}</div>
+                  </div>
+                )}
+              </div>
+
+              <Alert>
+                <ShieldAlert className="h-4 w-4" />
+                <AlertTitle>Counterparty verification</AlertTitle>
+                <AlertDescription className="text-sm">
+                  The counterparty&apos;s signature cannot be verified without their passkey.
+                  Trust in their identity relies on the fingerprint verification you performed
+                  when exchanging contact cards.
+                </AlertDescription>
+              </Alert>
+
+              <Button onClick={handleReset} variant="outline" className="w-full">
+                Verify Another Token
+              </Button>
+            </div>
+          )}
+
+          {state === 'error' && (
+            <div className="space-y-4">
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Verification Failed</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+
+              <Button onClick={handleReset} variant="outline" className="w-full">
+                Try Again
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}

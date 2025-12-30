@@ -155,9 +155,10 @@ Alice (Initiator)                    Bob (Countersigner)
 ```
 
 **Security properties:**
-- Both parties sign the same challenge (tamper-proof)
-- Token contains both parties' public IDs and credential keys
-- WebAuthn signatures prove each party controls their passkey
+- Both parties sign the same challenge with HMAC-SHA256 (tamper-proof)
+- Token contains both parties' public IDs and contact public keys
+- Each party can verify their own signature (requires passkey auth)
+- Trust in counterparty established via out-of-band fingerprint verification
 - **Only the two parties in the token can use it** - party membership is cryptographically verified during the handshake; a third party cannot use someone else's token
 
 ### Cloud Storage Redundancy
