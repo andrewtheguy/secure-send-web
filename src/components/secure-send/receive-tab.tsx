@@ -16,8 +16,8 @@ import type { SignalingMethod } from '@/lib/nostr/types'
 import type { PinKeyMaterial } from '@/lib/types'
 import { Link } from 'react-router-dom'
 import { formatFingerprint } from '@/lib/crypto/ecdh'
-import { isMutualTokenFormat, parseToken, type ParsedMutualToken } from '@/lib/crypto/contact-token'
-import { getSavedTokens, saveToken, type SavedToken } from '@/lib/saved-tokens'
+import { isPairingKeyFormat, parsePairingKey, type ParsedPairingKey } from '@/lib/crypto/pairing-key'
+import { getSavedPairingKeys, savePairingKey, type SavedPairingKey } from '@/lib/saved-pairing-keys'
 import { useQRScanner } from '@/hooks/useQRScanner'
 import { isMobileDevice } from '@/lib/utils'
 
@@ -52,98 +52,98 @@ export function ReceiveTab() {
   const [, setDetectedMethod] = useState<SignalingMethod>('nostr')
   const [pinFingerprint, setPinFingerprint] = useState<string | null>(null)
 
-  // Parsed token state (updated via useEffect since parsing is async)
-  const [parsedToken, setParsedToken] = useState<ParsedMutualToken | null>(null)
+  // Parsed pairing key state (updated via useEffect since parsing is async)
+  const [parsedPairingKey, setParsedPairingKey] = useState<ParsedPairingKey | null>(null)
 
-  // Saved tokens for quick selection
-  const [savedTokens, setSavedTokens] = useState<SavedToken[]>([])
-  const [showTokenDropdown, setShowTokenDropdown] = useState(false)
+  // Saved pairing keys for quick selection
+  const [savedPairingKeys, setSavedPairingKeys] = useState<SavedPairingKey[]>([])
+  const [showPairingKeyDropdown, setShowPairingKeyDropdown] = useState(false)
   const [loadedFromHistory, setLoadedFromHistory] = useState(false)
 
-  // QR scanner state for token scanning
-  const [showTokenQRScanner, setShowTokenQRScanner] = useState(false)
-  const [tokenQRError, setTokenQRError] = useState<string | null>(null)
-  const [tokenCameraReady, setTokenCameraReady] = useState(false)
-  const [selectedTokenCamera, setSelectedTokenCamera] = useState<string>(
+  // QR scanner state for pairing key scanning
+  const [showPairingKeyQRScanner, setShowPairingKeyQRScanner] = useState(false)
+  const [pairingKeyQRError, setPairingKeyQRError] = useState<string | null>(null)
+  const [pairingKeyCameraReady, setPairingKeyCameraReady] = useState(false)
+  const [selectedPairingKeyCamera, setSelectedPairingKeyCamera] = useState<string>(
     isMobileDevice() ? 'environment' : 'user'
   )
 
   // QR scanner handlers
-  const handleTokenQRScan = useCallback((data: Uint8Array) => {
-    // Decode bytes to string (mutual tokens are JSON text)
+  const handlePairingKeyQRScan = useCallback((data: Uint8Array) => {
+    // Decode bytes to string (pairing keys are JSON text)
     const text = new TextDecoder().decode(data)
-    // Check if it looks like a mutual token
-    if (isMutualTokenFormat(text)) {
+    // Check if it looks like a pairing key
+    if (isPairingKeyFormat(text)) {
       setSenderPublicIdInput(text)
       setLoadedFromHistory(false)
-      setShowTokenQRScanner(false)
-      setTokenQRError(null)
+      setShowPairingKeyQRScanner(false)
+      setPairingKeyQRError(null)
     } else {
-      setTokenQRError('Not a valid mutual contact token')
+      setPairingKeyQRError('Not a valid pairing key')
     }
   }, [])
 
-  const handleTokenQRError = useCallback((error: string) => {
-    setTokenQRError(error)
+  const handlePairingKeyQRError = useCallback((error: string) => {
+    setPairingKeyQRError(error)
   }, [])
 
-  const handleTokenCameraReady = useCallback(() => {
-    setTokenCameraReady(true)
-    setTokenQRError(null)
+  const handlePairingKeyCameraReady = useCallback(() => {
+    setPairingKeyCameraReady(true)
+    setPairingKeyQRError(null)
   }, [])
 
-  const { videoRef: tokenVideoRef, canvasRef: tokenCanvasRef, availableCameras: tokenAvailableCameras } = useQRScanner({
-    onScan: handleTokenQRScan,
-    onError: handleTokenQRError,
-    onCameraReady: handleTokenCameraReady,
-    facingMode: selectedTokenCamera as 'environment' | 'user',
-    isScanning: showTokenQRScanner,
+  const { videoRef: pairingKeyVideoRef, canvasRef: pairingKeyCanvasRef, availableCameras: pairingKeyAvailableCameras } = useQRScanner({
+    onScan: handlePairingKeyQRScan,
+    onError: handlePairingKeyQRError,
+    onCameraReady: handlePairingKeyCameraReady,
+    facingMode: selectedPairingKeyCamera as 'environment' | 'user',
+    isScanning: showPairingKeyQRScanner,
   })
 
-  // Reset tokenCameraReady when scanner closes
+  // Reset pairingKeyCameraReady when scanner closes
   useEffect(() => {
-    if (!showTokenQRScanner) {
-      setTokenCameraReady(false)
+    if (!showPairingKeyQRScanner) {
+      setPairingKeyCameraReady(false)
     }
-  }, [showTokenQRScanner])
+  }, [showPairingKeyQRScanner])
 
-  // Reset tokenCameraReady when camera selection changes while scanner is open
+  // Reset pairingKeyCameraReady when camera selection changes while scanner is open
   useEffect(() => {
-    if (showTokenQRScanner) {
-      setTokenCameraReady(false)
+    if (showPairingKeyQRScanner) {
+      setPairingKeyCameraReady(false)
     }
-  }, [selectedTokenCamera, showTokenQRScanner])
+  }, [selectedPairingKeyCamera, showPairingKeyQRScanner])
 
-  // Parse mutual contact token - debounced to reduce parsing on every keystroke
+  // Parse pairing key - debounced to reduce parsing on every keystroke
   useEffect(() => {
     let cancelled = false
 
     const input = senderPublicIdInput.trim()
     if (!input) {
-      setParsedToken(null)
+      setParsedPairingKey(null)
       setSenderPublicIdError(null)
       return
     }
 
     // Quick format check first (synchronous, no debounce needed)
-    if (!isMutualTokenFormat(input)) {
-      setParsedToken(null)
-      setSenderPublicIdError('Invalid format: expected mutual contact token (create one on the Passkey page)')
+    if (!isPairingKeyFormat(input)) {
+      setParsedPairingKey(null)
+      setSenderPublicIdError('Invalid format: expected pairing key (create one on the Passkey page)')
       return
     }
 
     // Debounce the async parsing
     const timeoutId = setTimeout(() => {
-      parseToken(input)
+      parsePairingKey(input)
         .then((parsed) => {
           if (cancelled) return
-          setParsedToken(parsed)
+          setParsedPairingKey(parsed)
           setSenderPublicIdError(null)
         })
         .catch((err: unknown) => {
           if (cancelled) return
-          setParsedToken(null)
-          setSenderPublicIdError(err instanceof Error ? err.message : 'Invalid token format')
+          setParsedPairingKey(null)
+          setSenderPublicIdError(err instanceof Error ? err.message : 'Invalid pairing key format')
         })
     }, 300)
 
@@ -160,10 +160,10 @@ export function ReceiveTab() {
     }
   }, [usePasskey])
 
-  // Load saved tokens when passkey mode is enabled
+  // Load saved pairing keys when passkey mode is enabled
   useEffect(() => {
     if (usePasskey) {
-      setSavedTokens(getSavedTokens())
+      setSavedPairingKeys(getSavedPairingKeys())
     }
   }, [usePasskey])
 
@@ -203,38 +203,38 @@ export function ReceiveTab() {
       ? rawStateAny.clipboardData
       : undefined
 
-  // Track which token was already saved to prevent duplicate saves
-  const savedTokenKeyRef = useRef<string | null>(null)
+  // Track which pairing key was already saved to prevent duplicate saves
+  const savedPairingKeyRef = useRef<string | null>(null)
 
-  // Save token to localStorage on successful transfer (passkey mode with mutual token)
+  // Save pairing key to localStorage on successful transfer (passkey mode with pairing key)
   useEffect(() => {
     if (
       state.status === 'complete' &&
       usePasskey &&
       !receiveFromSelf &&
-      parsedToken &&
+      parsedPairingKey &&
       senderPublicIdInput.trim()
     ) {
-      // Create a stable key for this token
-      const tokenKey = `${parsedToken.partyAFingerprint}:${parsedToken.partyBFingerprint}`
+      // Create a stable key for this pairing key
+      const pairingKeyIdentifier = `${parsedPairingKey.partyAFingerprint}:${parsedPairingKey.partyBFingerprint}`
 
-      // Only save if we haven't already saved this token
-      if (savedTokenKeyRef.current !== tokenKey) {
-        saveToken(
+      // Only save if we haven't already saved this pairing key
+      if (savedPairingKeyRef.current !== pairingKeyIdentifier) {
+        savePairingKey(
           senderPublicIdInput.trim(),
-          parsedToken.partyAFingerprint,
-          parsedToken.partyBFingerprint,
-          parsedToken.comment
+          parsedPairingKey.partyAFingerprint,
+          parsedPairingKey.partyBFingerprint,
+          parsedPairingKey.comment
         )
-        savedTokenKeyRef.current = tokenKey
-        // Refresh saved tokens list
-        setSavedTokens(getSavedTokens())
+        savedPairingKeyRef.current = pairingKeyIdentifier
+        // Refresh saved pairing keys list
+        setSavedPairingKeys(getSavedPairingKeys())
       }
     } else if (state.status !== 'complete') {
       // Reset when status leaves 'complete' so future transfers can be saved
-      savedTokenKeyRef.current = null
+      savedPairingKeyRef.current = null
     }
-  }, [state.status, usePasskey, receiveFromSelf, parsedToken, senderPublicIdInput])
+  }, [state.status, usePasskey, receiveFromSelf, parsedPairingKey, senderPublicIdInput])
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pinInactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -352,7 +352,7 @@ export function ReceiveTab() {
     // Clear passkey state
     setSenderPublicIdInput('')
     setSenderPublicIdError(null)
-    setParsedToken(null)
+    setParsedPairingKey(null)
     setReceiveFromSelf(false)
     setLoadedFromHistory(false)
   }
@@ -389,17 +389,17 @@ export function ReceiveTab() {
   // Handle passkey authentication for receiving
   const handlePasskeyAuth = async () => {
     if (passkeyAuthenticating) return
-    if (!receiveFromSelf && !parsedToken) return // Require parsed sender token unless receiving from self
+    if (!receiveFromSelf && !parsedPairingKey) return // Require parsed sender pairing key unless receiving from self
 
     setPasskeyAuthenticating(true)
 
     try {
-      // Start receive with passkey mode and sender contact token (or self-transfer)
-      // Token will be verified when passkey authenticates
+      // Start receive with passkey mode and sender pairing key (or self-transfer)
+      // Pairing key will be verified when passkey authenticates
       await nostrHook.receive({
         usePasskey: true,
         selfTransfer: receiveFromSelf,
-        senderContactToken: !receiveFromSelf && senderPublicIdInput.trim() ? senderPublicIdInput.trim() : undefined,
+        senderPairingKey: !receiveFromSelf && senderPublicIdInput.trim() ? senderPublicIdInput.trim() : undefined,
       })
     } catch {
       // Error will be handled by the hook
@@ -408,8 +408,8 @@ export function ReceiveTab() {
     }
   }
 
-  // Whether passkey mode requirements are met (either have parsed sender token or receiving from self)
-  const passkeyRequirementsMet = receiveFromSelf || parsedToken !== null
+  // Whether passkey mode requirements are met (either have parsed sender pairing key or receiving from self)
+  const passkeyRequirementsMet = receiveFromSelf || parsedPairingKey !== null
 
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
   const showQRInput = isManualMode && state.status === 'waiting_for_offer'
@@ -491,34 +491,34 @@ export function ReceiveTab() {
                             </p>
                           )}
 
-                          {/* Mutual contact token input - hidden when receiving from self */}
+                          {/* Pairing key input - hidden when receiving from self */}
                           {!receiveFromSelf && (
                             <>
                               <Label htmlFor="sender-pubkey" className="text-sm font-medium">
-                                Mutual Contact Token
+                                Pairing Key
                               </Label>
-                              {/* Saved tokens dropdown */}
-                              {savedTokens.length > 0 && (
+                              {/* Saved pairing keys dropdown */}
+                              {savedPairingKeys.length > 0 && (
                                 <div className="relative">
                                   <Button
                                     variant="outline"
                                     size="sm"
                                     className="w-full justify-between text-xs"
-                                    onClick={() => setShowTokenDropdown(!showTokenDropdown)}
+                                    onClick={() => setShowPairingKeyDropdown(!showPairingKeyDropdown)}
                                   >
-                                    <span className="text-muted-foreground">Select from saved tokens ({savedTokens.length})</span>
-                                    <ChevronDown className={`h-3 w-3 transition-transform ${showTokenDropdown ? 'rotate-180' : ''}`} />
+                                    <span className="text-muted-foreground">Select from saved pairing keys ({savedPairingKeys.length})</span>
+                                    <ChevronDown className={`h-3 w-3 transition-transform ${showPairingKeyDropdown ? 'rotate-180' : ''}`} />
                                   </Button>
-                                  {showTokenDropdown && (
+                                  {showPairingKeyDropdown && (
                                     <div className="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg max-h-48 overflow-y-auto">
-                                      {savedTokens.map((saved, index) => (
+                                      {savedPairingKeys.map((saved, index) => (
                                         <button
                                           key={index}
                                           className="w-full px-3 py-2 text-left hover:bg-muted/50 border-b last:border-b-0 text-xs"
                                           onClick={() => {
-                                            setSenderPublicIdInput(saved.token)
+                                            setSenderPublicIdInput(saved.pairingKey)
                                             setLoadedFromHistory(true)
-                                            setShowTokenDropdown(false)
+                                            setShowPairingKeyDropdown(false)
                                           }}
                                         >
                                           <div className="flex items-center gap-2">
@@ -536,12 +536,12 @@ export function ReceiveTab() {
                                   )}
                                 </div>
                               )}
-                              {/* Hide textarea when token is loaded from history and parsed */}
-                              {!(loadedFromHistory && parsedToken) && (
+                              {/* Hide textarea when pairing key is loaded from history and parsed */}
+                              {!(loadedFromHistory && parsedPairingKey) && (
                                 <div className="flex gap-2">
                                   <Textarea
                                     id="sender-pubkey"
-                                    placeholder="Paste mutual contact token from your Passkey page..."
+                                    placeholder="Paste pairing key from your Passkey page..."
                                     value={senderPublicIdInput}
                                     onChange={(e) => {
                                       setSenderPublicIdInput(e.target.value)
@@ -552,16 +552,16 @@ export function ReceiveTab() {
                                   <Button
                                     variant="outline"
                                     size="sm"
-                                    onClick={() => setShowTokenQRScanner(true)}
+                                    onClick={() => setShowPairingKeyQRScanner(true)}
                                     className="flex-shrink-0"
-                                    title="Scan token QR code"
+                                    title="Scan pairing key QR code"
                                   >
                                     <Camera className="h-4 w-4" />
                                   </Button>
                                 </div>
                               )}
-                              {/* Show entry options when token is loaded from history */}
-                              {loadedFromHistory && parsedToken && (
+                              {/* Show entry options when pairing key is loaded from history */}
+                              {loadedFromHistory && parsedPairingKey && (
                                 <div className="flex gap-2">
                                   <Button
                                     variant="outline"
@@ -569,7 +569,7 @@ export function ReceiveTab() {
                                     className="text-xs"
                                     onClick={() => {
                                       setSenderPublicIdInput('')
-                                      setParsedToken(null)
+                                      setParsedPairingKey(null)
                                       setLoadedFromHistory(false)
                                     }}
                                   >
@@ -580,7 +580,7 @@ export function ReceiveTab() {
                                     variant="outline"
                                     size="sm"
                                     className="text-xs"
-                                    onClick={() => setShowTokenQRScanner(true)}
+                                    onClick={() => setShowPairingKeyQRScanner(true)}
                                   >
                                     <Camera className="h-3 w-3 mr-1" />
                                     Scan QR
@@ -590,7 +590,7 @@ export function ReceiveTab() {
                               {senderPublicIdError && (
                                 <p className="text-xs text-destructive">{senderPublicIdError}</p>
                               )}
-                              {parsedToken && (
+                              {parsedPairingKey && (
                                 <div className="space-y-1 text-xs">
                                   <div className="flex items-center gap-1 text-amber-600 dark:text-amber-500 mb-1">
                                     <span className="text-[10px]">⚠ Unverified fingerprints (will be verified via handshake proof)</span>
@@ -598,15 +598,15 @@ export function ReceiveTab() {
                                   <div className="flex items-center gap-2 text-cyan-700 dark:text-cyan-400">
                                     <Fingerprint className="h-3 w-3" />
                                     <span>Party A:</span>
-                                    <span className="font-mono font-medium">{formatFingerprint(parsedToken.partyAFingerprint)}</span>
+                                    <span className="font-mono font-medium">{formatFingerprint(parsedPairingKey.partyAFingerprint)}</span>
                                   </div>
                                   <div className="flex items-center gap-2 text-cyan-700 dark:text-cyan-400 ml-5">
                                     <span>Party B:</span>
-                                    <span className="font-mono font-medium">{formatFingerprint(parsedToken.partyBFingerprint)}</span>
+                                    <span className="font-mono font-medium">{formatFingerprint(parsedPairingKey.partyBFingerprint)}</span>
                                   </div>
-                                  {parsedToken.comment && (
+                                  {parsedPairingKey.comment && (
                                     <div className="flex items-center gap-2 text-muted-foreground ml-5">
-                                      <span className="italic">"{parsedToken.comment}"</span>
+                                      <span className="italic">"{parsedPairingKey.comment}"</span>
                                     </div>
                                   )}
                                   <div className="flex items-center gap-2 ml-5">
@@ -617,11 +617,11 @@ export function ReceiveTab() {
                                 </div>
                               )}
                               <p className="text-xs text-muted-foreground">
-                                Create and exchange a mutual token on your{' '}
+                                Create and exchange a pairing key on your{' '}
                                 <Link to="/passkey" className="text-primary hover:underline">
                                   Passkey page
                                 </Link>{' '}
-                                with your contact
+                                with your peer
                               </p>
                             </>
                           )}
@@ -630,21 +630,21 @@ export function ReceiveTab() {
                     )}
                   </div>
 
-                  {/* Token QR Scanner Modal */}
-                  {showTokenQRScanner && (
+                  {/* Pairing Key QR Scanner Modal */}
+                  {showPairingKeyQRScanner && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
                       <div className="bg-background rounded-lg p-4 max-w-sm w-full mx-4 space-y-4">
                         <div className="flex items-center justify-between">
                           <h3 className="font-medium flex items-center gap-2">
                             <Camera className="h-5 w-5" />
-                            Scan Token QR Code
+                            Scan Pairing Key QR Code
                           </h3>
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => {
-                              setShowTokenQRScanner(false)
-                              setTokenQRError(null)
+                              setShowPairingKeyQRScanner(false)
+                              setPairingKeyQRError(null)
                             }}
                           >
                             <X className="h-4 w-4" />
@@ -652,14 +652,14 @@ export function ReceiveTab() {
                         </div>
 
                         <div className="relative bg-black rounded-lg overflow-hidden aspect-square">
-                          {tokenQRError && (
+                          {pairingKeyQRError && (
                             <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
                               <div className="text-center p-4">
-                                <p className="text-red-400 text-sm mb-2">{tokenQRError}</p>
+                                <p className="text-red-400 text-sm mb-2">{pairingKeyQRError}</p>
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => setTokenQRError(null)}
+                                  onClick={() => setPairingKeyQRError(null)}
                                 >
                                   <RefreshCw className="h-4 w-4 mr-1" />
                                   Retry
@@ -668,34 +668,34 @@ export function ReceiveTab() {
                             </div>
                           )}
                           <video
-                            ref={tokenVideoRef}
+                            ref={pairingKeyVideoRef}
                             className="w-full h-full object-cover"
                             autoPlay
                             playsInline
                             muted
                           />
-                          <canvas ref={tokenCanvasRef} className="hidden" />
-                          {!tokenCameraReady && !tokenQRError && (
+                          <canvas ref={pairingKeyCanvasRef} className="hidden" />
+                          {!pairingKeyCameraReady && !pairingKeyQRError && (
                             <div className="absolute inset-0 flex items-center justify-center">
                               <Loader2 className="h-8 w-8 animate-spin text-white" />
                             </div>
                           )}
                         </div>
 
-                        {tokenAvailableCameras.length > 1 && (
+                        {pairingKeyAvailableCameras.length > 1 && (
                           <div className="flex gap-2">
                             <Button
                               size="sm"
-                              variant={selectedTokenCamera === 'environment' ? 'default' : 'outline'}
-                              onClick={() => setSelectedTokenCamera('environment')}
+                              variant={selectedPairingKeyCamera === 'environment' ? 'default' : 'outline'}
+                              onClick={() => setSelectedPairingKeyCamera('environment')}
                               className="flex-1"
                             >
                               Back Camera
                             </Button>
                             <Button
                               size="sm"
-                              variant={selectedTokenCamera === 'user' ? 'default' : 'outline'}
-                              onClick={() => setSelectedTokenCamera('user')}
+                              variant={selectedPairingKeyCamera === 'user' ? 'default' : 'outline'}
+                              onClick={() => setSelectedPairingKeyCamera('user')}
                               className="flex-1"
                             >
                               Front Camera
@@ -704,7 +704,7 @@ export function ReceiveTab() {
                         )}
 
                         <p className="text-xs text-muted-foreground text-center">
-                          Point camera at the mutual contact token QR code
+                          Point camera at the pairing key QR code
                         </p>
                       </div>
                     </div>
@@ -713,7 +713,7 @@ export function ReceiveTab() {
                   {/* Passkey mode indicator */}
                   <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
                     <Fingerprint className="h-3 w-3" />
-                    <span>Passkey mode{receiveFromSelf ? ' → receiving from self' : parsedToken ? ' → token loaded' : ' (enter mutual token in Advanced Options)'}</span>
+                    <span>Passkey mode{receiveFromSelf ? ' → receiving from self' : parsedPairingKey ? ' → pairing key loaded' : ' (enter pairing key in Advanced Options)'}</span>
                   </div>
 
                   <Button
