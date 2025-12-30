@@ -542,7 +542,15 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         // Get receiver's verification secret from the parsed token
         const receiverVs = getOwnVerificationSecret(receiverParsedToken, ownPublicKeyBytes)
         // Decode the nonce from base64 for proof computation
-        const nonceBytes = Uint8Array.from(atob(eventNonce), c => c.charCodeAt(0))
+        // Note: eventNonce was already validated at line ~324 in the cross-user handshake path,
+        // but we add defensive error handling for safety and consistency
+        let nonceBytes: Uint8Array
+        try {
+          nonceBytes = Uint8Array.from(atob(eventNonce), c => c.charCodeAt(0))
+        } catch {
+          console.error('Failed to decode eventNonce for receiver handshake proof - this should not happen as nonce was validated earlier')
+          throw new Error('Internal error: corrupted nonce in receiver handshake proof computation')
+        }
         // Get the sender's fingerprint from the parsed token
         const senderFromToken = getCounterpartyFromParsedToken(receiverParsedToken, ownPublicKeyBytes)
         // Compute the receiver's proof: HMAC(receiver_vs, receiver_epk || nonce || sender_fingerprint)
