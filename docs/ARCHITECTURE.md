@@ -165,7 +165,19 @@ For cross-user passkey transfers (different passkeys), a **mutual contact token*
 }
 ```
 
-The `cpk` (contact public key) is derived deterministically from the passkey PRF master key via HKDF. It serves as an identity binding - each party's cpk is included in the token challenge to prove they control a specific passkey.
+**Why two separate 32-byte identifiers?**
+
+Both `id` (public ID) and `cpk` (contact public key) are derived from the passkey PRF master key via HKDF, but serve distinct purposes:
+
+| Field | HKDF Info String | Purpose | Published? |
+|-------|------------------|---------|------------|
+| `id` (public ID) | `secure-send-passkey-public-id-v1` | Event addressing/filtering on Nostr relays | Yes (in Nostr events) |
+| `cpk` (contact public key) | `secure-send-contact-public-key-v1` | Identity binding in token challenge; verification secret derivation | Yes (in contact cards/tokens) |
+
+**Why both are required (cannot reuse one identifier):**
+- **Separation of concerns**: The public ID is used for Nostr event routing (`rpkc` commitment, fingerprint filtering). The cpk is used exclusively in the authentication protocol (token challenge, handshake proofs).
+- **Unlinkability potential**: Different HKDF derivations allow future protocol changes to rotate one identifier without affecting the other.
+- **Defense in depth**: Compromising the public ID (visible in Nostr events) reveals nothing about the cpk used in cryptographic proofs.
 
 **Pending Token (after initiator signs):**
 ```typescript
@@ -175,7 +187,9 @@ interface PendingMutualToken {
   b_id: string       // Party B's public ID (lexicographically larger)
   b_cpk: string      // Party B's contact public key (32 bytes)
   iat: number        // Unix timestamp (seconds)
-  init_sig: string   // Initiator's HMAC-SHA256 signature (base64, 32 bytes)
+  init_party: 'a' | 'b'  // Who initiated the token (for VS mapping)
+  init_sig: string   // Initiator's HMAC-SHA256 MAC (base64, 32 bytes)
+  init_vs: string    // Initiator's verification secret (base64, 32 bytes)
   comment?: string   // Optional comment (max 256 bytes UTF-8)
 }
 ```
@@ -183,9 +197,12 @@ interface PendingMutualToken {
 **Complete Token (after countersigning):**
 ```typescript
 interface MutualContactTokenPayload extends PendingMutualToken {
-  counter_sig: string // Countersigner's HMAC-SHA256 signature (base64, 32 bytes)
+  counter_sig: string  // Countersigner's HMAC-SHA256 MAC (base64, 32 bytes)
+  counter_vs: string   // Countersigner's verification secret (base64, 32 bytes)
 }
 ```
+
+The `init_party` field tracks who initiated the token ('a' or 'b'), which is needed to correctly map verification secrets to parties during handshake authentication. The `init_vs` and `counter_vs` fields contain verification secrets used for Handshake Proofs (see below).
 
 **Challenge Computation:**
 ```
@@ -193,16 +210,17 @@ challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat || comment_bytes)
                    32     32       32      32       8     0-256 bytes
 ```
 - IDs sorted lexicographically to ensure deterministic ordering
-- Both parties sign the same challenge with their respective HMAC keys
+- Both parties compute MACs over the same challenge with their respective HMAC keys
 - Comment is optional; if present, it is UTF-8 encoded (max 256 bytes) and appended to the challenge input
 
 **Tamper Protection:**
 
 The entire token payload is tamper-proof:
-- **Data fields** (`a_id`, `a_cpk`, `b_id`, `b_cpk`, `iat`, `comment`): Included in the signed challenge. Tampering invalidates both signatures.
-- **Signature fields** (`init_sig`, `counter_sig`): HMAC-SHA256 signatures over the challenge. Each party can verify only their own signature via `verifyOwnSignature()` (requires passkey authentication). Trust in the counterparty's signature is established via out-of-band fingerprint verification.
+- **Data fields** (`a_id`, `a_cpk`, `b_id`, `b_cpk`, `iat`, `init_party`, `comment`): Included in the MAC challenge. Tampering invalidates both MACs.
+- **MAC fields** (`init_sig`, `counter_sig`): HMAC-SHA256 MACs over the challenge. Each party can verify only their own MAC via `verifyOwnSignature()` (requires passkey authentication). Trust in the counterparty's MAC is established via out-of-band fingerprint verification.
+- **Verification secret fields** (`init_vs`, `counter_vs`): Derived from each party's HMAC key. Used for Handshake Proofs to prevent impersonation with stolen tokens.
 
-**Result:** Modifying any field in the token — whether data or signature — will be detected when the affected party verifies their signature.
+**Result:** Modifying any field in the token — whether data or MAC — will be detected when the affected party verifies their MAC.
 
 **Token Creation Flow:**
 ```mermaid
@@ -264,15 +282,7 @@ VS = HMAC(contact_hmac_key, "verification-secret" || counterparty_cpk)
 - `counterparty_cpk`: The other party's contact public key (32 bytes)
 - The VS is included in the token so the counterparty can verify handshake proofs
 
-**Token Format with Verification Secrets:**
-```typescript
-interface MutualContactTokenPayload {
-  // ... existing fields ...
-  init_party: 'a' | 'b'  // Who initiated the token (for VS mapping)
-  init_vs: string        // Initiator's verification secret (base64, 32 bytes)
-  counter_vs: string     // Countersigner's verification secret (base64, 32 bytes)
-}
-```
+The verification secret fields (`init_vs`, `counter_vs`) and initiator tracking (`init_party`) are included in the token format defined above (see `PendingMutualToken` and `MutualContactTokenPayload`).
 
 **Handshake Proof (HP):**
 
@@ -359,58 +369,50 @@ flowchart TD
 PRF → HKDF deriveKey() → non-extractable HMAC CryptoKey (never exposed)
 ```
 
+**Trust Model: Two Security Layers**
+
+Security relies on two complementary mechanisms:
+
+1. **Out-of-band fingerprint verification** (primary trust anchor): During contact exchange, parties verify each other's fingerprints via a trusted channel (phone call, in-person, etc.). This establishes that "this public ID belongs to my intended contact."
+
+2. **Handshake Proofs (HP)** (mandatory impersonation defense): At every handshake, both parties must prove they control the passkey used to sign the token. This prevents stolen token impersonation - an attacker with a leaked token cannot connect without the passkey.
+
 **Why HMAC instead of ECDSA?**
 
-| Aspect | ECDSA (previous) | HMAC (current) |
-|--------|------------------|----------------|
-| Private key exposure | ~μs in JS memory | **None** (fully non-extractable) |
-| Verify other party's sig | ✅ Yes (using their `cpk`) | ❌ No (don't have their key) |
-| Verify your own sig | ✅ Yes | ✅ Yes (re-authenticate to derive key) |
-| Verify without auth | ✅ Yes | ❌ No (must authenticate) |
-
-**Security benefits**:
-- **No private key bytes ever exposed to JavaScript** - the HMAC key is derived directly via Web Crypto `deriveKey()` with `extractable: false`
-- **XSS-resistant** - even if an attacker has full JavaScript access, they cannot extract the signing key
-- **No timing window** - unlike ECDSA which briefly exposed private bytes during derivation
-
-**Trust model change**:
-- Each party can only verify their **own** signature (requires passkey auth)
-- Trust in the counterparty's signature is established via **out-of-band fingerprint verification** during contact exchange
-
-**Why losing ECDSA verification is acceptable:**
-
-Consider the analogy to HTTPS certificates:
-
-| Model | Trust Anchor | Signature Verification Proves |
-|-------|--------------|------------------------------|
-| HTTPS (CA-signed) | Certificate Authority chain | "A trusted CA vouches for this identity" |
-| HTTPS (self-signed) | None (or manual pinning) | "This cert was signed by... itself" (circular) |
-| Our tokens | Out-of-band fingerprint | "This token was signed by the keypair in the token" (circular) |
-
-With ECDSA, verifying the counterparty's signature only proved the token was internally consistent - like a self-signed certificate, it provided no external trust. The *actual* trust anchor was always the out-of-band fingerprint verification during contact exchange.
-
-**HMAC vs ECDSA - what actually changed:**
-
-The switch from ECDSA to HMAC is purely about **key protection**, not about verification strength:
+The choice between ECDSA and HMAC affects **key protection**, not trust establishment:
 
 | Aspect | ECDSA | HMAC |
 |--------|-------|------|
-| Key protection | Private key bytes briefly in JS memory | **Non-extractable** (never exposed) |
-| Counterparty sig verification | Yes (but meaningless for self-signed) | No |
-| Own sig verification | Yes | Yes (requires re-auth) |
+| Private key in memory | ~μs during derivation | **Never** (non-extractable) |
+| Verify your own MAC/sig | ✅ Yes | ✅ Yes (requires re-auth) |
+| Verify counterparty's MAC/sig | ✅ Yes | ❌ No (don't have their key) |
+| XSS key extraction risk | Possible (timing window) | **None** (Web Crypto enforced) |
 
-Losing counterparty signature verification has no security impact because it was meaningless anyway (circular trust). The benefit is strictly better key protection.
+**Why losing counterparty signature verification is acceptable:**
 
-**Handshake Proofs (HP) - a separate improvement:**
+With self-signed tokens (no CA), verifying the counterparty's signature only proves internal consistency - "this token was signed by the keypair in the token" (circular). The *actual* trust comes from out-of-band fingerprint verification, not cryptographic signature verification.
 
-Handshake Proofs are an **orthogonal security enhancement** that could have been implemented with ECDSA too. They address a different threat: stolen token impersonation.
+| Model | Trust Anchor | What Signature Verification Proves |
+|-------|--------------|-----------------------------------|
+| HTTPS (CA-signed) | Certificate Authority | "A trusted CA vouches for this identity" |
+| HTTPS (self-signed) | Manual pinning | "This cert was signed by itself" (circular) |
+| Our tokens | Out-of-band fingerprint | "This token was signed by the keypair in the token" (circular) |
 
-| Without HP | With HP |
-|------------|---------|
-| Token possession = can connect | Token possession alone is insufficient |
-| Attacker with stolen token can impersonate | Must prove passkey control at runtime |
+**ECDSA+HP vs HMAC+HP comparison:**
 
-HP happens to reuse the HMAC key infrastructure for computing verification secrets, but this is implementation convenience - the concept of "prove you control the signing key at handshake time" is independent of whether that key is ECDSA or HMAC.
+Both algorithms could support Handshake Proofs. The difference is purely in key protection:
+
+| Scheme | Counterparty sig verification | Private key exposure | HP support |
+|--------|------------------------------|---------------------|------------|
+| ECDSA + HP | ✅ Yes (but meaningless) | Risk: ~μs in JS memory | ✅ Yes |
+| HMAC + HP | ❌ No | **None** (non-extractable) | ✅ Yes |
+
+We chose HMAC because:
+- **Non-extractable keys** eliminate XSS/memory-inspection attacks on signing keys
+- **HP provides impersonation defense** regardless of MAC/signature algorithm
+- **Counterparty verification was never the trust anchor** - fingerprint verification was
+
+**HP is conceptually independent of ECDSA vs HMAC**: The concept of "prove passkey control at handshake time" works with either algorithm. Our implementation reuses the HMAC key infrastructure for computing verification secrets, but this is implementation convenience, not a requirement.
 
 **Operational implications of "Verify without auth: No"**:
 
