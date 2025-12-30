@@ -15,7 +15,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { getPasskeyIdentity } from '@/lib/crypto/passkey'
-import { verifyOwnSignature, isMutualTokenFormat, type VerifiedOwnSignature } from '@/lib/crypto/contact-token'
+import { verifyOwnSignature, isPairingKeyFormat, type VerifiedOwnSignature } from '@/lib/crypto/pairing-key'
 import { formatFingerprint } from '@/lib/crypto/ecdh'
 
 type PageState = 'idle' | 'verifying' | 'verified' | 'error'
@@ -27,15 +27,15 @@ export function PasskeyVerifyTokenPage() {
   const [verificationResult, setVerificationResult] = useState<VerifiedOwnSignature | null>(null)
 
   const handleVerify = useCallback(async () => {
-    const token = tokenInput.trim()
-    if (!token) {
-      setError('Please paste a mutual contact token')
+    const pairingKey = tokenInput.trim()
+    if (!pairingKey) {
+      setError('Please paste a pairing key')
       return
     }
 
     // Quick format check
-    if (!isMutualTokenFormat(token)) {
-      setError('Invalid format: expected a mutual contact token with both signatures')
+    if (!isPairingKeyFormat(pairingKey)) {
+      setError('Invalid format: expected a pairing key with both signatures')
       return
     }
 
@@ -46,10 +46,17 @@ export function PasskeyVerifyTokenPage() {
       // Authenticate with passkey to get HMAC key
       const identity = await getPasskeyIdentity()
 
-      // Verify our own signature on the token
+      // Guard: ensure HMAC key was derived (should always exist after successful auth)
+      if (!identity.hmacKey) {
+        throw new Error('Failed to derive HMAC signing key from passkey')
+      }
+
+      // Verify our own signature on the pairing key.
+      // NOTE: identity.hmacKey is YOUR OWN signing key (derived from your passkey),
+      // not the peer's key. Each party can only verify their own signature.
       const result = await verifyOwnSignature(
-        token,
-        identity.contactHmacKey,
+        pairingKey,
+        identity.hmacKey,
         identity.publicIdBytes
       )
 
@@ -83,21 +90,21 @@ export function PasskeyVerifyTokenPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Fingerprint className="h-5 w-5" />
-            Verify Token Signature
+            Verify Pairing Key Signature
           </CardTitle>
           <CardDescription>
-            Verify that you signed a mutual contact token with your passkey
+            Verify that you signed a pairing key with your passkey
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Info alert */}
           <Alert>
             <Info className="h-4 w-4" />
-            <AlertTitle>How token verification works</AlertTitle>
+            <AlertTitle>How pairing key verification works</AlertTitle>
             <AlertDescription className="text-sm">
               With HMAC signatures, each party can only verify their own signature.
-              This proves <strong>you</strong> signed the token with your passkey.
-              The counterparty&apos;s identity was established during contact exchange
+              This proves <strong>you</strong> signed the pairing key with your passkey.
+              The peer&apos;s identity was established during identity card exchange
               via fingerprint verification.
             </AlertDescription>
           </Alert>
@@ -105,10 +112,10 @@ export function PasskeyVerifyTokenPage() {
           {state === 'idle' && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="token">Mutual Contact Token</Label>
+                <Label htmlFor="token">Pairing Key</Label>
                 <Textarea
                   id="token"
-                  placeholder='Paste your mutual contact token here (JSON with both signatures)'
+                  placeholder='Paste your pairing key here (JSON with both signatures)'
                   value={tokenInput}
                   onChange={(e) => {
                     setTokenInput(e.target.value)
@@ -164,14 +171,14 @@ export function PasskeyVerifyTokenPage() {
                 </div>
 
                 <div>
-                  <div className="text-xs text-muted-foreground uppercase tracking-wide">Counterparty Fingerprint</div>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide">Peer Fingerprint</div>
                   <div className="font-mono text-sm">
-                    {formatFingerprint(verificationResult.counterpartyFingerprint)}
+                    {formatFingerprint(verificationResult.peerFingerprint)}
                   </div>
                 </div>
 
                 <div>
-                  <div className="text-xs text-muted-foreground uppercase tracking-wide">Token Created</div>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide">Pairing Key Created</div>
                   <div className="text-sm">
                     {verificationResult.issuedAt.toLocaleString()}
                   </div>
@@ -187,16 +194,16 @@ export function PasskeyVerifyTokenPage() {
 
               <Alert>
                 <ShieldAlert className="h-4 w-4" />
-                <AlertTitle>Counterparty verification</AlertTitle>
+                <AlertTitle>Peer verification</AlertTitle>
                 <AlertDescription className="text-sm">
-                  The counterparty&apos;s signature cannot be verified without their passkey.
+                  The peer&apos;s signature cannot be verified without their passkey.
                   Trust in their identity relies on the fingerprint verification you performed
-                  when exchanging contact cards.
+                  when exchanging identity cards.
                 </AlertDescription>
               </Alert>
 
               <Button onClick={handleReset} variant="outline" className="w-full">
-                Verify Another Token
+                Verify Another Pairing Key
               </Button>
             </div>
           )}

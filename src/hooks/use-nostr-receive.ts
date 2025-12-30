@@ -48,11 +48,11 @@ import {
   verifyPublicKeyCommitment,
   constantTimeEqual,
 } from '@/lib/crypto/ecdh'
-import { parseToken, getCounterpartyFromParsedToken, getOwnVerificationSecret, getCounterpartyVerificationSecret, computeHandshakeProof, verifyHandshakeProof } from '@/lib/crypto/contact-token'
+import { parsePairingKey, getPeerFromParsedPairingKey, getOwnVerificationSecret, getPeerVerificationSecret, computeHandshakeProof, verifyHandshakeProof } from '@/lib/crypto/pairing-key'
 
 export interface ReceiveOptions {
   usePasskey?: boolean
-  senderContactToken?: string // Bound contact token for mutual trust mode
+  senderPairingKey?: string // Pairing key for mutual trust mode
   selfTransfer?: boolean // For receiving from self
 }
 
@@ -103,9 +103,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     setReceivedContent(null)
 
     // Determine mode
-    const isMutualTrustMode =
-      'usePasskey' in arg && arg.usePasskey === true && (('senderContactToken' in arg && arg.senderContactToken) || ('selfTransfer' in arg && arg.selfTransfer))
-    const pinMaterial = !('usePasskey' in arg) ? (arg as PinKeyMaterial) : null
+    const usePasskey = 'usePasskey' in arg && arg.usePasskey === true
+    const hasSenderOrSelf =
+      ('senderPairingKey' in arg && arg.senderPairingKey) ||
+      ('selfTransfer' in arg && arg.selfTransfer)
+    const isMutualTrustMode = usePasskey && hasSenderOrSelf
+    const pinMaterial = !usePasskey ? (arg as PinKeyMaterial) : null
 
     // Closure variables for mutual trust mode - keeps sensitive data scoped
     let ownPublicKeyBytes: Uint8Array | null = null
@@ -115,8 +118,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     // PFS: Ephemeral session keypair for Perfect Forward Secrecy
     let receiverEphemeral: EphemeralSessionKeypair | null = null
     let identitySharedSecretKey: CryptoKey | null = null
-    // Parsed token for handshake proof computation (cross-user mode)
-    let receiverParsedToken: Awaited<ReturnType<typeof parseToken>> | null = null
+    // Parsed pairing key for handshake proof computation (cross-user mode)
+    let receiverParsedPairingKey: Awaited<ReturnType<typeof parsePairingKey>> | null = null
 
     try {
       let hint: string
@@ -148,23 +151,23 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           receiverEphemeral = ephemeral
           identitySharedSecretKey = sharedSecret
 
-          // Determine sender public key: use own identity for self-transfer, otherwise parse token
+          // Determine sender public key: use own identity for self-transfer, otherwise parse pairing key
           let senderPublicKeyBytes: Uint8Array
           if (opts.selfTransfer) {
             senderPublicKeyBytes = ephemeral.identityPublicKeyBytes
           } else {
-            // Parse mutual contact token to extract counterparty info
+            // Parse pairing key to extract peer info
             // NOTE: With HMAC signatures, we cannot verify the other party's signature here.
             // Trust is established via out-of-band fingerprint verification.
-            // SECURITY: The actual counterparty check happens during handshake event processing
-            // at lines 303-306 where we verify the sender's identity matches the token.
-            const parsedToken = await parseToken(
-              opts.senderContactToken!,
-              ephemeral.identityPublicKeyBytes // Verify we're a party to this token
+            // SECURITY: The actual peer check happens during handshake event processing
+            // (see "SECURITY VERIFICATION 3: Sender's pairing key" below).
+            const parsedPairingKey = await parsePairingKey(
+              opts.senderPairingKey!,
+              ephemeral.identityPublicKeyBytes // Verify we're a party to this pairing key
             )
 
-            // Extract the counterparty (sender) from the token.
-            const counterparty = getCounterpartyFromParsedToken(parsedToken, ephemeral.identityPublicKeyBytes)
+            // Extract the counterparty (sender) from the pairing key.
+            const counterparty = getPeerFromParsedPairingKey(parsedPairingKey, ephemeral.identityPublicKeyBytes)
             senderPublicKeyBytes = counterparty.publicId
           }
 
@@ -293,31 +296,31 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             continue
           }
 
-          // === SECURITY VERIFICATION 3: Sender's mutual contact token ===
+          // === SECURITY VERIFICATION 3: Sender's pairing key ===
           // CRITICAL: This check ensures decryption won't proceed if counterparty doesn't match.
-          // With mutual tokens, both parties have the SAME token with both signatures.
+          // With pairing keys, both parties have the SAME key with both signatures.
           // This proves sender specifically chose to communicate with us.
-          const parsedSenderToken = await parseToken(
-            parsed.senderContactToken,
-            ownPublicKeyBytes // Verify we're a party to this token
+          const parsedSenderPairingKey = await parsePairingKey(
+            parsed.senderPairingKey,
+            ownPublicKeyBytes // Verify we're a party to this pairing key
           )
-          // Extract the counterparty (sender) from the parsed token
-          const senderFromToken = getCounterpartyFromParsedToken(parsedSenderToken, ownPublicKeyBytes)
-          // Verify the token's counterparty matches the sender's claimed identity
+          // Extract the counterparty (sender) from the parsed pairing key
+          const senderFromPairingKey = getPeerFromParsedPairingKey(parsedSenderPairingKey, ownPublicKeyBytes)
+          // Verify the pairing key's counterparty matches the sender's claimed identity
           // If this check fails, the event is skipped and decryption never happens
-          if (senderFromToken.fingerprint !== parsed.senderFingerprint) {
-            console.log(`Token counterparty (${senderFromToken.fingerprint}) doesn't match sender (${parsed.senderFingerprint}) - rejecting`)
+          if (senderFromPairingKey.fingerprint !== parsed.senderFingerprint) {
+            console.log(`Pairing key counterparty (${senderFromPairingKey.fingerprint}) doesn't match sender (${parsed.senderFingerprint}) - rejecting`)
             continue
           }
 
           // === SECURITY VERIFICATION 4: Sender's handshake proof ===
-          // CRITICAL: This proves the sender controls their passkey, preventing impersonation with stolen tokens
+          // CRITICAL: This proves the sender controls their passkey, preventing impersonation with stolen pairing keys
           if (!parsed.senderHandshakeProof) {
             console.log('Sender did not provide handshake proof - rejecting')
             continue
           }
-          // Get the sender's verification secret from the token
-          const senderVs = getCounterpartyVerificationSecret(parsedSenderToken, ownPublicKeyBytes)
+          // Get the sender's verification secret from the pairing key
+          const senderVs = getPeerVerificationSecret(parsedSenderPairingKey, ownPublicKeyBytes)
           // Decode the nonce from base64 for verification
           let nonceBytes: Uint8Array
           try {
@@ -340,8 +343,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             continue
           }
 
-          // Store parsed token for computing receiver's handshake proof in ACK
-          receiverParsedToken = parsedSenderToken
+          // Store parsed pairing key for computing receiver's handshake proof in ACK
+          receiverParsedPairingKey = parsedSenderPairingKey
 
           // NOTE: For cross-user passkey mode, we CANNOT verify session binding because:
           // - Session binding is created using the sender's passkey master key
@@ -351,7 +354,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           // 2. RPKC verification (above) - ensures event is addressed to us
           // 3. Handshake proof verification (above) - proves sender controls their passkey
           // 4. Ephemeral ECDH - any MITM can't derive session key without both private keys
-          // 5. Contact token verification (above) - proves sender intended to reach us
+          // 5. Pairing key verification (above) - proves sender intended to reach us
 
           // Handshake verified - store info for session key derivation
           senderEphemeralPub = parsed.senderEphemeralPub
@@ -531,16 +534,16 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       // Send ready ACK (seq=0) - include nonce for replay protection in mutual trust mode
       // Include receiver's ephemeral key and binding for PFS
-      // For cross-user passkey: include receiver's contact token proving intent to communicate with sender
-      const receiverContactToken = isCrossUserPasskey && 'senderContactToken' in arg
-        ? (arg as ReceiveOptions).senderContactToken
+      // For cross-user passkey: include receiver's pairing key proving intent to communicate with sender
+      const receiverPairingKey = isCrossUserPasskey && 'senderPairingKey' in arg
+        ? (arg as ReceiveOptions).senderPairingKey
         : undefined
 
       // Compute receiver's handshake proof for cross-user mode
       let receiverHandshakeProof: Uint8Array | undefined
-      if (isCrossUserPasskey && receiverParsedToken && ownPublicKeyBytes && receiverEphemeral && eventNonce) {
-        // Get receiver's verification secret from the parsed token
-        const receiverVs = getOwnVerificationSecret(receiverParsedToken, ownPublicKeyBytes)
+      if (isCrossUserPasskey && receiverParsedPairingKey && ownPublicKeyBytes && receiverEphemeral && eventNonce) {
+        // Get receiver's verification secret from the parsed pairing key
+        const receiverVs = getOwnVerificationSecret(receiverParsedPairingKey, ownPublicKeyBytes)
         // Decode the nonce from base64 for proof computation
         // Note: eventNonce was already validated at line ~324 in the cross-user handshake path,
         // but we add defensive error handling for safety and consistency
@@ -551,14 +554,14 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           console.error('Failed to decode eventNonce for receiver handshake proof - this should not happen as nonce was validated earlier')
           throw new Error('Internal error: corrupted nonce in receiver handshake proof computation')
         }
-        // Get the sender's fingerprint from the parsed token
-        const senderFromToken = getCounterpartyFromParsedToken(receiverParsedToken, ownPublicKeyBytes)
+        // Get the sender's fingerprint from the parsed pairing key
+        const senderFromPairingKey = getPeerFromParsedPairingKey(receiverParsedPairingKey, ownPublicKeyBytes)
         // Compute the receiver's proof: HMAC(receiver_vs, receiver_epk || nonce || sender_fingerprint)
         receiverHandshakeProof = await computeHandshakeProof(
           receiverVs,
           receiverEphemeral.ephemeralPublicKeyBytes,
           nonceBytes,
-          senderFromToken.fingerprint
+          senderFromPairingKey.fingerprint
         )
       }
 
@@ -571,7 +574,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         eventNonce,
         receiverEphemeral?.ephemeralPublicKeyBytes,
         receiverEphemeral?.sessionBinding,
-        receiverContactToken,
+        receiverPairingKey,
         receiverHandshakeProof
       )
       await client.publish(readyAck)

@@ -16,8 +16,8 @@ import {
 const PASSKEY_MASTER_LABEL = 'secure-send-passkey-master-v1'
 const PASSKEY_PUBLIC_ID_LABEL = 'secure-send-passkey-public-id-v1'
 const SESSION_BINDING_LABEL = 'secure-send-session-bind-v1'
-const CONTACT_HMAC_KEY_LABEL = 'secure-send-contact-hmac-key-v1'
-const CONTACT_PUBLIC_KEY_LABEL = 'secure-send-contact-public-key-v1'
+const HMAC_KEY_LABEL = 'secure-send-hmac-key-v1'
+const PEER_PUBLIC_KEY_LABEL = 'secure-send-peer-public-key-v1'
 
 /**
  * Derive a stable, shareable public identifier from the passkey master key.
@@ -42,7 +42,8 @@ export async function derivePasskeyPublicId(masterKey: CryptoKey): Promise<Uint8
 }
 
 /**
- * Derive an HMAC-SHA256 key from the passkey master key for signing contact tokens.
+ * Derive your own HMAC-SHA256 signing key from the passkey master key.
+ * Used for signing pairing keys (NOT the peer's key - each party has their own).
  *
  * SECURITY:
  * - No raw key material is ever exposed to JavaScript
@@ -52,8 +53,8 @@ export async function derivePasskeyPublicId(masterKey: CryptoKey): Promise<Uint8
  * @param masterKey - HKDF master key from passkey PRF
  * @returns Non-extractable HMAC CryptoKey for signing/verification
  */
-export async function deriveContactHmacKey(masterKey: CryptoKey): Promise<CryptoKey> {
-  const info = new TextEncoder().encode(CONTACT_HMAC_KEY_LABEL)
+export async function deriveHmacKey(masterKey: CryptoKey): Promise<CryptoKey> {
+  const info = new TextEncoder().encode(HMAC_KEY_LABEL)
   return crypto.subtle.deriveKey(
     {
       name: 'HKDF',
@@ -69,19 +70,19 @@ export async function deriveContactHmacKey(masterKey: CryptoKey): Promise<Crypto
 }
 
 /**
- * Derive a contact public key (32 bytes) from the passkey master key.
+ * Derive a peer public key (32 bytes) from the passkey master key.
  * This is NOT an EC public key - it's a direct HKDF derivation used for identity binding.
  *
  * SECURITY:
  * - No private key material involved (unlike EC key derivation)
- * - This IS the public value - safe to share in contact cards
+ * - This IS the public value - safe to share in identity cards
  * - Used for identity binding during file transfers
  *
  * @param masterKey - HKDF master key from passkey PRF
- * @returns 32-byte contact public key for identity binding
+ * @returns 32-byte peer public key for identity binding
  */
-export async function deriveContactPublicKey(masterKey: CryptoKey): Promise<Uint8Array> {
-  const info = new TextEncoder().encode(CONTACT_PUBLIC_KEY_LABEL)
+export async function derivePeerPublicKey(masterKey: CryptoKey): Promise<Uint8Array> {
+  const info = new TextEncoder().encode(PEER_PUBLIC_KEY_LABEL)
   const bits = await crypto.subtle.deriveBits(
     {
       name: 'HKDF',
@@ -175,12 +176,12 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<{
  * Single call: authenticate with passkey and derive public identifier + fingerprint.
  * This is the main entry point for passkey identity info.
  *
- * Also derives a contact HMAC key and public key for mutual token creation.
+ * Also derives a peer HMAC key and public key for pairing key creation.
  * Both are deterministic - same passkey always produces same keys.
  *
  * SECURITY:
  * - HMAC key is fully non-extractable (no raw bytes ever exposed)
- * - Contact public key is a 32-byte HKDF derivation (no EC private key involved)
+ * - Peer public key is a 32-byte HKDF derivation (no EC private key involved)
  *
  * @param credentialId - Optional base64url credential ID to use specific passkey (skips picker)
  * @returns Identity with prfSupported flag (true if we got here, throws otherwise), and credentialId used
@@ -190,17 +191,18 @@ export async function getPasskeyIdentity(credentialId?: string): Promise<{
   publicIdFingerprint: string
   prfSupported: boolean
   credentialId: string
-  contactPublicKey: Uint8Array // 32 bytes for contact card and identity binding
-  contactHmacKey: CryptoKey // non-extractable HMAC key for signing tokens
+  peerPublicKey: Uint8Array // 32 bytes for identity card and identity binding
+  /** Your own non-extractable HMAC signing key (NOT the peer's key) for pairing keys */
+  hmacKey: CryptoKey
 }> {
   const { masterKey, credentialId: usedCredentialId } = await getPasskeyMasterKey(credentialId)
   const publicIdBytes = await derivePasskeyPublicId(masterKey)
   const publicIdFingerprint = await publicKeyToFingerprint(publicIdBytes)
 
-  // Derive contact keys from same master key
-  // SECURITY: HMAC key never exposed as raw bytes, contact public key is the public value itself
-  const contactHmacKey = await deriveContactHmacKey(masterKey)
-  const contactPublicKey = await deriveContactPublicKey(masterKey)
+  // Derive keys from same master key
+  // SECURITY: HMAC key never exposed as raw bytes, peer public key is the public value itself
+  const hmacKey = await deriveHmacKey(masterKey)
+  const peerPublicKey = await derivePeerPublicKey(masterKey)
 
   // If we got here, PRF worked (getPasskeyMasterKey throws if PRF fails)
   return {
@@ -208,8 +210,8 @@ export async function getPasskeyIdentity(credentialId?: string): Promise<{
     publicIdFingerprint,
     prfSupported: true,
     credentialId: usedCredentialId,
-    contactPublicKey,
-    contactHmacKey,
+    peerPublicKey,
+    hmacKey,
   }
 }
 

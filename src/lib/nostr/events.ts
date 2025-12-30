@@ -107,7 +107,7 @@ export function parsePinExchangeEvent(event: Event): {
  * @param nonce - Base64-encoded 16-byte random nonce (replay protection)
  * @param senderEphemeralPub - Sender's ephemeral public key for ECDH (required, 65 bytes)
  * @param senderSessionBinding - Session binding proving ephemeral key is authorized (required, 32 bytes)
- * @param senderContactToken - Sender's bound contact token proving intent to communicate with receiver
+ * @param senderPairingKey - Sender's pairing key proving intent to communicate with receiver
  * @param senderHandshakeProof - Optional: Handshake proof proving sender controls their passkey (32 bytes). Required for cross-user mode.
  */
 export function createMutualTrustHandshakeEvent(
@@ -120,7 +120,7 @@ export function createMutualTrustHandshakeEvent(
   nonce: string,
   senderEphemeralPub: Uint8Array,
   senderSessionBinding: Uint8Array,
-  senderContactToken: string,
+  senderPairingKey: string,
   senderHandshakeProof?: Uint8Array
 ): Event {
   const expiration = Math.floor((Date.now() + TRANSFER_EXPIRATION_MS) / 1000)
@@ -155,7 +155,7 @@ export function createMutualTrustHandshakeEvent(
     ['expiration', expiration.toString()],
     ['epk', uint8ArrayToBase64(senderEphemeralPub)], // Ephemeral public key
     ['esb', uint8ArrayToBase64(senderSessionBinding)], // Ephemeral session binding
-    ['ctk', senderContactToken], // Sender's bound contact token (proves intent)
+    ['pk', senderPairingKey], // Sender's pairing key (proves intent)
   ]
 
   // Add handshake proof if provided (for cross-user mode)
@@ -189,7 +189,7 @@ export function parseMutualTrustHandshakeEvent(event: Event): {
   transferId: string
   senderEphemeralPub: Uint8Array
   senderSessionBinding: Uint8Array
-  senderContactToken: string
+  senderPairingKey: string
   senderHandshakeProof?: Uint8Array
 } | null {
   if (event.kind !== EVENT_KIND_PIN_EXCHANGE) return null
@@ -203,10 +203,10 @@ export function parseMutualTrustHandshakeEvent(event: Event): {
   const nonceB64 = event.tags.find((t) => t[0] === 'n')?.[1]
   const saltB64 = event.tags.find((t) => t[0] === 's')?.[1]
   const transferId = event.tags.find((t) => t[0] === 't')?.[1]
-  const senderContactToken = event.tags.find((t) => t[0] === 'ctk')?.[1]
+  const senderPairingKey = event.tags.find((t) => t[0] === 'pk')?.[1]
 
   if (!receiverFingerprint || !senderFingerprint ||
-      !receiverPkCommitment || !nonceB64 || !saltB64 || !transferId || !senderContactToken) return null
+      !receiverPkCommitment || !nonceB64 || !saltB64 || !transferId || !senderPairingKey) return null
 
   // Validate nonce
   let nonceBytes: Uint8Array
@@ -262,7 +262,7 @@ export function parseMutualTrustHandshakeEvent(event: Event): {
     transferId,
     senderEphemeralPub: ephemeralPub,
     senderSessionBinding: sessionBinding,
-    senderContactToken,
+    senderPairingKey,
     senderHandshakeProof: handshakeProof,
   }
 }
@@ -499,7 +499,7 @@ export function parseMutualTrustEvent(event: Event): {
  * hint is optional - used in dual mode to indicate which key the receiver used
  * nonce is optional - echoed from sender's mutual trust event for replay protection
  * receiverEphemeralPub/receiverSessionBinding - for PFS (Perfect Forward Secrecy)
- * receiverContactToken - for cross-user passkey: receiver's bound token proving intent
+ * receiverPairingKey - for cross-user passkey: receiver's pairing key proving intent
  * receiverHandshakeProof - for cross-user passkey: proves receiver controls their passkey (32 bytes)
  */
 export function createAckEvent(
@@ -511,7 +511,7 @@ export function createAckEvent(
   nonce?: string,
   receiverEphemeralPub?: Uint8Array,
   receiverSessionBinding?: Uint8Array,
-  receiverContactToken?: string,
+  receiverPairingKey?: string,
   receiverHandshakeProof?: Uint8Array
 ): Event {
   const tags: string[][] = [
@@ -550,9 +550,9 @@ export function createAckEvent(
     tags.push(['esb', uint8ArrayToBase64(receiverSessionBinding)]) // Receiver's session binding
   }
 
-  // Add receiver's contact token for cross-user passkey transfers
-  if (receiverContactToken) {
-    tags.push(['ctk', receiverContactToken])
+  // Add receiver's pairing key for cross-user passkey transfers
+  if (receiverPairingKey) {
+    tags.push(['pk', receiverPairingKey])
   }
 
   // Add receiver's handshake proof for cross-user passkey transfers
@@ -590,8 +590,8 @@ export function parseAckEvent(event: Event): {
   // Optional PFS fields (present if receiver supports ephemeral session keys)
   receiverEphemeralPub?: Uint8Array
   receiverSessionBinding?: Uint8Array
-  // Optional contact token for cross-user passkey transfers
-  receiverContactToken?: string
+  // Optional pairing key for cross-user passkey transfers
+  receiverPairingKey?: string
   // Optional handshake proof for cross-user passkey transfers
   receiverHandshakeProof?: Uint8Array
 } | null {
@@ -605,7 +605,7 @@ export function parseAckEvent(event: Event): {
   const seqStr = event.tags.find((t) => t[0] === 'seq')?.[1]
   const hint = event.tags.find((t) => t[0] === 'h')?.[1]
   const nonce = event.tags.find((t) => t[0] === 'n')?.[1]
-  const receiverContactToken = event.tags.find((t) => t[0] === 'ctk')?.[1]
+  const receiverPairingKey = event.tags.find((t) => t[0] === 'pk')?.[1]
 
   if (!senderPubkey || !transferId || !seqStr) return null
 
@@ -640,7 +640,7 @@ export function parseAckEvent(event: Event): {
     }
   }
 
-  return { senderPubkey, transferId, seq, hint, nonce, receiverEphemeralPub, receiverSessionBinding, receiverContactToken, receiverHandshakeProof }
+  return { senderPubkey, transferId, seq, hint, nonce, receiverEphemeralPub, receiverSessionBinding, receiverPairingKey, receiverHandshakeProof }
 }
 
 /**

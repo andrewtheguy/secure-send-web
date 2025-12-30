@@ -29,25 +29,25 @@ import {
 } from '@/lib/crypto/passkey'
 import { formatFingerprint } from '@/lib/crypto/ecdh'
 import {
-  createMutualTokenInit,
-  countersignMutualToken,
-  isTokenRequest,
-} from '@/lib/crypto/contact-token'
+  createPairingRequest,
+  confirmPairingRequest,
+  isPairingRequestFormat,
+} from '@/lib/crypto/pairing-key'
 import { PIN_WORDLIST } from '@/lib/crypto/constants'
 import { ValidationError } from '@/lib/errors'
 import { useQRScanner } from '@/hooks/useQRScanner'
 import { generateTextQRCode } from '@/lib/qr-utils'
 import { isMobileDevice } from '@/lib/utils'
 
-type PageState = 'idle' | 'checking' | 'creating' | 'getting_key' | 'binding_contact'
+type PageState = 'idle' | 'checking' | 'creating' | 'getting_key' | 'pairing_peer'
 
 // Active mode for "Already Have a Passkey?" section
 type ActiveMode = 'idle' | 'signer' | 'initiator'
 
-// Contact card format: JSON with id (public ID) and cpk (contact public key)
-interface ContactCard {
+// Identity card format: JSON with id (public ID) and ppk (peer public key)
+interface IdentityCard {
   id: string // base64 public ID (32 bytes)
-  cpk: string // base64 contact public key (32 bytes, HKDF-derived)
+  ppk: string // base64 peer public key (32 bytes, HKDF-derived)
 }
 
 // Helper to convert Uint8Array to base64
@@ -65,23 +65,21 @@ function base64ToUint8Array(base64: string): Uint8Array {
   return bytes
 }
 
-// Parse a contact card from JSON format
-function parseContactInput(input: string): ContactCard | null {
+// Parse an identity card from JSON format
+function parseIdentityInput(input: string): IdentityCard | null {
   const trimmed = input.trim()
   if (!trimmed) return null
 
-  // Try parsing as JSON contact card first
+  // Try parsing as JSON identity card first
   try {
     const parsed = JSON.parse(trimmed) as unknown
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      'id' in parsed &&
-      'cpk' in parsed &&
-      typeof (parsed as ContactCard).id === 'string' &&
-      typeof (parsed as ContactCard).cpk === 'string'
-    ) {
-      return parsed as ContactCard
+    if (typeof parsed === 'object' && parsed !== null && 'id' in parsed) {
+      const obj = parsed as Record<string, unknown>
+      // Support both old 'cpk' and new 'ppk' field names
+      const ppk = obj.ppk ?? obj.cpk
+      if (typeof obj.id === 'string' && typeof ppk === 'string') {
+        return { id: obj.id, ppk: ppk as string }
+      }
     }
   } catch {
     // Not JSON, continue
@@ -108,26 +106,26 @@ export function PasskeyPage() {
   const defaultUserName = useMemo(() => generateRandomName(), [])
   const [fingerprint, setFingerprint] = useState<string | null>(null)
   const [publicIdBase64, setPublicIdBase64] = useState<string | null>(null)
-  const [contactPublicKeyBase64, setContactPublicKeyBase64] = useState<string | null>(null)
+  const [peerPublicKeyBase64, setPeerPublicKeyBase64] = useState<string | null>(null)
   const [prfSupported, setPrfSupported] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [copiedContactCard, setCopiedContactCard] = useState(false)
+  const [copiedIdentityCard, setCopiedIdentityCard] = useState(false)
 
-  // Mutual Token state
-  const [contactInput, setContactInput] = useState('')
-  const [tokenComment, setTokenComment] = useState('')
-  const [outputToken, setOutputToken] = useState<string | null>(null)
-  const [tokenError, setTokenError] = useState<string | null>(null)
-  const [copiedToken, setCopiedToken] = useState(false)
+  // Pairing Key state
+  const [peerInput, setPeerInput] = useState('')
+  const [pairingComment, setPairingComment] = useState('')
+  const [outputPairingKey, setOutputPairingKey] = useState<string | null>(null)
+  const [pairingError, setPairingError] = useState<string | null>(null)
+  const [copiedPairingKey, setCopiedPairingKey] = useState(false)
 
   // QR Scanner state
   const [showQRScanner, setShowQRScanner] = useState(false)
-  const [qrScannerMode, setQRScannerMode] = useState<'contact-card' | 'token-request'>('contact-card')
+  const [qrScannerMode, setQRScannerMode] = useState<'identity-card' | 'pairing-request'>('identity-card')
   const [qrScanError, setQRScanError] = useState<string | null>(null)
-  const [outputTokenQrUrl, setOutputTokenQrUrl] = useState<string | null>(null)
-  const [outputTokenQrError, setOutputTokenQrError] = useState<string | null>(null)
+  const [outputPairingKeyQrUrl, setOutputPairingKeyQrUrl] = useState<string | null>(null)
+  const [outputPairingKeyQrError, setOutputPairingKeyQrError] = useState<string | null>(null)
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>(
     isMobileDevice() ? 'environment' : 'user'
   )
@@ -135,10 +133,10 @@ export function PasskeyPage() {
   // Format fingerprint for display: XXXX-XXXX-XXXX-XXXX
   const formattedFingerprint = fingerprint ? formatFingerprint(fingerprint) : null
 
-  // Generate contact card JSON
-  const contactCard: string | null =
-    publicIdBase64 && contactPublicKeyBase64
-      ? JSON.stringify({ id: publicIdBase64, cpk: contactPublicKeyBase64 })
+  // Generate identity card JSON
+  const identityCard: string | null =
+    publicIdBase64 && peerPublicKeyBase64
+      ? JSON.stringify({ id: publicIdBase64, ppk: peerPublicKeyBase64 })
       : null
 
 
@@ -150,26 +148,44 @@ export function PasskeyPage() {
     }
   }, [success])
 
-  // Generate QR code URL when outputToken changes
+  // Generate QR code URL when outputPairingKey changes
   useEffect(() => {
-    if (outputToken) {
+    let cancelled = false
+    let currentUrl: string | null = null
+
+    if (outputPairingKey) {
       // Clear previous error when retrying
-      setOutputTokenQrError(null)
-      generateTextQRCode(outputToken, { width: 256, errorCorrectionLevel: 'L' })
+      setOutputPairingKeyQrError(null)
+      generateTextQRCode(outputPairingKey, { width: 256, errorCorrectionLevel: 'L' })
         .then((url) => {
-          setOutputTokenQrUrl(url)
-          setOutputTokenQrError(null)
+          if (cancelled) {
+            // Component unmounted or effect re-ran - revoke the unused URL
+            URL.revokeObjectURL(url)
+            return
+          }
+          currentUrl = url
+          setOutputPairingKeyQrUrl(url)
+          setOutputPairingKeyQrError(null)
         })
         .catch((err) => {
+          if (cancelled) return
           console.error('Failed to generate QR code:', err)
-          setOutputTokenQrUrl(null)
-          setOutputTokenQrError(err instanceof Error ? err.message : 'Failed to generate QR code')
+          setOutputPairingKeyQrUrl(null)
+          setOutputPairingKeyQrError(err instanceof Error ? err.message : 'Failed to generate QR code')
         })
     } else {
-      setOutputTokenQrUrl(null)
-      setOutputTokenQrError(null)
+      setOutputPairingKeyQrUrl(null)
+      setOutputPairingKeyQrError(null)
     }
-  }, [outputToken])
+
+    return () => {
+      cancelled = true
+      // Revoke blob URL on cleanup to prevent memory leaks
+      if (currentUrl) {
+        URL.revokeObjectURL(currentUrl)
+      }
+    }
+  }, [outputPairingKey])
 
   // QR Scanner handlers
   const handleQRScan = useCallback(
@@ -181,22 +197,23 @@ export function PasskeyPage() {
         // Try to parse as JSON to validate format
         const parsed = JSON.parse(text)
 
-        if (qrScannerMode === 'contact-card') {
-          // Validate contact card format
-          if (typeof parsed.id !== 'string' || typeof parsed.cpk !== 'string') {
-            setQRScanError('Invalid contact card format: missing "id" or "cpk"')
+        if (qrScannerMode === 'identity-card') {
+          // Validate identity card format (support both old 'cpk' and new 'ppk')
+          const hasPpk = typeof parsed.ppk === 'string' || typeof parsed.cpk === 'string'
+          if (typeof parsed.id !== 'string' || !hasPpk) {
+            setQRScanError('Invalid identity card format: missing "id" or "ppk"')
             return
           }
         } else {
-          // Validate token request format (basic check)
+          // Validate pairing request format (basic check)
           if (typeof parsed.a_id !== 'string' || typeof parsed.init_sig !== 'string') {
-            setQRScanError('Invalid token request format')
+            setQRScanError('Invalid pairing request format')
             return
           }
         }
 
         // Success - populate input and close scanner
-        setContactInput(text)
+        setPeerInput(text)
         setShowQRScanner(false)
         setQRScanError(null)
       } catch {
@@ -227,7 +244,7 @@ export function PasskeyPage() {
     facingMode,
   })
 
-  const openQRScanner = (mode: 'contact-card' | 'token-request') => {
+  const openQRScanner = (mode: 'identity-card' | 'pairing-request') => {
     setQRScannerMode(mode)
     setQRScanError(null)
     setShowQRScanner(true)
@@ -239,9 +256,9 @@ export function PasskeyPage() {
     setSuccess(null)
     setFingerprint(null)
     setPublicIdBase64(null)
-    setContactPublicKeyBase64(null)
+    setPeerPublicKeyBase64(null)
     setPrfSupported(null)
-    setOutputToken(null)
+    setOutputPairingKey(null)
     setPageState('checking')
 
     try {
@@ -269,13 +286,13 @@ export function PasskeyPage() {
     }
   }
 
-  // Handler for "Someone wants to add me as a contact" - auth to get identity for display
+  // Handler for "Someone wants to add me as a peer" - auth to get identity for display
   const handleSelectSigner = async () => {
     setError(null)
     setSuccess(null)
-    setOutputToken(null)
-    setTokenError(null)
-    setContactInput('')
+    setOutputPairingKey(null)
+    setPairingError(null)
+    setPeerInput('')
     setPageState('getting_key')
 
     try {
@@ -284,8 +301,8 @@ export function PasskeyPage() {
       setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
       setPrfSupported(result.prfSupported)
 
-      // Store contact public key for display (signing key is NOT stored - derived fresh per sign)
-      setContactPublicKeyBase64(uint8ArrayToBase64(result.contactPublicKey))
+      // Store peer public key for display (signing key is NOT stored - derived fresh per sign)
+      setPeerPublicKeyBase64(uint8ArrayToBase64(result.peerPublicKey))
 
       setPageState('idle')
       setActiveMode('signer')
@@ -295,14 +312,14 @@ export function PasskeyPage() {
     }
   }
 
-  // Handler for "I want to add someone as a contact" - no auth needed, just switch mode
+  // Handler for "I want to add someone as a peer" - no auth needed, just switch mode
   const handleSelectInitiator = () => {
     setError(null)
     setSuccess(null)
-    setOutputToken(null)
-    setTokenError(null)
-    setContactInput('')
-    setTokenComment('')
+    setOutputPairingKey(null)
+    setPairingError(null)
+    setPeerInput('')
+    setPairingComment('')
     setActiveMode('initiator')
   }
 
@@ -319,13 +336,13 @@ export function PasskeyPage() {
     }
   }
 
-  const handleCopyContactCard = async () => {
-    if (!contactCard) return
+  const handleCopyIdentityCard = async () => {
+    if (!identityCard) return
     await copyToClipboard(
-      contactCard,
+      identityCard,
       () => {
-        setCopiedContactCard(true)
-        setTimeout(() => setCopiedContactCard(false), 2000)
+        setCopiedIdentityCard(true)
+        setTimeout(() => setCopiedIdentityCard(false), 2000)
       },
       () => {
         setError('Failed to copy to clipboard')
@@ -349,132 +366,132 @@ export function PasskeyPage() {
     )
   }
 
-  const handleCreateToken = async () => {
-    setTokenError(null)
-    setOutputToken(null)
-    setPageState('binding_contact')
+  const handleCreatePairingRequest = async () => {
+    setPairingError(null)
+    setOutputPairingKey(null)
+    setPageState('pairing_peer')
 
     try {
-      const trimmed = contactInput.trim()
+      const trimmed = peerInput.trim()
       if (!trimmed) {
-        throw new Error("Please enter contact's card")
+        throw new Error("Please enter peer's identity card")
       }
 
-      // Parse contact card first (before auth prompt)
-      const contactCardParsed = parseContactInput(trimmed)
-      if (!contactCardParsed) {
-        throw new Error('Invalid contact card format. Expected JSON with "id" and "cpk" fields.')
+      // Parse identity card first (before auth prompt)
+      const identityCardParsed = parseIdentityInput(trimmed)
+      if (!identityCardParsed) {
+        throw new Error('Invalid identity card format. Expected JSON with "id" and "ppk" fields.')
       }
 
-      // Validate contact card fields
+      // Validate identity card fields
       try {
-        const idBytes = base64ToUint8Array(contactCardParsed.id)
+        const idBytes = base64ToUint8Array(identityCardParsed.id)
         if (idBytes.length !== 32) {
-          throw new ValidationError('Invalid contact public ID: expected 32 bytes')
+          throw new ValidationError('Invalid peer public ID: expected 32 bytes')
         }
-        const cpkBytes = base64ToUint8Array(contactCardParsed.cpk)
-        if (cpkBytes.length !== 32) {
-          throw new ValidationError('Invalid contact public key: expected 32 bytes')
+        const ppkBytes = base64ToUint8Array(identityCardParsed.ppk)
+        if (ppkBytes.length !== 32) {
+          throw new ValidationError('Invalid peer public key: expected 32 bytes')
         }
       } catch (e) {
         if (e instanceof ValidationError) {
           throw e
         }
-        throw new ValidationError('Invalid base64 encoding in contact card')
+        throw new ValidationError('Invalid base64 encoding in identity card')
       }
 
       // Authenticate fresh to get HMAC key (key only exists during this operation)
       const identity = await getPasskeyIdentity()
 
-      // Create pending mutual token using freshly derived HMAC key
-      const token = await createMutualTokenInit(
-        identity.contactHmacKey,
-        identity.contactPublicKey,
+      // Create pairing request using freshly derived HMAC key
+      const pairingRequest = await createPairingRequest(
+        identity.hmacKey,
+        identity.peerPublicKey,
         uint8ArrayToBase64(identity.publicIdBytes),
-        contactCardParsed.id,
-        contactCardParsed.cpk,
-        tokenComment.trim() || undefined
+        identityCardParsed.id,
+        identityCardParsed.ppk,
+        pairingComment.trim() || undefined
       )
-      // contactHmacKey goes out of scope here - no longer in memory
+      // hmacKey goes out of scope here - no longer in memory
 
-      setOutputToken(token)
-      setContactInput('')
-      setTokenComment('')
+      setOutputPairingKey(pairingRequest)
+      setPeerInput('')
+      setPairingComment('')
       setPageState('idle')
     } catch (err) {
-      setTokenError(err instanceof Error ? err.message : 'Failed to create token')
+      setPairingError(err instanceof Error ? err.message : 'Failed to create pairing request')
       setPageState('idle')
     }
   }
 
-  const handleSignRequest = async () => {
-    setTokenError(null)
-    setOutputToken(null)
-    setPageState('binding_contact')
+  const handleConfirmRequest = async () => {
+    setPairingError(null)
+    setOutputPairingKey(null)
+    setPageState('pairing_peer')
 
     try {
-      const trimmed = contactInput.trim()
+      const trimmed = peerInput.trim()
       if (!trimmed) {
-        throw new Error('Please enter token request')
+        throw new Error('Please enter pairing request')
       }
 
-      // Validate token request format first (before auth prompt)
-      if (!isTokenRequest(trimmed)) {
-        throw new Error('Invalid token request format')
+      // Validate pairing request format first (before auth prompt)
+      if (!isPairingRequestFormat(trimmed)) {
+        throw new Error('Invalid pairing request format')
       }
 
       // Authenticate fresh to get HMAC key (key only exists during this operation)
       const identity = await getPasskeyIdentity()
 
-      const token = await countersignMutualToken(
+      const pairingKey = await confirmPairingRequest(
         trimmed,
-        identity.contactHmacKey,
-        identity.contactPublicKey,
+        identity.hmacKey,
+        identity.peerPublicKey,
         uint8ArrayToBase64(identity.publicIdBytes)
       )
-      // contactHmacKey goes out of scope here - no longer in memory
+      // hmacKey goes out of scope here - no longer in memory
 
-      setOutputToken(token)
-      setContactInput('')
+      setOutputPairingKey(pairingKey)
+      setPeerInput('')
       setPageState('idle')
     } catch (err) {
-      setTokenError(err instanceof Error ? err.message : 'Failed to sign token request')
+      setPairingError(err instanceof Error ? err.message : 'Failed to confirm pairing request')
       setPageState('idle')
     }
   }
 
-  const handleCopyToken = async () => {
-    if (!outputToken) return
+  const handleCopyPairingKey = async () => {
+    if (!outputPairingKey) return
     await copyToClipboard(
-      outputToken,
+      outputPairingKey,
       () => {
-        setCopiedToken(true)
-        setTimeout(() => setCopiedToken(false), 2000)
+        setCopiedPairingKey(true)
+        setTimeout(() => setCopiedPairingKey(false), 2000)
       },
       () => {
-        setTokenError('Failed to copy to clipboard')
-        setTimeout(() => setTokenError(null), 3000)
+        setPairingError('Failed to copy to clipboard')
+        setTimeout(() => setPairingError(null), 3000)
       }
     )
   }
 
   const handleStartOver = () => {
     setActiveMode('idle')
-    setContactInput('')
-    setTokenComment('')
-    setOutputToken(null)
-    setTokenError(null)
+    setPeerInput('')
+    setPairingComment('')
+    setOutputPairingKey(null)
+    setPairingError(null)
     // Reset display state so user must re-authenticate when selecting a new mode
     setFingerprint(null)
     setPublicIdBase64(null)
-    setContactPublicKeyBase64(null)
+    setPeerPublicKeyBase64(null)
   }
 
   const isLoading = pageState !== 'idle'
 
-  // Render contact card with numbered step (for signer flow step 1)
-  const renderContactCardStep = () => {
-    if (!contactCard || !fingerprint) return null
+  // Render identity card with numbered step (for signer flow step 1)
+  const renderIdentityCardStep = () => {
+    if (!identityCard || !fingerprint) return null
 
     return (
       <div className="p-4 rounded-lg border border-cyan-500/50 bg-cyan-50/30 dark:bg-cyan-950/20 space-y-4">
@@ -482,29 +499,29 @@ export function PasskeyPage() {
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-600 text-white text-sm font-medium">
             1
           </span>
-          <span className="font-semibold text-cyan-700 dark:text-cyan-400">Your Contact Card</span>
+          <span className="font-semibold text-cyan-700 dark:text-cyan-400">Your Identity Card</span>
         </div>
 
         {/* QR Code */}
         <div className="flex flex-col items-center gap-4">
           <div className="bg-white p-4 rounded-lg">
-            <QRCodeSVG value={contactCard} size={200} level="M" />
+            <QRCodeSVG value={identityCard} size={200} level="M" />
           </div>
           <p className="text-xs text-muted-foreground text-center max-w-xs">
-            Share this QR code with your contact so they can create a token request.
+            Share this QR code with your peer so they can create a pairing request.
           </p>
         </div>
 
-        {/* Copy Contact Card */}
+        {/* Copy Identity Card */}
         <div className="pt-4 border-t border-cyan-500/30">
           <div className="flex items-center gap-2 mb-2">
             <Key className="h-4 w-4 text-cyan-600" />
-            <span className="text-sm font-medium text-cyan-600">Contact Card (JSON)</span>
+            <span className="text-sm font-medium text-cyan-600">Identity Card (JSON)</span>
           </div>
           <div className="flex gap-2">
             <textarea
               readOnly
-              value={contactCard}
+              value={identityCard}
               onClick={(e) => e.currentTarget.select()}
               rows={2}
               className="flex-1 text-xs bg-cyan-500/10 border border-cyan-500/20 p-2 rounded font-mono focus:outline-none focus:ring-2 focus:ring-cyan-500/30 resize-none"
@@ -512,10 +529,10 @@ export function PasskeyPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={handleCopyContactCard}
-              className={`flex-shrink-0 ${copiedContactCard ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-cyan-500/10'}`}
+              onClick={handleCopyIdentityCard}
+              className={`flex-shrink-0 ${copiedIdentityCard ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-cyan-500/10'}`}
             >
-              {copiedContactCard ? (
+              {copiedIdentityCard ? (
                 <Check className="h-4 w-4 text-white" />
               ) : (
                 <Copy className="h-4 w-4" />
@@ -544,7 +561,7 @@ export function PasskeyPage() {
             </Button>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            Use to verify identity when sharing your contact card.
+            Use to verify identity when sharing your identity card.
           </p>
         </div>
 
@@ -565,7 +582,7 @@ export function PasskeyPage() {
         Create New Passkey
       </h3>
       <p className="text-sm">
-        Create a passkey to generate your contact card. Share it with contacts for secure file
+        Create a passkey to generate your identity card. Share it with peers for secure file
         transfers without needing PINs.
       </p>
       <div className="space-y-2">
@@ -611,7 +628,7 @@ export function PasskeyPage() {
         Already Have a Passkey?
       </h3>
       <p className="text-sm text-muted-foreground">
-        Choose what you want to do to create a mutual contact token.
+        Choose what you want to do to create a pairing key.
       </p>
 
       <div className="grid gap-3">
@@ -630,10 +647,10 @@ export function PasskeyPage() {
             <>
               <div className="flex items-center gap-2 font-semibold">
                 <CheckCircle2 className="h-5 w-5" />
-                Someone wants to add me as a contact
+                Someone wants to pair with me
               </div>
               <p className="text-xs text-muted-foreground font-normal text-left whitespace-normal">
-                Share your contact card, have them create a token request, then sign it
+                Share your identity card, have them create a pairing request, then confirm it
               </p>
             </>
           )}
@@ -654,10 +671,10 @@ export function PasskeyPage() {
             <>
               <div className="flex items-center gap-2 font-semibold">
                 <Plus className="h-5 w-5" />
-                I want to add someone as a contact
+                I want to pair with someone
               </div>
               <p className="text-xs text-muted-foreground font-normal text-left">
-                You have their contact card and will create a token request for them to sign
+                You have their identity card and will create a pairing request for them to confirm
               </p>
             </>
           )}
@@ -665,7 +682,7 @@ export function PasskeyPage() {
       </div>
 
       <p className="text-xs text-muted-foreground text-center pt-2">
-        Already have a token?{' '}
+        Already have a pairing key?{' '}
         <Link to="/passkey/verify-token" className="text-primary hover:underline">
           Verify it here
         </Link>
@@ -681,7 +698,7 @@ export function PasskeyPage() {
     </div>
   )
 
-  // Initiator flow: Create Token Request
+  // Initiator flow: Create Pairing Request
   const renderInitiatorFlow = () => (
     <div className="space-y-6">
       {/* Back button */}
@@ -696,31 +713,31 @@ export function PasskeyPage() {
         Back
       </Button>
 
-      {/* Token request creation form */}
+      {/* Pairing request creation form */}
       <div className="space-y-4 p-4 rounded-lg border border-amber-500/30 bg-amber-50/30 dark:bg-amber-950/10">
         <h3 className="font-semibold flex items-center gap-2">
           <Shield className="h-5 w-5 text-amber-600" />
-          Create Token Request
+          Create Pairing Request
         </h3>
         <p className="text-sm text-muted-foreground">
-          Paste your contact&apos;s card to create a token request for them to sign.
+          Paste your peer&apos;s identity card to create a pairing request for them to confirm.
         </p>
 
         <div className="space-y-2">
-          <Label htmlFor="contact-card">Contact&apos;s Card</Label>
+          <Label htmlFor="identity-card">Peer&apos;s Identity Card</Label>
           <div className="flex gap-2">
             <Textarea
-              id="contact-card"
-              placeholder={`Paste contact's card (JSON with "id" and "cpk")...`}
-              value={contactInput}
-              onChange={(e) => setContactInput(e.target.value)}
+              id="identity-card"
+              placeholder={`Paste peer's identity card (JSON with "id" and "ppk")...`}
+              value={peerInput}
+              onChange={(e) => setPeerInput(e.target.value)}
               disabled={isLoading}
               className="font-mono text-xs min-h-[60px] resize-none flex-1"
             />
             <Button
               variant="outline"
               size="sm"
-              onClick={() => openQRScanner('contact-card')}
+              onClick={() => openQRScanner('identity-card')}
               disabled={isLoading}
               className="flex-shrink-0"
               title="Scan QR code"
@@ -730,22 +747,22 @@ export function PasskeyPage() {
           </div>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="token-comment">Comment (optional)</Label>
+          <Label htmlFor="pairing-comment">Comment (optional)</Label>
           <Input
-            id="token-comment"
+            id="pairing-comment"
             placeholder="e.g., Alice's work laptop"
-            value={tokenComment}
-            onChange={(e) => setTokenComment(e.target.value)}
+            value={pairingComment}
+            onChange={(e) => setPairingComment(e.target.value)}
             disabled={isLoading}
           />
         </div>
 
         <Button
-          onClick={handleCreateToken}
-          disabled={!contactInput.trim() || isLoading}
+          onClick={handleCreatePairingRequest}
+          disabled={!peerInput.trim() || isLoading}
           className="w-full"
         >
-          {pageState === 'binding_contact' ? (
+          {pageState === 'pairing_peer' ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Creating...
@@ -753,47 +770,47 @@ export function PasskeyPage() {
           ) : (
             <>
               <Shield className="mr-2 h-4 w-4" />
-              Create Token Request
+              Create Pairing Request
             </>
           )}
         </Button>
 
-        {tokenError && (
+        {pairingError && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{tokenError}</AlertDescription>
+            <AlertDescription>{pairingError}</AlertDescription>
           </Alert>
         )}
 
-        {outputToken && (
+        {outputPairingKey && (
           <div className="space-y-3 pt-3 border-t border-amber-500/30">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-green-600" />
-              <span className="text-sm font-medium text-green-600">Token Request Created</span>
+              <span className="text-sm font-medium text-green-600">Pairing Request Created</span>
             </div>
 
-            {/* QR Code for token request */}
-            {outputTokenQrUrl && (
+            {/* QR Code for pairing request */}
+            {outputPairingKeyQrUrl && (
               <div className="flex flex-col items-center gap-2">
                 <div className="bg-white p-3 rounded-lg">
-                  <img src={outputTokenQrUrl} alt="Token Request QR Code" className="w-48 h-48" />
+                  <img src={outputPairingKeyQrUrl} alt="Pairing Request QR Code" className="w-48 h-48" />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Let your contact scan this QR code
+                  Let your peer scan this QR code
                 </p>
               </div>
             )}
-            {outputTokenQrError && (
+            {outputPairingKeyQrError && (
               <div className="flex flex-col items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
-                <p className="text-sm text-destructive">QR code generation failed: {outputTokenQrError}</p>
-                <p className="text-xs text-muted-foreground">Copy the token text below instead</p>
+                <p className="text-sm text-destructive">QR code generation failed: {outputPairingKeyQrError}</p>
+                <p className="text-xs text-muted-foreground">Copy the text below instead</p>
               </div>
             )}
 
             <div className="flex gap-2">
               <Textarea
                 readOnly
-                value={outputToken}
+                value={outputPairingKey}
                 onClick={(e) => e.currentTarget.select()}
                 rows={4}
                 className="flex-1 text-xs bg-amber-500/10 border border-amber-500/20 p-2 rounded font-mono focus:outline-none focus:ring-2 focus:ring-amber-500/30 resize-none"
@@ -801,15 +818,15 @@ export function PasskeyPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleCopyToken}
-                className={`flex-shrink-0 ${copiedToken ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-amber-500/10'}`}
+                onClick={handleCopyPairingKey}
+                className={`flex-shrink-0 ${copiedPairingKey ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-amber-500/10'}`}
               >
-                {copiedToken ? <Check className="h-4 w-4 text-white" /> : <Copy className="h-4 w-4" />}
+                {copiedPairingKey ? <Check className="h-4 w-4 text-white" /> : <Copy className="h-4 w-4" />}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Send this token request to your contact. They will sign it and send back the final
-              mutual token.
+              Send this pairing request to your peer. They will confirm it and send back the final
+              pairing key.
             </p>
             <Button variant="outline" onClick={handleStartOver} className="w-full">
               Start Over
@@ -820,7 +837,7 @@ export function PasskeyPage() {
     </div>
   )
 
-  // Signer flow: Show contact card + sign token request (with numbered steps)
+  // Signer flow: Show identity card + confirm pairing request (with numbered steps)
   const renderSignerFlow = () => (
     <div className="space-y-6">
       {/* Back button */}
@@ -835,8 +852,8 @@ export function PasskeyPage() {
         Back
       </Button>
 
-      {/* Step 1: Contact Card */}
-      {renderContactCardStep()}
+      {/* Step 1: Identity Card */}
+      {renderIdentityCardStep()}
 
       {/* Step 2: Instructions */}
       <div className="p-4 rounded-lg border border-muted bg-muted/30">
@@ -844,43 +861,43 @@ export function PasskeyPage() {
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted-foreground/50 text-white text-sm font-medium">
             2
           </span>
-          <span className="font-semibold text-muted-foreground">Wait for Token Request</span>
+          <span className="font-semibold text-muted-foreground">Wait for Pairing Request</span>
         </div>
         <p className="text-sm text-muted-foreground ml-8">
-          Ask your contact to scan your contact card above and create a token request. They will
+          Ask your peer to scan your identity card above and create a pairing request. They will
           send it back to you.
         </p>
       </div>
 
-      {/* Step 3: Sign Token Request */}
+      {/* Step 3: Confirm Pairing Request */}
       <div className="space-y-4 p-4 rounded-lg border border-amber-500/30 bg-amber-50/30 dark:bg-amber-950/10">
         <div className="flex items-center gap-2">
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-600 text-white text-sm font-medium">
             3
           </span>
           <span className="font-semibold text-amber-700 dark:text-amber-400">
-            Sign Token Request
+            Confirm Pairing Request
           </span>
         </div>
         <p className="text-sm text-muted-foreground ml-8">
-          Paste the token request your contact sent you to create the mutual token.
+          Paste the pairing request your peer sent you to create the pairing key.
         </p>
 
         <div className="space-y-2">
-          <Label htmlFor="token-request">Token Request</Label>
+          <Label htmlFor="pairing-request">Pairing Request</Label>
           <div className="flex gap-2">
             <Textarea
-              id="token-request"
-              placeholder="Paste the token request from your contact..."
-              value={contactInput}
-              onChange={(e) => setContactInput(e.target.value)}
+              id="pairing-request"
+              placeholder="Paste the pairing request from your peer..."
+              value={peerInput}
+              onChange={(e) => setPeerInput(e.target.value)}
               disabled={isLoading}
               className="font-mono text-xs min-h-[80px] resize-none flex-1"
             />
             <Button
               variant="outline"
               size="sm"
-              onClick={() => openQRScanner('token-request')}
+              onClick={() => openQRScanner('pairing-request')}
               disabled={isLoading}
               className="flex-shrink-0"
               title="Scan QR code"
@@ -891,59 +908,59 @@ export function PasskeyPage() {
         </div>
 
         <Button
-          onClick={handleSignRequest}
-          disabled={!contactInput.trim() || isLoading}
+          onClick={handleConfirmRequest}
+          disabled={!peerInput.trim() || isLoading}
           className="w-full"
         >
-          {pageState === 'binding_contact' ? (
+          {pageState === 'pairing_peer' ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Signing...
+              Confirming...
             </>
           ) : (
             <>
               <Shield className="mr-2 h-4 w-4" />
-              Sign Token Request
+              Confirm Pairing Request
             </>
           )}
         </Button>
 
-        {tokenError && (
+        {pairingError && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{tokenError}</AlertDescription>
+            <AlertDescription>{pairingError}</AlertDescription>
           </Alert>
         )}
 
-        {outputToken && (
+        {outputPairingKey && (
           <div className="space-y-3 pt-3 border-t border-amber-500/30">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-green-600" />
-              <span className="text-sm font-medium text-green-600">Mutual Token Completed</span>
+              <span className="text-sm font-medium text-green-600">Pairing Key Completed</span>
             </div>
 
-            {/* QR Code for mutual token */}
-            {outputTokenQrUrl && (
+            {/* QR Code for pairing key */}
+            {outputPairingKeyQrUrl && (
               <div className="flex flex-col items-center gap-2">
                 <div className="bg-white p-3 rounded-lg">
-                  <img src={outputTokenQrUrl} alt="Mutual Token QR Code" className="w-48 h-48" />
+                  <img src={outputPairingKeyQrUrl} alt="Pairing Key QR Code" className="w-48 h-48" />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Share this QR code with your contact
+                  Share this QR code with your peer
                 </p>
               </div>
             )}
-            {outputTokenQrError && (
+            {outputPairingKeyQrError && (
               <div className="flex flex-col items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
-                <p className="text-sm text-destructive">QR code generation failed: {outputTokenQrError}</p>
-                <p className="text-xs text-muted-foreground">Copy the token text below instead</p>
+                <p className="text-sm text-destructive">QR code generation failed: {outputPairingKeyQrError}</p>
+                <p className="text-xs text-muted-foreground">Copy the text below instead</p>
               </div>
             )}
 
             <div className="flex gap-2">
               <Textarea
                 readOnly
-                value={outputToken}
+                value={outputPairingKey}
                 onClick={(e) => e.currentTarget.select()}
                 rows={4}
                 className="flex-1 text-xs bg-amber-500/10 border border-amber-500/20 p-2 rounded font-mono focus:outline-none focus:ring-2 focus:ring-amber-500/30 resize-none"
@@ -951,14 +968,14 @@ export function PasskeyPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleCopyToken}
-                className={`flex-shrink-0 ${copiedToken ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-amber-500/10'}`}
+                onClick={handleCopyPairingKey}
+                className={`flex-shrink-0 ${copiedPairingKey ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-amber-500/10'}`}
               >
-                {copiedToken ? <Check className="h-4 w-4 text-white" /> : <Copy className="h-4 w-4" />}
+                {copiedPairingKey ? <Check className="h-4 w-4 text-white" /> : <Copy className="h-4 w-4" />}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              This mutual token can now be used by both parties for secure file transfers.
+              This pairing key can now be used by both peers for secure file transfers.
             </p>
             <Button variant="outline" onClick={handleStartOver} className="w-full">
               Start Over
@@ -990,7 +1007,7 @@ export function PasskeyPage() {
             Passkey Setup
           </CardTitle>
           <CardDescription>
-            Generate your passkey contact card for secure, PIN-free file transfers
+            Generate your passkey identity card for secure, PIN-free file transfers
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -1024,9 +1041,9 @@ export function PasskeyPage() {
               passkey-bound session binding, ensuring only the intended recipient can decrypt.
             </p>
             <p>
-              <span className="font-medium text-foreground">Mutual tokens:</span> Both parties sign
-              the same token, proving mutual consent. The initiator creates a token request, and the
-              counterparty signs it to produce the final mutual token.
+              <span className="font-medium text-foreground">Pairing keys:</span> Both parties sign
+              the same key, proving mutual consent. The initiator creates a pairing request, and the
+              peer confirms it to produce the final pairing key.
             </p>
           </div>
         </CardContent>
@@ -1039,7 +1056,7 @@ export function PasskeyPage() {
             <div className="flex items-center justify-between">
               <h3 className="font-medium flex items-center gap-2">
                 <Camera className="h-5 w-5" />
-                {qrScannerMode === 'contact-card' ? 'Scan Contact Card' : 'Scan Token Request'}
+                {qrScannerMode === 'identity-card' ? 'Scan Identity Card' : 'Scan Pairing Request'}
               </h3>
               <Button
                 variant="ghost"
@@ -1091,9 +1108,9 @@ export function PasskeyPage() {
             )}
 
             <p className="text-xs text-muted-foreground text-center">
-              {qrScannerMode === 'contact-card'
-                ? 'Point camera at the contact card QR code'
-                : 'Point camera at the token request QR code'}
+              {qrScannerMode === 'identity-card'
+                ? 'Point camera at the identity card QR code'
+                : 'Point camera at the pairing request QR code'}
             </p>
           </div>
         </div>
