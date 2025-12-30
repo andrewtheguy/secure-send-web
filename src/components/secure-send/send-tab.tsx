@@ -102,6 +102,20 @@ export function SendTab() {
     isScanning: showTokenQRScanner,
   })
 
+  // Reset tokenCameraReady when scanner closes
+  useEffect(() => {
+    if (!showTokenQRScanner) {
+      setTokenCameraReady(false)
+    }
+  }, [showTokenQRScanner])
+
+  // Reset tokenCameraReady when camera selection changes while scanner is open
+  useEffect(() => {
+    if (showTokenQRScanner) {
+      setTokenCameraReady(false)
+    }
+  }, [selectedTokenCamera, showTokenQRScanner])
+
   // Parse mutual contact token - debounced to reduce parsing on every keystroke
   useEffect(() => {
     let cancelled = false
