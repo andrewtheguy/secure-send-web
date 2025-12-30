@@ -153,12 +153,12 @@ The out-of-band fingerprint verification in step 1 is the primary trust anchor f
 *Implementation References:*
 | Function | File | Description |
 |----------|------|-------------|
-| `publicKeyToFingerprint()` | `src/lib/crypto/ecdh.ts:26-34` | SHA-256 hash → first 8 bytes → hex |
-| `formatFingerprint()` | `src/lib/crypto/ecdh.ts:42-55` | Add hyphen separators for display |
-| `getPasskeyIdentity()` | `src/lib/crypto/passkey.ts:188-213` | Returns `publicIdFingerprint` |
-| `parseToken()` | `src/lib/crypto/contact-token.ts:640-720` | Extracts `partyAFingerprint`, `partyBFingerprint` |
-| Contact card display | `src/pages/passkey.tsx:474-545` | UI for contact card + fingerprint |
-| Fingerprint tests | `src/lib/crypto/passkey.test.ts:5-53` | Unit tests for determinism/uniqueness |
+| `publicKeyToFingerprint()` | `src/lib/crypto/ecdh.ts` | SHA-256 hash → first 8 bytes → hex |
+| `formatFingerprint()` | `src/lib/crypto/ecdh.ts` | Add hyphen separators for display |
+| `getPasskeyIdentity()` | `src/lib/crypto/passkey.ts` | Returns `publicIdFingerprint` |
+| `parseToken()` | `src/lib/crypto/pairing-key.ts` | Extracts `partyAFingerprint`, `partyBFingerprint` |
+| Contact card display | `src/pages/passkey.tsx` | UI for contact card + fingerprint |
+| Fingerprint tests | `src/lib/crypto/passkey.test.ts` | Unit tests for determinism/uniqueness |
 
 **Verification Process:**
 
@@ -458,7 +458,7 @@ When using passkey mode, additional cryptographic protections are applied:
 ['h', receiverFingerprint]     // For event filtering
 ['spk', senderFingerprint]     // Sender verification
 ['kc', keyConfirmHash]         // Key confirmation (MITM detection)
-['rpkc', receiverPkCommitment] // Receiver public ID commitment (relay MITM prevention)
+['rpkc', sha256(receiverPublicId)] // Receiver public ID commitment (SHA-256 hash, relay MITM prevention)
 ['n', nonce]                   // Replay nonce (base64, 16 bytes)
 ['s', salt]                    // Per-transfer salt
 ['t', transferId]              // Transfer ID
@@ -472,7 +472,7 @@ When using passkey mode, additional cryptographic protections are applied:
 ```
 ['h', receiverFingerprint]     // For event filtering
 ['spk', senderFingerprint]     // Sender verification
-['rpkc', receiverPkCommitment] // Receiver public ID commitment
+['rpkc', sha256(receiverPublicId)] // Receiver public ID commitment (SHA-256 hash)
 ['n', nonce]                   // Replay nonce (base64, 16 bytes)
 ['s', salt]                    // Per-transfer salt
 ['t', transferId]              // Transfer ID
@@ -499,8 +499,8 @@ Note: Encrypted payload in event content, encrypted with session key from epheme
 ```
 
 **Verification Flow:**
-1. Sender computes key confirmation hash, receiver public ID commitment, and random nonce
-2. Receiver verifies RPKC matches own public ID (prevents relay MITM)
+1. Sender computes key confirmation hash, receiver public ID commitment (SHA-256 hash of receiver's public ID), and random nonce
+2. Receiver verifies RPKC by computing SHA-256 of own public ID and comparing (prevents relay MITM)
 3. Receiver verifies key confirmation hash matches (detects shared secret mismatch)
 4. Receiver echoes nonce in ready ACK
 5. Sender verifies nonce match using constant-time comparison (prevents replay)
@@ -523,21 +523,4 @@ Security-critical functions validate inputs before cryptographic operations:
 - `hashKeyConfirmation()`: Validates input is exactly 16-byte Uint8Array before SHA-256 digest
 - `parseMutualTrustEvent()`: Validates nonce decodes to exactly 16 bytes, salt decodes to at least 16 bytes
 
-## Security Properties
-
-| Property | PIN Mode | Passkey Self-Transfer | Passkey Cross-User |
-|----------|----------|----------------------|-------------------|
-| Key Source | User-memorized PIN | Hardware secure element | Hardware secure element |
-| Brute Force Resistance | 600K PBKDF2 iterations | Hardware rate limiting | Hardware rate limiting |
-| Phishing Resistance | None | Origin-bound credentials | Origin-bound credentials |
-| Sync Method | Out-of-band sharing | Password manager sync | Pairing key exchange |
-| Verification | PIN match | Fingerprint comparison | Pairing key (dual signatures) |
-| Key Confirmation | N/A | HKDF-derived hash | N/A (no shared secret) |
-| Relay MITM Protection | N/A | Public ID commitment | Public ID commitment |
-| Replay Protection | TTL only | TTL + nonce | TTL + nonce |
-| Session Binding Verification | N/A | Yes (same master key) | No (different master keys) |
-| Shared Secret Protection | Raw bytes in memory | Non-extractable CryptoKey | Non-extractable CryptoKey |
-| Perfect Forward Secrecy | No | Yes (ephemeral ECDH) | Yes (ephemeral ECDH) |
-| Round Trips | 1 | 1 | 2 (handshake + payload) |
-| Party Membership Check | N/A | N/A | Yes (during handshake) |
-| Handshake Authentication | N/A | N/A | Yes (bidirectional HP) |
+For a comparison of security properties across PIN and Passkey modes, see [Security Properties by Mode](./ARCHITECTURE.md#security-properties-by-mode) in the main architecture document.

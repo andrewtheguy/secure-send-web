@@ -535,6 +535,25 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 14. **Non-Extractable Keys**: In passkey mutual trust mode, the passkey master key and the ephemeral ECDH shared secret are kept as non-extractable `CryptoKey` objects - raw bytes never exposed to JavaScript, preventing exfiltration via XSS or memory inspection
 15. **Perfect Forward Secrecy (PFS)**: Passkey mode uses ephemeral session keys generated via Web Crypto's `generateKey()` - raw private key material is NEVER exposed to JavaScript. Compromising the passkey public ID or a single session's memory does not help decrypt past or future sessions. PFS is mandatory in passkey mode.
 
+### Security Properties by Mode
+
+| Property | PIN Mode | Passkey Self-Transfer | Passkey Cross-User |
+|----------|----------|----------------------|-------------------|
+| Key Source | User-memorized PIN | Hardware secure element | Hardware secure element |
+| Brute Force Resistance | 600K PBKDF2 iterations | Hardware rate limiting | Hardware rate limiting |
+| Phishing Resistance | None | Origin-bound credentials | Origin-bound credentials |
+| Sync Method | Out-of-band sharing | Password manager sync | Pairing key exchange |
+| Verification | PIN match | Fingerprint comparison | Pairing key (dual signatures) |
+| Key Confirmation | N/A | HKDF-derived hash | N/A (no shared secret) |
+| Relay MITM Protection | N/A | Public ID commitment | Public ID commitment |
+| Replay Protection | TTL only | TTL + nonce | TTL + nonce |
+| Session Binding Verification | N/A | Yes (same master key) | No (different master keys) |
+| Shared Secret Protection | Raw bytes in memory | Non-extractable CryptoKey | Non-extractable CryptoKey |
+| Perfect Forward Secrecy | No | Yes (ephemeral ECDH) | Yes (ephemeral ECDH) |
+| Round Trips | 1 | 1 | 2 (handshake + payload) |
+| Party Membership Check | N/A | N/A | Yes (during handshake) |
+| Handshake Authentication | N/A | N/A | Yes (bidirectional HP) |
+
 ## File Structure
 
 ```
