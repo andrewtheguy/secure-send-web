@@ -215,12 +215,13 @@ challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat || comment_bytes)
 
 **Tamper Protection:**
 
-The entire token payload is tamper-proof:
-- **Data fields** (`a_id`, `a_cpk`, `b_id`, `b_cpk`, `iat`, `init_party`, `comment`): Included in the MAC challenge. Tampering invalidates both MACs.
+The entire token payload is tamper-proof via different mechanisms:
+- **Challenge-covered fields** (`a_id`, `a_cpk`, `b_id`, `b_cpk`, `iat`, `comment`): Included in the SHA256 challenge. Tampering invalidates both MACs (detected during `verifyOwnSignature()`).
 - **MAC fields** (`init_sig`, `counter_sig`): HMAC-SHA256 MACs over the challenge. Each party can verify only their own MAC via `verifyOwnSignature()` (requires passkey authentication). Trust in the counterparty's MAC is established via out-of-band fingerprint verification.
-- **Verification secret fields** (`init_vs`, `counter_vs`): Derived from each party's HMAC key. Used for Handshake Proofs to prevent impersonation with stolen tokens.
+- **Verification secret fields** (`init_vs`, `counter_vs`): Derived deterministically from each party's HMAC key. Tampering causes handshake proof verification to fail.
+- **Mapping field** (`init_party`): Not included in the challenge, but tampering is detected during handshake. This field maps `init_vs`/`counter_vs` to parties A/B. If tampered, the VS mapping becomes incorrect, causing handshake proof verification to fail (the counterparty's HP will use the wrong VS).
 
-**Result:** Modifying any field in the token — whether data or MAC — will be detected when the affected party verifies their MAC.
+**Result:** Modifying any field in the token is detected — challenge-covered fields via MAC verification, other fields via handshake proof verification.
 
 **Token Creation Flow:**
 ```mermaid
