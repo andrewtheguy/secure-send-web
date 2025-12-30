@@ -319,7 +319,13 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           // Get the sender's verification secret from the token
           const senderVs = getCounterpartyVerificationSecret(parsedSenderToken, ownPublicKeyBytes)
           // Decode the nonce from base64 for verification
-          const nonceBytes = Uint8Array.from(atob(parsed.nonce), c => c.charCodeAt(0))
+          let nonceBytes: Uint8Array
+          try {
+            nonceBytes = Uint8Array.from(atob(parsed.nonce), c => c.charCodeAt(0))
+          } catch {
+            console.warn('Malformed nonce base64 - skipping event')
+            continue
+          }
           // Verify the sender's proof: HMAC(sender_vs, sender_epk || nonce || receiver_fingerprint)
           const ownFingerprint = await publicKeyToFingerprint(ownPublicKeyBytes)
           const senderProofValid = await verifyHandshakeProof(
