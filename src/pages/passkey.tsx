@@ -108,7 +108,6 @@ export function PasskeyPage() {
   const [fingerprint, setFingerprint] = useState<string | null>(null)
   const [publicIdBase64, setPublicIdBase64] = useState<string | null>(null)
   const [contactPublicKeyBase64, setContactPublicKeyBase64] = useState<string | null>(null)
-  const [contactSigningKey, setContactSigningKey] = useState<CryptoKey | null>(null)
   const [prfSupported, setPrfSupported] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -229,7 +228,6 @@ export function PasskeyPage() {
     setFingerprint(null)
     setPublicIdBase64(null)
     setContactPublicKeyBase64(null)
-    setContactSigningKey(null)
     setPrfSupported(null)
     setOutputToken(null)
     setPageState('checking')
@@ -259,7 +257,7 @@ export function PasskeyPage() {
     }
   }
 
-  // Handler for "Someone wants to add me as a contact" - auth immediately
+  // Handler for "Someone wants to add me as a contact" - auth to get identity for display
   const handleSelectSigner = async () => {
     setError(null)
     setSuccess(null)
@@ -274,9 +272,8 @@ export function PasskeyPage() {
       setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
       setPrfSupported(result.prfSupported)
 
-      // Store derived contact key pair
+      // Store contact public key for display (signing key is NOT stored - derived fresh per sign)
       setContactPublicKeyBase64(uint8ArrayToBase64(result.contactPublicKey))
-      setContactSigningKey(result.contactSigningKey)
 
       setPageState('idle')
       setActiveMode('signer')
@@ -286,7 +283,7 @@ export function PasskeyPage() {
     }
   }
 
-  // Handler for "I want to add someone as a contact" - auth immediately (like signer)
+  // Handler for "I want to add someone as a contact" - auth to get identity for display
   const handleSelectInitiator = async () => {
     setError(null)
     setSuccess(null)
@@ -302,9 +299,8 @@ export function PasskeyPage() {
       setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
       setPrfSupported(result.prfSupported)
 
-      // Store derived contact key pair
+      // Store contact public key for display (signing key is NOT stored - derived fresh per sign)
       setContactPublicKeyBase64(uint8ArrayToBase64(result.contactPublicKey))
-      setContactSigningKey(result.contactSigningKey)
 
       setPageState('idle')
       setActiveMode('initiator')
@@ -368,11 +364,7 @@ export function PasskeyPage() {
         throw new Error("Please enter contact's card")
       }
 
-      if (!contactSigningKey || !contactPublicKeyBase64 || !publicIdBase64) {
-        throw new Error('Please authenticate first')
-      }
-
-      // Parse contact card
+      // Parse contact card first (before auth prompt)
       const contactCardParsed = parseContactInput(trimmed)
       if (!contactCardParsed) {
         throw new Error('Invalid contact card format. Expected JSON with "id" and "cpk" fields.')
@@ -395,15 +387,19 @@ export function PasskeyPage() {
         throw new ValidationError('Invalid base64 encoding in contact card')
       }
 
-      // Create pending mutual token using derived signing key
+      // Authenticate fresh to get signing key (key only exists during this operation)
+      const identity = await getPasskeyIdentity()
+
+      // Create pending mutual token using freshly derived signing key
       const token = await createMutualTokenInit(
-        contactSigningKey,
-        base64ToUint8Array(contactPublicKeyBase64),
-        publicIdBase64,
+        identity.contactSigningKey,
+        identity.contactPublicKey,
+        uint8ArrayToBase64(identity.publicIdBytes),
         contactCardParsed.id,
         contactCardParsed.cpk,
         tokenComment.trim() || undefined
       )
+      // contactSigningKey goes out of scope here - no longer in memory
 
       setOutputToken(token)
       setContactInput('')
@@ -426,20 +422,21 @@ export function PasskeyPage() {
         throw new Error('Please enter token request')
       }
 
-      if (!contactSigningKey || !contactPublicKeyBase64 || !publicIdBase64) {
-        throw new Error('Please authenticate with a passkey first')
-      }
-
+      // Validate token request format first (before auth prompt)
       if (!isTokenRequest(trimmed)) {
         throw new Error('Invalid token request format')
       }
 
+      // Authenticate fresh to get signing key (key only exists during this operation)
+      const identity = await getPasskeyIdentity()
+
       const token = await countersignMutualToken(
         trimmed,
-        contactSigningKey,
-        base64ToUint8Array(contactPublicKeyBase64),
-        publicIdBase64
+        identity.contactSigningKey,
+        identity.contactPublicKey,
+        uint8ArrayToBase64(identity.publicIdBytes)
       )
+      // contactSigningKey goes out of scope here - no longer in memory
 
       setOutputToken(token)
       setContactInput('')
@@ -471,11 +468,10 @@ export function PasskeyPage() {
     setTokenComment('')
     setOutputToken(null)
     setTokenError(null)
-    // Reset auth state so user must re-authenticate when selecting a new mode
+    // Reset display state so user must re-authenticate when selecting a new mode
     setFingerprint(null)
     setPublicIdBase64(null)
     setContactPublicKeyBase64(null)
-    setContactSigningKey(null)
   }
 
   const isLoading = pageState !== 'idle'

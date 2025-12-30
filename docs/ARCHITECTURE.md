@@ -298,6 +298,7 @@ PRF → HKDF deriveBits → [private bytes in JS ~μs] → importKey(extractable
 - Private bytes exist for ~microseconds before zeroing
 - Imported key is non-extractable (cannot be exported later)
 - No logging or serialization of the bytes
+- CryptoKey is NOT stored in React state - derived fresh per signing operation and immediately discarded
 
 **Potential future improvement**: Replace ECDSA with HMAC for token signing. HMAC keys can be derived directly via `deriveKey()` without exposing raw bytes:
 
