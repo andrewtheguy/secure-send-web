@@ -157,36 +157,45 @@ Passkeys provide an alternative to PIN-based authentication using the WebAuthn P
 
 For cross-user passkey transfers (different passkeys), a **mutual contact token** establishes trust between parties. Both parties sign the same token, creating a cryptographic proof of mutual agreement.
 
-**Contact Card Format:**
+**Invite Code Format:**
 ```json
 {
   "id": "<base64 public ID, 32 bytes>",
-  "cpk": "<base64 contact public key, 32 bytes HKDF-derived>"
+  "ppk": "<base64 peer public key, 32 bytes HKDF-derived>",
+  "iat": "<Unix timestamp in seconds, issued-at time>"
 }
 ```
 
+**Invite Code TTL:**
+- Invite codes are valid for **24 hours** from creation (`INVITE_CODE_TTL_SECONDS = 86400`)
+- A maximum clock skew of **5 minutes** is allowed (`MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS = 300`)
+- TTL is validated at two points:
+  1. **Initiator (Step 2)**: When creating the pairing request from peer's invite code
+  2. **Confirmer (Step 3)**: When confirming the pairing request (protects even if initiator bypassed check)
+- The `iat` timestamp is included in the challenge hash, making it tamper-proof
+
 **Why two separate 32-byte identifiers?**
 
-Both `id` (public ID) and `cpk` (contact public key) are derived from the passkey PRF master key via HKDF, but serve distinct purposes:
+Both `id` (public ID) and `ppk` (peer public key) are derived from the passkey PRF master key via HKDF, but serve distinct purposes:
 
 | Field | HKDF Info String | Purpose | Published? |
 |-------|------------------|---------|------------|
 | `id` (public ID) | `secure-send-passkey-public-id-v1` | Event addressing/filtering on Nostr relays | Yes (in Nostr events) |
-| `cpk` (contact public key) | `secure-send-contact-public-key-v1` | Identity binding in token challenge; verification secret derivation | Yes (in contact cards/tokens) |
+| `ppk` (peer public key) | `secure-send-peer-public-key-v1` | Identity binding in token challenge; verification secret derivation | Yes (in invite codes/tokens) |
 
 **Why both are required (cannot reuse one identifier):**
-- **Separation of concerns**: The public ID is used for Nostr event routing (`rpkc` commitment, fingerprint filtering). The cpk is used exclusively in the authentication protocol (token challenge, handshake proofs).
+- **Separation of concerns**: The public ID is used for Nostr event routing (`rpkc` commitment, fingerprint filtering). The ppk is used exclusively in the authentication protocol (token challenge, handshake proofs).
 - **Unlinkability potential**: Different HKDF derivations allow future protocol changes to rotate one identifier without affecting the other.
-- **Defense in depth**: Compromising the public ID (visible in Nostr events) reveals nothing about the cpk used in cryptographic proofs.
+- **Defense in depth**: Compromising the public ID (visible in Nostr events) reveals nothing about the ppk used in cryptographic proofs.
 
 **Pending Token (after initiator signs):**
 ```typescript
 interface PendingMutualToken {
   a_id: string       // Party A's public ID (lexicographically smaller)
-  a_cpk: string      // Party A's contact public key (32 bytes)
+  a_ppk: string      // Party A's peer public key (32 bytes)
   b_id: string       // Party B's public ID (lexicographically larger)
-  b_cpk: string      // Party B's contact public key (32 bytes)
-  iat: number        // Unix timestamp (seconds)
+  b_ppk: string      // Party B's peer public key (32 bytes)
+  iat: number        // Invite code issued-at timestamp (Unix seconds, valid for 24 hours)
   init_party: 'a' | 'b'  // Who initiated the token (for VS mapping)
   init_sig: string   // Initiator's HMAC-SHA256 MAC (base64, 32 bytes)
   init_vs: string    // Initiator's verification secret (base64, 32 bytes)
@@ -206,17 +215,18 @@ The `init_party` field tracks who initiated the token ('a' or 'b'), which is nee
 
 **Challenge Computation:**
 ```
-challenge = SHA256(a_id || a_cpk || b_id || b_cpk || iat || comment_bytes)
+challenge = SHA256(a_id || a_ppk || b_id || b_ppk || iat || comment_bytes)
                    32     32       32      32       8     0-256 bytes
 ```
 - IDs sorted lexicographically to ensure deterministic ordering
 - Both parties compute MACs over the same challenge with their respective HMAC keys
+- The `iat` timestamp (8 bytes, big-endian) is included in the challenge, making it tamper-proof
 - Comment is optional; if present, it is UTF-8 encoded (max 256 bytes) and appended to the challenge input
 
 **Tamper Protection:**
 
 The entire token payload is tamper-proof via different mechanisms:
-- **Challenge-covered fields** (`a_id`, `a_cpk`, `b_id`, `b_cpk`, `iat`, `comment`): Included in the SHA256 challenge. Tampering invalidates both MACs (detected during `verifyOwnSignature()`).
+- **Challenge-covered fields** (`a_id`, `a_ppk`, `b_id`, `b_ppk`, `iat`, `comment`): Included in the SHA256 challenge. Tampering invalidates both MACs (detected during `verifyOwnSignature()`).
 - **MAC fields** (`init_sig`, `counter_sig`): HMAC-SHA256 MACs over the challenge. Each party can verify only their own MAC via `verifyOwnSignature()` (requires passkey authentication). Trust in the counterparty's MAC is established via out-of-band fingerprint verification.
 - **Verification secret fields** (`init_vs`, `counter_vs`): Derived deterministically from each party's HMAC key. Tampering causes handshake proof verification to fail.
 - **Mapping field** (`init_party`): Not included in the challenge, but tampering is detected during handshake. This field maps `init_vs`/`counter_vs` to parties A/B. If tampered, the VS mapping becomes incorrect, causing handshake proof verification to fail (the counterparty's HP will use the wrong VS).
@@ -228,18 +238,19 @@ The entire token payload is tamper-proof via different mechanisms:
 sequenceDiagram
     participant Alice
     participant Bob
-    Note over Alice,Bob: 1. Exchange Contact Cards + Verify Fingerprints
-    Alice->>Bob: Alice's Contact Card (id + cpk)
-    Bob->>Alice: Bob's Contact Card (id + cpk)
+    Note over Alice,Bob: 1. Bob shares Invite Code + Verify Fingerprints
+    Bob->>Alice: Bob's Invite Code (id + ppk + iat)
     Note over Alice,Bob: Out-of-band fingerprint verification (phone, in-person)
-    Note over Alice: 2. Alice creates pending token
+    Note over Alice: 2. Alice creates pending token (validates Bob's iat TTL)
     Alice->>Alice: Passkey auth → derive HMAC key from PRF
+    Alice->>Alice: Validate Bob's invite code iat (24h TTL, 5min clock skew)
     Alice->>Alice: Sort IDs lexicographically
-    Alice->>Alice: Compute challenge = SHA256(a_id||a_cpk||b_id||b_cpk||iat||comment)
+    Alice->>Alice: Compute challenge = SHA256(a_id||a_ppk||b_id||b_ppk||iat||comment)
     Alice->>Alice: HMAC-SHA256 sign challenge
     Alice->>Bob: Pending token (init_sig only)
-    Note over Bob: 3. Bob countersigns
+    Note over Bob: 3. Bob countersigns (validates iat TTL again)
     Bob->>Bob: Passkey auth → derive HMAC key from PRF
+    Bob->>Bob: Validate iat TTL (protects even if Alice bypassed check)
     Bob->>Bob: HMAC-SHA256 sign same challenge
     Bob->>Alice: Complete token (both signatures)
     Note over Alice,Bob: 4. Both use same token for transfers
@@ -259,8 +270,8 @@ The out-of-band fingerprint verification in step 1 is the primary trust anchor f
 | Method | Description | Best For |
 |--------|-------------|----------|
 | **Verbal comparison** | Read fingerprint aloud over phone/video call | Remote contacts with voice channel |
-| **QR code scan** | Scan contact card QR code (contains id + cpk) | In-person exchange |
-| **Copy/paste** | Copy contact card JSON and send via secure channel | Existing encrypted chat (Signal, iMessage) |
+| **QR code scan** | Scan invite code QR code (contains id + ppk + iat) | In-person exchange |
+| **Copy/paste** | Copy invite code JSON and send via secure channel | Existing encrypted chat (Signal, iMessage) |
 
 *Verification Requirements:*
 - **Not mandatory for functionality**: The token creation flow works without fingerprint verification. Verification is a security best practice, not a technical requirement.
@@ -314,11 +325,11 @@ The mutual contact token proves that both parties agreed to communicate, but pos
 Each party computes a verification secret when creating/countersigning the token:
 
 ```
-VS = HMAC(contact_hmac_key, "verification-secret" || counterparty_cpk)
+VS = HMAC(contact_hmac_key, "verification-secret" || counterparty_ppk)
 ```
 
 - `contact_hmac_key`: Non-extractable HMAC key derived from passkey PRF
-- `counterparty_cpk`: The other party's contact public key (32 bytes)
+- `counterparty_ppk`: The other party's peer public key (32 bytes)
 - The VS is included in the token so the counterparty can verify handshake proofs
 
 The verification secret fields (`init_vs`, `counter_vs`) and initiator tracking (`init_party`) are included in the token format defined above (see `PendingMutualToken` and `MutualContactTokenPayload`).
@@ -395,7 +406,7 @@ flowchart TD
     PRF --> MasterKey[Master Key HKDF]
     MasterKey --> PublicId[Public ID<br/>HKDF label: public-id]
     MasterKey --> ContactHmac[Contact HMAC Key<br/>HKDF deriveKey: contact-hmac-key]
-    MasterKey --> ContactPub[Contact Public Key<br/>HKDF deriveBits: contact-public-key]
+    MasterKey --> ContactPub[Peer Public Key<br/>HKDF deriveBits: peer-public-key]
     Salt[Random Salt] --> HKDF[HKDF-SHA256]
     MasterKey --> HKDF
     HKDF --> AESKey[AES-256-GCM Key]
@@ -406,7 +417,7 @@ flowchart TD
 1. **Master Key**: Single passkey prompt derives HKDF master key via PRF
 2. **Public ID**: HKDF with label derives a 32-byte shareable identifier
 3. **Contact HMAC Key**: HKDF `deriveKey()` derives a non-extractable HMAC-SHA256 key for token signing
-4. **Contact Public Key**: HKDF `deriveBits()` derives a 32-byte identifier for identity binding in tokens
+4. **Peer Public Key**: HKDF `deriveBits()` derives a 32-byte identifier for identity binding in tokens
 5. **Per-Transfer Key**: HKDF with random salt derives unique AES key per transfer
 6. **No PIN Required**: Biometric/device unlock replaces PIN entry
 
@@ -448,7 +459,7 @@ The requirement to authenticate for verification has important operational conse
 Passkeys in this application are intentionally **disposable** - they bind to contact tokens, not to persistent identity:
 
 1. **Generate new passkey** at `/passkey`
-2. **Re-exchange contact cards** with counterparty (new public ID, new cpk)
+2. **Re-exchange invite codes** with counterparty (new public ID, new ppk)
 3. **Create new mutual contact token** with fresh signatures
 4. **Old tokens are abandoned** - they cannot be used without the original passkey
 

@@ -2,15 +2,14 @@
 
 ## Planned Features
 
-### better issued date/expiration date logic for mutual tokens for request and final tokens
-
-### Include expiration date for the final token
-
 ### Improved Error Handling
 Better user feedback for network errors, relay failures, and WebRTC connection issues.
 
 ## Backlog (Future Considerations)
 - Better website UI/UX
+
+### Expiration Date on Final Pairing Token
+Add an optional expiration timestamp to the completed pairing token, allowing parties to set a validity period for their pairing relationship (e.g., 30 days, 1 year, or indefinite).
 
 ### Encrypted Mutual Contact Tokens
 Encrypt the mutual contact token payload so only the two parties can read it:

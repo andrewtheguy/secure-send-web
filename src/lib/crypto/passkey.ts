@@ -75,7 +75,7 @@ export async function deriveHmacKey(masterKey: CryptoKey): Promise<CryptoKey> {
  *
  * SECURITY:
  * - No private key material involved (unlike EC key derivation)
- * - This IS the public value - safe to share in identity cards
+ * - This IS the public value - safe to share in invite codes
  * - Used for identity binding during file transfers
  *
  * @param masterKey - HKDF master key from passkey PRF
@@ -191,7 +191,7 @@ export async function getPasskeyIdentity(credentialId?: string): Promise<{
   publicIdFingerprint: string
   prfSupported: boolean
   credentialId: string
-  peerPublicKey: Uint8Array // 32 bytes for identity card and identity binding
+  peerPublicKey: Uint8Array // 32 bytes for invite code and identity binding
   /** Your own non-extractable HMAC signing key (NOT the peer's key) for pairing keys */
   hmacKey: CryptoKey
 }> {

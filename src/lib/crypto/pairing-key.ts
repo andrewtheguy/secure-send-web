@@ -27,8 +27,8 @@ import { publicKeyToFingerprint, constantTimeEqualBytes } from './ecdh'
 /** Maximum byte length for comment field to prevent overly large keys */
 const MAX_COMMENT_BYTES = 256
 
-/** Identity card TTL in seconds (24 hours) */
-export const IDENTITY_CARD_TTL_SECONDS = 24 * 60 * 60
+/** Invite code TTL in seconds (24 hours) */
+export const INVITE_CODE_TTL_SECONDS = 24 * 60 * 60
 
 /** Maximum acceptable clock skew for future timestamps (5 minutes) */
 export const MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS = 5 * 60
@@ -45,7 +45,7 @@ export interface PairingRequest {
   b_id: string
   /** Party B's peer public key (base64, 32 bytes) - derived from PRF */
   b_ppk: string
-  /** Identity card issued-at timestamp (Unix seconds) - copied from Signer's identity card, valid for 24 hours */
+  /** Invite code issued-at timestamp (Unix seconds) - copied from Signer's invite code, valid for 24 hours */
   iat: number
   /** Which party initiated the pairing ('a' or 'b') */
   init_party: 'a' | 'b'
@@ -162,7 +162,7 @@ function compareIds(id1: Uint8Array, id2: Uint8Array): number {
  *
  * IDs are sorted lexicographically to ensure deterministic ordering.
  * Comment is optional; if provided, it is UTF-8 encoded and appended to the challenge input.
- * iat is the Identity Card timestamp (copied from Signer's identity card).
+ * iat is the Invite Code timestamp (copied from Signer's invite code).
  */
 async function computeMutualChallenge(
   aId: Uint8Array,
@@ -402,10 +402,10 @@ export function isPairingKeyFormat(input: string): boolean {
  * @param initiatorPublicIdBase64 - Initiator's passkey public ID (base64)
  * @param peerPublicIdBase64 - Peer's public ID (base64)
  * @param peerPpkBase64 - Peer's peer public key (base64)
- * @param identityCardIat - Signer's identity card issued-at timestamp (Unix seconds)
+ * @param inviteCodeIat - Signer's invite code issued-at timestamp (Unix seconds)
  * @param comment - Optional comment (max 256 bytes)
  * @returns Pairing request (JSON string) to send to peer for confirmation
- * @throws Error if the identity card has expired (>24 hours old)
+ * @throws Error if the invite code has expired (>24 hours old)
  */
 export async function createPairingRequest(
   hmacKey: CryptoKey,
@@ -413,16 +413,16 @@ export async function createPairingRequest(
   initiatorPublicIdBase64: string,
   peerPublicIdBase64: string,
   peerPpkBase64: string,
-  identityCardIat: number,
+  inviteCodeIat: number,
   comment?: string
 ): Promise<string> {
-  // Validate identity card TTL
+  // Validate invite code TTL
   const now = Math.floor(Date.now() / 1000)
-  if (identityCardIat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
-    throw new Error(`Identity card iat is in the future: iat=${identityCardIat}, now=${now}, allowedSkewSeconds=${MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS}`)
+  if (inviteCodeIat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
+    throw new Error(`Invite code iat is in the future: iat=${inviteCodeIat}, now=${now}, allowedSkewSeconds=${MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS}`)
   }
-  if (now - identityCardIat > IDENTITY_CARD_TTL_SECONDS) {
-    throw new Error('Identity card has expired (valid for 24 hours)')
+  if (now - inviteCodeIat > INVITE_CODE_TTL_SECONDS) {
+    throw new Error('Invite code has expired (valid for 24 hours)')
   }
   // Decode and validate initiator's public ID
   const initiatorPublicId = base64ToUint8Array(initiatorPublicIdBase64)
@@ -478,8 +478,8 @@ export async function createPairingRequest(
     }
   }
 
-  // Compute challenge using the Identity Card's iat (includes comment if present)
-  const challenge = await computeMutualChallenge(aId, aPpk, bId, bPpk, identityCardIat, trimmedComment)
+  // Compute challenge using the Invite Code's iat (includes comment if present)
+  const challenge = await computeMutualChallenge(aId, aPpk, bId, bPpk, inviteCodeIat, trimmedComment)
 
   // Sign with HMAC-SHA256 (32 bytes)
   const signatureBuffer = await crypto.subtle.sign('HMAC', hmacKey, toArrayBuffer(challenge))
@@ -492,13 +492,13 @@ export async function createPairingRequest(
   // Determine initiator's party role
   const initParty: 'a' | 'b' = cmp < 0 ? 'a' : 'b'
 
-  // Build pairing request (iat is copied from Identity Card)
+  // Build pairing request (iat is copied from Invite Code)
   const payload: PairingRequest = {
     a_id: uint8ArrayToBase64(aId),
     a_ppk: uint8ArrayToBase64(aPpk),
     b_id: uint8ArrayToBase64(bId),
     b_ppk: uint8ArrayToBase64(bPpk),
-    iat: identityCardIat,
+    iat: inviteCodeIat,
     init_party: initParty,
     init_sig: uint8ArrayToBase64(signature),
     init_vs: uint8ArrayToBase64(initiatorVs),
@@ -537,17 +537,12 @@ export async function confirmPairingRequest(
     throw new Error('Invalid pairing request: failed to parse JSON')
   }
 
-  // Support both old (a_cpk/b_cpk) and new (a_ppk/b_ppk) field names
-  const requestAny = request as unknown as Record<string, unknown>
-  const aPpkField = requestAny.a_ppk ?? requestAny.a_cpk
-  const bPpkField = requestAny.b_ppk ?? requestAny.b_cpk
-
   // Validate required fields
   if (
     typeof request.a_id !== 'string' ||
-    typeof aPpkField !== 'string' ||
+    typeof request.a_ppk !== 'string' ||
     typeof request.b_id !== 'string' ||
-    typeof bPpkField !== 'string' ||
+    typeof request.b_ppk !== 'string' ||
     typeof request.iat !== 'number' ||
     !Number.isFinite(request.iat) ||
     (request.init_party !== 'a' && request.init_party !== 'b') ||
@@ -557,13 +552,13 @@ export async function confirmPairingRequest(
     throw new Error('Invalid pairing request: missing required fields')
   }
 
-  // Validate identity card TTL (protects confirmer even if initiator bypassed check)
+  // Validate invite code TTL (protects confirmer even if initiator bypassed check)
   const now = Math.floor(Date.now() / 1000)
   if (request.iat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
-    throw new Error(`Identity card iat is in the future: iat=${request.iat}, now=${now}, allowedSkewSeconds=${MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS}`)
+    throw new Error(`Invite code iat is in the future: iat=${request.iat}, now=${now}, allowedSkewSeconds=${MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS}`)
   }
-  if (now - request.iat > IDENTITY_CARD_TTL_SECONDS) {
-    throw new Error('Identity card has expired (valid for 24 hours)')
+  if (now - request.iat > INVITE_CODE_TTL_SECONDS) {
+    throw new Error('Invite code has expired (valid for 24 hours)')
   }
 
   // Validate comment byte length if present
@@ -579,9 +574,9 @@ export async function confirmPairingRequest(
 
   // Decode fields
   const aId = base64ToUint8Array(request.a_id)
-  const aPpk = base64ToUint8Array(aPpkField as string)
+  const aPpk = base64ToUint8Array(request.a_ppk)
   const bId = base64ToUint8Array(request.b_id)
-  const bPpk = base64ToUint8Array(bPpkField as string)
+  const bPpk = base64ToUint8Array(request.b_ppk)
   const initVs = base64ToUint8Array(request.init_vs)
 
   if (aId.length !== 32) throw new Error('Invalid a_id: expected 32 bytes')
@@ -676,17 +671,12 @@ export async function parsePairingKey(
     throw new Error('Invalid pairing key: failed to parse JSON')
   }
 
-  // Support both old (a_cpk/b_cpk) and new (a_ppk/b_ppk) field names
-  const payloadAny = payload as unknown as Record<string, unknown>
-  const aPpkField = payloadAny.a_ppk ?? payloadAny.a_cpk
-  const bPpkField = payloadAny.b_ppk ?? payloadAny.b_cpk
-
   // Validate required fields
   if (
     typeof payload.a_id !== 'string' ||
-    typeof aPpkField !== 'string' ||
+    typeof payload.a_ppk !== 'string' ||
     typeof payload.b_id !== 'string' ||
-    typeof bPpkField !== 'string' ||
+    typeof payload.b_ppk !== 'string' ||
     typeof payload.iat !== 'number' ||
     !Number.isFinite(payload.iat) ||
     (payload.init_party !== 'a' && payload.init_party !== 'b') ||
@@ -700,9 +690,9 @@ export async function parsePairingKey(
 
   // Decode fields
   const aId = base64ToUint8Array(payload.a_id)
-  const aPpk = base64ToUint8Array(aPpkField as string)
+  const aPpk = base64ToUint8Array(payload.a_ppk)
   const bId = base64ToUint8Array(payload.b_id)
-  const bPpk = base64ToUint8Array(bPpkField as string)
+  const bPpk = base64ToUint8Array(payload.b_ppk)
   const initVs = base64ToUint8Array(payload.init_vs)
   const counterVs = base64ToUint8Array(payload.counter_vs)
 
@@ -775,17 +765,12 @@ export async function verifyOwnSignature(
     throw new Error('Invalid pairing key: failed to parse JSON')
   }
 
-  // Support both old (a_cpk/b_cpk) and new (a_ppk/b_ppk) field names
-  const payloadAny = payload as unknown as Record<string, unknown>
-  const aPpkField = payloadAny.a_ppk ?? payloadAny.a_cpk
-  const bPpkField = payloadAny.b_ppk ?? payloadAny.b_cpk
-
   // Validate required fields
   if (
     typeof payload.a_id !== 'string' ||
-    typeof aPpkField !== 'string' ||
+    typeof payload.a_ppk !== 'string' ||
     typeof payload.b_id !== 'string' ||
-    typeof bPpkField !== 'string' ||
+    typeof payload.b_ppk !== 'string' ||
     typeof payload.iat !== 'number' ||
     !Number.isFinite(payload.iat) ||
     typeof payload.init_sig !== 'string' ||
@@ -796,9 +781,9 @@ export async function verifyOwnSignature(
 
   // Decode fields
   const aId = base64ToUint8Array(payload.a_id)
-  const aPpk = base64ToUint8Array(aPpkField as string)
+  const aPpk = base64ToUint8Array(payload.a_ppk)
   const bId = base64ToUint8Array(payload.b_id)
-  const bPpk = base64ToUint8Array(bPpkField as string)
+  const bPpk = base64ToUint8Array(payload.b_ppk)
 
   if (aId.length !== 32) throw new Error('Invalid a_id: expected 32 bytes')
   if (bId.length !== 32) throw new Error('Invalid b_id: expected 32 bytes')

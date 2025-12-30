@@ -34,7 +34,7 @@ import {
   createPairingRequest,
   confirmPairingRequest,
   isPairingRequestFormat,
-  IDENTITY_CARD_TTL_SECONDS,
+  INVITE_CODE_TTL_SECONDS,
   MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS,
 } from '@/lib/crypto/pairing-key'
 import { PIN_WORDLIST } from '@/lib/crypto/constants'
@@ -49,8 +49,8 @@ type PageState = 'idle' | 'checking' | 'creating' | 'getting_key' | 'pairing_pee
 // Active mode for "Already Have a Passkey?" section
 type ActiveMode = 'idle' | 'signer' | 'initiator'
 
-// Identity card format: JSON with id (public ID), ppk (peer public key), and iat (issued-at)
-interface IdentityCard {
+// Invite code format: JSON with id (public ID), ppk (peer public key), and iat (issued-at)
+interface InviteCode {
   id: string // base64 public ID (32 bytes)
   ppk: string // base64 peer public key (32 bytes, HKDF-derived)
   iat: number // issued-at timestamp (Unix seconds) - valid for 24 hours
@@ -71,12 +71,12 @@ function base64ToUint8Array(base64: string): Uint8Array {
   return bytes
 }
 
-// Parse an identity card from JSON format
-function parseIdentityInput(input: string): IdentityCard | null {
+// Parse an invite code from JSON format
+function parseInviteCode(input: string): InviteCode | null {
   const trimmed = input.trim()
   if (!trimmed) return null
 
-  // Try parsing as JSON identity card
+  // Try parsing as JSON invite code
   try {
     const parsed = JSON.parse(trimmed) as unknown
     if (typeof parsed === 'object' && parsed !== null && 'id' in parsed) {
@@ -116,12 +116,12 @@ export function PasskeyPage() {
   const [fingerprint, setFingerprint] = useState<string | null>(null)
   const [publicIdBase64, setPublicIdBase64] = useState<string | null>(null)
   const [peerPublicKeyBase64, setPeerPublicKeyBase64] = useState<string | null>(null)
-  const [identityCardIat, setIdentityCardIat] = useState<number | null>(null)
+  const [inviteCodeIat, setInviteCodeIat] = useState<number | null>(null)
   const [prfSupported, setPrfSupported] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [copiedIdentityCard, setCopiedIdentityCard] = useState(false)
+  const [copiedInviteCode, setCopiedInviteCode] = useState(false)
 
   // Pairing Key state
   const [peerInput, setPeerInput] = useState('')
@@ -132,7 +132,7 @@ export function PasskeyPage() {
 
   // QR Scanner state
   const [showQRScanner, setShowQRScanner] = useState(false)
-  const [qrScannerMode, setQRScannerMode] = useState<'identity-card' | 'pairing-request'>('identity-card')
+  const [qrScannerMode, setQRScannerMode] = useState<'invite-code' | 'pairing-request'>('invite-code')
   const [qrScanError, setQRScanError] = useState<string | null>(null)
   const [outputPairingKeyQrUrl, setOutputPairingKeyQrUrl] = useState<string | null>(null)
   const [outputPairingKeyQrError, setOutputPairingKeyQrError] = useState<string | null>(null)
@@ -143,10 +143,10 @@ export function PasskeyPage() {
   // Format fingerprint for display: XXXX-XXXX-XXXX-XXXX
   const formattedFingerprint = fingerprint ? formatFingerprint(fingerprint) : null
 
-  // Generate identity card JSON (with 24-hour TTL)
-  const identityCard: string | null =
-    publicIdBase64 && peerPublicKeyBase64 && identityCardIat
-      ? JSON.stringify({ id: publicIdBase64, ppk: peerPublicKeyBase64, iat: identityCardIat })
+  // Generate invite code JSON (with 24-hour TTL)
+  const inviteCode: string | null =
+    publicIdBase64 && peerPublicKeyBase64 && inviteCodeIat
+      ? JSON.stringify({ id: publicIdBase64, ppk: peerPublicKeyBase64, iat: inviteCodeIat })
       : null
 
 
@@ -207,12 +207,11 @@ export function PasskeyPage() {
         // Try to parse as JSON to validate format
         const parsed = JSON.parse(text)
 
-        if (qrScannerMode === 'identity-card') {
-          // Validate identity card format (support both old 'cpk' and new 'ppk')
-          const hasPpk = typeof parsed.ppk === 'string' || typeof parsed.cpk === 'string'
+        if (qrScannerMode === 'invite-code') {
+          // Validate invite code format
           const hasValidIat = typeof parsed.iat === 'number'
-          if (typeof parsed.id !== 'string' || !hasPpk || !hasValidIat) {
-            setQRScanError('Invalid identity card format: missing "id", "ppk", or "iat"')
+          if (typeof parsed.id !== 'string' || typeof parsed.ppk !== 'string' || !hasValidIat) {
+            setQRScanError('Invalid invite code format: missing "id", "ppk", or "iat"')
             return
           }
         } else {
@@ -255,7 +254,7 @@ export function PasskeyPage() {
     facingMode,
   })
 
-  const openQRScanner = (mode: 'identity-card' | 'pairing-request') => {
+  const openQRScanner = (mode: 'invite-code' | 'pairing-request') => {
     setQRScannerMode(mode)
     setQRScanError(null)
     setShowQRScanner(true)
@@ -268,7 +267,7 @@ export function PasskeyPage() {
     setFingerprint(null)
     setPublicIdBase64(null)
     setPeerPublicKeyBase64(null)
-    setIdentityCardIat(null)
+    setInviteCodeIat(null)
     setPrfSupported(null)
     setOutputPairingKey(null)
     setPageState('checking')
@@ -316,8 +315,8 @@ export function PasskeyPage() {
       // Store peer public key for display (signing key is NOT stored - derived fresh per sign)
       setPeerPublicKeyBase64(uint8ArrayToBase64(result.peerPublicKey))
 
-      // Set issued-at timestamp for identity card (24-hour TTL)
-      setIdentityCardIat(Math.floor(Date.now() / 1000))
+      // Set issued-at timestamp for invite code (24-hour TTL)
+      setInviteCodeIat(Math.floor(Date.now() / 1000))
 
       setPageState('idle')
       setActiveMode('signer')
@@ -351,13 +350,13 @@ export function PasskeyPage() {
     }
   }
 
-  const handleCopyIdentityCard = async () => {
-    if (!identityCard) return
+  const handleCopyInviteCode = async () => {
+    if (!inviteCode) return
     await copyToClipboard(
-      identityCard,
+      inviteCode,
       () => {
-        setCopiedIdentityCard(true)
-        setTimeout(() => setCopiedIdentityCard(false), 2000)
+        setCopiedInviteCode(true)
+        setTimeout(() => setCopiedInviteCode(false), 2000)
       },
       () => {
         setError('Failed to copy to clipboard')
@@ -389,22 +388,22 @@ export function PasskeyPage() {
     try {
       const trimmed = peerInput.trim()
       if (!trimmed) {
-        throw new Error("Please enter peer's identity card")
+        throw new Error("Please enter peer's invite code")
       }
 
-      // Parse identity card first (before auth prompt)
-      const identityCardParsed = parseIdentityInput(trimmed)
-      if (!identityCardParsed) {
-        throw new Error('Invalid identity card format. Expected JSON with "id", "ppk", and "iat" (finite number) fields.')
+      // Parse invite code first (before auth prompt)
+      const inviteCodeParsed = parseInviteCode(trimmed)
+      if (!inviteCodeParsed) {
+        throw new Error('Invalid invite code format. Expected JSON with "id", "ppk", and "iat" (finite number) fields.')
       }
 
-      // Validate identity card fields
+      // Validate invite code fields
       try {
-        const idBytes = base64ToUint8Array(identityCardParsed.id)
+        const idBytes = base64ToUint8Array(inviteCodeParsed.id)
         if (idBytes.length !== 32) {
           throw new ValidationError('Invalid peer public ID: expected 32 bytes')
         }
-        const ppkBytes = base64ToUint8Array(identityCardParsed.ppk)
+        const ppkBytes = base64ToUint8Array(inviteCodeParsed.ppk)
         if (ppkBytes.length !== 32) {
           throw new ValidationError('Invalid peer public key: expected 32 bytes')
         }
@@ -412,16 +411,16 @@ export function PasskeyPage() {
         if (e instanceof ValidationError) {
           throw e
         }
-        throw new ValidationError('Invalid base64 encoding in identity card')
+        throw new ValidationError('Invalid base64 encoding in invite code')
       }
 
-      // Validate identity card TTL (24 hours)
+      // Validate invite code TTL (24 hours)
       const now = Math.floor(Date.now() / 1000)
-      if (identityCardParsed.iat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
-        throw new Error('Identity card iat is in the future. Check your device clock.')
+      if (inviteCodeParsed.iat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
+        throw new Error('Invite code iat is in the future. Check your device clock.')
       }
-      if (now - identityCardParsed.iat > IDENTITY_CARD_TTL_SECONDS) {
-        throw new Error('Identity card has expired (valid for 24 hours). Ask your peer to generate a new one.')
+      if (now - inviteCodeParsed.iat > INVITE_CODE_TTL_SECONDS) {
+        throw new Error('Invite code has expired (valid for 24 hours). Ask your peer to generate a new one.')
       }
 
       // Authenticate fresh to get HMAC key (key only exists during this operation)
@@ -432,9 +431,9 @@ export function PasskeyPage() {
         identity.hmacKey,
         identity.peerPublicKey,
         uint8ArrayToBase64(identity.publicIdBytes),
-        identityCardParsed.id,
-        identityCardParsed.ppk,
-        identityCardParsed.iat,
+        inviteCodeParsed.id,
+        inviteCodeParsed.ppk,
+        inviteCodeParsed.iat,
         pairingComment.trim() || undefined
       )
       // hmacKey goes out of scope here - no longer in memory
@@ -521,14 +520,14 @@ export function PasskeyPage() {
     setFingerprint(null)
     setPublicIdBase64(null)
     setPeerPublicKeyBase64(null)
-    setIdentityCardIat(null)
+    setInviteCodeIat(null)
   }
 
   const isLoading = pageState !== 'idle'
 
-  // Render identity card with numbered step (for signer flow step 1)
-  const renderIdentityCardStep = () => {
-    if (!identityCard || !fingerprint) return null
+  // Render invite code with numbered step (for signer flow step 1)
+  const renderInviteCodeStep = () => {
+    if (!inviteCode || !fingerprint) return null
 
     return (
       <div className="p-4 rounded-lg border border-cyan-500/50 bg-cyan-50/30 dark:bg-cyan-950/20 space-y-4">
@@ -536,29 +535,29 @@ export function PasskeyPage() {
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-600 text-white text-sm font-medium">
             1
           </span>
-          <span className="font-semibold text-cyan-700 dark:text-cyan-400">Your Identity Card</span>
+          <span className="font-semibold text-cyan-700 dark:text-cyan-400">Your Invite Code</span>
         </div>
 
         {/* QR Code */}
         <div className="flex flex-col items-center gap-4">
           <div className="bg-white p-4 rounded-lg">
-            <QRCodeSVG value={identityCard} size={200} level="M" />
+            <QRCodeSVG value={inviteCode} size={200} level="M" />
           </div>
           <p className="text-xs text-muted-foreground text-center max-w-xs">
             Share this QR code with your peer so they can create a pairing request.
           </p>
         </div>
 
-        {/* Copy Identity Card */}
+        {/* Copy Invite Code */}
         <div className="pt-4 border-t border-cyan-500/30">
           <div className="flex items-center gap-2 mb-2">
             <Key className="h-4 w-4 text-cyan-600" />
-            <span className="text-sm font-medium text-cyan-600">Identity Card (JSON)</span>
+            <span className="text-sm font-medium text-cyan-600">Invite Code (JSON)</span>
           </div>
           <div className="flex gap-2">
             <textarea
               readOnly
-              value={identityCard}
+              value={inviteCode}
               onClick={(e) => e.currentTarget.select()}
               rows={2}
               className="flex-1 text-xs bg-cyan-500/10 border border-cyan-500/20 p-2 rounded font-mono focus:outline-none focus:ring-2 focus:ring-cyan-500/30 resize-none"
@@ -566,10 +565,10 @@ export function PasskeyPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={handleCopyIdentityCard}
-              className={`flex-shrink-0 ${copiedIdentityCard ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-cyan-500/10'}`}
+              onClick={handleCopyInviteCode}
+              className={`flex-shrink-0 ${copiedInviteCode ? 'bg-emerald-500 border-emerald-500 hover:bg-emerald-500' : 'hover:bg-cyan-500/10'}`}
             >
-              {copiedIdentityCard ? (
+              {copiedInviteCode ? (
                 <Check className="h-4 w-4 text-white" />
               ) : (
                 <Copy className="h-4 w-4" />
@@ -598,7 +597,7 @@ export function PasskeyPage() {
             </Button>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            Use to verify identity when sharing your identity card.
+            Use to verify identity when sharing your invite code.
           </p>
         </div>
 
@@ -619,7 +618,7 @@ export function PasskeyPage() {
         Create New Passkey
       </h3>
       <p className="text-sm">
-        Create a passkey to generate your identity card. Share it with peers for secure file
+        Create a passkey to generate your invite code. Share it with peers for secure file
         transfers without needing PINs.
       </p>
       <div className="space-y-2">
@@ -687,7 +686,7 @@ export function PasskeyPage() {
                 I want to pair with someone
               </div>
               <p className="text-xs text-muted-foreground font-normal text-left whitespace-normal">
-                Share your identity card first, then confirm their pairing request
+                Share your invite code first, then confirm their pairing request
               </p>
             </>
           )}
@@ -708,7 +707,7 @@ export function PasskeyPage() {
             <>
               <div className="flex items-center gap-2 font-semibold">
                 <CheckCircle2 className="h-5 w-5" />
-                I have someone's identity card
+                I have someone's invite code
               </div>
               <p className="text-xs text-muted-foreground font-normal text-left">
                 Create a pairing request for them to confirm
@@ -757,15 +756,15 @@ export function PasskeyPage() {
           Create Pairing Request
         </h3>
         <p className="text-sm text-muted-foreground">
-          Paste your peer&apos;s identity card to create a pairing request for them to confirm.
+          Paste your peer&apos;s invite code to create a pairing request for them to confirm.
         </p>
 
         <div className="space-y-2">
-          <Label htmlFor="identity-card">Peer&apos;s Identity Card</Label>
+          <Label htmlFor="invite-code">Peer&apos;s Invite Code</Label>
           <div className="flex gap-2">
             <Textarea
-              id="identity-card"
-              placeholder={`Paste peer's identity card (JSON with "id" and "ppk")...`}
+              id="invite-code"
+              placeholder={`Paste peer's invite code (JSON with "id", "ppk", and "iat")...`}
               value={peerInput}
               onChange={(e) => setPeerInput(e.target.value)}
               disabled={isLoading}
@@ -774,7 +773,7 @@ export function PasskeyPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => openQRScanner('identity-card')}
+              onClick={() => openQRScanner('invite-code')}
               disabled={isLoading}
               className="flex-shrink-0"
               title="Scan QR code"
@@ -898,7 +897,7 @@ export function PasskeyPage() {
     </div>
   )
 
-  // Signer flow: Show identity card + confirm pairing request (with numbered steps)
+  // Signer flow: Show invite code + confirm pairing request (with numbered steps)
   const renderSignerFlow = () => (
     <div className="space-y-6">
       {/* Back button */}
@@ -913,8 +912,8 @@ export function PasskeyPage() {
         Back
       </Button>
 
-      {/* Step 1: Identity Card */}
-      {renderIdentityCardStep()}
+      {/* Step 1: Invite Code */}
+      {renderInviteCodeStep()}
 
       {/* Step 2: Instructions */}
       <div className="p-4 rounded-lg border border-muted bg-muted/30">
@@ -925,7 +924,7 @@ export function PasskeyPage() {
           <span className="font-semibold text-muted-foreground">Wait for Pairing Request</span>
         </div>
         <p className="text-sm text-muted-foreground ml-8">
-          Ask your peer to scan your identity card above and create a pairing request. They will
+          Ask your peer to scan your invite code above and create a pairing request. They will
           send it back to you.
         </p>
       </div>
@@ -1096,7 +1095,7 @@ export function PasskeyPage() {
             Passkey Setup
           </CardTitle>
           <CardDescription>
-            Generate your passkey identity card for secure, PIN-free file transfers
+            Generate your passkey invite code for secure, PIN-free file transfers
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -1145,7 +1144,7 @@ export function PasskeyPage() {
             <div className="flex items-center justify-between">
               <h3 className="font-medium flex items-center gap-2">
                 <Camera className="h-5 w-5" />
-                {qrScannerMode === 'identity-card' ? 'Scan Identity Card' : 'Scan Pairing Request'}
+                {qrScannerMode === 'invite-code' ? 'Scan Invite Code' : 'Scan Pairing Request'}
               </h3>
               <Button
                 variant="ghost"
@@ -1197,8 +1196,8 @@ export function PasskeyPage() {
             )}
 
             <p className="text-xs text-muted-foreground text-center">
-              {qrScannerMode === 'identity-card'
-                ? 'Point camera at the identity card QR code'
+              {qrScannerMode === 'invite-code'
+                ? 'Point camera at the invite code QR code'
                 : 'Point camera at the pairing request QR code'}
             </p>
           </div>
