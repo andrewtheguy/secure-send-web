@@ -30,7 +30,10 @@ export function downloadFile(data: Uint8Array, fileName: string, mimeType: strin
 }
 
 /**
- * Trigger a text file download in the browser
+ * Trigger a text file download in the browser (UTF-8 encoded)
+ * @param content - The text content to download (encoded as UTF-8)
+ * @param fileName - The name of the file to download
+ * @param mimeType - The MIME type of the file
  */
 export function downloadTextFile(content: string, fileName: string, mimeType: string): void {
   const bytes = new TextEncoder().encode(content)

@@ -478,6 +478,17 @@ export function PasskeyPage() {
     )
   }
 
+  const handleDownloadPairingKey = (filePrefix: string) => {
+    if (!outputPairingKey) return
+    try {
+      downloadTextFile(outputPairingKey, `${filePrefix}-${Date.now()}.json`, 'application/json')
+    } catch (err) {
+      console.error('Failed to download file:', err)
+      setPairingError('Failed to download file')
+      setTimeout(() => setPairingError(null), 3000)
+    }
+  }
+
   const handleStartOver = () => {
     setActiveMode('idle')
     setPeerInput('')
@@ -833,8 +844,10 @@ export function PasskeyPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => downloadTextFile(outputPairingKey, `pairing-request-${Date.now()}.json`, 'application/json')}
+                  onClick={() => handleDownloadPairingKey('pairing-request')}
                   className="flex-shrink-0 hover:bg-amber-500/10"
+                  aria-label="Download pairing request"
+                  title="Download pairing request"
                 >
                   <Download className="h-4 w-4" />
                 </Button>
@@ -1011,8 +1024,10 @@ export function PasskeyPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => downloadTextFile(outputPairingKey, `pairing-key-${Date.now()}.json`, 'application/json')}
+                  onClick={() => handleDownloadPairingKey('pairing-key')}
                   className="flex-shrink-0 hover:bg-amber-500/10"
+                  aria-label="Download pairing key"
+                  title="Download pairing key"
                 >
                   <Download className="h-4 w-4" />
                 </Button>
