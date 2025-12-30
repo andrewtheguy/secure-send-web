@@ -245,6 +245,43 @@ sequenceDiagram
     Note over Alice,Bob: 4. Both use same token for transfers
 ```
 
+**Fingerprint Verification Details:**
+
+The out-of-band fingerprint verification in step 1 is the primary trust anchor for cross-user passkey mode. This section details the fingerprint format, exchange methods, and verification requirements.
+
+*Fingerprint Format:*
+- **Length**: 16 uppercase hexadecimal characters (64 bits)
+- **Derivation**: First 8 bytes of SHA-256 hash of the public ID
+- **Display format**: Hyphenated groups for readability: `XXXX-XXXX-XXXX-XXXX` (e.g., `A1B2-C3D4-E5F6-7890`)
+- **Collision resistance**: 64 bits provides ~2^32 resistance to birthday attacks, sufficient for personal contact verification
+
+*Supported Exchange Methods:*
+| Method | Description | Best For |
+|--------|-------------|----------|
+| **Verbal comparison** | Read fingerprint aloud over phone/video call | Remote contacts with voice channel |
+| **QR code scan** | Scan contact card QR code (contains id + cpk) | In-person exchange |
+| **Copy/paste** | Copy contact card JSON and send via secure channel | Existing encrypted chat (Signal, iMessage) |
+
+*Verification Requirements:*
+- **Not mandatory for functionality**: The token creation flow works without fingerprint verification. Verification is a security best practice, not a technical requirement.
+- **No enforcement**: The UI does not block or prompt for explicit fingerprint confirmation before proceeding
+- **User responsibility**: Verification is manual and relies on user diligence
+- **Current UX behavior**:
+  - Contact cards and fingerprints are displayed in the UI (`passkey.tsx`)
+  - Warning banner shown: "⚠ Unverified fingerprints (will be verified via handshake proof)"
+  - Users can proceed with token creation at any time
+- **Risk of skipping verification**: If fingerprints are not verified and an attacker substitutes their contact card (MITM during exchange), the attacker can create a valid token and impersonate the intended party. Handshake Proofs (HP) detect impersonation with *stolen* tokens but cannot detect MITM during initial contact exchange.
+
+*Implementation References:*
+| Function | File | Description |
+|----------|------|-------------|
+| `publicKeyToFingerprint()` | `src/lib/crypto/ecdh.ts:26-34` | SHA-256 hash → first 8 bytes → hex |
+| `formatFingerprint()` | `src/lib/crypto/ecdh.ts:42-55` | Add hyphen separators for display |
+| `getPasskeyIdentity()` | `src/lib/crypto/passkey.ts:188-213` | Returns `publicIdFingerprint` |
+| `parseToken()` | `src/lib/crypto/contact-token.ts:640-720` | Extracts `partyAFingerprint`, `partyBFingerprint` |
+| Contact card display | `src/pages/passkey.tsx:474-545` | UI for contact card + fingerprint |
+| Fingerprint tests | `src/lib/crypto/passkey.test.ts:5-53` | Unit tests for determinism/uniqueness |
+
 **Verification Process:**
 
 With HMAC signatures, each party can only verify their own signature:
