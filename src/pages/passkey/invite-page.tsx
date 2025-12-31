@@ -14,13 +14,22 @@ export function PasskeyInvitePage() {
   // Auto-authenticate if not already authenticated
   useEffect(() => {
     if (!fingerprint && pageState === 'idle') {
-      authenticate().then((success) => {
-        if (!success) {
+      authenticate()
+        .then((success) => {
+          if (!success) {
+            navigate('/passkey/pair')
+          }
+        })
+        .catch((err) => {
+          console.error('Authentication failed:', err)
           navigate('/passkey/pair')
-        }
-      })
+        })
     }
   }, [fingerprint, pageState, authenticate, navigate])
+
+  const handleBack = () => {
+    navigate('/passkey/pair')
+  }
 
   const handleStartOver = () => {
     resetAll()
@@ -44,9 +53,10 @@ export function PasskeyInvitePage() {
       <Button
         variant="ghost"
         size="sm"
-        onClick={handleStartOver}
+        onClick={handleBack}
         className="text-muted-foreground"
         disabled={isLoading}
+        aria-label="Go back to pairing options"
       >
         <ArrowLeft className="mr-2 h-4 w-4" />
         Back
@@ -71,7 +81,7 @@ export function PasskeyInvitePage() {
 
       {/* Continue to confirm */}
       <div className="flex justify-between items-center">
-        <Button variant="outline" onClick={handleStartOver}>
+        <Button variant="outline" onClick={handleStartOver} disabled={isLoading}>
           Start Over
         </Button>
         <Button asChild>
