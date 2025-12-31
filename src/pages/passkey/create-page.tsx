@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Loader2, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -7,6 +7,12 @@ import { Label } from '@/components/ui/label'
 import { checkWebAuthnSupport, createPasskeyCredential } from '@/lib/crypto/passkey'
 import { usePasskey } from '@/contexts/passkey-context'
 import { PIN_WORDLIST } from '@/lib/crypto/constants'
+
+/** Maximum allowed length for display name */
+const MAX_NAME_LENGTH = 64
+
+/** Allowed characters: alphanumerics, space, hyphen, underscore */
+const ALLOWED_NAME_PATTERN = /^[a-zA-Z0-9 _-]*$/
 
 function generateRandomName(): string {
   const words: string[] = []
@@ -18,16 +24,58 @@ function generateRandomName(): string {
   return words.join('-')
 }
 
+/**
+ * Validate display name input.
+ * @returns Error message if invalid, null if valid or empty (empty uses default)
+ */
+function validateDisplayName(name: string): string | null {
+  const trimmed = name.trim()
+
+  // Empty is valid (will use default)
+  if (!trimmed) {
+    return null
+  }
+
+  // Check max length
+  if (trimmed.length > MAX_NAME_LENGTH) {
+    return `Display name must be ${MAX_NAME_LENGTH} characters or less`
+  }
+
+  // Check allowed characters
+  if (!ALLOWED_NAME_PATTERN.test(trimmed)) {
+    return 'Display name can only contain letters, numbers, spaces, hyphens, and underscores'
+  }
+
+  return null
+}
+
 export function PasskeyCreatePage() {
   const navigate = useNavigate()
   const { pageState, setPageState, setError } = usePasskey()
   const [userName, setUserName] = useState('')
+  const [nameError, setNameError] = useState<string | null>(null)
   const defaultUserName = useMemo(() => generateRandomName(), [])
 
   const isLoading = pageState !== 'idle'
 
+  const handleNameChange = useCallback((value: string) => {
+    setUserName(value)
+    // Validate on change for immediate feedback
+    const error = validateDisplayName(value)
+    setNameError(error)
+  }, [])
+
   const handleCreatePasskey = async () => {
     setError(null)
+
+    // Validate name before proceeding
+    const trimmedName = userName.trim()
+    const validationError = validateDisplayName(userName)
+    if (validationError) {
+      setNameError(validationError)
+      return
+    }
+
     setPageState('checking')
 
     try {
@@ -40,8 +88,11 @@ export function PasskeyCreatePage() {
 
       setPageState('creating')
 
-      await createPasskeyCredential(userName || defaultUserName)
+      // Use trimmed name or default if empty
+      const displayName = trimmedName || defaultUserName
+      await createPasskeyCredential(displayName)
       setUserName('')
+      setNameError(null)
       setPageState('idle')
 
       // Navigate to pairing immediately after successful creation
@@ -81,17 +132,26 @@ export function PasskeyCreatePage() {
             id="userName"
             placeholder={defaultUserName}
             value={userName}
-            onChange={(e) => setUserName(e.target.value)}
+            onChange={(e) => handleNameChange(e.target.value)}
             disabled={isLoading}
+            aria-invalid={!!nameError}
+            aria-describedby={nameError ? 'userName-error' : undefined}
+            className={nameError ? 'border-destructive' : undefined}
           />
-          <p className="text-xs text-muted-foreground">
-            Helps identify this passkey in your password manager.
-          </p>
+          {nameError ? (
+            <p id="userName-error" className="text-xs text-destructive">
+              {nameError}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Helps identify this passkey in your password manager.
+            </p>
+          )}
         </div>
 
         <Button
           onClick={handleCreatePasskey}
-          disabled={isLoading}
+          disabled={isLoading || !!nameError}
           className="w-full mt-4"
           size="lg"
         >
