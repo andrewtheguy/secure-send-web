@@ -96,7 +96,7 @@ export function PasskeyCreatePage() {
       setPageState('idle')
 
       // Navigate to pairing immediately after successful creation
-      navigate('/passkey/pair')
+      navigate('/passkey/pair', { state: { passkeyCreated: true } })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create passkey')
       setPageState('idle')

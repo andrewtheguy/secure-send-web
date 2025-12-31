@@ -1,10 +1,17 @@
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { Plus, CheckCircle2, Key, ArrowLeft, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { usePasskey } from '@/contexts/passkey-context'
 
+interface LocationState {
+  passkeyCreated?: boolean
+}
+
 export function PasskeyPairPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const locationState = location.state as LocationState | null
+  const passkeyCreated = locationState?.passkeyCreated ?? false
   const { pageState, authenticate, setError } = usePasskey()
 
   const isLoading = pageState !== 'idle'
@@ -39,6 +46,15 @@ export function PasskeyPairPage() {
         <ArrowLeft className="mr-2 h-4 w-4" />
         Back
       </Button>
+
+      {passkeyCreated && (
+        <div className="p-3 rounded-lg border border-green-500/30 bg-green-50/30 dark:bg-green-950/10">
+          <p className="text-sm text-green-700 dark:text-green-400 flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4" />
+            Passkey created successfully! You can now pair with someone.
+          </p>
+        </div>
+      )}
 
       <div className="p-4 rounded-lg border">
         <h3 className="font-medium flex items-center gap-2">
