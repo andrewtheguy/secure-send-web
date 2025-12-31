@@ -57,9 +57,14 @@ export function PasskeyPairPage() {
             disabled={isLoading}
           >
             {pageState === 'getting_key' ? (
-              <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Authenticating...</span>
+              <div className="flex flex-col items-start gap-1">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Authenticating...</span>
+                </div>
+                <p className="text-xs text-muted-foreground font-normal text-left whitespace-normal">
+                  Don&apos;t see your passkey? Cancel and create one on the previous step first.
+                </p>
               </div>
             ) : (
               <>

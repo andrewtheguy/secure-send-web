@@ -76,6 +76,10 @@ export function PasskeyConfirmPage() {
     }
   }
 
+  const handleBack = () => {
+    navigate('/passkey/pair/invite')
+  }
+
   const handleStartOver = () => {
     resetAll()
     navigate('/passkey/pair')
@@ -106,7 +110,7 @@ export function PasskeyConfirmPage() {
       <Button
         variant="ghost"
         size="sm"
-        onClick={handleStartOver}
+        onClick={handleBack}
         className="text-muted-foreground"
         disabled={isLoading}
       >
