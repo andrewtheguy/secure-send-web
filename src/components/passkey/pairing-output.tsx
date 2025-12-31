@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { CheckCircle2, Copy, Check, Download, Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -18,6 +18,16 @@ export function PairingOutput({ type, stepNumber, onStartOver }: PairingOutputPr
   const [qrUrl, setQrUrl] = useState<string | null>(null)
   const [qrError, setQrError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const copyTimerRef = useRef<number | null>(null)
+
+  // Cleanup copy timer on unmount
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        clearTimeout(copyTimerRef.current)
+      }
+    }
+  }, [])
 
   const isRequest = type === 'request'
   const label = isRequest ? 'Pairing Request' : 'Pairing Key'
@@ -67,8 +77,14 @@ export function PairingOutput({ type, stepNumber, onStartOver }: PairingOutputPr
         return
       }
       await navigator.clipboard.writeText(outputPairingKey)
+      if (copyTimerRef.current !== null) {
+        clearTimeout(copyTimerRef.current)
+      }
       setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      copyTimerRef.current = window.setTimeout(() => {
+        setCopied(false)
+        copyTimerRef.current = null
+      }, 2000)
     } catch {
       setPairingError('Failed to copy to clipboard')
     }

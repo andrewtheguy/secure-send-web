@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Fingerprint, Key, Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { QRCodeSVG } from 'qrcode.react'
@@ -13,6 +13,20 @@ export function InviteCodeDisplay({ stepNumber }: InviteCodeDisplayProps) {
   const { inviteCode, fingerprint, prfSupported, setError } = usePasskey()
   const [copiedInviteCode, setCopiedInviteCode] = useState(false)
   const [copiedFingerprint, setCopiedFingerprint] = useState(false)
+  const inviteCodeTimerRef = useRef<number | null>(null)
+  const fingerprintTimerRef = useRef<number | null>(null)
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (inviteCodeTimerRef.current !== null) {
+        clearTimeout(inviteCodeTimerRef.current)
+      }
+      if (fingerprintTimerRef.current !== null) {
+        clearTimeout(fingerprintTimerRef.current)
+      }
+    }
+  }, [])
 
   if (!inviteCode || !fingerprint) return null
 
@@ -33,15 +47,27 @@ export function InviteCodeDisplay({ stepNumber }: InviteCodeDisplayProps) {
 
   const handleCopyInviteCode = async () => {
     await copyToClipboard(inviteCode, () => {
+      if (inviteCodeTimerRef.current !== null) {
+        clearTimeout(inviteCodeTimerRef.current)
+      }
       setCopiedInviteCode(true)
-      setTimeout(() => setCopiedInviteCode(false), 2000)
+      inviteCodeTimerRef.current = window.setTimeout(() => {
+        setCopiedInviteCode(false)
+        inviteCodeTimerRef.current = null
+      }, 2000)
     })
   }
 
   const handleCopyFingerprint = async () => {
     await copyToClipboard(formattedFingerprint, () => {
+      if (fingerprintTimerRef.current !== null) {
+        clearTimeout(fingerprintTimerRef.current)
+      }
       setCopiedFingerprint(true)
-      setTimeout(() => setCopiedFingerprint(false), 2000)
+      fingerprintTimerRef.current = window.setTimeout(() => {
+        setCopiedFingerprint(false)
+        fingerprintTimerRef.current = null
+      }, 2000)
     })
   }
 
