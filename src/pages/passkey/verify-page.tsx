@@ -52,6 +52,10 @@ export function PasskeyVerifyPage() {
         throw new Error('Failed to derive HMAC signing key from passkey')
       }
 
+      if (!identity.publicIdBytes) {
+        throw new Error('Failed to retrieve public identity bytes from passkey')
+      }
+
       const result = await verifyOwnSignature(pairingKey, identity.hmacKey, identity.publicIdBytes)
 
       setVerificationResult(result)
