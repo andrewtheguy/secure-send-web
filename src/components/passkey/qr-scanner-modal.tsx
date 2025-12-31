@@ -17,14 +17,19 @@ export function QRScannerModal() {
   if (!showQRScanner) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="qr-scanner-title"
+    >
       <div className="bg-background rounded-lg p-4 max-w-sm w-full mx-4 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="font-medium flex items-center gap-2">
+          <h3 id="qr-scanner-title" className="font-medium flex items-center gap-2">
             <Camera className="h-5 w-5" />
             {qrScannerMode === 'invite-code' ? 'Scan Invite Code' : 'Scan Pairing Request'}
           </h3>
-          <Button variant="ghost" size="sm" onClick={closeQRScanner}>
+          <Button variant="ghost" size="sm" onClick={closeQRScanner} aria-label="Close scanner">
             <X className="h-4 w-4" />
           </Button>
         </div>

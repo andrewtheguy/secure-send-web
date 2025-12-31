@@ -20,7 +20,7 @@ function generateRandomName(): string {
 
 export function PasskeyCreatePage() {
   const navigate = useNavigate()
-  const { pageState, setPageState, setError, setSuccess } = usePasskey()
+  const { pageState, setPageState, setError } = usePasskey()
   const [userName, setUserName] = useState('')
   const defaultUserName = useMemo(() => generateRandomName(), [])
 
@@ -28,7 +28,6 @@ export function PasskeyCreatePage() {
 
   const handleCreatePasskey = async () => {
     setError(null)
-    setSuccess(null)
     setPageState('checking')
 
     try {
@@ -43,11 +42,9 @@ export function PasskeyCreatePage() {
 
       await createPasskeyCredential(userName || defaultUserName)
       setUserName('')
-
-      setSuccess('Passkey created! You can now pair with others.')
       setPageState('idle')
 
-      // Navigate to pairing after successful creation
+      // Navigate to pairing immediately after successful creation
       navigate('/passkey/pair')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create passkey')
@@ -103,7 +100,6 @@ export function PasskeyCreatePage() {
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               {pageState === 'checking' && 'Checking support...'}
               {pageState === 'creating' && 'Creating passkey...'}
-              {pageState === 'getting_key' && 'Getting public ID...'}
             </>
           ) : (
             <>
