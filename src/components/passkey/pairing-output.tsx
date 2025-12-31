@@ -19,12 +19,16 @@ export function PairingOutput({ type, stepNumber, onStartOver }: PairingOutputPr
   const [qrError, setQrError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const copyTimerRef = useRef<number | null>(null)
+  const unmountedRef = useRef(false)
 
-  // Cleanup copy timer on unmount
+  // Cleanup on unmount: clear timer and mark as unmounted
   useEffect(() => {
+    unmountedRef.current = false
     return () => {
+      unmountedRef.current = true
       if (copyTimerRef.current !== null) {
         clearTimeout(copyTimerRef.current)
+        copyTimerRef.current = null
       }
     }
   }, [])
@@ -73,20 +77,30 @@ export function PairingOutput({ type, stepNumber, onStartOver }: PairingOutputPr
   const handleCopy = async () => {
     try {
       if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
-        setPairingError('Clipboard not available')
+        if (!unmountedRef.current) {
+          setPairingError('Clipboard not available')
+        }
         return
       }
       await navigator.clipboard.writeText(outputPairingKey)
+
+      // Check unmount status after async operation
+      if (unmountedRef.current) return
+
       if (copyTimerRef.current !== null) {
         clearTimeout(copyTimerRef.current)
       }
       setCopied(true)
       copyTimerRef.current = window.setTimeout(() => {
-        setCopied(false)
+        if (!unmountedRef.current) {
+          setCopied(false)
+        }
         copyTimerRef.current = null
       }, 2000)
     } catch {
-      setPairingError('Failed to copy to clipboard')
+      if (!unmountedRef.current) {
+        setPairingError('Failed to copy to clipboard')
+      }
     }
   }
 
