@@ -7,7 +7,7 @@ import { InviteCodeDisplay } from '@/components/passkey'
 
 export function PasskeyInvitePage() {
   const navigate = useNavigate()
-  const { fingerprint, pageState, authenticate, resetAll } = usePasskey()
+  const { fingerprint, pageState, authenticate, resetAll, setError } = usePasskey()
 
   const isLoading = pageState !== 'idle'
 
@@ -17,15 +17,20 @@ export function PasskeyInvitePage() {
       authenticate()
         .then((success) => {
           if (!success) {
+            // Note: authenticate() already sets error state internally on failure,
+            // but we add a navigation-specific message for clarity
+            setError('Authentication failed. Returning to pairing options.')
             navigate('/passkey/pair')
           }
         })
         .catch((err) => {
           console.error('Authentication failed:', err)
+          const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+          setError(`Authentication failed: ${errorMessage}. Returning to pairing options.`)
           navigate('/passkey/pair')
         })
     }
-  }, [fingerprint, pageState, authenticate, navigate])
+  }, [fingerprint, pageState, authenticate, navigate, setError])
 
   const handleBack = () => {
     navigate('/passkey/pair')
