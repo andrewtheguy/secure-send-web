@@ -88,15 +88,15 @@ export function PasskeyRequestPage() {
       // Authenticate fresh to get HMAC key
       const identity = await getPasskeyIdentity()
 
-      const pairingRequest = await createPairingRequest(
-        identity.hmacKey,
-        identity.peerPublicKey,
-        uint8ArrayToBase64(identity.publicIdBytes),
-        inviteCodeParsed.id,
-        inviteCodeParsed.ppk,
-        inviteCodeParsed.iat,
-        pairingComment.trim() || undefined
-      )
+      const pairingRequest = await createPairingRequest({
+        hmacKey: identity.hmacKey,
+        peerPublicKey: identity.peerPublicKey,
+        publicId: uint8ArrayToBase64(identity.publicIdBytes),
+        inviteId: inviteCodeParsed.id,
+        invitePpk: inviteCodeParsed.ppk,
+        inviteIat: inviteCodeParsed.iat,
+        comment: pairingComment.trim() || undefined,
+      })
 
       setOutputPairingKey(pairingRequest)
       setPeerInput('')

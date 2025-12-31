@@ -85,14 +85,14 @@ describe('Pairing Key HMAC Key Ownership', () => {
     const validIat = Math.floor(Date.now() / 1000)
 
     // Create pairing request - should sign with provided HMAC key
-    const request = await createPairingRequest(
+    const request = await createPairingRequest({
       hmacKey,
-      peerKey,
-      aIdBase64,
-      bIdBase64,
-      peerPpkBase64,
-      validIat
-    )
+      peerPublicKey: peerKey,
+      publicId: aIdBase64,
+      inviteId: bIdBase64,
+      invitePpk: peerPpkBase64,
+      inviteIat: validIat,
+    })
 
     // Verify it's valid JSON with signature
     const parsed = JSON.parse(request)
@@ -111,14 +111,14 @@ describe('Pairing Key HMAC Key Ownership', () => {
     const validIat = Math.floor(Date.now() / 1000)
 
     // Initiator creates request
-    const request = await createPairingRequest(
-      initiatorHmacKey,
-      initiatorPeerKey,
-      aIdBase64,
-      bIdBase64,
-      signerPpkBase64,
-      validIat
-    )
+    const request = await createPairingRequest({
+      hmacKey: initiatorHmacKey,
+      peerPublicKey: initiatorPeerKey,
+      publicId: aIdBase64,
+      inviteId: bIdBase64,
+      invitePpk: signerPpkBase64,
+      inviteIat: validIat,
+    })
 
     // Signer confirms request - adds their signature
     const pairingKey = await confirmPairingRequest(
@@ -148,14 +148,14 @@ describe('Pairing Key HMAC Key Ownership', () => {
     const validIat = Math.floor(Date.now() / 1000)
 
     // Create complete pairing flow
-    const request = await createPairingRequest(
-      initiatorHmacKey,
-      initiatorPeerKey,
-      aIdBase64,
-      bIdBase64,
-      signerPpkBase64,
-      validIat
-    )
+    const request = await createPairingRequest({
+      hmacKey: initiatorHmacKey,
+      peerPublicKey: initiatorPeerKey,
+      publicId: aIdBase64,
+      inviteId: bIdBase64,
+      invitePpk: signerPpkBase64,
+      inviteIat: validIat,
+    })
     const pairingKey = await confirmPairingRequest(
       request,
       signerHmacKey,
@@ -184,14 +184,14 @@ describe('Pairing Key HMAC Key Ownership', () => {
     const validIat = Math.floor(Date.now() / 1000)
 
     // Create complete pairing flow
-    const request = await createPairingRequest(
-      initiatorHmacKey,
-      initiatorPeerKey,
-      aIdBase64,
-      bIdBase64,
-      signerPpkBase64,
-      validIat
-    )
+    const request = await createPairingRequest({
+      hmacKey: initiatorHmacKey,
+      peerPublicKey: initiatorPeerKey,
+      publicId: aIdBase64,
+      inviteId: bIdBase64,
+      invitePpk: signerPpkBase64,
+      inviteIat: validIat,
+    })
     const pairingKey = await confirmPairingRequest(
       request,
       signerHmacKey,
@@ -492,14 +492,14 @@ describe('Tampering Protection', () => {
     const validIat = Math.floor(Date.now() / 1000)
 
     // Create legitimate pairing request
-    const request = await createPairingRequest(
-      initiatorHmacKey,
-      initiatorPeerKey,
-      aIdBase64,
-      bIdBase64,
-      signerPpkBase64,
-      validIat
-    )
+    const request = await createPairingRequest({
+      hmacKey: initiatorHmacKey,
+      peerPublicKey: initiatorPeerKey,
+      publicId: aIdBase64,
+      inviteId: bIdBase64,
+      invitePpk: signerPpkBase64,
+      inviteIat: validIat,
+    })
 
     // Tamper with iat (make it look fresh even though original was different)
     const parsed = JSON.parse(request)
@@ -537,14 +537,14 @@ describe('Tampering Protection', () => {
     const validIat = Math.floor(Date.now() / 1000)
 
     // Create complete pairing
-    const request = await createPairingRequest(
-      initiatorHmacKey,
-      initiatorPeerKey,
-      aIdBase64,
-      bIdBase64,
-      signerPpkBase64,
-      validIat
-    )
+    const request = await createPairingRequest({
+      hmacKey: initiatorHmacKey,
+      peerPublicKey: initiatorPeerKey,
+      publicId: aIdBase64,
+      inviteId: bIdBase64,
+      invitePpk: signerPpkBase64,
+      inviteIat: validIat,
+    })
     const pairingKey = await confirmPairingRequest(
       request,
       signerHmacKey,
@@ -575,15 +575,15 @@ describe('Tampering Protection', () => {
     const validIat = Math.floor(Date.now() / 1000)
 
     // Create pairing with comment
-    const request = await createPairingRequest(
-      initiatorHmacKey,
-      initiatorPeerKey,
-      aIdBase64,
-      bIdBase64,
-      signerPpkBase64,
-      validIat,
-      'Original comment'
-    )
+    const request = await createPairingRequest({
+      hmacKey: initiatorHmacKey,
+      peerPublicKey: initiatorPeerKey,
+      publicId: aIdBase64,
+      inviteId: bIdBase64,
+      invitePpk: signerPpkBase64,
+      inviteIat: validIat,
+      comment: 'Original comment',
+    })
     const pairingKey = await confirmPairingRequest(
       request,
       signerHmacKey,
@@ -617,22 +617,22 @@ describe('Tampering Protection', () => {
     const now = Math.floor(Date.now() / 1000)
 
     // Create two requests with different iats
-    const request1 = await createPairingRequest(
+    const request1 = await createPairingRequest({
       hmacKey,
-      peerKey,
-      aIdBase64,
-      bIdBase64,
-      peerPpkBase64,
-      now
-    )
-    const request2 = await createPairingRequest(
+      peerPublicKey: peerKey,
+      publicId: aIdBase64,
+      inviteId: bIdBase64,
+      invitePpk: peerPpkBase64,
+      inviteIat: now,
+    })
+    const request2 = await createPairingRequest({
       hmacKey,
-      peerKey,
-      aIdBase64,
-      bIdBase64,
-      peerPpkBase64,
-      now - 1000 // Different iat
-    )
+      peerPublicKey: peerKey,
+      publicId: aIdBase64,
+      inviteId: bIdBase64,
+      invitePpk: peerPpkBase64,
+      inviteIat: now - 1000, // Different iat
+    })
 
     // Parse and compare signatures - they should be different
     const parsed1 = JSON.parse(request1)

@@ -392,46 +392,55 @@ export function isPairingKeyFormat(input: string): boolean {
 }
 
 /**
+ * Options for creating a pairing request
+ */
+export interface CreatePairingRequestOptions {
+  /** Your own non-extractable HMAC signing key (from PRF) */
+  hmacKey: CryptoKey
+  /** Your peer public key (32 bytes, derived from PRF) */
+  peerPublicKey: Uint8Array
+  /** Your passkey public ID (base64) */
+  publicId: string
+  /** Peer's public ID from invite code (base64) */
+  inviteId: string
+  /** Peer's peer public key from invite code (base64) */
+  invitePpk: string
+  /** Peer's invite code issued-at timestamp (Unix seconds) */
+  inviteIat: number
+  /** Optional comment (max 256 bytes) */
+  comment?: string
+}
+
+/**
  * Create initial pairing request (initiator signs first).
  *
  * The initiator must know the peer's public ID and peer public key.
  * The request will contain both peers' identity information with the initiator's signature.
  *
- * @param hmacKey - Your own non-extractable HMAC signing key (NOT the peer's - from PRF)
- * @param peerPublicKey - Initiator's peer public key (32 bytes, derived from PRF)
- * @param initiatorPublicIdBase64 - Initiator's passkey public ID (base64)
- * @param peerPublicIdBase64 - Peer's public ID (base64)
- * @param peerPpkBase64 - Peer's peer public key (base64)
- * @param inviteCodeIat - Signer's invite code issued-at timestamp (Unix seconds)
- * @param comment - Optional comment (max 256 bytes)
+ * @param options - Options for creating the pairing request
  * @returns Pairing request (JSON string) to send to peer for confirmation
  * @throws Error if the invite code has expired (>24 hours old)
  */
-export async function createPairingRequest(
-  hmacKey: CryptoKey,
-  peerPublicKey: Uint8Array,
-  initiatorPublicIdBase64: string,
-  peerPublicIdBase64: string,
-  peerPpkBase64: string,
-  inviteCodeIat: number,
-  comment?: string
-): Promise<string> {
+export async function createPairingRequest(options: CreatePairingRequestOptions): Promise<string> {
+  const { hmacKey, peerPublicKey, publicId, inviteId, invitePpk, inviteIat, comment } = options
+
   // Validate invite code TTL
   const now = Math.floor(Date.now() / 1000)
-  if (inviteCodeIat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
-    throw new Error(`Invite code iat is in the future: iat=${inviteCodeIat}, now=${now}, allowedSkewSeconds=${MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS}`)
+  if (inviteIat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
+    throw new Error(`Invite code iat is in the future: iat=${inviteIat}, now=${now}, allowedSkewSeconds=${MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS}`)
   }
-  if (now - inviteCodeIat > INVITE_CODE_TTL_SECONDS) {
+  if (now - inviteIat > INVITE_CODE_TTL_SECONDS) {
     throw new Error('Invite code has expired (valid for 24 hours)')
   }
+
   // Decode and validate initiator's public ID
-  const initiatorPublicId = base64ToUint8Array(initiatorPublicIdBase64)
+  const initiatorPublicId = base64ToUint8Array(publicId)
   if (initiatorPublicId.length !== 32) {
     throw new Error('Invalid initiator public ID: expected 32 bytes')
   }
 
   // Decode and validate peer's public ID
-  const peerPublicId = base64ToUint8Array(peerPublicIdBase64)
+  const peerPublicId = base64ToUint8Array(inviteId)
   if (peerPublicId.length !== 32) {
     throw new Error('Invalid peer public ID: expected 32 bytes')
   }
@@ -442,7 +451,7 @@ export async function createPairingRequest(
   }
 
   // Decode and validate peer's peer public key
-  const peerPpk = base64ToUint8Array(peerPpkBase64)
+  const peerPpk = base64ToUint8Array(invitePpk)
   if (peerPpk.length !== 32) {
     throw new Error('Invalid peer peer public key: expected 32 bytes')
   }
@@ -479,7 +488,7 @@ export async function createPairingRequest(
   }
 
   // Compute challenge using the Invite Code's iat (includes comment if present)
-  const challenge = await computeMutualChallenge(aId, aPpk, bId, bPpk, inviteCodeIat, trimmedComment)
+  const challenge = await computeMutualChallenge(aId, aPpk, bId, bPpk, inviteIat, trimmedComment)
 
   // Sign with HMAC-SHA256 (32 bytes)
   const signatureBuffer = await crypto.subtle.sign('HMAC', hmacKey, toArrayBuffer(challenge))
@@ -498,7 +507,7 @@ export async function createPairingRequest(
     a_ppk: uint8ArrayToBase64(aPpk),
     b_id: uint8ArrayToBase64(bId),
     b_ppk: uint8ArrayToBase64(bPpk),
-    iat: inviteCodeIat,
+    iat: inviteIat,
     init_party: initParty,
     init_sig: uint8ArrayToBase64(signature),
     init_vs: uint8ArrayToBase64(initiatorVs),
