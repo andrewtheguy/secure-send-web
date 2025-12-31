@@ -63,15 +63,7 @@ export function PasskeyPairPage() {
                   <span>Authenticating...</span>
                 </div>
                 <p className="text-xs text-muted-foreground font-normal text-left whitespace-normal">
-                  Don&apos;t see your passkey? You may need to{' '}
-                  <Link
-                    to="/passkey/create"
-                    className="text-primary hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    create one first
-                  </Link>
-                  .
+                  Don&apos;t see your passkey? Cancel and create one on the previous step first.
                 </p>
               </div>
             ) : (
