@@ -47,6 +47,12 @@ export interface InviteCode {
  * - iat is a finite positive Unix timestamp
  * - iat is not too far in the future (max 5 minutes clock skew)
  *
+ * NOTE: This function does NOT check TTL expiration (iat being too old).
+ * The current flow handles this: request-page.tsx checks TTL before calling
+ * createPairingRequest(), which also validates TTL as defense-in-depth.
+ * If reusing this function elsewhere, verify `now - iat <= INVITE_CODE_TTL_SECONDS`
+ * (24 hours) before using the invite code.
+ *
  * @param input - JSON string to parse
  * @returns InviteCode if valid, null otherwise
  */
