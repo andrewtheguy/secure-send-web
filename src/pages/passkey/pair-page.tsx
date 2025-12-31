@@ -5,14 +5,21 @@ import { usePasskey } from '@/contexts/passkey-context'
 
 export function PasskeyPairPage() {
   const navigate = useNavigate()
-  const { pageState, authenticate } = usePasskey()
+  const { pageState, authenticate, setError } = usePasskey()
 
   const isLoading = pageState !== 'idle'
 
   const handleSelectSigner = async () => {
-    const success = await authenticate()
-    if (success) {
-      navigate('/passkey/pair/invite')
+    try {
+      const success = await authenticate()
+      if (success) {
+        navigate('/passkey/pair/invite')
+      }
+      // Note: authenticate() already sets error via context on failure,
+      // so no need to set error here when success is false
+    } catch (err) {
+      console.error('Authentication failed:', err)
+      setError(err instanceof Error ? err.message : 'Authentication failed unexpectedly')
     }
   }
 

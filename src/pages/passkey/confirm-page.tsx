@@ -90,7 +90,15 @@ export function PasskeyConfirmPage() {
   }
 
   if (!fingerprint) {
-    return null
+    // Show fallback while useEffect triggers redirect to /passkey/pair
+    return (
+      <div className="flex flex-col items-center justify-center py-8 gap-4">
+        <p className="text-muted-foreground">Redirecting to pairing options...</p>
+        <Button variant="outline" size="sm" onClick={() => navigate('/passkey/pair')}>
+          Go to Pairing Options
+        </Button>
+      </div>
+    )
   }
 
   return (
