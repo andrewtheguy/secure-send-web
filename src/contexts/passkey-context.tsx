@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   type ReactNode,
   type RefObject,
 } from 'react'
@@ -112,6 +113,15 @@ export function PasskeyProvider({ children }: PasskeyProviderProps) {
   const [outputPairingKey, setOutputPairingKey] = useState<string | null>(null)
   const [pairingError, setPairingError] = useState<string | null>(null)
 
+  // Mounted ref for abort handling
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
   // Derived invite code
   const inviteCode = useMemo(() => {
     if (publicIdBase64 && peerPublicKeyBase64 && inviteCodeIat) {
@@ -182,6 +192,12 @@ export function PasskeyProvider({ children }: PasskeyProviderProps) {
 
     try {
       const result = await getPasskeyIdentity()
+
+      // Check if component is still mounted before updating state
+      if (!mountedRef.current) {
+        return false
+      }
+
       setFingerprint(result.publicIdFingerprint)
       setPublicIdBase64(uint8ArrayToBase64(result.publicIdBytes))
       setPeerPublicKeyBase64(uint8ArrayToBase64(result.peerPublicKey))
@@ -191,6 +207,11 @@ export function PasskeyProvider({ children }: PasskeyProviderProps) {
       setPageState('idle')
       return true
     } catch (err) {
+      // Check if component is still mounted before updating state
+      if (!mountedRef.current) {
+        return false
+      }
+
       setError(err instanceof Error ? err.message : 'Failed to authenticate')
       setPageState('idle')
       return false
