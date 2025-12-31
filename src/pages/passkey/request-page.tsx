@@ -6,19 +6,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { usePasskey } from '@/contexts/passkey-context'
-import {
-  parseInviteCode,
-  base64ToUint8Array,
-  uint8ArrayToBase64,
-} from '@/lib/passkey-utils'
+import { parseInviteCode, uint8ArrayToBase64 } from '@/lib/passkey-utils'
 import { PairingOutput } from '@/components/passkey'
-import {
-  createPairingRequest,
-  INVITE_CODE_TTL_SECONDS,
-  MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS,
-} from '@/lib/crypto/pairing-key'
+import { createPairingRequest, INVITE_CODE_TTL_SECONDS } from '@/lib/crypto/pairing-key'
 import { getPasskeyIdentity } from '@/lib/crypto/passkey'
-import { ValidationError } from '@/lib/errors'
 
 export function PasskeyRequestPage() {
   const navigate = useNavigate()
@@ -50,35 +41,18 @@ export function PasskeyRequestPage() {
         throw new Error("Please enter peer's invite code")
       }
 
+      // parseInviteCode validates: JSON structure, non-empty id/ppk strings,
+      // valid base64 encoding, 32-byte lengths, finite positive iat, and
+      // iat not too far in the future (max 5 min clock skew)
       const inviteCodeParsed = parseInviteCode(trimmed)
       if (!inviteCodeParsed) {
         throw new Error(
-          'Invalid invite code format. Expected JSON with "id", "ppk", and "iat" (finite number) fields.'
+          'Invalid invite code. Expected JSON with valid "id" (32 bytes), "ppk" (32 bytes), and "iat" (timestamp) fields.'
         )
       }
 
-      // Validate invite code fields
-      try {
-        const idBytes = base64ToUint8Array(inviteCodeParsed.id)
-        if (idBytes.length !== 32) {
-          throw new ValidationError('Invalid peer public ID: expected 32 bytes')
-        }
-        const ppkBytes = base64ToUint8Array(inviteCodeParsed.ppk)
-        if (ppkBytes.length !== 32) {
-          throw new ValidationError('Invalid peer public key: expected 32 bytes')
-        }
-      } catch (e) {
-        if (e instanceof ValidationError) {
-          throw e
-        }
-        throw new ValidationError('Invalid base64 encoding in invite code')
-      }
-
-      // Validate invite code TTL
+      // Check if invite code has expired (parseInviteCode doesn't check TTL expiration)
       const now = Math.floor(Date.now() / 1000)
-      if (inviteCodeParsed.iat > now + MAX_ACCEPTABLE_CLOCK_SKEW_SECONDS) {
-        throw new Error('Invite code iat is in the future. Check your device clock.')
-      }
       if (now - inviteCodeParsed.iat > INVITE_CODE_TTL_SECONDS) {
         throw new Error(
           'Invite code has expired (valid for 24 hours). Ask your peer to generate a new one.'
