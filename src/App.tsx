@@ -4,8 +4,16 @@ import { Footer } from '@/components/footer'
 import { SendPage } from '@/pages/send'
 import { ReceivePage } from '@/pages/receive'
 import { AboutPage } from '@/pages/about'
-import { PasskeyPage } from '@/pages/passkey'
-import { PasskeyVerifyTokenPage } from '@/pages/passkey-verify-token'
+import {
+  PasskeyLayout,
+  PasskeyIndexPage,
+  PasskeyCreatePage,
+  PasskeyPairPage,
+  PasskeyInvitePage,
+  PasskeyConfirmPage,
+  PasskeyRequestPage,
+  PasskeyVerifyPage,
+} from '@/pages/passkey'
 import { NotFoundPage } from '@/pages/not-found'
 
 function App() {
@@ -16,8 +24,15 @@ function App() {
         <Routes>
           <Route path="/" element={<SendPage />} />
           <Route path="/receive" element={<ReceivePage />} />
-          <Route path="/passkey" element={<PasskeyPage />} />
-          <Route path="/passkey/verify-token" element={<PasskeyVerifyTokenPage />} />
+          <Route path="/passkey" element={<PasskeyLayout />}>
+            <Route index element={<PasskeyIndexPage />} />
+            <Route path="create" element={<PasskeyCreatePage />} />
+            <Route path="pair" element={<PasskeyPairPage />} />
+            <Route path="pair/invite" element={<PasskeyInvitePage />} />
+            <Route path="pair/confirm" element={<PasskeyConfirmPage />} />
+            <Route path="pair/request" element={<PasskeyRequestPage />} />
+            <Route path="verify" element={<PasskeyVerifyPage />} />
+          </Route>
           <Route path="/about" element={<AboutPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>

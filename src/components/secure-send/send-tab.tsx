@@ -818,7 +818,7 @@ export function SendTab() {
                                   </div>
                                 )}
                                 <div className="flex items-center gap-2 ml-5">
-                                  <Link to="/passkey/verify-token" className="text-primary hover:underline text-xs">
+                                  <Link to="/passkey/verify" className="text-primary hover:underline text-xs">
                                     Verify your signature →
                                   </Link>
                                 </div>
