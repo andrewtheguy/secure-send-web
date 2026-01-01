@@ -565,9 +565,9 @@ export function SendTab() {
                                 </Button>
                                 {showPairingKeyDropdown && (
                                   <div className="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg max-h-48 overflow-y-auto">
-                                    {savedPairingKeys.map((saved, index) => (
+                                    {savedPairingKeys.map((saved) => (
                                       <button
-                                        key={index}
+                                        key={saved.pairingKey}
                                         className="w-full px-3 py-2 text-left hover:bg-muted/50 border-b last:border-b-0 text-xs"
                                         onClick={() => {
                                           setReceiverPublicKeyInput(saved.pairingKey)
@@ -783,7 +783,7 @@ export function SendTab() {
             </div>
           )}
 
-          <Button onClick={() => handleSend()} disabled={!canSend} className="w-full">
+          <Button onClick={handleSend} disabled={!canSend} className="w-full">
             <Send className="mr-2 h-4 w-4" />
             {methodChoice === 'manual' ? 'Generate & Send' : 'Generate Secure PIN'}
             <ChevronRight className="ml-1 h-3 w-3" />
