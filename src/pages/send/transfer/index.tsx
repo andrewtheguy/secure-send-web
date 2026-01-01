@@ -74,12 +74,16 @@ export function SendTransferPage() {
   useEffect(() => {
     if (!config || startedRef.current) return
 
+    let cancelled = false
+
     const prepareFile = async () => {
       try {
         // Check Nostr availability first if needed
         if (config.methodChoice === 'nostr') {
+          if (cancelled) return
           setStep('checking')
           const result = await testRelayAvailability()
+          if (cancelled) return
           const available = result.available
           if (!available) {
             setStep('nostr_unavailable')
@@ -93,6 +97,7 @@ export function SendTransferPage() {
           : config.selectedFiles
 
         if (files.length === 0) {
+          if (cancelled) return
           setError('No files selected')
           setStep('error')
           return
@@ -100,10 +105,12 @@ export function SendTransferPage() {
 
         if (files.length === 1 && !config.folderFiles) {
           // Single file, no compression needed
+          if (cancelled) return
           setCompressedFile(files[0])
           setStep('ready')
         } else {
           // Multiple files or folder, compress
+          if (cancelled) return
           setStep('compressing')
           const archiveName = config.folderFiles
             ? getFolderName(config.folderFiles)
@@ -114,16 +121,22 @@ export function SendTransferPage() {
             return dt.files
           })()
           const zipFile = await compressFilesToZip(fileList, archiveName)
+          if (cancelled) return
           setCompressedFile(zipFile)
           setStep('ready')
         }
       } catch (err) {
+        if (cancelled) return
         setError(err instanceof Error ? err.message : 'Failed to prepare files')
         setStep('error')
       }
     }
 
     prepareFile()
+
+    return () => {
+      cancelled = true
+    }
   }, [config])
 
   // Start transfer when file is ready
