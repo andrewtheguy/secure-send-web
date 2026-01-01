@@ -25,7 +25,7 @@ function App() {
       <Navbar />
       <main className="flex-1 px-6 py-10">
         <Routes>
-          {/* Send routes wrapped with SendProvider */}
+          {/* Send routes wrapped with SendLayout */}
           <Route element={<SendLayout />}>
             <Route path="/" element={<SendPage />} />
             <Route path="/send/transfer" element={<SendTransferLayout />}>

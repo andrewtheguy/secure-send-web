@@ -160,7 +160,11 @@ export function SendTransferPage() {
   }, [step, compressedFile, config, activeHook])
 
   // Track completion - sync local step with hook state
+  // Only apply state changes when transfer is active to avoid race conditions
+  // after cancellation (handleSwitchToManual, handleRetry set startedRef to false)
   useEffect(() => {
+    if (!startedRef.current) return
+
     if (state.status === 'complete') {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: sync step with hook completion
       setStep('complete')
