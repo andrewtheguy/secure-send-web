@@ -19,6 +19,15 @@ type ActiveHook =
   | { type: 'nostr'; hook: UseNostrSendReturn }
   | { type: 'manual'; hook: UseManualSendReturn }
 
+// Helper to build FileList from array of Files
+function buildFileListFromFiles(files: File[]): FileList {
+  const dt = new DataTransfer()
+  for (const file of files) {
+    dt.items.add(file)
+  }
+  return dt.files
+}
+
 export function SendTransferPage() {
   const navigate = useNavigate()
   const { config, setConfig, clearConfig } = useSend()
@@ -108,11 +117,7 @@ export function SendTransferPage() {
           const archiveName = config.folderFiles
             ? getFolderName(config.folderFiles)
             : 'files'
-          const fileList = config.folderFiles || (() => {
-            const dt = new DataTransfer()
-            config.selectedFiles.forEach(f => dt.items.add(f))
-            return dt.files
-          })()
+          const fileList = config.folderFiles ?? buildFileListFromFiles(config.selectedFiles)
           const zipFile = await compressFilesToZip(fileList, archiveName)
           if (cancelled) return
           setCompressedFile(zipFile)
