@@ -252,10 +252,10 @@ export function SendTransferPage() {
       {step === 'active' && (
         <>
           {/* QR display/input for Manual mode */}
-          {!isNostr && offerData && state.status === 'showing_offer' && (
+          {!isNostr && offerData && submitAnswer && state.status === 'showing_offer' && (
             <div className="space-y-4">
               <QRDisplay data={offerData} clipboardData={clipboardData || ''} />
-              <QRInput onSubmit={submitAnswer!} expectedType="answer" />
+              <QRInput onSubmit={submitAnswer} expectedType="answer" />
             </div>
           )}
 
