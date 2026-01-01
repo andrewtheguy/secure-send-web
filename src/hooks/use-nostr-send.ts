@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useMemo } from 'react'
 import {
   generatePinForMethod,
   computePinHint,
@@ -895,7 +895,11 @@ export function useNostrSend(): UseNostrSendReturn {
     [clearExpirationTimeout]
   )
 
-  return { state, pin, ownPublicKey, ownFingerprint, send, cancel }
+  // Memoize return object to prevent unnecessary re-renders in consumers
+  return useMemo(
+    () => ({ state, pin, ownPublicKey, ownFingerprint, send, cancel }),
+    [state, pin, ownPublicKey, ownFingerprint, send, cancel]
+  )
 }
 
 /**

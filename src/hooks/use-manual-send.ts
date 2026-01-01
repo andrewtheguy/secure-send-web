@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useMemo } from 'react'
 import {
   generateSalt,
   generateECDHKeyPair,
@@ -469,5 +469,9 @@ export function useManualSend(): UseManualSendReturn {
     }
   }, [clearExpirationTimeout])
 
-  return { state, send, submitAnswer, cancel }
+  // Memoize return object to prevent unnecessary re-renders in consumers
+  return useMemo(
+    () => ({ state, send, submitAnswer, cancel }),
+    [state, send, submitAnswer, cancel]
+  )
 }
