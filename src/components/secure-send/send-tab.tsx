@@ -1,9 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, AlertTriangle, Info, Fingerprint, ArrowRight, Keyboard, Camera, RefreshCw } from 'lucide-react'
+import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, AlertTriangle, Info, Fingerprint, ArrowRight, Keyboard, Camera, RefreshCw, Wifi, WifiOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { PinDisplay } from './pin-display'
@@ -583,6 +582,37 @@ export function SendTab() {
             </div>
           </div>
 
+          {/* Work offline toggle - visible on main UI */}
+          <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/30">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-full ${methodChoice === 'manual' ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-green-100 dark:bg-green-900/30'}`}>
+                {methodChoice === 'manual' ? (
+                  <WifiOff className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                ) : (
+                  <Wifi className="h-4 w-4 text-green-600 dark:text-green-400" />
+                )}
+              </div>
+              <div>
+                <Label htmlFor="work-offline" className="text-sm font-medium cursor-pointer">
+                  Work offline
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {methodChoice === 'manual'
+                    ? 'Uses QR codes. Both devices must be on the same network.'
+                    : 'Connected to relay servers for easy transfers.'}
+                </p>
+              </div>
+            </div>
+            <Switch
+              id="work-offline"
+              checked={methodChoice === 'manual'}
+              onCheckedChange={(checked) => {
+                setMethodChoice(checked ? 'manual' : 'nostr')
+                if (checked) setRelayOnly(false)
+              }}
+            />
+          </div>
+
           {/* Advanced Options */}
           <div className="border rounded-lg overflow-hidden">
             <button
@@ -592,47 +622,24 @@ export function SendTab() {
             >
               {showAdvanced ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
               Advanced Options
-              {methodChoice !== 'nostr' && (
-                <span className="ml-auto text-xs bg-muted px-2 py-0.5 rounded">
-                  Manual
+              {usePasskey && (
+                <span className="ml-auto text-xs bg-primary/10 text-primary px-2 py-0.5 rounded">
+                  Passkey
                 </span>
               )}
             </button>
             {showAdvanced && (
-              <div className="p-3 pt-0 space-y-2 border-t">
-                <Label className="text-sm font-medium">Signaling Method</Label>
-                <RadioGroup
-                  value={methodChoice}
-                  onValueChange={(v) => {
-                    const nextMethod = v as MethodChoice
-                    setMethodChoice(nextMethod)
-                    if (nextMethod === 'manual') {
-                      setRelayOnly(false)
-                    }
-                  }}
-                  className="flex flex-wrap gap-4"
-                >
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="nostr" id="nostr" />
-                    <Label htmlFor="nostr" className="text-sm font-normal cursor-pointer">
-                      Nostr
-                    </Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="manual" id="manual" />
-                    <Label htmlFor="manual" className="text-sm font-normal cursor-pointer flex items-center gap-1">
-                      <QrCode className="h-3 w-3" />
-                      Manual
-                    </Label>
-                  </div>
-                </RadioGroup>
+              <div className="p-3 pt-0 space-y-3 border-t">
+                {/* Technical details about current mode */}
                 <p className="text-xs text-muted-foreground">
                   {methodChoice === 'nostr'
-                    ? 'Uses Nostr relays for signaling. Requires internet.'
-                    : 'Manual exchange via QR scan or copy/paste. No internet required. Without internet, devices must be on same local network.'}
+                    ? 'Online mode: Uses Nostr relays for signaling. If P2P fails, encrypted data transfers via cloud.'
+                    : 'Offline mode: Exchange signaling via QR scan or copy/paste. Devices must be on same local network.'}
                 </p>
+
+                {/* Force cloud transfer - only for online mode */}
                 {methodChoice === 'nostr' && (
-                  <div className="flex items-center gap-2 pt-1">
+                  <div className="flex items-center gap-2">
                     <input
                       id="force-cloud-transfer"
                       type="checkbox"
@@ -646,9 +653,14 @@ export function SendTab() {
                   </div>
                 )}
 
-                {/* Passkey toggle - only for Nostr */}
+                {/* Passkey toggle - only for online mode (Nostr) */}
                 {methodChoice === 'nostr' && (
                   <div className="pt-3 border-t space-y-3">
+                    <div className="flex items-center gap-1 mb-2">
+                      <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded">
+                        Power User
+                      </span>
+                    </div>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Fingerprint className="h-4 w-4 text-muted-foreground" />
