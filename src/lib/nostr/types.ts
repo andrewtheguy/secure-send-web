@@ -29,9 +29,8 @@ export interface FileMetadata {
   mimeType: string
 }
 
-export interface TransferState {
-  status: TransferStatus
-  message?: string
+// Base properties shared across all transfer states
+interface TransferStateBase {
   progress?: {
     current: number  // bytes transferred
     total: number    // total bytes
@@ -42,6 +41,21 @@ export interface TransferState {
   currentRelays?: string[] // Connected relay URLs being used (for signaling)
   totalRelays?: number     // Total relays attempted to connect
 }
+
+// Error state has required message
+interface TransferStateError extends TransferStateBase {
+  status: 'error'
+  message: string
+}
+
+// All other states have optional message
+interface TransferStateOther extends TransferStateBase {
+  status: Exclude<TransferStatus, 'error'>
+  message?: string
+}
+
+// Discriminated union: TypeScript narrows to TransferStateError when status === 'error'
+export type TransferState = TransferStateError | TransferStateOther
 
 // PIN Exchange payload (encrypted in the event)
 export interface PinExchangePayload {

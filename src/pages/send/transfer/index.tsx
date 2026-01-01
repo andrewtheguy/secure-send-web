@@ -160,7 +160,8 @@ export function SendTransferPage() {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: sync step with hook completion
       setStep('complete')
     } else if (state.status === 'error') {
-      setError(state.message ?? 'Transfer failed')
+      // TypeScript narrows state to TransferStateError, so message is required
+      setError(state.message)
       setStep('error')
     }
   }, [state])

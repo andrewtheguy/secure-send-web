@@ -17,7 +17,6 @@ import {
   parseMutualPayload,
   type SignalingPayload,
 } from '@/lib/manual-signaling'
-import type { TransferState } from '@/lib/nostr/types'
 import { readFileAsBytes } from '@/lib/file-utils'
 
 // Extended transfer status for Manual Exchange mode
@@ -31,11 +30,39 @@ export type ManualTransferStatus =
   | 'complete'
   | 'error'
 
-export interface ManualTransferState extends Omit<TransferState, 'status'> {
-  status: ManualTransferStatus
+// Base properties for manual transfer state
+interface ManualTransferStateBase {
+  progress?: {
+    current: number
+    total: number
+  }
+  contentType?: 'file'
+  fileMetadata?: {
+    fileName: string
+    fileSize: number
+    mimeType: string
+  }
+  useWebRTC?: boolean
+  currentRelays?: string[]
+  totalRelays?: number
   offerData?: Uint8Array // Binary data for QR code
   clipboardData?: string // Base64 for copy button
 }
+
+// Error state has required message
+interface ManualTransferStateError extends ManualTransferStateBase {
+  status: 'error'
+  message: string
+}
+
+// All other states have optional message
+interface ManualTransferStateOther extends ManualTransferStateBase {
+  status: Exclude<ManualTransferStatus, 'error'>
+  message?: string
+}
+
+// Discriminated union for manual transfer state
+export type ManualTransferState = ManualTransferStateError | ManualTransferStateOther
 
 export interface UseManualSendReturn {
   state: ManualTransferState
