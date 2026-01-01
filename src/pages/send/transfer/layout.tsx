@@ -35,6 +35,7 @@ export function SendTransferLayout() {
               size="sm"
               onClick={handleBack}
               className="h-8 w-8 p-0"
+              aria-label="Go back to home"
             >
               <ArrowLeft className="h-4 w-4" />
             </Button>

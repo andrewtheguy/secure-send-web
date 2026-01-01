@@ -16,7 +16,7 @@ type TransferStep = 'checking' | 'compressing' | 'ready' | 'active' | 'complete'
 
 export function SendTransferPage() {
   const navigate = useNavigate()
-  const { config, clearConfig } = useSend()
+  const { config, setConfig, clearConfig } = useSend()
 
   const [step, setStep] = useState<TransferStep>('checking')
   const [compressedFile, setCompressedFile] = useState<File | null>(null)
@@ -148,11 +148,12 @@ export function SendTransferPage() {
 
   const handleSwitchToManual = useCallback(() => {
     if (!config) return
-    // Update config to manual and restart
-    // For now, just go back
-    clearConfig()
-    navigate('/')
-  }, [config, clearConfig, navigate])
+    // Update config to manual mode and restart the transfer flow
+    setConfig({ ...config, methodChoice: 'manual' })
+    startedRef.current = false
+    setStep('checking')
+    setError(null)
+  }, [config, setConfig])
 
   const handleRetry = useCallback(() => {
     startedRef.current = false
