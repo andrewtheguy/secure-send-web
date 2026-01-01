@@ -17,8 +17,8 @@ export function SendTransferLayout() {
   }, [config, navigate])
 
   const handleBack = () => {
-    clearConfig()
     navigate('/')
+    clearConfig()
   }
 
   if (!config) {
