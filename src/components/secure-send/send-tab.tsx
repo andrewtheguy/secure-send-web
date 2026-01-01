@@ -416,33 +416,33 @@ export function SendTab() {
             </div>
           </div>
 
-          {/* Work offline toggle - visible on main UI */}
+          {/* Work online toggle - visible on main UI */}
           <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/30">
             <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-full ${methodChoice === 'manual' ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-green-100 dark:bg-green-900/30'}`}>
-                {methodChoice === 'manual' ? (
-                  <WifiOff className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                ) : (
+              <div className={`p-2 rounded-full ${methodChoice === 'nostr' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-amber-100 dark:bg-amber-900/30'}`}>
+                {methodChoice === 'nostr' ? (
                   <Wifi className="h-4 w-4 text-green-600 dark:text-green-400" />
+                ) : (
+                  <WifiOff className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                 )}
               </div>
               <div>
-                <Label htmlFor="work-offline" className="text-sm font-medium cursor-pointer">
-                  Work offline
+                <Label htmlFor="work-online" className="text-sm font-medium cursor-pointer">
+                  Work online
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  {methodChoice === 'manual'
-                    ? 'Uses QR codes. Both devices must be on the same network.'
-                    : 'Connected to relay servers for easy transfers.'}
+                  {methodChoice === 'nostr'
+                    ? 'Connected to relay servers for easy transfers.'
+                    : 'Offline mode: Uses QR codes. Both devices must be nearby.'}
                 </p>
               </div>
             </div>
             <Switch
-              id="work-offline"
-              checked={methodChoice === 'manual'}
+              id="work-online"
+              checked={methodChoice === 'nostr'}
               onCheckedChange={(checked) => {
-                setMethodChoice(checked ? 'manual' : 'nostr')
-                if (checked) setRelayOnly(false)
+                setMethodChoice(checked ? 'nostr' : 'manual')
+                if (!checked) setRelayOnly(false)
               }}
             />
           </div>

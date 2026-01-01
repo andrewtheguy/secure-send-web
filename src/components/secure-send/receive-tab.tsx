@@ -818,7 +818,8 @@ export function ReceiveTab() {
             <>
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">
-                  Scan or paste the sender's code to receive their content. No PIN required.
+                  For <span className="font-medium text-foreground">Manual mode</span> transfers only (not for passkey QR codes).
+                  Scan or paste the sender's QR code to receive their content.
                 </p>
               </div>
 
