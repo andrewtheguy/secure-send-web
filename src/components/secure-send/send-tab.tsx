@@ -416,7 +416,7 @@ export function SendTab() {
             </div>
           </div>
 
-          {/* Work online toggle - visible on main UI */}
+          {/* Connection method toggle - visible on main UI */}
           <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/30">
             <div className="flex items-center gap-3">
               <div className={`p-2 rounded-full ${methodChoice === 'nostr' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-amber-100 dark:bg-amber-900/30'}`}>
@@ -427,18 +427,18 @@ export function SendTab() {
                 )}
               </div>
               <div>
-                <Label htmlFor="work-online" className="text-sm font-medium cursor-pointer">
-                  Work online
+                <Label htmlFor="use-internet" className="text-sm font-medium cursor-pointer">
+                  {methodChoice === 'nostr' ? 'Internet required' : 'No internet required'}
                 </Label>
                 <p className="text-xs text-muted-foreground">
                   {methodChoice === 'nostr'
-                    ? 'Connected to relay servers. Toggle off for offline QR exchange.'
-                    : 'Offline mode: Uses QR codes. Both devices must be connected to the same network.'}
+                    ? 'Auto-connect via relay servers.'
+                    : 'Manual QR exchange. Devices must be on a shared network if internet is not available.'}
                 </p>
               </div>
             </div>
             <Switch
-              id="work-online"
+              id="use-internet"
               checked={methodChoice === 'nostr'}
               onCheckedChange={(checked) => {
                 setMethodChoice(checked ? 'nostr' : 'manual')
