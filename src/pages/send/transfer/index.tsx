@@ -270,23 +270,47 @@ export function SendTransferPage() {
       {/* Active transfer */}
       {step === 'active' && (
         <>
-          {/* QR display/input for Manual mode */}
+          {/* Manual mode: showing offer */}
           {!isNostr && offerData && submitAnswer && state.status === 'showing_offer' && (
             <div className="space-y-4">
+              {/* Instructions at top */}
+              <div className="rounded-lg bg-muted/50 border p-4 space-y-2">
+                <p className="font-medium">Show this QR code to the receiver</p>
+                <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
+                  <li>Receiver opens this app and goes to <span className="font-medium text-foreground">Receive</span> tab</li>
+                  <li>Receiver scans this QR code (or pastes the copied data)</li>
+                  <li>Receiver shows you their response QR code</li>
+                  <li>You scan/paste their response below</li>
+                </ol>
+              </div>
+
+              {/* QR code */}
               <QRDisplay data={offerData} clipboardData={clipboardData || ''} />
-              <QRInput onSubmit={submitAnswer} expectedType="answer" />
+
+              {/* Input for receiver's response */}
+              <div className="pt-2 border-t">
+                <p className="text-sm font-medium mb-3">Scan or paste receiver's response</p>
+                <QRInput onSubmit={submitAnswer} expectedType="answer" />
+              </div>
             </div>
           )}
 
-          {/* Transfer progress */}
-          <TransferStatus
-            state={state}
-            betweenProgressAndChunks={
-              isNostr && pin && state.status === 'waiting_for_receiver'
-                ? <PinDisplay pin={pin} passkeyFingerprint={null} onExpire={handleCancel} />
-                : undefined
-            }
-          />
+          {/* Manual mode: other states (connecting, transferring, etc.) */}
+          {!isNostr && state.status !== 'showing_offer' && (
+            <TransferStatus state={state} />
+          )}
+
+          {/* Nostr mode: Transfer progress */}
+          {isNostr && (
+            <TransferStatus
+              state={state}
+              betweenProgressAndChunks={
+                pin && state.status === 'waiting_for_receiver'
+                  ? <PinDisplay pin={pin} passkeyFingerprint={null} onExpire={handleCancel} />
+                  : undefined
+              }
+            />
+          )}
 
           {/* Sender fingerprint in passkey mode */}
           {isNostr && ownFingerprint && config.usePasskey && (
