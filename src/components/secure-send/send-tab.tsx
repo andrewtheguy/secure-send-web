@@ -401,21 +401,6 @@ export function SendTab() {
             </div>
           )}
 
-          {/* How it works info box */}
-          <div className="rounded-lg bg-gradient-to-br from-primary/5 to-accent/5 border border-primary/10 p-4">
-            <div className="flex items-start gap-3">
-              <div className="rounded-full bg-primary/10 p-2">
-                <Info className="h-4 w-4 text-primary" />
-              </div>
-              <div className="text-sm">
-                <p className="font-medium mb-1">How it works</p>
-                <p className="text-muted-foreground">
-                  Your files are encrypted on your device before sending. Share a PIN with your recipient—only they can decrypt and receive your files.
-                </p>
-              </div>
-            </div>
-          </div>
-
           {/* Connection method toggle - visible on main UI */}
           <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/30">
             <div className="flex items-center gap-3">
@@ -445,6 +430,23 @@ export function SendTab() {
                 if (!checked) setRelayOnly(false)
               }}
             />
+          </div>
+
+          {/* How it works info box */}
+          <div className="rounded-lg bg-gradient-to-br from-primary/5 to-accent/5 border border-primary/10 p-4">
+            <div className="flex items-start gap-3">
+              <div className="rounded-full bg-primary/10 p-2">
+                <Info className="h-4 w-4 text-primary" />
+              </div>
+              <div className="text-sm">
+                <p className="font-medium mb-1">How it works</p>
+                <p className="text-muted-foreground">
+                  {methodChoice === 'nostr'
+                    ? 'Your files are encrypted on your device before sending. Share a PIN with your recipient—only they can decrypt and receive your files.'
+                    : 'Your files are encrypted on your device before sending. Exchange QR codes with your recipient to establish a secure connection.'}
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Advanced Options */}
