@@ -442,7 +442,7 @@ export function SendTab() {
                 <p className="font-medium mb-1">How it works</p>
                 <p className="text-muted-foreground">
                   {methodChoice === 'nostr'
-                    ? <>Share a PIN with your recipient—only they can decrypt and receive your files.<br />Your files are encrypted on your device before sending.<br />No internet? Toggle above for manual QR exchange.</>
+                    ? <>Share a PIN with your recipient—only they can decrypt and receive your files.<br />Your files are encrypted on your device before sending.<br />Poor or no internet? Toggle above for manual QR exchange.</>
                     : <>Exchange QR codes with your recipient to establish a secure connection.<br />Your files are encrypted on your device before sending.</>}
                 </p>
               </div>
