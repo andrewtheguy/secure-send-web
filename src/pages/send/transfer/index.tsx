@@ -4,7 +4,7 @@ import { Loader2, AlertTriangle, QrCode, CheckCircle2, RotateCcw } from 'lucide-
 import { Button } from '@/components/ui/button'
 import { useSend } from '@/contexts/send-context'
 import { useNostrSend, type UseNostrSendReturn } from '@/hooks/use-nostr-send'
-import { useManualSend, type UseManualSendReturn, type ManualTransferState } from '@/hooks/use-manual-send'
+import { useManualSend, type UseManualSendReturn } from '@/hooks/use-manual-send'
 import { PinDisplay } from '@/components/secure-send/pin-display'
 import { TransferStatus } from '@/components/secure-send/transfer-status'
 import { QRDisplay } from '@/components/secure-send/qr-display'
@@ -18,11 +18,6 @@ type TransferStep = 'checking' | 'compressing' | 'ready' | 'active' | 'complete'
 type ActiveHook =
   | { type: 'nostr'; hook: UseNostrSendReturn }
   | { type: 'manual'; hook: UseManualSendReturn }
-
-// Type guard to check if state is ManualTransferState
-function isManualState(state: unknown): state is ManualTransferState {
-  return typeof state === 'object' && state !== null && 'status' in state
-}
 
 export function SendTransferPage() {
   const navigate = useNavigate()
@@ -55,10 +50,8 @@ export function SendTransferPage() {
   const pin = activeHook.type === 'nostr' ? activeHook.hook.pin : null
   const ownFingerprint = activeHook.type === 'nostr' ? activeHook.hook.ownFingerprint : null
 
-  // Manual-specific properties (type-safe access)
-  const manualState = activeHook.type === 'manual' && isManualState(activeHook.hook.state)
-    ? activeHook.hook.state
-    : null
+  // Manual-specific properties (type-safe access via discriminated union)
+  const manualState = activeHook.type === 'manual' ? activeHook.hook.state : null
   const offerData = manualState?.offerData
   const clipboardData = manualState?.clipboardData
   const submitAnswer = activeHook.type === 'manual' ? activeHook.hook.submitAnswer : undefined
@@ -167,7 +160,7 @@ export function SendTransferPage() {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: sync step with hook completion
       setStep('complete')
     } else if (state.status === 'error') {
-      setError((state as { error?: string }).error || 'Transfer failed')
+      setError(state.message ?? 'Transfer failed')
       setStep('error')
     }
   }, [state])
@@ -196,10 +189,18 @@ export function SendTransferPage() {
   }, [config, setConfig, cancel])
 
   const handleRetry = useCallback(() => {
+    // Cancel any in-flight transfer before retrying
+    if (startedRef.current) {
+      try {
+        cancel()
+      } catch (err) {
+        console.error('Failed to cancel transfer:', err)
+      }
+    }
     startedRef.current = false
     setStep('checking')
     setError(null)
-  }, [])
+  }, [cancel])
 
   const handleSendAnother = useCallback(() => {
     cancel()
