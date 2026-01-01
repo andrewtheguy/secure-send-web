@@ -43,13 +43,13 @@ interface TransferStateBase {
 }
 
 // Error state has required message
-interface TransferStateError extends TransferStateBase {
+export interface TransferStateError extends TransferStateBase {
   status: 'error'
   message: string
 }
 
 // All other states have optional message
-interface TransferStateOther extends TransferStateBase {
+export interface TransferStateOther extends TransferStateBase {
   status: Exclude<TransferStatus, 'error'>
   message?: string
 }
