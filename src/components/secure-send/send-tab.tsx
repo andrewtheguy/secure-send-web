@@ -97,6 +97,7 @@ export function SendTab() {
   // Reset pairingKeyCameraReady when scanner closes
   useEffect(() => {
     if (!showPairingKeyQRScanner) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset camera state when scanner closes
       setPairingKeyCameraReady(false)
     }
   }, [showPairingKeyQRScanner])
@@ -104,6 +105,7 @@ export function SendTab() {
   // Reset pairingKeyCameraReady when camera selection changes while scanner is open
   useEffect(() => {
     if (showPairingKeyQRScanner) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset camera state when switching cameras
       setPairingKeyCameraReady(false)
     }
   }, [selectedPairingKeyCamera, showPairingKeyQRScanner])
@@ -114,6 +116,7 @@ export function SendTab() {
 
     const input = receiverPublicKeyInput.trim()
     if (!input) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Clear validation state when input is empty
       setParsedPairingKey(null)
       setReceiverPublicKeyError(null)
       return
@@ -150,6 +153,7 @@ export function SendTab() {
   // Load saved pairing keys when passkey mode is enabled
   useEffect(() => {
     if (usePasskey) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Load data from localStorage when feature enabled
       setSavedPairingKeys(getSavedPairingKeys())
     }
   }, [usePasskey])
