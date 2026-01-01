@@ -3,7 +3,7 @@ import {
   createContext,
   useContext,
   useState,
-  useCallback,
+  useMemo,
   type ReactNode,
 } from 'react'
 import type { ParsedPairingKey } from '@/lib/crypto/pairing-key'
@@ -53,39 +53,34 @@ interface SendProviderProps {
 }
 
 export function SendProvider({ children }: SendProviderProps) {
-  const [config, setConfigState] = useState<SendConfig | null>(null)
+  const [config, setConfig] = useState<SendConfig | null>(null)
 
-  const setConfig = useCallback((newConfig: SendConfig) => {
-    setConfigState(newConfig)
-  }, [])
+  // Memoize context value to prevent unnecessary consumer re-renders
+  // setConfig from useState is stable, clearConfig is defined inline since useMemo stabilizes it
+  const value = useMemo<SendContextState>(() => {
+    const hasConfig = config !== null
 
-  const clearConfig = useCallback(() => {
-    setConfigState(null)
-  }, [])
+    const totalFileSize = config
+      ? config.folderFiles
+        ? Array.from(config.folderFiles).reduce((sum, f) => sum + f.size, 0)
+        : config.selectedFiles.reduce((sum, f) => sum + f.size, 0)
+      : 0
 
-  // Computed values
-  const hasConfig = config !== null
+    const fileCount = config
+      ? config.folderFiles
+        ? config.folderFiles.length
+        : config.selectedFiles.length
+      : 0
 
-  const totalFileSize = config
-    ? config.folderFiles
-      ? Array.from(config.folderFiles).reduce((sum, f) => sum + f.size, 0)
-      : config.selectedFiles.reduce((sum, f) => sum + f.size, 0)
-    : 0
-
-  const fileCount = config
-    ? config.folderFiles
-      ? config.folderFiles.length
-      : config.selectedFiles.length
-    : 0
-
-  const value: SendContextState = {
-    config,
-    setConfig,
-    clearConfig,
-    hasConfig,
-    totalFileSize,
-    fileCount,
-  }
+    return {
+      config,
+      setConfig,
+      clearConfig: () => setConfig(null),
+      hasConfig,
+      totalFileSize,
+      fileCount,
+    }
+  }, [config])
 
   return <SendContext.Provider value={value}>{children}</SendContext.Provider>
 }
