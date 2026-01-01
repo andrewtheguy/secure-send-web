@@ -4,6 +4,7 @@ import {
   useContext,
   useState,
   useMemo,
+  useCallback,
   type ReactNode,
 } from 'react'
 import type { ParsedPairingKey } from '@/lib/crypto/pairing-key'
@@ -55,8 +56,10 @@ interface SendProviderProps {
 export function SendProvider({ children }: SendProviderProps) {
   const [config, setConfig] = useState<SendConfig | null>(null)
 
+  // Stable clearConfig reference for consumers
+  const clearConfig = useCallback(() => setConfig(null), [])
+
   // Memoize context value to prevent unnecessary consumer re-renders
-  // setConfig from useState is stable, clearConfig is defined inline since useMemo stabilizes it
   const value = useMemo<SendContextState>(() => {
     const hasConfig = config !== null
 
@@ -75,12 +78,12 @@ export function SendProvider({ children }: SendProviderProps) {
     return {
       config,
       setConfig,
-      clearConfig: () => setConfig(null),
+      clearConfig,
       hasConfig,
       totalFileSize,
       fileCount,
     }
-  }, [config])
+  }, [config, clearConfig])
 
   return <SendContext.Provider value={value}>{children}</SendContext.Provider>
 }
