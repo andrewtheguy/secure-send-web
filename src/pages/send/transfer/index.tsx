@@ -219,11 +219,6 @@ export function SendTransferPage() {
       {/* Active transfer */}
       {step === 'active' && (
         <>
-          {/* PIN display for Nostr mode */}
-          {isNostr && pin && state.status === 'waiting_for_receiver' && (
-            <PinDisplay pin={pin} passkeyFingerprint={null} onExpire={handleCancel} />
-          )}
-
           {/* QR display/input for Manual mode */}
           {!isNostr && offerData && state.status === 'showing_offer' && (
             <div className="space-y-4">
