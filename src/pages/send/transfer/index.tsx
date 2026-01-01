@@ -1,10 +1,10 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, AlertTriangle, QrCode, CheckCircle2, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSend } from '@/contexts/send-context'
-import { useNostrSend } from '@/hooks/use-nostr-send'
-import { useManualSend } from '@/hooks/use-manual-send'
+import { useNostrSend, type UseNostrSendReturn } from '@/hooks/use-nostr-send'
+import { useManualSend, type UseManualSendReturn, type ManualTransferState } from '@/hooks/use-manual-send'
 import { PinDisplay } from '@/components/secure-send/pin-display'
 import { TransferStatus } from '@/components/secure-send/transfer-status'
 import { QRDisplay } from '@/components/secure-send/qr-display'
@@ -13,6 +13,16 @@ import { compressFilesToZip, getFolderName } from '@/lib/folder-utils'
 import { testRelayAvailability } from '@/lib/nostr'
 
 type TransferStep = 'checking' | 'compressing' | 'ready' | 'active' | 'complete' | 'error' | 'nostr_unavailable'
+
+// Discriminated union for type-safe hook access
+type ActiveHook =
+  | { type: 'nostr'; hook: UseNostrSendReturn }
+  | { type: 'manual'; hook: UseManualSendReturn }
+
+// Type guard to check if state is ManualTransferState
+function isManualState(state: unknown): state is ManualTransferState {
+  return typeof state === 'object' && state !== null && 'status' in state
+}
 
 export function SendTransferPage() {
   const navigate = useNavigate()
@@ -28,20 +38,30 @@ export function SendTransferPage() {
 
   const startedRef = useRef(false)
 
-  // Determine which hook to use based on config
+  // Determine which hook to use based on config with discriminated union
   const isNostr = config?.methodChoice === 'nostr'
-  const activeHook = isNostr ? nostrHook : manualHook
+  const activeHook: ActiveHook = useMemo(
+    () => isNostr
+      ? { type: 'nostr', hook: nostrHook }
+      : { type: 'manual', hook: manualHook },
+    [isNostr, nostrHook, manualHook]
+  )
 
-  // Extract state from active hook
-  const { state, cancel } = activeHook
-  const pin = isNostr && 'pin' in activeHook ? activeHook.pin : null
-  const ownFingerprint = isNostr && 'ownFingerprint' in activeHook ? activeHook.ownFingerprint : null
+  // Extract common state from active hook
+  const state = activeHook.hook.state
+  const cancel = activeHook.hook.cancel
 
-  // Manual mode specific state
-  const rawState = state as unknown as Record<string, unknown>
-  const offerData = rawState.offerData instanceof Uint8Array ? rawState.offerData : undefined
-  const clipboardData = typeof rawState.clipboardData === 'string' ? rawState.clipboardData : undefined
-  const submitAnswer = !isNostr ? manualHook.submitAnswer : undefined
+  // Nostr-specific properties (type-safe access)
+  const pin = activeHook.type === 'nostr' ? activeHook.hook.pin : null
+  const ownFingerprint = activeHook.type === 'nostr' ? activeHook.hook.ownFingerprint : null
+
+  // Manual-specific properties (type-safe access)
+  const manualState = activeHook.type === 'manual' && isManualState(activeHook.hook.state)
+    ? activeHook.hook.state
+    : null
+  const offerData = manualState?.offerData
+  const clipboardData = manualState?.clipboardData
+  const submitAnswer = activeHook.type === 'manual' ? activeHook.hook.submitAnswer : undefined
 
   // Redirect if no config
   useEffect(() => {
@@ -114,20 +134,19 @@ export function SendTransferPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: sync step state when starting transfer
     setStep('active')
 
-    const options = config.usePasskey
-      ? {
-          receiverPairingKey: config.receiverPublicKeyInput || undefined,
-          selfTransfer: config.sendToSelf,
-          relayOnly: config.relayOnly,
-        }
-      : { relayOnly: config.relayOnly }
-
-    if (isNostr) {
-      nostrHook.send(compressedFile, options)
+    if (activeHook.type === 'nostr') {
+      const options = config.usePasskey
+        ? {
+            receiverPairingKey: config.receiverPublicKeyInput || undefined,
+            selfTransfer: config.sendToSelf,
+            relayOnly: config.relayOnly,
+          }
+        : { relayOnly: config.relayOnly }
+      activeHook.hook.send(compressedFile, options)
     } else {
-      manualHook.send(compressedFile)
+      activeHook.hook.send(compressedFile)
     }
-  }, [step, compressedFile, config, isNostr, nostrHook, manualHook])
+  }, [step, compressedFile, config, activeHook])
 
   // Track completion - sync local step with hook state
   useEffect(() => {
