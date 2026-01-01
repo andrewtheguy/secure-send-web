@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Shield, Zap, Globe, Lock, Fingerprint } from 'lucide-react'
+import { Shield, Zap, Globe, Lock, Fingerprint, Download } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { SendTab } from './send-tab'
 import { ReceiveTab } from './receive-tab'
 import { generateTextQRCode } from '@/lib/qr-utils'
+import { Link } from 'react-router-dom'
 
 type SecureSendView = 'send' | 'receive' | 'about'
 
@@ -77,7 +78,18 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
       <CardHeader>
         <CardTitle className={getTitleClassName()}>{getTitle()}</CardTitle>
         <CardDescription>
-          {view === 'send' && 'Share files or folders securely with end-to-end encryption.'}
+          {view === 'send' && (
+            <span className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+              <span>Share files or folders securely with end-to-end encryption.</span>
+              <Link
+                to="/receive"
+                className="inline-flex items-center gap-1 text-primary hover:underline whitespace-nowrap"
+              >
+                <Download className="h-3 w-3" />
+                <span>Receive files instead</span>
+              </Link>
+            </span>
+          )}
           {view === 'receive' && 'Enter a PIN to securely receive files or messages.'}
           {view === 'about' && 'Learn how Secure Send works and what keeps it secure.'}
         </CardDescription>

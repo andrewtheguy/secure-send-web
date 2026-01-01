@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import { Navbar } from '@/components/navbar'
 import { Footer } from '@/components/footer'
 import { SendPage } from '@/pages/send'
+import { SendLayout } from '@/pages/send/layout'
 import { ReceivePage } from '@/pages/receive'
 import { AboutPage } from '@/pages/about'
 import {
@@ -14,6 +15,8 @@ import {
   PasskeyRequestPage,
   PasskeyVerifyPage,
 } from '@/pages/passkey'
+import { SendTransferLayout } from '@/pages/send/transfer/layout'
+import { SendTransferPage } from '@/pages/send/transfer'
 import { NotFoundPage } from '@/pages/not-found'
 
 function App() {
@@ -22,7 +25,13 @@ function App() {
       <Navbar />
       <main className="flex-1 px-6 py-10">
         <Routes>
-          <Route path="/" element={<SendPage />} />
+          {/* Send routes wrapped with SendLayout */}
+          <Route element={<SendLayout />}>
+            <Route path="/" element={<SendPage />} />
+            <Route path="/send/transfer" element={<SendTransferLayout />}>
+              <Route index element={<SendTransferPage />} />
+            </Route>
+          </Route>
           <Route path="/receive" element={<ReceivePage />} />
           <Route path="/passkey" element={<PasskeyLayout />}>
             <Route index element={<PasskeyIndexPage />} />

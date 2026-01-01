@@ -315,8 +315,8 @@ export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProp
     <div className="flex flex-col gap-4 p-6 rounded-lg bg-muted/50 border">
       {/* Header with timer */}
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-          Share this PIN with the receiver
+        <h3 className="text-sm font-medium">
+          Share this PIN with the receiver{!useWords && ' (case sensitive)'}
         </h3>
         <div className="flex items-center gap-2 text-sm">
           <Clock className="h-4 w-4 text-amber-600" />
@@ -415,8 +415,8 @@ export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProp
             </>
           ) : (
             <>
-              <p className="text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">Character PIN is shorter to type</span> but case sensitive
+              <p className="text-xs font-medium text-foreground">
+                Character PIN is shorter to type but case sensitive
               </p>
               <p className="text-xs text-muted-foreground">
                 Best for secure messaging apps. For voice calls, consider using words instead

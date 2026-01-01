@@ -1,27 +1,20 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, X, RotateCcw, FileUp, Upload, Cloud, FolderUp, Loader2, ChevronDown, ChevronRight, QrCode, AlertTriangle, Info, Fingerprint, ArrowRight, Keyboard, Camera, RefreshCw } from 'lucide-react'
+import { Send, X, FileUp, Upload, FolderUp, Loader2, ChevronDown, ChevronRight, Info, Fingerprint, ArrowRight, Keyboard, Camera, RefreshCw, Wifi, WifiOff, Cloud } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { PinDisplay } from './pin-display'
-import { TransferStatus } from './transfer-status'
-import { QRDisplay } from './qr-display'
-import { QRInput } from './qr-input'
-import { useNostrSend } from '@/hooks/use-nostr-send'
-import { useManualSend } from '@/hooks/use-manual-send'
 import { MAX_MESSAGE_SIZE } from '@/lib/crypto'
 import { formatFileSize } from '@/lib/file-utils'
-import { compressFilesToZip, getFolderName, getTotalSize, supportsFolderSelection } from '@/lib/folder-utils'
-import type { SignalingMethod } from '@/lib/nostr/types'
-import { Link } from 'react-router-dom'
+import { getTotalSize, supportsFolderSelection, getFolderName } from '@/lib/folder-utils'
+import { Link, useNavigate } from 'react-router-dom'
 import { formatFingerprint } from '@/lib/crypto/ecdh'
 import { isPairingKeyFormat, parsePairingKey, type ParsedPairingKey } from '@/lib/crypto/pairing-key'
-import { getSavedPairingKeys, savePairingKey, type SavedPairingKey } from '@/lib/saved-pairing-keys'
+import { getSavedPairingKeys, type SavedPairingKey } from '@/lib/saved-pairing-keys'
 import { useQRScanner } from '@/hooks/useQRScanner'
 import { isMobileDevice } from '@/lib/utils'
+import { useSend } from '@/contexts/send-context'
 
 type ContentMode = 'file' | 'folder'
 type MethodChoice = 'nostr' | 'manual'
@@ -35,19 +28,18 @@ declare module 'react' {
 }
 
 export function SendTab() {
+  const navigate = useNavigate()
+  const { setConfig } = useSend()
+
   const [mode, setMode] = useState<ContentMode>('file')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [methodChoice, setMethodChoice] = useState<MethodChoice>('nostr')
   const [usePasskey, setUsePasskey] = useState(false)
   const [sendToSelf, setSendToSelf] = useState(false)
-  const [activeMethod, setActiveMethod] = useState<SignalingMethod | null>(null)
   const [relayOnly, setRelayOnly] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [folderFiles, setFolderFiles] = useState<FileList | null>(null) // Keep FileList for folder to preserve paths
-  const [isCompressing, setIsCompressing] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
-  const [checkingNostr, setCheckingNostr] = useState(false)
-  const [nostrUnavailable, setNostrUnavailable] = useState(false)
   const [receiverPublicKeyInput, setReceiverPublicKeyInput] = useState('')
   const [receiverPublicKeyError, setReceiverPublicKeyError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -105,6 +97,7 @@ export function SendTab() {
   // Reset pairingKeyCameraReady when scanner closes
   useEffect(() => {
     if (!showPairingKeyQRScanner) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset camera state when scanner closes
       setPairingKeyCameraReady(false)
     }
   }, [showPairingKeyQRScanner])
@@ -112,6 +105,7 @@ export function SendTab() {
   // Reset pairingKeyCameraReady when camera selection changes while scanner is open
   useEffect(() => {
     if (showPairingKeyQRScanner) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset camera state when switching cameras
       setPairingKeyCameraReady(false)
     }
   }, [selectedPairingKeyCamera, showPairingKeyQRScanner])
@@ -122,6 +116,7 @@ export function SendTab() {
 
     const input = receiverPublicKeyInput.trim()
     if (!input) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Clear validation state when input is empty
       setParsedPairingKey(null)
       setReceiverPublicKeyError(null)
       return
@@ -158,179 +153,36 @@ export function SendTab() {
   // Load saved pairing keys when passkey mode is enabled
   useEffect(() => {
     if (usePasskey) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Load data from localStorage when feature enabled
       setSavedPairingKeys(getSavedPairingKeys())
     }
   }, [usePasskey])
-
-  // All hooks must be called unconditionally (React rules)
-  const nostrHook = useNostrSend()
-  const manualHook = useManualSend()
-
-  // Use the appropriate hook based on active method (defaults to nostr before detection)
-  const activeHook = activeMethod === 'manual' ? manualHook : nostrHook
-
-  // Only nostr hook has PIN - use runtime check for type safety
-  const pin: string | null =
-    activeMethod !== 'manual' && 'pin' in activeHook && typeof activeHook.pin === 'string'
-      ? activeHook.pin
-      : null
-  // Only nostr hook has ownFingerprint for mutual trust mode
-  const senderFingerprint: string | null =
-    activeMethod === 'nostr' && 'ownFingerprint' in activeHook && typeof activeHook.ownFingerprint === 'string'
-      ? activeHook.ownFingerprint
-      : null
-  const { state: rawState, cancel } = activeHook
-  const submitAnswer = activeMethod === 'manual' ? manualHook.submitAnswer : undefined
-
-  // Runtime normalization for manual-mode specific properties
-  const state = rawState
-  const rawStateAny = rawState as unknown as Record<string, unknown>
-  const offerData: Uint8Array | undefined =
-    rawStateAny.offerData instanceof Uint8Array ? rawStateAny.offerData : undefined
-  const clipboardData: string | undefined =
-    typeof rawStateAny.clipboardData === 'string' ? rawStateAny.clipboardData : undefined
-
-  // Save pairing key to localStorage on successful transfer (passkey mode with pairing key)
-  useEffect(() => {
-    if (
-      state.status === 'complete' &&
-      usePasskey &&
-      !sendToSelf &&
-      parsedPairingKey &&
-      receiverPublicKeyInput.trim()
-    ) {
-      savePairingKey(
-        receiverPublicKeyInput.trim(),
-        parsedPairingKey.partyAFingerprint,
-        parsedPairingKey.partyBFingerprint,
-        parsedPairingKey.comment
-      )
-      // Refresh saved pairing keys list
-      setSavedPairingKeys(getSavedPairingKeys())
-    }
-  }, [state.status, usePasskey, sendToSelf, parsedPairingKey, receiverPublicKeyInput])
 
   const filesTotalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0)
   const folderTotalSize = folderFiles ? getTotalSize(folderFiles) : 0
   const isFilesOverLimit = filesTotalSize > MAX_MESSAGE_SIZE
   const isFolderOverLimit = folderTotalSize > MAX_MESSAGE_SIZE
 
-  const canSendFiles = selectedFiles.length > 0 && !isFilesOverLimit && state.status === 'idle' && !isCompressing
-  const canSendFolder = folderFiles && folderFiles.length > 0 && !isFolderOverLimit && state.status === 'idle' && !isCompressing
+  const canSendFiles = selectedFiles.length > 0 && !isFilesOverLimit
+  const canSendFolder = folderFiles && folderFiles.length > 0 && !isFolderOverLimit
   // When passkey mode is enabled, require valid receiver pairing key OR sendToSelf
   const passkeyRequirementsMet = !usePasskey || sendToSelf || (parsedPairingKey !== null)
   const canSend = (mode === 'file' ? canSendFiles : canSendFolder) && passkeyRequirementsMet
 
-  const handleSend = async () => {
-    // Use the user's selected method
-    const methodToUse = methodChoice
-
-    // Check Nostr availability if that method is selected
-    if (methodToUse === 'nostr') {
-      setCheckingNostr(true)
-      setNostrUnavailable(false)
-      try {
-        const { testRelayAvailability } = await import('@/lib/nostr')
-        const nostrResult = await testRelayAvailability()
-
-        if (!nostrResult.available) {
-          // Nostr unavailable - suggest user to switch to manual mode
-          console.log('Nostr unavailable, suggesting manual mode', nostrResult)
-          setCheckingNostr(false)
-          setNostrUnavailable(true)
-          return
-        }
-        console.log('Nostr available', nostrResult)
-      } catch (error) {
-        // If test fails, suggest manual mode
-        console.error('Nostr availability test failed:', error)
-        setCheckingNostr(false)
-        setNostrUnavailable(true)
-        return
-      }
-      setCheckingNostr(false)
-    }
-
-    setActiveMethod(methodToUse)
-
-    // Only Nostr hook supports relayOnly and usePasskey options
-    // Pass receiver pairing key when in passkey mode (unless sending to self)
-    // Pairing key will be verified at send time when passkey authenticates
-    const sendOptions = methodToUse === 'nostr'
-      ? {
-          relayOnly,
-          usePasskey,
-          selfTransfer: usePasskey && sendToSelf,
-          receiverPairingKey: usePasskey && !sendToSelf && receiverPublicKeyInput.trim() ? receiverPublicKeyInput.trim() : undefined,
-        }
-      : undefined
-
-    const doSend = (content: File) => {
-      if (methodToUse === 'nostr') {
-        nostrHook.send(content, sendOptions)
-      } else {
-        manualHook.send(content)
-      }
-    }
-
-    if (mode === 'file' && canSendFiles) {
-      // Single file: send directly
-      if (selectedFiles.length === 1) {
-        doSend(selectedFiles[0])
-        return
-      }
-      // Multiple files: compress to ZIP
-      setIsCompressing(true)
-      try {
-        const dataTransfer = new DataTransfer()
-        selectedFiles.forEach(f => dataTransfer.items.add(f))
-        const zipFile = await compressFilesToZip(dataTransfer.files, 'files')
-        setIsCompressing(false)
-        doSend(zipFile)
-      } catch (err) {
-        setIsCompressing(false)
-        console.error('Failed to compress files:', err)
-      }
-    } else if (mode === 'folder' && canSendFolder && folderFiles) {
-      setIsCompressing(true)
-      try {
-        const archiveName = getFolderName(folderFiles)
-        const zipFile = await compressFilesToZip(folderFiles, archiveName)
-        setIsCompressing(false)
-        doSend(zipFile)
-      } catch (err) {
-        setIsCompressing(false)
-        console.error('Failed to compress folder:', err)
-      }
-    }
-  }
-
-  const handleReset = () => {
-    nostrHook.cancel()
-    manualHook.cancel()
-    setSelectedFiles([])
-    setFolderFiles(null)
-    setActiveMethod(null)
-    setNostrUnavailable(false)
-    setReceiverPublicKeyInput('')
-    setReceiverPublicKeyError(null)
-    setParsedPairingKey(null)
-    setSendToSelf(false)
-    setLoadedFromHistory(false)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-    if (folderInputRef.current) folderInputRef.current.value = ''
-  }
-
-  const handleSwitchToManual = () => {
-    setNostrUnavailable(false)
-    setMethodChoice('manual')
-    setShowAdvanced(true) // Show advanced options so user sees the change
-  }
-
-  const handleRetryNostr = () => {
-    setNostrUnavailable(false)
-    // Re-trigger send which will re-check availability
-    handleSend()
+  const handleSend = () => {
+    // Set context with all the configuration
+    setConfig({
+      selectedFiles,
+      folderFiles,
+      methodChoice,
+      usePasskey,
+      relayOnly,
+      sendToSelf,
+      parsedPairingKey,
+      receiverPublicKeyInput: receiverPublicKeyInput.trim(),
+    })
+    // Navigate to transfer page
+    navigate('/send/transfer')
   }
 
   const addFiles = useCallback((files: File[]) => {
@@ -393,15 +245,8 @@ export function SendTab() {
     }
   }, [])
 
-  const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
-  const showPinDisplay = pin && state.status === 'waiting_for_receiver'
-  const showQRDisplay = activeMethod === 'manual' && offerData && state.status === 'showing_offer'
-  const showQRInput = activeMethod === 'manual' && state.status === 'showing_offer'
-
   return (
     <div className="space-y-4 pt-4">
-      {state.status === 'idle' ? (
-        <>
           {supportsFolderSelection && (
             <Tabs value={mode} onValueChange={(v) => setMode(v as ContentMode)}>
               <TabsList className="grid w-full grid-cols-2">
@@ -419,12 +264,7 @@ export function SendTab() {
 
           {mode === 'file' && (
             <div className="space-y-2">
-              {isCompressing ? (
-                <div className="min-h-[200px] border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-3 border-muted-foreground/25">
-                  <Loader2 className="h-10 w-10 text-muted-foreground animate-spin" />
-                  <p className="font-medium">Compressing to ZIP...</p>
-                </div>
-              ) : selectedFiles.length > 0 ? (
+              {selectedFiles.length > 0 ? (
                 <div className="space-y-2">
                   {/* File list */}
                   <div className="max-h-[160px] overflow-y-auto space-y-1 border rounded-lg p-2">
@@ -509,14 +349,7 @@ export function SendTab() {
                   ${folderFiles ? 'bg-muted/50' : ''}
                 `}
               >
-                {isCompressing ? (
-                  <>
-                    <Loader2 className="h-10 w-10 text-muted-foreground animate-spin" />
-                    <div className="text-center">
-                      <p className="font-medium">Compressing to ZIP...</p>
-                    </div>
-                  </>
-                ) : folderFiles ? (
+                {folderFiles ? (
                   <>
                     <FolderUp className="h-10 w-10 text-muted-foreground" />
                     <div className="text-center">
@@ -583,6 +416,37 @@ export function SendTab() {
             </div>
           </div>
 
+          {/* Work offline toggle - visible on main UI */}
+          <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/30">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-full ${methodChoice === 'manual' ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-green-100 dark:bg-green-900/30'}`}>
+                {methodChoice === 'manual' ? (
+                  <WifiOff className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                ) : (
+                  <Wifi className="h-4 w-4 text-green-600 dark:text-green-400" />
+                )}
+              </div>
+              <div>
+                <Label htmlFor="work-offline" className="text-sm font-medium cursor-pointer">
+                  Work offline
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {methodChoice === 'manual'
+                    ? 'Uses QR codes. Both devices must be on the same network.'
+                    : 'Connected to relay servers for easy transfers.'}
+                </p>
+              </div>
+            </div>
+            <Switch
+              id="work-offline"
+              checked={methodChoice === 'manual'}
+              onCheckedChange={(checked) => {
+                setMethodChoice(checked ? 'manual' : 'nostr')
+                if (checked) setRelayOnly(false)
+              }}
+            />
+          </div>
+
           {/* Advanced Options */}
           <div className="border rounded-lg overflow-hidden">
             <button
@@ -592,47 +456,24 @@ export function SendTab() {
             >
               {showAdvanced ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
               Advanced Options
-              {methodChoice !== 'nostr' && (
-                <span className="ml-auto text-xs bg-muted px-2 py-0.5 rounded">
-                  Manual
+              {usePasskey && (
+                <span className="ml-auto text-xs bg-primary/10 text-primary px-2 py-0.5 rounded">
+                  Passkey
                 </span>
               )}
             </button>
             {showAdvanced && (
-              <div className="p-3 pt-0 space-y-2 border-t">
-                <Label className="text-sm font-medium">Signaling Method</Label>
-                <RadioGroup
-                  value={methodChoice}
-                  onValueChange={(v) => {
-                    const nextMethod = v as MethodChoice
-                    setMethodChoice(nextMethod)
-                    if (nextMethod === 'manual') {
-                      setRelayOnly(false)
-                    }
-                  }}
-                  className="flex flex-wrap gap-4"
-                >
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="nostr" id="nostr" />
-                    <Label htmlFor="nostr" className="text-sm font-normal cursor-pointer">
-                      Nostr
-                    </Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="manual" id="manual" />
-                    <Label htmlFor="manual" className="text-sm font-normal cursor-pointer flex items-center gap-1">
-                      <QrCode className="h-3 w-3" />
-                      Manual
-                    </Label>
-                  </div>
-                </RadioGroup>
+              <div className="p-3 pt-0 space-y-3 border-t">
+                {/* Technical details about current mode */}
                 <p className="text-xs text-muted-foreground">
                   {methodChoice === 'nostr'
-                    ? 'Uses Nostr relays for signaling. Requires internet.'
-                    : 'Manual exchange via QR scan or copy/paste. No internet required. Without internet, devices must be on same local network.'}
+                    ? 'Online mode: Uses Nostr relays for signaling. If P2P fails, encrypted data transfers via cloud.'
+                    : 'Offline mode: Exchange signaling via QR scan or copy/paste. Devices must be on same local network.'}
                 </p>
+
+                {/* Force cloud transfer - only for online mode */}
                 {methodChoice === 'nostr' && (
-                  <div className="flex items-center gap-2 pt-1">
+                  <div className="flex items-center gap-2">
                     <input
                       id="force-cloud-transfer"
                       type="checkbox"
@@ -646,9 +487,14 @@ export function SendTab() {
                   </div>
                 )}
 
-                {/* Passkey toggle - only for Nostr */}
+                {/* Passkey toggle - only for online mode (Nostr) */}
                 {methodChoice === 'nostr' && (
                   <div className="pt-3 border-t space-y-3">
+                    <div className="flex items-center gap-1 mb-2">
+                      <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded">
+                        Power User
+                      </span>
+                    </div>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Fingerprint className="h-4 w-4 text-muted-foreground" />
@@ -719,9 +565,9 @@ export function SendTab() {
                                 </Button>
                                 {showPairingKeyDropdown && (
                                   <div className="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg max-h-48 overflow-y-auto">
-                                    {savedPairingKeys.map((saved, index) => (
+                                    {savedPairingKeys.map((saved) => (
                                       <button
-                                        key={index}
+                                        key={saved.pairingKey}
                                         className="w-full px-3 py-2 text-left hover:bg-muted/50 border-b last:border-b-0 text-xs"
                                         onClick={() => {
                                           setReceiverPublicKeyInput(saved.pairingKey)
@@ -937,132 +783,11 @@ export function SendTab() {
             </div>
           )}
 
-          {checkingNostr && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              <span>Checking Nostr relay availability...</span>
-            </div>
-          )}
-
-          {nostrUnavailable ? (
-            <div className="space-y-3 p-4 border border-amber-500/50 bg-amber-500/10 rounded-lg">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <p className="font-medium text-sm">Nostr Relays Unavailable</p>
-                  <p className="text-xs text-muted-foreground">
-                    Nostr relays are unreachable. You can switch to Manual mode which doesn't require internet - exchange signaling via QR code or copy/paste.
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={handleSwitchToManual} className="flex-1" size="sm">
-                  <QrCode className="mr-2 h-4 w-4" />
-                  Switch to Manual
-                </Button>
-                <Button onClick={handleRetryNostr} variant="outline" size="sm">
-                  Retry
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <Button onClick={() => handleSend()} disabled={!canSend || checkingNostr} className="w-full">
-              <Send className="mr-2 h-4 w-4" />
-              {methodChoice === 'manual' ? 'Generate & Send' : 'Generate Secure PIN'}
-              <ChevronRight className="ml-1 h-3 w-3" />
-            </Button>
-          )}
-        </>
-      ) : (
-        <>
-          {/* Show active method indicator */}
-          {activeMethod && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded">
-              {activeMethod === 'nostr' ? (
-                <>
-                  <Cloud className="h-3 w-3" />
-                  <span>
-                    {relayOnly ? 'Using Nostr with Cloud Transfer Only' : 'Using Nostr'}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <QrCode className="h-3 w-3" />
-                  <span>Using Manual</span>
-                </>
-              )}
-            </div>
-          )}
-
-          <TransferStatus
-            state={state}
-            betweenProgressAndChunks={showPinDisplay ? <PinDisplay pin={pin} passkeyFingerprint={null} onExpire={cancel} /> : undefined}
-          />
-
-          {/* Sender fingerprint display in passkey mode */}
-          {activeMethod === 'nostr' && senderFingerprint && (
-            <div className="text-xs text-muted-foreground border border-cyan-500/30 bg-cyan-50/30 dark:bg-cyan-950/20 px-3 py-2 rounded">
-              <div className="flex items-center gap-2 font-mono">
-                <Fingerprint className="h-3 w-3 text-cyan-600" />
-                <span>Your fingerprint: </span>
-                <span className="font-medium text-cyan-600">
-                  {formatFingerprint(senderFingerprint)}
-                </span>
-              </div>
-              <p className="mt-1 ml-5">Receiver should verify this matches your public ID.</p>
-            </div>
-          )}
-
-          {/* Passkey authentication help */}
-          {state.status === 'connecting' && state.message?.toLowerCase().includes('passkey') && (
-            <div className="text-xs text-muted-foreground border border-primary/20 bg-primary/5 px-3 py-2 rounded space-y-1">
-              <p>A passkey prompt should appear from your browser or password manager.</p>
-              <p>
-                Don't have a passkey yet?{' '}
-                <Link to="/passkey" className="text-primary hover:underline inline-flex items-center gap-1">
-                  Create one here <ArrowRight className="h-3 w-3" />
-                </Link>
-              </p>
-            </div>
-          )}
-
-          {/* QR Code display for sender */}
-          {showQRDisplay && (
-            <QRDisplay
-              data={offerData!}
-              clipboardData={clipboardData}
-              label="Show this QR to receiver"
-            />
-          )}
-
-          {/* QR Input for receiving answer */}
-          {showQRInput && submitAnswer && (
-            <div className="border-t pt-4">
-              <QRInput
-                expectedType="answer"
-                label="Paste receiver's response QR data"
-                onSubmit={submitAnswer}
-              />
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            {isActive && (
-              <Button variant="outline" onClick={cancel} className="flex-1">
-                <X className="mr-2 h-4 w-4" />
-                Cancel
-              </Button>
-            )}
-
-            {(state.status === 'complete' || state.status === 'error') && (
-              <Button variant="outline" onClick={handleReset} className="flex-1">
-                <RotateCcw className="mr-2 h-4 w-4" />
-                Send Another
-              </Button>
-            )}
-          </div>
-        </>
-      )}
+          <Button onClick={handleSend} disabled={!canSend} className="w-full">
+            <Send className="mr-2 h-4 w-4" />
+            {methodChoice === 'manual' ? 'Generate & Send' : 'Generate Secure PIN'}
+            <ChevronRight className="ml-1 h-3 w-3" />
+          </Button>
     </div>
   )
 }

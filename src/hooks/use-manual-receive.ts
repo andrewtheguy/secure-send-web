@@ -17,7 +17,6 @@ import {
   generateMutualClipboardData,
   type SignalingPayload,
 } from '@/lib/manual-signaling'
-import type { TransferState } from '@/lib/nostr/types'
 import type { ReceivedContent } from '@/lib/types'
 
 // Extended transfer status for Manual Exchange receive mode
@@ -31,11 +30,39 @@ export type ManualReceiveStatus =
   | 'complete'
   | 'error'
 
-export interface ManualReceiveState extends Omit<TransferState, 'status'> {
-  status: ManualReceiveStatus
+// Base properties for manual receive state
+interface ManualReceiveStateBase {
+  progress?: {
+    current: number
+    total: number
+  }
+  contentType?: 'file'
+  fileMetadata?: {
+    fileName: string
+    fileSize: number
+    mimeType: string
+  }
+  useWebRTC?: boolean
+  currentRelays?: string[]
+  totalRelays?: number
   answerData?: Uint8Array // Binary data for QR code
   clipboardData?: string // Base64 for copy button
 }
+
+// Error state has required message
+interface ManualReceiveStateError extends ManualReceiveStateBase {
+  status: 'error'
+  message: string
+}
+
+// All other states have optional message
+interface ManualReceiveStateOther extends ManualReceiveStateBase {
+  status: Exclude<ManualReceiveStatus, 'error'>
+  message?: string
+}
+
+// Discriminated union for manual receive state
+export type ManualReceiveState = ManualReceiveStateError | ManualReceiveStateOther
 
 export interface UseManualReceiveReturn {
   state: ManualReceiveState
