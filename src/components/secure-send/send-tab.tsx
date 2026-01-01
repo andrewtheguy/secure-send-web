@@ -432,8 +432,8 @@ export function SendTab() {
                 </Label>
                 <p className="text-xs text-muted-foreground">
                   {methodChoice === 'nostr'
-                    ? 'Connected to relay servers for easy transfers.'
-                    : 'Offline mode: Uses QR codes. Both devices must be nearby.'}
+                    ? 'Connected to relay servers. Toggle off for offline QR exchange.'
+                    : 'Offline mode: Uses QR codes. Both devices must be connected to the same network.'}
                 </p>
               </div>
             </div>
