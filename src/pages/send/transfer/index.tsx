@@ -180,12 +180,20 @@ export function SendTransferPage() {
 
   const handleSwitchToManual = useCallback(() => {
     if (!config) return
+    // Cancel any active Nostr transfer before switching modes
+    if (startedRef.current) {
+      try {
+        cancel()
+      } catch (err) {
+        console.error('Failed to cancel transfer:', err)
+      }
+    }
     // Update config to manual mode and restart the transfer flow
-    setConfig({ ...config, methodChoice: 'manual' })
     startedRef.current = false
+    setConfig({ ...config, methodChoice: 'manual' })
     setStep('checking')
     setError(null)
-  }, [config, setConfig])
+  }, [config, setConfig, cancel])
 
   const handleRetry = useCallback(() => {
     startedRef.current = false
