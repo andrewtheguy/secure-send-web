@@ -414,10 +414,13 @@ export function useManualSend(): UseManualSendReturn {
 
         chunkIndex++
 
-        setState(s => ({
-          ...s,
+        setState({
+          status: 'transferring',
+          message: 'Sending via P2P...',
           progress: { current: end, total: contentBytes.length },
-        }))
+          contentType: 'file',
+          fileMetadata: { fileName, fileSize, mimeType },
+        })
       }
 
       // Send done signal with chunk count
@@ -448,11 +451,10 @@ export function useManualSend(): UseManualSendReturn {
 
     } catch (error) {
       if (!cancelledRef.current) {
-        setState(prevState => ({
-          ...prevState,
+        setState({
           status: 'error',
           message: error instanceof Error ? error.message : 'Failed to send',
-        }))
+        })
       }
     } finally {
       clearExpirationTimeout()
