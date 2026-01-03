@@ -1,6 +1,6 @@
 # Secure Send
 
-A web application for sending encrypted text messages and files using PIN-based signaling protection and optional cloud encryption. Uses WebRTC for direct P2P connections with cloud fallback.
+A web application for sending encrypted files and folders with PIN-based or passkey-based Nostr signaling, plus optional cloud fallback. Uses WebRTC for direct P2P connections.
 
 **Demo:** [https://securesend.kuvi.app/](https://securesend.kuvi.app/)
 
@@ -9,7 +9,7 @@ A web application for sending encrypted text messages and files using PIN-based 
 - **100% Static - No Backend Required**: The entire app is a static site that can be hosted on any static hosting service (GitHub Pages, Netlify, Vercel, S3, etc.). No server-side code, no database, no backend infrastructure needed.
 - **Works offline**: No internet required after page load when using Manual Exchange on same local network
 - **Flexible signaling**: Nostr (default) or Manual Exchange (QR/copy-paste). Manual Exchange works across networks with internet, or on same local network without internet.
-- **PIN-based security**: All signaling payloads are encrypted with the PIN
+- **PIN-based security (Nostr)**: Nostr signaling payloads are encrypted with the PIN
 - **Passkey support**: Use synced passkeys (1Password, iCloud Keychain, Google Password Manager) for passwordless encryption - no PIN memorization needed
 - **File or folder transfer**: Send files or folders up to 100MB
 - **End-to-end encryption**: All transfers use AES-256-GCM encryption
@@ -18,18 +18,10 @@ A web application for sending encrypted text messages and files using PIN-based 
 
 ## How It Works
 
-### Sending a Text Message
+### Sending Files or Folders
 
-1. Select the "Text Message" tab
-2. Enter your message (up to 100MB)
-3. Click "Generate PIN & Send"
-4. Share the generated 12-character PIN or its 7-word equivalent with the receiver through another channel (voice, chat, etc.)
-5. Wait for the receiver to connect and receive the message
-
-### Sending a File
-
-1. Select the "File" tab
-2. Drag and drop a file or click to select (max 100MB)
+1. Select the "File" or "Folder" tab
+2. Drag and drop a file/folder or click to select (max 100MB total)
 3. Click "Generate PIN & Send"
 4. Share the generated 12-character PIN (or 7-word equivalent) with the receiver
 5. Wait for the receiver to connect and receive the file
@@ -38,18 +30,17 @@ A web application for sending encrypted text messages and files using PIN-based 
 
 1. Enter the PIN or the 7-word sequence shared by the sender (signaling method is auto-detected)
 2. Click "Receive"
-3. For text: View and copy the decrypted message
-4. For files: Click "Download File" to save
+3. Click "Download File" to save
 
 ## Security
 
 - **PBKDF2-SHA256** with 600,000 iterations for key derivation (browser-compatible)
 - **AES-256-GCM** authenticated encryption
-- **PIN never transmitted**: Only a hash hint is visible to relays
+- **PIN never transmitted (Nostr)**: Only a hash hint is visible to relays
 - **Passkey security**: Keys derived via WebAuthn PRF extension from device secure hardware (Touch ID, Face ID, Windows Hello, etc.)
 - **Ephemeral identities**: New Nostr keypairs generated per transfer
 - **1-hour expiration**: PIN exchange events expire automatically
-- **QR signaling encryption**: QR payloads are encrypted with the PIN before encoding
+- **Manual exchange signaling**: QR payloads are time-bucketed obfuscated; file data is encrypted with ECDH-derived AES
 
 ## Tech Stack
 
@@ -88,7 +79,7 @@ VITE_USE_HASH=true
 
 ## Transport Layer
 
-All signaling methods share a **unified encryption layer**: content is encrypted in 128KB AES-256-GCM chunks before transmission, regardless of transport. Receivers preallocate buffers and write directly to position for memory efficiency.
+All signaling methods share a **unified encryption layer**: P2P transfers encrypt content in 128KB AES-256-GCM chunks before transmission. Cloud fallback encrypts the whole file, then splits it into 10MB upload chunks.
 
 **Signaling Methods** (sender chooses):
 - **Nostr** (default): Requires internet. Decentralized relay signaling. Devices can be on different networks. Has cloud fallback.
@@ -175,16 +166,14 @@ Upload servers and CORS proxies with automatic failover:
 
 **Upload Servers:**
 - tmpfiles.org
-- litterbox.catbox.moe (1h expiration, upload via CORS proxy)
+- litterbox.catbox.moe (1h expiration, upload via CORS proxy; direct download)
 - uguu.se
 - x0.at
 
 **CORS Proxies (for download):**
-- Direct download (for litterbox URLs)
 - corsproxy.io
 - cors.leverson83.org
 - api.codetabs.com
-- cors-anywhere.com
 - api.allorigins.win
 
 ## Debug

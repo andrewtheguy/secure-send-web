@@ -2,13 +2,13 @@
 
 ## Overview
 
-Secure Send is a browser-based encrypted file and message transfer application. It supports PIN-based or passkey-based encryption for signaling and cloud transfers, two signaling methods (Nostr relays or QR codes), and enables direct P2P (WebRTC) data transfer with optional cloud fallback (Nostr mode only).
+Secure Send is a browser-based encrypted file and folder transfer application. It supports PIN-based or passkey-based encryption for Nostr signaling, a manual exchange method (QR or copy/paste with time-bucketed obfuscation), and direct P2P (WebRTC) data transfer with optional cloud fallback (Nostr mode only).
 
 ## Core Principles
 
 1. **P2P First**: Direct WebRTC connections are always preferred for data transfer.
-2. **Protocol-Agnostic Encryption**: All content is encrypted at the application layer using AES-256-GCM in 128KB chunks, regardless of transport encryption. This provides defense in depth and consistent security across all signaling methods.
-3. **Memory-Efficient Streaming**: Content is encrypted/decrypted in streaming chunks. All receivers (P2P and cloud) preallocate buffers and write directly to calculated positions - no intermediate chunk arrays.
+2. **Protocol-Agnostic Encryption**: P2P content is encrypted at the application layer using AES-256-GCM in 128KB chunks regardless of transport encryption. Cloud fallback encrypts the whole file first, then uploads in 10MB chunks.
+3. **Memory-Efficient Streaming**: P2P receive paths write decrypted chunks directly into a growing buffer. Manual Exchange receive temporarily buffers encrypted chunks before decrypting into a preallocated output buffer.
 4. **Pluggable Signaling**: Signaling (Nostr, QR) is decoupled from the transfer layer. The same encryption/chunking logic is used regardless of signaling method.
 5. **Dual PIN Representation**: A 12-character alphanumeric PIN serves as the shared secret. To improve shareability (e.g., via voice), this PIN can be bijectively mapped to a 7-word sequence from the BIP-39 wordlist.
 6. **Passkey Support**: Alternative to PIN-based authentication using WebAuthn PRF extension. Keys are derived from hardware-backed secure elements (Touch ID, Face ID, Windows Hello) when passkeys are synced via password managers. See [Passkey Architecture](./PASSKEY_ARCHITECTURE.md#how-it-works) for details.
@@ -20,12 +20,12 @@ By default, Nostr is used for signaling. QR/Manual exchange is available as an a
 | Feature | Nostr (Default) | Manual Exchange (No Signaling Server) |
 |---------|-----------------|---------------------------------------|
 | Signaling Server | Decentralized relays | None (QR or copy/paste) |
-| STUN Server | Yes (Google) | Yes (Google, when available) |
+| STUN/TURN | Yes (Google + Cloudflare STUN; optional TURN) | Yes (same WebRTC config) |
 | Cloud Fallback | Yes (tmpfiles.org) | No |
 | Reliability | Higher (fallback available) | P2P only |
 | Privacy | Better (no central server) | Best (no signaling server) |
 | Complexity | More complex | Manual exchange (QR or copy/paste) |
-| Internet Required | Yes | No |
+| Internet Required | Yes | No (if on same local network) |
 | Network Requirement | Any (via internet) | Same local network (without internet) |
 | Recommended For | Unreliable networks, NAT issues | Offline transfers, local network only |
 
@@ -67,10 +67,10 @@ sequenceDiagram
 sequenceDiagram
     participant Sender
     participant Receiver
-    Sender->>Sender: Generate PIN, create WebRTC offer
-    Sender->>Sender: Encrypt signaling payload (includes salt)
+    Sender->>Sender: Generate ECDH keypair, create WebRTC offer
+    Sender->>Sender: Obfuscate signaling payload (includes salt)
     Sender->>Receiver: Display Offer QR (scan or paste)
-    Receiver->>Receiver: Decrypt with PIN, derive key
+    Receiver->>Receiver: Parse payload, derive shared secret
     Receiver->>Receiver: Create WebRTC answer
     Receiver-->>Sender: Display Answer QR (scan or paste)
     Sender->>Receiver: Process answer, establish WebRTC
@@ -117,8 +117,8 @@ Secure Send uses a sophisticated PIN system designed for both security and user-
 #### Alphanumeric Representation (Base-69)
 - **Length**: 12 characters.
 - **Charset**: 69 URL-safe characters (mixed case + digits + symbols).
-- **Entropy**: ~67 bits (11 random chars + 1 checksum).
-- **First Character**: Encodes the signaling method (`A-Z` for Nostr, `'2'` for Manual).
+- **Entropy**: ~65.6 bits for Nostr (`23 * 69^10`), ~61.1 bits for Manual (`69^10`).
+- **First Character**: Encodes the signaling method (Nostr uses 23 uppercase letters excluding I/L/O; Manual uses `'2'`).
 - **Last Character**: Weighted position-based checksum character.
 
 #### Word-Based Representation (Base-2048)
@@ -185,7 +185,7 @@ Uses Nostr protocol for decentralized signaling between sender and receiver.
 - `events.ts`: Event creation and parsing functions
 - `client.ts`: Nostr relay connection management
 - `relays.ts`: Default relay configuration
-- `discovery.ts`: Backup relay discovery
+- `availability.ts`: Relay availability probing
 
 ### Manual Exchange Signaling (`src/lib/manual-signaling.ts`)
 
@@ -277,7 +277,7 @@ A 2-hour sliding window (current bucket + 1 previous bucket) is used to verify i
 
 **Key Features:**
 - No signaling server required - manual exchange via QR scan or copy/paste
-- Camera optional - encrypted payload can be copied as text and pasted on other device
+- Camera optional - obfuscated payload can be copied as text and pasted on other device
 - No internet required when devices are on same local network
 - With internet: works across different networks via STUN (stun.l.google.com) for NAT traversal
 - Not air-gapped: requires network connectivity between devices (either local network or internet)
@@ -286,8 +286,8 @@ A 2-hour sliding window (current bucket + 1 previous bucket) is used to verify i
 - Uses `zxing-wasm` for both generation and scanning
 
 **Security Model:**
-- **All modes**: PIN encrypts signaling metadata to prevent unauthorized connection establishment
-- **QR mode**: Physical QR exchange adds a presence check, but PIN is still required to decrypt signaling
+- **Nostr**: PIN or passkey encrypts signaling metadata to prevent unauthorized connection establishment
+- **Manual**: Signaling is obfuscated and time-limited; confidentiality of content is provided by ECDH-derived AES-256-GCM over the data channel
 - **All modes**: Once WebRTC connection is established, DTLS encrypts all data in transit
 
 ### WebRTC (`src/lib/webrtc.ts`)
@@ -296,7 +296,7 @@ Handles direct peer-to-peer connections using WebRTC data channels.
 
 **Features:**
 - ICE candidate queuing for reliable connection establishment
-- STUN server for NAT traversal (`stun.l.google.com:19302`)
+- STUN servers for NAT traversal (`stun.l.google.com`, `stun.cloudflare.com`) with optional TURN via env vars
 - 128KB encrypted chunk messages with backpressure (WebRTC handles fragmentation)
 - Backpressure support (waits for buffer to drain before sending more data)
 - Connection state monitoring
@@ -312,8 +312,8 @@ Fallback storage when P2P connection cannot be established (30s timeout window).
 - Chunked upload/download for files >10MB
 
 **Current Services:**
-- Upload: tmpfiles.org, litterbox, uguu.se, x0.at
-- CORS Proxies: corsproxy.io, leverson83, codetabs, cors-anywhere, allorigins
+- Upload: tmpfiles.org, litterbox.catbox.moe, uguu.se, x0.at
+- CORS Proxies: corsproxy.io, cors.leverson83.org, api.codetabs.com, api.allorigins.win
 
 ### React Hooks (`src/hooks/`)
 
@@ -337,7 +337,7 @@ Fallback storage when P2P connection cannot be established (30s timeout window).
 **Manual Exchange Mode:**
 
 **`use-manual-send.ts`** - Sender logic (Manual Exchange):
-1. Read content (file or text), validate size
+1. Read content (file), validate size
 2. Generate PIN and salt, derive encryption key
 3. Create WebRTC offer with ICE candidates
 4. Wait for ICE gathering to complete
@@ -376,7 +376,7 @@ Both signaling methods (Nostr, Manual Exchange) share the same encryption middle
 ### PIN Exchange Payload
 ```typescript
 interface PinExchangePayload {
-  contentType: 'text' | 'file'
+  contentType: 'file'
   transferId: string
   senderPubkey: string
   totalChunks: number
@@ -410,7 +410,7 @@ interface PinExchangePayload {
 |------|-----------------|----------------|
 | Signaling Payload | Encrypted (AES-GCM) | N/A |
 | WebRTC Signals | Encrypted (AES-GCM) | N/A |
-| File/Text Content | Encrypted (AES-GCM, 128KB chunks) | Encrypted (AES-GCM, whole file) |
+| File Content | Encrypted (AES-GCM, 128KB chunks) | Encrypted (AES-GCM, whole file) |
 
 ### Streaming Encryption (All Methods)
 
@@ -474,7 +474,7 @@ const writePosition = chunkIndex * CLOUD_CHUNK_SIZE
 cloudBuffer.set(chunkData, writePosition)  // Direct write, no intermediate storage
 ```
 
-This ensures consistent memory behavior across all transfer modes - P2P and cloud fallback both avoid creating intermediate chunk arrays.
+This ensures consistent memory behavior across all transfer modes - P2P and cloud fallback avoid large intermediate arrays where possible, but manual exchange receive temporarily buffers encrypted chunks before decrypting.
 
 ## Size Limits
 
@@ -492,7 +492,7 @@ This ensures consistent memory behavior across all transfer modes - P2P and clou
 | P2P connection | 30 seconds | Time to establish WebRTC connection (offer/answer/ICE/channel open) |
 | P2P offer retry | 5 seconds | Interval to retry WebRTC offer if no answer received |
 | P2P data transfer | Unlimited | Once connected, data transfer has no timeout |
-| Chunk ACK | 60 seconds | Time to download and acknowledge a cloud chunk |
+| Chunk ACK | 5 minutes | Time to download and acknowledge a cloud chunk |
 | Overall transfer | 10 minutes | Maximum time for entire transfer (receiver side) |
 | Transfer TTL | 1 hour | Transfer session validity (`TRANSFER_EXPIRATION_MS`) |
 | Receiver PIN inactivity | 5 minutes | Clears PIN input if no changes made |

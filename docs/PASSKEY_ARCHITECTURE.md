@@ -145,8 +145,8 @@ The out-of-band fingerprint verification in step 1 is the primary trust anchor f
 - **No enforcement**: The UI does not block or prompt for explicit fingerprint confirmation before proceeding
 - **User responsibility**: Verification is manual and relies on user diligence
 - **Current UX behavior**:
-  - Contact cards and fingerprints are displayed in the UI (`passkey.tsx`)
-  - Warning banner shown: "⚠ Unverified fingerprints (will be verified via handshake proof)"
+  - Contact cards and fingerprints are displayed on the passkey page (`src/pages/passkey/index-page.tsx`)
+  - Warning banner shown in send/receive tabs: "⚠ Unverified fingerprints (will be verified via handshake proof)"
   - Users can proceed with token creation at any time
 - **Risk of skipping verification (cross-user only)**: If fingerprints are not verified and an attacker substitutes their contact card (MITM during exchange), the attacker can create a valid token and impersonate the intended party. Handshake Proofs (HP) detect impersonation with *stolen* tokens but cannot detect MITM during initial contact exchange. This risk does not apply to self-transfer mode since there is no counterparty to impersonate—both sender and receiver are the same person using the same synced passkey.
 
@@ -157,7 +157,7 @@ The out-of-band fingerprint verification in step 1 is the primary trust anchor f
 | `formatFingerprint()` | `src/lib/crypto/ecdh.ts` | Add hyphen separators for display |
 | `getPasskeyIdentity()` | `src/lib/crypto/passkey.ts` | Returns `publicIdFingerprint` |
 | `parseToken()` | `src/lib/crypto/pairing-key.ts` | Extracts `partyAFingerprint`, `partyBFingerprint` |
-| Contact card display | `src/pages/passkey.tsx` | UI for contact card + fingerprint |
+| Contact card display | `src/pages/passkey/index-page.tsx` | UI for contact card + fingerprint |
 | Fingerprint tests | `src/lib/crypto/passkey.test.ts` | Unit tests for determinism/uniqueness |
 
 **Verification Process:**
@@ -433,13 +433,9 @@ sequenceDiagram
 
 **Implementation**: `generateEphemeralSessionKeypair()`, `verifySessionBinding()`, `deriveSessionEncryptionKey()`, `getPasskeySessionKeypair()` in `src/lib/crypto/passkey.ts`
 
-## Dual Mode (Sender)
+## Passkey Mode (Sender)
 
-When passkey mode is enabled, the sender generates BOTH:
-- Normal PIN + PIN-derived key
-- Passkey fingerprint + passkey-derived key
-
-Two PIN exchange events are published to Nostr (one for each mode). Receiver chooses their preferred authentication method, and the ACK includes a hint indicating which key was used.
+When passkey mode is enabled, the sender uses passkey-derived keys instead of a PIN. PIN generation and PIN exchange events are not used in passkey mode.
 
 ## Mutual Trust Security Enhancements
 
@@ -448,7 +444,7 @@ When using passkey mode, additional cryptographic protections are applied:
 | Enhancement | Event Tag | Purpose |
 |-------------|-----------|---------|
 | Key Confirmation | `kc` | HKDF-derived hash proves both parties derived same shared secret (MITM detection) |
-| Receiver Public ID Commitment | `rpkc` | SHA-256 of receiver's public ID prevents relay substitution attacks |
+| Receiver Public ID Commitment | `rpkc` | SHA-256 of receiver's public ID truncated to 16 bytes (32 hex chars) prevents relay substitution attacks |
 | Replay Nonce | `n` | 16-byte random nonce (base64) echoed in ACK prevents replay attacks within TTL |
 | Constant-Time Comparison | N/A | All security-critical string comparisons use timing-attack-resistant comparison |
 | Input Validation | N/A | Nonce must decode to exactly 16 bytes; key confirmation input validated as 16-byte Uint8Array |
@@ -458,7 +454,7 @@ When using passkey mode, additional cryptographic protections are applied:
 ['h', receiverFingerprint]     // For event filtering
 ['spk', senderFingerprint]     // Sender verification
 ['kc', keyConfirmHash]         // Key confirmation (MITM detection)
-['rpkc', sha256(receiverPublicId)] // Receiver public ID commitment (SHA-256 hash, relay MITM prevention)
+['rpkc', sha256(receiverPublicId)] // Receiver public ID commitment (SHA-256 truncated to 16 bytes)
 ['n', nonce]                   // Replay nonce (base64, 16 bytes)
 ['s', salt]                    // Per-transfer salt
 ['t', transferId]              // Transfer ID
@@ -472,7 +468,7 @@ When using passkey mode, additional cryptographic protections are applied:
 ```
 ['h', receiverFingerprint]     // For event filtering
 ['spk', senderFingerprint]     // Sender verification
-['rpkc', sha256(receiverPublicId)] // Receiver public ID commitment (SHA-256 hash)
+['rpkc', sha256(receiverPublicId)] // Receiver public ID commitment (SHA-256 truncated to 16 bytes)
 ['n', nonce]                   // Replay nonce (base64, 16 bytes)
 ['s', salt]                    // Per-transfer salt
 ['t', transferId]              // Transfer ID
@@ -480,6 +476,8 @@ When using passkey mode, additional cryptographic protections are applied:
 ['expiration', timestamp]      // TTL (NIP-40)
 ['epk', ephemeralPubKey]       // Ephemeral public key (base64, 65 bytes)
 ['esb', sessionBinding]        // Session binding proof (base64, 32 bytes)
+['pk', pairingKey]             // Sender's pairing key (JSON string)
+['ehp', handshakeProof]        // Optional handshake proof (base64, 32 bytes)
 ```
 Note: No `['kc', ...]` tag - key confirmation requires shared secret which doesn't exist for cross-user transfers.
 
@@ -499,8 +497,8 @@ Note: Encrypted payload in event content, encrypted with session key from epheme
 ```
 
 **Verification Flow:**
-1. Sender computes key confirmation hash, receiver public ID commitment (SHA-256 hash of receiver's public ID), and random nonce
-2. Receiver verifies RPKC by computing SHA-256 of own public ID and comparing (prevents relay MITM)
+1. Sender computes key confirmation hash, receiver public ID commitment (SHA-256 truncated to 16 bytes), and random nonce
+2. Receiver verifies RPKC by computing SHA-256 of own public ID and comparing the truncated 16-byte hex (prevents relay MITM)
 3. Receiver verifies key confirmation hash matches (detects shared secret mismatch)
 4. Receiver echoes nonce in ready ACK
 5. Sender verifies nonce match using constant-time comparison (prevents replay)
