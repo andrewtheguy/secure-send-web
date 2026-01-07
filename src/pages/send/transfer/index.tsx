@@ -16,8 +16,8 @@ type TransferStep = 'checking' | 'compressing' | 'ready' | 'active' | 'complete'
 
 // Discriminated union for type-safe hook access
 type ActiveHook =
-  | { type: 'nostr'; hook: UseNostrSendReturn }
-  | { type: 'manual'; hook: UseManualSendReturn }
+  | { type: 'online'; hook: UseNostrSendReturn }
+  | { type: 'offline'; hook: UseManualSendReturn }
 
 // Helper to build FileList from array of Files
 function buildFileListFromFiles(files: File[]): FileList {
@@ -43,27 +43,27 @@ export function SendTransferPage() {
   const startedRef = useRef(false)
 
   // Determine which hook to use based on config with discriminated union
-  const isNostr = config?.methodChoice === 'nostr'
+  const isOnline = config?.methodChoice === 'online'
   const activeHook: ActiveHook = useMemo(
-    () => isNostr
-      ? { type: 'nostr', hook: nostrHook }
-      : { type: 'manual', hook: manualHook },
-    [isNostr, nostrHook, manualHook]
+    () => isOnline
+      ? { type: 'online', hook: nostrHook }
+      : { type: 'offline', hook: manualHook },
+    [isOnline, nostrHook, manualHook]
   )
 
   // Extract common state from active hook
   const state = activeHook.hook.state
   const cancel = activeHook.hook.cancel
 
-  // Nostr-specific properties (type-safe access)
-  const pin = activeHook.type === 'nostr' ? activeHook.hook.pin : null
-  const ownFingerprint = activeHook.type === 'nostr' ? activeHook.hook.ownFingerprint : null
+  // Online-specific properties (type-safe access)
+  const pin = activeHook.type === 'online' ? activeHook.hook.pin : null
+  const ownFingerprint = activeHook.type === 'online' ? activeHook.hook.ownFingerprint : null
 
-  // Manual-specific properties (type-safe access via discriminated union)
-  const manualState = activeHook.type === 'manual' ? activeHook.hook.state : null
+  // Offline-specific properties (type-safe access via discriminated union)
+  const manualState = activeHook.type === 'offline' ? activeHook.hook.state : null
   const offerData = manualState?.offerData
   const clipboardData = manualState?.clipboardData
-  const submitAnswer = activeHook.type === 'manual' ? activeHook.hook.submitAnswer : undefined
+  const submitAnswer = activeHook.type === 'offline' ? activeHook.hook.submitAnswer : undefined
 
   // Redirect if no config
   useEffect(() => {
@@ -81,7 +81,7 @@ export function SendTransferPage() {
     const prepareFile = async () => {
       try {
         // Check Nostr availability first if needed
-        if (config.methodChoice === 'nostr') {
+        if (config.methodChoice === 'online') {
           if (cancelled) return
           setStep('checking')
           const result = await testRelayAvailability()
@@ -145,9 +145,10 @@ export function SendTransferPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: sync step state when starting transfer
     setStep('active')
 
-    if (activeHook.type === 'nostr') {
+    if (activeHook.type === 'online') {
       const options = config.usePasskey
         ? {
+            usePasskey: true,
             receiverPairingKey: config.receiverPublicKeyInput || undefined,
             selfTransfer: config.sendToSelf,
             relayOnly: config.relayOnly,
@@ -161,7 +162,7 @@ export function SendTransferPage() {
 
   // Track completion - sync local step with hook state
   // Only apply state changes when transfer is active to avoid race conditions
-  // after cancellation (handleSwitchToManual, handleRetry set startedRef to false)
+  // after cancellation (handleSwitchToOffline, handleRetry set startedRef to false)
   useEffect(() => {
     if (!startedRef.current) return
 
@@ -181,7 +182,7 @@ export function SendTransferPage() {
     navigate('/')
   }, [cancel, clearConfig, navigate])
 
-  const handleSwitchToManual = useCallback(() => {
+  const handleSwitchToOffline = useCallback(() => {
     if (!config) return
     // Cancel any active Nostr transfer before switching modes
     if (startedRef.current) {
@@ -193,7 +194,7 @@ export function SendTransferPage() {
     }
     // Update config to manual mode and restart the transfer flow
     startedRef.current = false
-    setConfig({ ...config, methodChoice: 'manual' })
+    setConfig({ ...config, methodChoice: 'offline' })
     setStep('checking')
     setError(null)
   }, [config, setConfig, cancel])
@@ -256,7 +257,7 @@ export function SendTransferPage() {
             </div>
           </div>
           <div className="flex gap-2">
-            <Button onClick={handleSwitchToManual} className="flex-1" size="sm">
+            <Button onClick={handleSwitchToOffline} className="flex-1" size="sm">
               <QrCode className="mr-2 h-4 w-4" />
               Switch to Manual
             </Button>
@@ -271,7 +272,7 @@ export function SendTransferPage() {
       {step === 'active' && (
         <>
           {/* Manual mode: showing offer */}
-          {!isNostr && offerData && submitAnswer && state.status === 'showing_offer' && (
+          {!isOnline && offerData && submitAnswer && state.status === 'showing_offer' && (
             <div className="space-y-4">
               {/* Instructions at top */}
               <div className="rounded-lg bg-muted/50 border p-4 space-y-2">
@@ -296,12 +297,12 @@ export function SendTransferPage() {
           )}
 
           {/* Manual mode: other states (connecting, transferring, etc.) */}
-          {!isNostr && state.status !== 'showing_offer' && (
+          {!isOnline && state.status !== 'showing_offer' && (
             <TransferStatus state={state} />
           )}
 
           {/* Nostr mode: Transfer progress */}
-          {isNostr && (
+          {isOnline && (
             <TransferStatus
               state={state}
               betweenProgressAndChunks={
@@ -313,7 +314,7 @@ export function SendTransferPage() {
           )}
 
           {/* Sender fingerprint in passkey mode */}
-          {isNostr && ownFingerprint && config.usePasskey && (
+          {isOnline && ownFingerprint && config.usePasskey && (
             <div className="text-xs text-muted-foreground border border-cyan-500/30 bg-cyan-50/30 dark:bg-cyan-950/20 px-3 py-2 rounded">
               <p>Your fingerprint: <span className="font-mono font-medium text-cyan-600">{ownFingerprint}</span></p>
               <p className="mt-1">Receiver should verify this matches your public ID.</p>

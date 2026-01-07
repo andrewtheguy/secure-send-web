@@ -9,7 +9,7 @@ import {
 } from 'react'
 import type { ParsedPairingKey } from '@/lib/crypto/pairing-key'
 
-export type MethodChoice = 'nostr' | 'manual'
+export type MethodChoice = 'online' | 'offline'
 
 interface SendConfig {
   // Files

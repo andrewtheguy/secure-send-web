@@ -17,7 +17,7 @@ import { isMobileDevice } from '@/lib/utils'
 import { useSend } from '@/contexts/send-context'
 
 type ContentMode = 'file' | 'folder'
-type MethodChoice = 'nostr' | 'manual'
+type MethodChoice = 'online' | 'offline'
 
 // Extend input element to include webkitdirectory attribute
 declare module 'react' {
@@ -33,7 +33,7 @@ export function SendTab() {
 
   const [mode, setMode] = useState<ContentMode>('file')
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [methodChoice, setMethodChoice] = useState<MethodChoice>('nostr')
+  const [methodChoice, setMethodChoice] = useState<MethodChoice>('online')
   const [usePasskey, setUsePasskey] = useState(false)
   const [sendToSelf, setSendToSelf] = useState(false)
   const [relayOnly, setRelayOnly] = useState(false)
@@ -404,8 +404,8 @@ export function SendTab() {
           {/* Connection method toggle - visible on main UI */}
           <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/30">
             <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-full ${methodChoice === 'nostr' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-amber-100 dark:bg-amber-900/30'}`}>
-                {methodChoice === 'nostr' ? (
+              <div className={`p-2 rounded-full ${methodChoice === 'online' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-amber-100 dark:bg-amber-900/30'}`}>
+                {methodChoice === 'online' ? (
                   <Wifi className="h-4 w-4 text-green-600 dark:text-green-400" />
                 ) : (
                   <WifiOff className="h-4 w-4 text-amber-600 dark:text-amber-400" />
@@ -413,10 +413,10 @@ export function SendTab() {
               </div>
               <div>
                 <Label htmlFor="use-internet" className="text-sm font-medium cursor-pointer">
-                  {methodChoice === 'nostr' ? 'Internet required' : 'No internet required'}
+                  {methodChoice === 'online' ? 'Internet required' : 'No internet required'}
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  {methodChoice === 'nostr'
+                  {methodChoice === 'online'
                     ? 'Auto-connect via relay servers.'
                     : 'Manual QR exchange. Devices must be on a shared network if internet is not available.'}
                 </p>
@@ -424,9 +424,9 @@ export function SendTab() {
             </div>
             <Switch
               id="use-internet"
-              checked={methodChoice === 'nostr'}
+              checked={methodChoice === 'online'}
               onCheckedChange={(checked) => {
-                setMethodChoice(checked ? 'nostr' : 'manual')
+                setMethodChoice(checked ? 'online' : 'offline')
                 if (!checked) setRelayOnly(false)
               }}
             />
@@ -441,7 +441,7 @@ export function SendTab() {
               <div className="text-sm">
                 <p className="font-medium mb-1">How it works</p>
                 <p className="text-muted-foreground">
-                  {methodChoice === 'nostr'
+                  {methodChoice === 'online'
                     ? <>Share a PIN with your recipient—only they can decrypt and receive your files.<br />Your files are encrypted on your device before sending.<br />Poor or no internet? Toggle above for manual QR exchange.</>
                     : <>Exchange QR codes with your recipient to establish a secure connection.<br />Your files are encrypted on your device before sending.</>}
                 </p>
@@ -468,13 +468,13 @@ export function SendTab() {
               <div className="p-3 pt-0 space-y-3 border-t">
                 {/* Technical details about current mode */}
                 <p className="text-xs text-muted-foreground">
-                  {methodChoice === 'nostr'
+                  {methodChoice === 'online'
                     ? 'Online mode: Uses Nostr relays for signaling. If P2P fails, encrypted data transfers via cloud.'
                     : 'Offline mode: Exchange signaling via QR scan or copy/paste. Devices must be on same local network.'}
                 </p>
 
                 {/* Force cloud transfer - only for online mode */}
-                {methodChoice === 'nostr' && (
+                {methodChoice === 'online' && (
                   <div className="flex items-center gap-2">
                     <input
                       id="force-cloud-transfer"
@@ -489,8 +489,8 @@ export function SendTab() {
                   </div>
                 )}
 
-                {/* Passkey toggle - only for online mode (Nostr) */}
-                {methodChoice === 'nostr' && (
+                {/* Passkey toggle - only for online mode */}
+                {methodChoice === 'online' && (
                   <div className="pt-3 border-t space-y-3">
                     <div className="flex items-center gap-1 mb-2">
                       <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded">
@@ -787,7 +787,7 @@ export function SendTab() {
 
           <Button onClick={handleSend} disabled={!canSend} className="w-full">
             <Send className="mr-2 h-4 w-4" />
-            {methodChoice === 'manual' ? 'Generate & Send' : 'Generate Secure PIN'}
+            {methodChoice === 'offline' ? 'Generate & Send' : 'Generate Secure PIN'}
             <ChevronRight className="ml-1 h-3 w-3" />
           </Button>
     </div>
