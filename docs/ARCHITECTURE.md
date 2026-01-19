@@ -135,6 +135,12 @@ To protect against manual entry errors, the PIN includes a custom checksum:
 
 Passkeys provide an alternative to PIN-based authentication using the WebAuthn PRF extension for hardware-backed key derivation. Passkey mode is designed for self-transfer (sending files to yourself across devices using the same synced passkey).
 
+**Why self-transfer only?** Cross-user passkey transfers were previously supported via **pairing keys**—a cryptographic mechanism where both parties exchange invite codes and sign a shared token to establish trust between different passkeys. This required significant complexity: invite code exchange with TTL validation, HMAC signatures from both parties, verification secrets, handshake proofs for impersonation prevention, and two round trips instead of one. This complexity existed without a compelling use case since PIN mode already handles cross-user transfers simply. Passkey mode is now scoped to self-transfer where the same user owns both devices and has the same passkey synced via their password manager—this provides a streamlined single-round-trip experience with stronger security guarantees (hardware-backed keys, PFS, non-extractable secrets).
+
+**Mode selection guidance:**
+- **Passkey mode**: Recommended for syncing files between your own devices. Provides higher security (hardware-backed keys, PFS, non-extractable secrets) and eliminates PIN sharing.
+- **PIN mode**: Required for sending to other users or recipients who don't share your passkey sync. PIN can be communicated out-of-band (voice, message, etc.).
+
 For detailed documentation on the passkey system, including key derivation, security properties, and perfect forward secrecy, see [Passkey Architecture](./PASSKEY_ARCHITECTURE.md).
 
 ### User Interface Architecture
@@ -528,7 +534,7 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 7. **Transport Security**: All P2P transfers (Nostr, Manual Exchange) use both AES-256-GCM encryption (128KB chunks) and WebRTC DTLS
 8. **Protocol-Agnostic Security**: Same encryption layer used regardless of signaling method - no security difference between Nostr or Manual Exchange
 9. **Passkey Security**: WebAuthn PRF extension provides hardware-backed key derivation with origin-bound credentials and phishing resistance
-10. **Passkey Sync**: Requires same passkey synced via password manager (1Password, iCloud Keychain, Google Password Manager) - no out-of-band PIN sharing needed
+10. **Passkey Sync**: For self-transfer scenarios (both devices owned by same user), requires same passkey synced via password manager (1Password, iCloud Keychain, Google Password Manager) - no out-of-band PIN sharing needed. Cross-user transfers require PIN mode since different users cannot share passkey credentials.
 11. **XSS Protection**: Sensitive cryptographic material (shared secrets, key derivation functions) stored in closure scope, not on global `window` object
 12. **Resource Cleanup**: All error paths properly clean up timeouts and subscriptions to prevent resource leaks
 13. **Input Validation**: Cryptographic functions validate inputs (nonce length, key confirmation size) before operations to provide deterministic errors
