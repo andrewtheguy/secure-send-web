@@ -14,7 +14,6 @@ import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file
 import type { SignalingMethod } from '@/lib/nostr/types'
 import type { PinKeyMaterial } from '@/lib/types'
 import { Link } from 'react-router-dom'
-import { formatFingerprint } from '@/lib/crypto/ecdh'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -61,9 +60,6 @@ export function ReceiveTab() {
   const activeHook = isManualMode ? manualHook : nostrHook
 
   const { state: rawState, receivedContent, cancel, reset } = activeHook
-
-  // Get own fingerprint from nostr hook for verification display (only in nostr mode)
-  const receiverOwnFingerprint = !isManualMode ? nostrHook.ownFingerprint : null
 
   // Get the right receive function based on mode
   // nostrHook has .receive, manualHook does not
