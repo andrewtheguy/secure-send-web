@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Plus, Key, Shield } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 export function PasskeyIndexPage() {
@@ -13,34 +13,7 @@ export function PasskeyIndexPage() {
             Create New Passkey
           </h3>
           <p className="text-sm text-muted-foreground mt-2">
-            Create a passkey to generate your invite code. Share it with peers for secure file
-            transfers without needing PINs.
-          </p>
-        </div>
-      </Link>
-
-      {/* Already Have a Passkey */}
-      <Link to="/passkey/pair" className="block">
-        <div className="p-4 rounded-lg border hover:border-primary/30 hover:bg-muted/50 transition-colors">
-          <h3 className="font-medium flex items-center gap-2">
-            <Key className="h-4 w-4" />
-            Already Have a Passkey?
-          </h3>
-          <p className="text-sm text-muted-foreground mt-2">
-            Pair with someone to create a shared pairing key for secure transfers.
-          </p>
-        </div>
-      </Link>
-
-      {/* Verify Pairing Key */}
-      <Link to="/passkey/verify" className="block">
-        <div className="p-4 rounded-lg border hover:border-primary/30 hover:bg-muted/50 transition-colors">
-          <h3 className="font-medium flex items-center gap-2">
-            <Shield className="h-4 w-4" />
-            Verify Pairing Key
-          </h3>
-          <p className="text-sm text-muted-foreground mt-2">
-            Verify a pairing key&apos;s authenticity by checking the digital signatures.
+            Create a passkey to securely send files to yourself across devices without needing PINs.
           </p>
         </div>
       </Link>

@@ -15,8 +15,6 @@ import {
   generateEphemeralKeys,
   parsePinExchangeEvent,
   parseMutualTrustEvent,
-  parseMutualTrustHandshakeEvent,
-  parseMutualTrustPayloadEvent,
   createAckEvent,
   parseChunkNotifyEvent,
   DEFAULT_RELAYS,
@@ -48,12 +46,10 @@ import {
   verifyPublicKeyCommitment,
   constantTimeEqual,
 } from '@/lib/crypto/ecdh'
-import { parsePairingKey, getPeerFromParsedPairingKey, getOwnVerificationSecret, getPeerVerificationSecret, computeHandshakeProof, verifyHandshakeProof } from '@/lib/crypto/pairing-key'
 
 export interface ReceiveOptions {
   usePasskey?: boolean
-  senderPairingKey?: string // Pairing key for mutual trust mode
-  selfTransfer?: boolean // For receiving from self
+  selfTransfer?: boolean // For receiving from self (passkey mode)
 }
 
 export interface UseNostrReceiveReturn {
@@ -104,10 +100,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
     // Determine mode
     const usePasskey = 'usePasskey' in arg && arg.usePasskey === true
-    const hasSenderOrSelf =
-      ('senderPairingKey' in arg && arg.senderPairingKey) ||
-      ('selfTransfer' in arg && arg.selfTransfer)
-    const isMutualTrustMode = usePasskey && hasSenderOrSelf
+    const isSelfTransfer = 'selfTransfer' in arg && (arg as ReceiveOptions).selfTransfer
+    const isMutualTrustMode = usePasskey && isSelfTransfer
     const pinMaterial = !usePasskey ? (arg as PinKeyMaterial) : null
 
     // Closure variables for mutual trust mode - keeps sensitive data scoped
@@ -118,8 +112,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     // PFS: Ephemeral session keypair for Perfect Forward Secrecy
     let receiverEphemeral: EphemeralSessionKeypair | null = null
     let identitySharedSecretKey: CryptoKey | null = null
-    // Parsed pairing key for handshake proof computation (cross-user mode)
-    let receiverParsedPairingKey: Awaited<ReturnType<typeof parsePairingKey>> | null = null
 
     try {
       let hint: string
@@ -127,9 +119,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       let expectedSenderFingerprint: string | undefined
 
       if (isMutualTrustMode) {
-        // MUTUAL TRUST MODE: Use passkey mutual trust with sender's public ID
+        // MUTUAL TRUST MODE: Use passkey for self-transfer
         // NOW WITH PERFECT FORWARD SECRECY via ephemeral session keys
-        const opts = arg as ReceiveOptions
         setState({ status: 'connecting', message: 'Authenticate with passkey...' })
 
         try {
@@ -151,25 +142,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           receiverEphemeral = ephemeral
           identitySharedSecretKey = sharedSecret
 
-          // Determine sender public key: use own identity for self-transfer, otherwise parse pairing key
-          let senderPublicKeyBytes: Uint8Array
-          if (opts.selfTransfer) {
-            senderPublicKeyBytes = ephemeral.identityPublicKeyBytes
-          } else {
-            // Parse pairing key to extract peer info
-            // NOTE: With HMAC signatures, we cannot verify the other party's signature here.
-            // Trust is established via out-of-band fingerprint verification.
-            // SECURITY: The actual peer check happens during handshake event processing
-            // (see "SECURITY VERIFICATION 3: Sender's pairing key" below).
-            const parsedPairingKey = await parsePairingKey(
-              opts.senderPairingKey!,
-              ephemeral.identityPublicKeyBytes // Verify we're a party to this pairing key
-            )
-
-            // Extract the counterparty (sender) from the pairing key.
-            const counterparty = getPeerFromParsedPairingKey(parsedPairingKey, ephemeral.identityPublicKeyBytes)
-            senderPublicKeyBytes = counterparty.publicId
-          }
+          // For self-transfer, sender is the same as receiver
+          const senderPublicKeyBytes = ephemeral.identityPublicKeyBytes
 
           // Calculate expected sender fingerprint for verification
           expectedSenderFingerprint = await publicKeyToFingerprint(senderPublicKeyBytes)
@@ -194,6 +168,11 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           receivingRef.current = false
           return
         }
+      } else if (usePasskey && !isSelfTransfer) {
+        // Passkey mode without selfTransfer - not supported anymore
+        setState({ status: 'error', message: 'Passkey mode is only for self-transfer' })
+        receivingRef.current = false
+        return
       } else if (pinMaterial) {
         // PIN mode: use provided material
         if (!pinMaterial.key || !pinMaterial.hint) {
@@ -252,12 +231,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // PFS: Store sender's ephemeral public key and salt for session key derivation
       let senderEphemeralPub: Uint8Array | undefined
       let eventSalt: Uint8Array | undefined
-      // Cross-user passkey: flag for handshake flow
-      let isHandshakeFlow = false
-
-      // Determine if this is self-transfer or cross-user passkey mode
-      const isSelfTransfer = 'selfTransfer' in arg && (arg as ReceiveOptions).selfTransfer
-      const isCrossUserPasskey = isMutualTrustMode && !isSelfTransfer
 
       const sortedEvents = [...events].sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
 
@@ -274,98 +247,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         }
         sawNonExpiredCandidate = true
 
-        if (isCrossUserPasskey) {
-          // Cross-user passkey mode: look for handshake events
-          const parsed = parseMutualTrustHandshakeEvent(event)
-          if (!parsed) continue
-
-          // === SECURITY VERIFICATION 1: Sender fingerprint (constant-time) ===
-          if (!constantTimeEqual(parsed.senderFingerprint, expectedSenderFingerprint!)) {
-            console.log('Sender fingerprint mismatch')
-            continue
-          }
-
-          // === SECURITY VERIFICATION 2: Receiver public ID commitment ===
-          if (!ownPublicKeyBytes) {
-            console.error('Own public ID not available for RPKC verification')
-            continue
-          }
-          const rpkcValid = await verifyPublicKeyCommitment(ownPublicKeyBytes, parsed.receiverPkCommitment)
-          if (!rpkcValid) {
-            console.log('Receiver public ID commitment mismatch - event not addressed to us')
-            continue
-          }
-
-          // === SECURITY VERIFICATION 3: Sender's pairing key ===
-          // CRITICAL: This check ensures decryption won't proceed if counterparty doesn't match.
-          // With pairing keys, both parties have the SAME key with both signatures.
-          // This proves sender specifically chose to communicate with us.
-          const parsedSenderPairingKey = await parsePairingKey(
-            parsed.senderPairingKey,
-            ownPublicKeyBytes // Verify we're a party to this pairing key
-          )
-          // Extract the counterparty (sender) from the parsed pairing key
-          const senderFromPairingKey = getPeerFromParsedPairingKey(parsedSenderPairingKey, ownPublicKeyBytes)
-          // Verify the pairing key's counterparty matches the sender's claimed identity
-          // If this check fails, the event is skipped and decryption never happens
-          if (senderFromPairingKey.fingerprint !== parsed.senderFingerprint) {
-            console.log(`Pairing key counterparty (${senderFromPairingKey.fingerprint}) doesn't match sender (${parsed.senderFingerprint}) - rejecting`)
-            continue
-          }
-
-          // === SECURITY VERIFICATION 4: Sender's handshake proof ===
-          // CRITICAL: This proves the sender controls their passkey, preventing impersonation with stolen pairing keys
-          if (!parsed.senderHandshakeProof) {
-            console.log('Sender did not provide handshake proof - rejecting')
-            continue
-          }
-          // Get the sender's verification secret from the pairing key
-          const senderVs = getPeerVerificationSecret(parsedSenderPairingKey, ownPublicKeyBytes)
-          // Decode the nonce from base64 for verification
-          let nonceBytes: Uint8Array
-          try {
-            nonceBytes = Uint8Array.from(atob(parsed.nonce), c => c.charCodeAt(0))
-          } catch {
-            console.warn('Malformed nonce base64 - skipping event')
-            continue
-          }
-          // Verify the sender's proof: HMAC(sender_vs, sender_epk || nonce || receiver_fingerprint)
-          const ownFingerprint = await publicKeyToFingerprint(ownPublicKeyBytes)
-          const senderProofValid = await verifyHandshakeProof(
-            senderVs,
-            parsed.senderHandshakeProof,
-            parsed.senderEphemeralPub,
-            nonceBytes,
-            ownFingerprint
-          )
-          if (!senderProofValid) {
-            console.log('Invalid sender handshake proof - sender does not control their passkey')
-            continue
-          }
-
-          // Store parsed pairing key for computing receiver's handshake proof in ACK
-          receiverParsedPairingKey = parsedSenderPairingKey
-
-          // NOTE: For cross-user passkey mode, we CANNOT verify session binding because:
-          // - Session binding is created using the sender's passkey master key
-          // - We don't have access to sender's master key (different passkeys = different PRF outputs)
-          // Security relies on:
-          // 1. Fingerprint verification (above) - ensures sender identity
-          // 2. RPKC verification (above) - ensures event is addressed to us
-          // 3. Handshake proof verification (above) - proves sender controls their passkey
-          // 4. Ephemeral ECDH - any MITM can't derive session key without both private keys
-          // 5. Pairing key verification (above) - proves sender intended to reach us
-
-          // Handshake verified - store info for session key derivation
-          senderEphemeralPub = parsed.senderEphemeralPub
-          transferId = parsed.transferId
-          senderPubkey = event.pubkey
-          selectedCreatedAtSec = event.created_at || null
-          eventNonce = parsed.nonce
-          eventSalt = parsed.salt
-          isHandshakeFlow = true
-          break
-        } else if (isMutualTrustMode && isSelfTransfer) {
+        if (isMutualTrustMode) {
           // Self-transfer mode: parse mutual trust event (has payload)
           const parsed = parseMutualTrustEvent(event)
           if (!parsed) continue
@@ -476,9 +358,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         }
       }
 
-      // For handshake flow, we don't have payload yet (it comes after ACK)
-      // For other modes, we need payload from the initial event
-      if (!isHandshakeFlow && (!payload || !key)) {
+      if (!payload || !key) {
         if (!sawNonExpiredCandidate && sawExpiredCandidate) {
           setState({ status: 'error', message: 'Transfer expired. Ask sender to start a new transfer.' })
           return
@@ -486,7 +366,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         setState({
           status: 'error',
           message: isMutualTrustMode
-            ? 'Could not decrypt transfer. Wrong sender public ID?'
+            ? 'Could not decrypt transfer. Wrong passkey?'
             : 'Could not decrypt transfer. Wrong PIN?',
         })
         return
@@ -534,37 +414,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       // Send ready ACK (seq=0) - include nonce for replay protection in mutual trust mode
       // Include receiver's ephemeral key and binding for PFS
-      // For cross-user passkey: include receiver's pairing key proving intent to communicate with sender
-      const receiverPairingKey = isCrossUserPasskey && 'senderPairingKey' in arg
-        ? (arg as ReceiveOptions).senderPairingKey
-        : undefined
-
-      // Compute receiver's handshake proof for cross-user mode
-      let receiverHandshakeProof: Uint8Array | undefined
-      if (isCrossUserPasskey && receiverParsedPairingKey && ownPublicKeyBytes && receiverEphemeral && eventNonce) {
-        // Get receiver's verification secret from the parsed pairing key
-        const receiverVs = getOwnVerificationSecret(receiverParsedPairingKey, ownPublicKeyBytes)
-        // Decode the nonce from base64 for proof computation
-        // Note: eventNonce was already validated at line ~324 in the cross-user handshake path,
-        // but we add defensive error handling for safety and consistency
-        let nonceBytes: Uint8Array
-        try {
-          nonceBytes = Uint8Array.from(atob(eventNonce), c => c.charCodeAt(0))
-        } catch {
-          console.error('Failed to decode eventNonce for receiver handshake proof - this should not happen as nonce was validated earlier')
-          throw new Error('Internal error: corrupted nonce in receiver handshake proof computation')
-        }
-        // Get the sender's fingerprint from the parsed pairing key
-        const senderFromPairingKey = getPeerFromParsedPairingKey(receiverParsedPairingKey, ownPublicKeyBytes)
-        // Compute the receiver's proof: HMAC(receiver_vs, receiver_epk || nonce || sender_fingerprint)
-        receiverHandshakeProof = await computeHandshakeProof(
-          receiverVs,
-          receiverEphemeral.ephemeralPublicKeyBytes,
-          nonceBytes,
-          senderFromPairingKey.fingerprint
-        )
-      }
-
       const readyAck = createAckEvent(
         secretKey,
         senderPubkey,
@@ -573,9 +422,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         hint,
         eventNonce,
         receiverEphemeral?.ephemeralPublicKeyBytes,
-        receiverEphemeral?.sessionBinding,
-        receiverPairingKey,
-        receiverHandshakeProof
+        receiverEphemeral?.sessionBinding
       )
       await client.publish(readyAck)
 
@@ -590,102 +437,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       if (cancelledRef.current) return
 
-      // For handshake flow, wait for payload event and decrypt it
-      if (isHandshakeFlow) {
-        setState({ status: 'receiving', message: 'Waiting for encrypted metadata...' })
-
-        // Wait for payload event from sender
-        const payloadEvent = await new Promise<Event | null>((resolve) => {
-          // Declare subId before timeout so both can access it safely
-          // eslint-disable-next-line prefer-const
-          let subId: string | undefined
-
-          const timeout = setTimeout(() => {
-            if (subId !== undefined) client.unsubscribe(subId)
-            resolve(null)
-          }, 60000) // 1 minute timeout for payload
-
-          subId = client.subscribe(
-            [
-              {
-                kinds: [EVENT_KIND_DATA_TRANSFER],
-                '#t': [transferId!],
-                authors: [senderPubkey!],
-              },
-            ],
-            (event) => {
-              const parsed = parseMutualTrustPayloadEvent(event)
-              if (parsed && parsed.transferId === transferId) {
-                clearTimeout(timeout)
-                if (subId !== undefined) client.unsubscribe(subId)
-                resolve(event)
-              }
-            }
-          )
-
-            // Also check existing events
-            ; (async () => {
-              try {
-                const existingEvents = await client.query([
-                  {
-                    kinds: [EVENT_KIND_DATA_TRANSFER],
-                    '#t': [transferId!],
-                    authors: [senderPubkey!],
-                    limit: 10,
-                  },
-                ])
-                for (const event of existingEvents) {
-                  const parsed = parseMutualTrustPayloadEvent(event)
-                  if (parsed && parsed.transferId === transferId) {
-                    clearTimeout(timeout)
-                    if (subId !== undefined) client.unsubscribe(subId)
-                    resolve(event)
-                    return
-                  }
-                }
-              } catch (err) {
-                console.error('Failed to query existing payload events:', err)
-              }
-            })()
-        })
-
-        if (!payloadEvent) {
-          setState({ status: 'error', message: 'Timeout waiting for encrypted payload from sender' })
-          return
-        }
-
-        if (cancelledRef.current) return
-
-        // Parse and decrypt payload
-        const parsedPayload = parseMutualTrustPayloadEvent(payloadEvent)
-        if (!parsedPayload) {
-          setState({ status: 'error', message: 'Invalid payload event from sender' })
-          return
-        }
-
-        if (!key) {
-          setState({ status: 'error', message: 'Session key not available for decryption' })
-          return
-        }
-
-        try {
-          const decrypted = await decrypt(key, parsedPayload.encryptedPayload)
-          const decoder = new TextDecoder()
-          const payloadStr = decoder.decode(decrypted)
-          payload = JSON.parse(payloadStr) as PinExchangePayload
-        } catch (err) {
-          console.error('Failed to decrypt payload:', err)
-          setState({ status: 'error', message: 'Failed to decrypt transfer metadata' })
-          return
-        }
-      }
-
-      // Validate payload (now available for all flows)
-      if (!payload) {
-        setState({ status: 'error', message: 'No transfer metadata available' })
-        return
-      }
-
+      // Validate payload
       if (payload.fileSize == null || !Number.isFinite(payload.fileSize) || payload.fileSize < 0) {
         setState({ status: 'error', message: 'Invalid file size in transfer' })
         return
@@ -961,23 +713,25 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             processEvent
           )
 
-            ; (async () => {
-              try {
-                const existingEvents = await client.query([
-                  {
-                    kinds: [EVENT_KIND_DATA_TRANSFER],
-                    '#t': [transferId!],
-                    authors: [senderPubkey!],
-                    limit: 50,
-                  },
-                ])
-                for (const event of existingEvents) {
-                  await processEvent(event)
-                }
-              } catch (err) {
-                console.error('Failed to query existing events:', err)
+          // Fire-and-forget: Query existing events in parallel with the live subscription.
+          // This catches events published before we subscribed. Errors are logged inside.
+          void (async () => {
+            try {
+              const existingEvents = await client.query([
+                {
+                  kinds: [EVENT_KIND_DATA_TRANSFER],
+                  '#t': [transferId!],
+                  authors: [senderPubkey!],
+                  limit: 50,
+                },
+              ])
+              for (const event of existingEvents) {
+                await processEvent(event)
               }
-            })()
+            } catch (err) {
+              console.error('Failed to query existing events:', err)
+            }
+          })()
         }
       )
 

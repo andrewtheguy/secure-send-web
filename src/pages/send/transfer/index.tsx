@@ -57,7 +57,6 @@ export function SendTransferPage() {
 
   // Online-specific properties (type-safe access)
   const pin = activeHook.type === 'online' ? activeHook.hook.pin : null
-  const ownFingerprint = activeHook.type === 'online' ? activeHook.hook.ownFingerprint : null
 
   // Offline-specific properties (type-safe access via discriminated union)
   const manualState = activeHook.type === 'offline' ? activeHook.hook.state : null
@@ -149,8 +148,7 @@ export function SendTransferPage() {
       const options = config.usePasskey
         ? {
             usePasskey: true,
-            receiverPairingKey: config.receiverPublicKeyInput || undefined,
-            selfTransfer: config.sendToSelf,
+            selfTransfer: true, // Passkey mode is always self-transfer
             relayOnly: config.relayOnly,
           }
         : { relayOnly: config.relayOnly }
@@ -311,14 +309,6 @@ export function SendTransferPage() {
                   : undefined
               }
             />
-          )}
-
-          {/* Sender fingerprint in passkey mode */}
-          {isOnline && ownFingerprint && config.usePasskey && (
-            <div className="text-xs text-muted-foreground border border-cyan-500/30 bg-cyan-50/30 dark:bg-cyan-950/20 px-3 py-2 rounded">
-              <p>Your fingerprint: <span className="font-mono font-medium text-cyan-600">{ownFingerprint}</span></p>
-              <p className="mt-1">Receiver should verify this matches your public ID.</p>
-            </div>
           )}
 
           <Button onClick={handleCancel} variant="outline" className="w-full">

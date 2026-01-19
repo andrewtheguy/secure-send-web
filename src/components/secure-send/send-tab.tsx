@@ -1,19 +1,13 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, X, FileUp, Upload, FolderUp, Loader2, ChevronDown, ChevronRight, Info, Fingerprint, ArrowRight, Keyboard, Camera, RefreshCw, Wifi, WifiOff, Cloud } from 'lucide-react'
+import { useState, useRef, useCallback } from 'react'
+import { Send, X, FileUp, Upload, FolderUp, ChevronDown, ChevronRight, Info, Fingerprint, Wifi, WifiOff, Cloud } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
 import { MAX_MESSAGE_SIZE } from '@/lib/crypto'
 import { formatFileSize } from '@/lib/file-utils'
 import { getTotalSize, supportsFolderSelection, getFolderName } from '@/lib/folder-utils'
 import { Link, useNavigate } from 'react-router-dom'
-import { formatFingerprint } from '@/lib/crypto/ecdh'
-import { isPairingKeyFormat, parsePairingKey, type ParsedPairingKey } from '@/lib/crypto/pairing-key'
-import { getSavedPairingKeys, type SavedPairingKey } from '@/lib/saved-pairing-keys'
-import { useQRScanner } from '@/hooks/useQRScanner'
-import { isMobileDevice } from '@/lib/utils'
 import { useSend } from '@/contexts/send-context'
 
 type ContentMode = 'file' | 'folder'
@@ -35,128 +29,13 @@ export function SendTab() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [methodChoice, setMethodChoice] = useState<MethodChoice>('online')
   const [usePasskey, setUsePasskey] = useState(false)
-  const [sendToSelf, setSendToSelf] = useState(false)
   const [relayOnly, setRelayOnly] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [folderFiles, setFolderFiles] = useState<FileList | null>(null) // Keep FileList for folder to preserve paths
   const [isDragging, setIsDragging] = useState(false)
-  const [receiverPublicKeyInput, setReceiverPublicKeyInput] = useState('')
-  const [receiverPublicKeyError, setReceiverPublicKeyError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
-
-  // Parsed pairing key state (updated via useEffect since parsing is async)
-  const [parsedPairingKey, setParsedPairingKey] = useState<ParsedPairingKey | null>(null)
-
-  // Saved pairing keys for quick selection
-  const [savedPairingKeys, setSavedPairingKeys] = useState<SavedPairingKey[]>([])
-  const [showPairingKeyDropdown, setShowPairingKeyDropdown] = useState(false)
-  const [loadedFromHistory, setLoadedFromHistory] = useState(false)
-
-  // QR scanner state for pairing key scanning
-  const [showPairingKeyQRScanner, setShowPairingKeyQRScanner] = useState(false)
-  const [pairingKeyQRError, setPairingKeyQRError] = useState<string | null>(null)
-  const [pairingKeyCameraReady, setPairingKeyCameraReady] = useState(false)
-  const [selectedPairingKeyCamera, setSelectedPairingKeyCamera] = useState<string>(
-    isMobileDevice() ? 'environment' : 'user'
-  )
-
-  // QR scanner handlers
-  const handlePairingKeyQRScan = useCallback((data: Uint8Array) => {
-    // Decode bytes to string (pairing keys are JSON text)
-    const text = new TextDecoder().decode(data)
-    // Check if it looks like a pairing key
-    if (isPairingKeyFormat(text)) {
-      setReceiverPublicKeyInput(text)
-      setLoadedFromHistory(false)
-      setShowPairingKeyQRScanner(false)
-      setPairingKeyQRError(null)
-    } else {
-      setPairingKeyQRError('Not a valid pairing key')
-    }
-  }, [])
-
-  const handlePairingKeyQRError = useCallback((error: string) => {
-    setPairingKeyQRError(error)
-  }, [])
-
-  const handlePairingKeyCameraReady = useCallback(() => {
-    setPairingKeyCameraReady(true)
-    setPairingKeyQRError(null)
-  }, [])
-
-  const { videoRef: pairingKeyVideoRef, canvasRef: pairingKeyCanvasRef, availableCameras: pairingKeyAvailableCameras } = useQRScanner({
-    onScan: handlePairingKeyQRScan,
-    onError: handlePairingKeyQRError,
-    onCameraReady: handlePairingKeyCameraReady,
-    facingMode: selectedPairingKeyCamera as 'environment' | 'user',
-    isScanning: showPairingKeyQRScanner,
-  })
-
-  // Reset pairingKeyCameraReady when scanner closes
-  useEffect(() => {
-    if (!showPairingKeyQRScanner) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset camera state when scanner closes
-      setPairingKeyCameraReady(false)
-    }
-  }, [showPairingKeyQRScanner])
-
-  // Reset pairingKeyCameraReady when camera selection changes while scanner is open
-  useEffect(() => {
-    if (showPairingKeyQRScanner) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset camera state when switching cameras
-      setPairingKeyCameraReady(false)
-    }
-  }, [selectedPairingKeyCamera, showPairingKeyQRScanner])
-
-  // Parse pairing key - debounced to reduce parsing on every keystroke
-  useEffect(() => {
-    let cancelled = false
-
-    const input = receiverPublicKeyInput.trim()
-    if (!input) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Clear validation state when input is empty
-      setParsedPairingKey(null)
-      setReceiverPublicKeyError(null)
-      return
-    }
-
-    // Quick format check first (synchronous, no debounce needed)
-    if (!isPairingKeyFormat(input)) {
-      setParsedPairingKey(null)
-      setReceiverPublicKeyError('Invalid format: expected pairing key (create one on the Passkey page)')
-      return
-    }
-
-    // Debounce the async parsing
-    const timeoutId = setTimeout(() => {
-      parsePairingKey(input)
-        .then((parsed) => {
-          if (cancelled) return
-          setParsedPairingKey(parsed)
-          setReceiverPublicKeyError(null)
-        })
-        .catch((err: unknown) => {
-          if (cancelled) return
-          setParsedPairingKey(null)
-          setReceiverPublicKeyError(err instanceof Error ? err.message : 'Invalid pairing key format')
-        })
-    }, 300)
-
-    return () => {
-      cancelled = true
-      clearTimeout(timeoutId)
-    }
-  }, [receiverPublicKeyInput])
-
-  // Load saved pairing keys when passkey mode is enabled
-  useEffect(() => {
-    if (usePasskey) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Load data from localStorage when feature enabled
-      setSavedPairingKeys(getSavedPairingKeys())
-    }
-  }, [usePasskey])
 
   const filesTotalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0)
   const folderTotalSize = folderFiles ? getTotalSize(folderFiles) : 0
@@ -165,9 +44,7 @@ export function SendTab() {
 
   const canSendFiles = selectedFiles.length > 0 && !isFilesOverLimit
   const canSendFolder = folderFiles && folderFiles.length > 0 && !isFolderOverLimit
-  // When passkey mode is enabled, require valid receiver pairing key OR sendToSelf
-  const passkeyRequirementsMet = !usePasskey || sendToSelf || (parsedPairingKey !== null)
-  const canSend = (mode === 'file' ? canSendFiles : canSendFolder) && passkeyRequirementsMet
+  const canSend = mode === 'file' ? canSendFiles : canSendFolder
 
   const handleSend = () => {
     // Set context with all the configuration
@@ -177,9 +54,6 @@ export function SendTab() {
       methodChoice,
       usePasskey,
       relayOnly,
-      sendToSelf,
-      parsedPairingKey,
-      receiverPublicKeyInput: receiverPublicKeyInput.trim(),
     })
     // Navigate to transfer page
     navigate('/send/transfer')
@@ -512,8 +386,8 @@ export function SendTab() {
                     </div>
                     <p className="text-xs text-muted-foreground">
                       {usePasskey
-                        ? 'Send to a specific recipient using their public ID. No PIN needed.'
-                        : 'Use passkey-based encryption instead of PIN. Requires receiver\'s public ID.'}
+                        ? 'Send files to yourself across devices using your passkey. No PIN needed.'
+                        : 'Use passkey-based encryption for self-transfer across your devices.'}
                     </p>
                     {!usePasskey && (
                       <p className="text-xs text-muted-foreground">
@@ -521,167 +395,8 @@ export function SendTab() {
                         <Link to="/passkey" className="text-primary hover:underline">
                           Passkey setup page
                         </Link>{' '}
-                        to create, manage your passkey or get your passkey&apos;s public ID.
+                        to create your passkey.
                       </p>
-                    )}
-
-                    {/* Receiver public ID input - only shown when passkey enabled */}
-                    {usePasskey && (
-                      <div className="space-y-3 pt-2 border-t border-dashed">
-                        {/* Send to self checkbox */}
-                        <div className="flex items-center gap-2">
-                          <input
-                            id="send-to-self"
-                            type="checkbox"
-                            className="h-4 w-4 rounded border-gray-300"
-                            checked={sendToSelf}
-                            onChange={(e) => setSendToSelf(e.target.checked)}
-                          />
-                          <Label htmlFor="send-to-self" className="text-sm font-normal cursor-pointer">
-                            Send to myself
-                          </Label>
-                        </div>
-                        {sendToSelf && (
-                          <p className="text-xs text-muted-foreground">
-                            Transfer files to yourself using the same passkey on another device.
-                          </p>
-                        )}
-
-                        {/* Pairing key input - hidden when sending to self */}
-                        {!sendToSelf && (
-                          <>
-                            <Label htmlFor="receiver-pubkey" className="text-sm font-medium">
-                              Pairing Key
-                            </Label>
-                            {/* Saved pairing keys dropdown */}
-                            {savedPairingKeys.length > 0 && (
-                              <div className="relative">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="w-full justify-between text-xs"
-                                  onClick={() => setShowPairingKeyDropdown(!showPairingKeyDropdown)}
-                                >
-                                  <span className="text-muted-foreground">Select from saved pairing keys ({savedPairingKeys.length})</span>
-                                  <ChevronDown className={`h-3 w-3 transition-transform ${showPairingKeyDropdown ? 'rotate-180' : ''}`} />
-                                </Button>
-                                {showPairingKeyDropdown && (
-                                  <div className="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg max-h-48 overflow-y-auto">
-                                    {savedPairingKeys.map((saved) => (
-                                      <button
-                                        key={saved.pairingKey}
-                                        className="w-full px-3 py-2 text-left hover:bg-muted/50 border-b last:border-b-0 text-xs"
-                                        onClick={() => {
-                                          setReceiverPublicKeyInput(saved.pairingKey)
-                                          setLoadedFromHistory(true)
-                                          setShowPairingKeyDropdown(false)
-                                        }}
-                                      >
-                                        <div className="flex items-center gap-2">
-                                          <Fingerprint className="h-3 w-3 text-muted-foreground" />
-                                          <span className="font-mono">{formatFingerprint(saved.partyAFingerprint)}</span>
-                                          <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                                          <span className="font-mono">{formatFingerprint(saved.partyBFingerprint)}</span>
-                                        </div>
-                                        {saved.comment && (
-                                          <div className="text-muted-foreground mt-0.5 truncate">{saved.comment}</div>
-                                        )}
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            {/* Hide textarea when pairing key is loaded from history and parsed */}
-                            {!(loadedFromHistory && parsedPairingKey) && (
-                              <div className="flex gap-2">
-                                <Textarea
-                                  id="receiver-pubkey"
-                                  placeholder="Paste pairing key from your Passkey page..."
-                                  value={receiverPublicKeyInput}
-                                  onChange={(e) => {
-                                    setReceiverPublicKeyInput(e.target.value)
-                                    setLoadedFromHistory(false)
-                                  }}
-                                  className="font-mono text-xs min-h-[60px] resize-none"
-                                />
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => setShowPairingKeyQRScanner(true)}
-                                  className="flex-shrink-0"
-                                  title="Scan pairing key QR code"
-                                >
-                                  <Camera className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            )}
-                            {/* Show entry options when pairing key is loaded from history */}
-                            {loadedFromHistory && parsedPairingKey && (
-                              <div className="flex gap-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="text-xs"
-                                  onClick={() => {
-                                    setReceiverPublicKeyInput('')
-                                    setParsedPairingKey(null)
-                                    setLoadedFromHistory(false)
-                                  }}
-                                >
-                                  <Keyboard className="h-3 w-3 mr-1" />
-                                  Enter manually
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="text-xs"
-                                  onClick={() => setShowPairingKeyQRScanner(true)}
-                                >
-                                  <Camera className="h-3 w-3 mr-1" />
-                                  Scan QR
-                                </Button>
-                              </div>
-                            )}
-                            {receiverPublicKeyError && (
-                              <p className="text-xs text-destructive">{receiverPublicKeyError}</p>
-                            )}
-                            {parsedPairingKey && (
-                              <div className="space-y-1 text-xs">
-                                <div className="flex items-center gap-1 text-amber-600 dark:text-amber-500 mb-1">
-                                  <span className="text-[10px]">⚠ Unverified fingerprints (will be verified via handshake proof)</span>
-                                </div>
-                                <div className="flex items-center gap-2 text-cyan-700 dark:text-cyan-400">
-                                  <Fingerprint className="h-3 w-3" />
-                                  <span>Party A:</span>
-                                  <span className="font-mono font-medium">{formatFingerprint(parsedPairingKey.partyAFingerprint)}</span>
-                                </div>
-                                <div className="flex items-center gap-2 text-cyan-700 dark:text-cyan-400 ml-5">
-                                  <span>Party B:</span>
-                                  <span className="font-mono font-medium">{formatFingerprint(parsedPairingKey.partyBFingerprint)}</span>
-                                </div>
-                                {parsedPairingKey.comment && (
-                                  <div className="flex items-center gap-2 text-muted-foreground ml-5">
-                                    <span className="italic">"{parsedPairingKey.comment}"</span>
-                                  </div>
-                                )}
-                                <div className="flex items-center gap-2 ml-5">
-                                  <Link to="/passkey/verify" className="text-primary hover:underline text-xs">
-                                    Verify your signature →
-                                  </Link>
-                                </div>
-                              </div>
-                            )}
-                            <p className="text-xs text-muted-foreground">
-                              Create and exchange a pairing key on your{' '}
-                              <Link to="/passkey" className="text-primary hover:underline">
-                                Passkey page
-                              </Link>{' '}
-                              with your peer
-                            </p>
-                          </>
-                        )}
-                      </div>
                     )}
                   </div>
                 )}
@@ -699,89 +414,7 @@ export function SendTab() {
           {usePasskey && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
               <Fingerprint className="h-3 w-3" />
-              <span>
-                Passkey mode{sendToSelf ? ' → sending to self' : parsedPairingKey ? ' → pairing key loaded' : ' (enter pairing key)'}
-              </span>
-            </div>
-          )}
-
-          {/* Pairing Key QR Scanner Modal */}
-          {showPairingKeyQRScanner && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-              <div className="bg-background rounded-lg p-4 max-w-sm w-full mx-4 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-medium flex items-center gap-2">
-                    <Camera className="h-5 w-5" />
-                    Scan Pairing Key QR Code
-                  </h3>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setShowPairingKeyQRScanner(false)
-                      setPairingKeyQRError(null)
-                    }}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-
-                <div className="relative bg-black rounded-lg overflow-hidden aspect-square">
-                  {pairingKeyQRError && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
-                      <div className="text-center p-4">
-                        <p className="text-red-400 text-sm mb-2">{pairingKeyQRError}</p>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setPairingKeyQRError(null)}
-                        >
-                          <RefreshCw className="h-4 w-4 mr-1" />
-                          Retry
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                  <video
-                    ref={pairingKeyVideoRef}
-                    className="w-full h-full object-cover"
-                    autoPlay
-                    playsInline
-                    muted
-                  />
-                  <canvas ref={pairingKeyCanvasRef} className="hidden" />
-                  {!pairingKeyCameraReady && !pairingKeyQRError && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Loader2 className="h-8 w-8 animate-spin text-white" />
-                    </div>
-                  )}
-                </div>
-
-                {pairingKeyAvailableCameras.length > 1 && (
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant={selectedPairingKeyCamera === 'environment' ? 'default' : 'outline'}
-                      onClick={() => setSelectedPairingKeyCamera('environment')}
-                      className="flex-1"
-                    >
-                      Back Camera
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={selectedPairingKeyCamera === 'user' ? 'default' : 'outline'}
-                      onClick={() => setSelectedPairingKeyCamera('user')}
-                      className="flex-1"
-                    >
-                      Front Camera
-                    </Button>
-                  </div>
-                )}
-
-                <p className="text-xs text-muted-foreground text-center">
-                  Point camera at the pairing key QR code
-                </p>
-              </div>
+              <span>Passkey mode — self-transfer</span>
             </div>
           )}
 

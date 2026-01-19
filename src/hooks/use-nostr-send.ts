@@ -18,14 +18,11 @@ import {
   generateEphemeralKeys,
   createPinExchangeEvent,
   createMutualTrustEvent,
-  createMutualTrustHandshakeEvent,
-  createMutualTrustPayloadEvent,
   parseAckEvent,
   createSignalingEvent,
   parseSignalingEvent,
   createChunkNotifyEvent,
   DEFAULT_RELAYS,
-  base64ToUint8Array,
   type TransferState,
   type PinExchangePayload,
   type ContentType,
@@ -53,14 +50,13 @@ import {
   constantTimeEqual,
 } from '@/lib/crypto/ecdh'
 import { uint8ArrayToBase64 } from '@/lib/nostr/events'
-import { parsePairingKey, getPeerFromParsedPairingKey, getOwnVerificationSecret, getPeerVerificationSecret, computeHandshakeProof, verifyHandshakeProof } from '@/lib/crypto/pairing-key'
 
 export interface UseNostrSendReturn {
   state: TransferState
   pin: string | null
   ownPublicKey: Uint8Array | null
   ownFingerprint: string | null
-  send: (content: File, options?: WebRTCOptions & { receiverPairingKey?: string; selfTransfer?: boolean }) => Promise<void>
+  send: (content: File, options?: WebRTCOptions & { selfTransfer?: boolean }) => Promise<void>
   cancel: () => void
 }
 
@@ -97,7 +93,7 @@ export function useNostrSend(): UseNostrSendReturn {
   }, [clearExpirationTimeout])
 
   const send = useCallback(
-    async (content: File, options?: WebRTCOptions & { receiverPairingKey?: string; selfTransfer?: boolean }) => {
+    async (content: File, options?: WebRTCOptions & { selfTransfer?: boolean }) => {
       // Guard against concurrent invocations
       if (sendingRef.current) return
       sendingRef.current = true
@@ -155,17 +151,9 @@ export function useNostrSend(): UseNostrSendReturn {
         // PFS: Ephemeral session keypair for Perfect Forward Secrecy
         let senderEphemeral: EphemeralSessionKeypair | undefined
         let identitySharedSecretKey: CryptoKey | undefined
-        // Handshake authentication: proves sender controls their passkey
-        let senderHandshakeProof: Uint8Array | undefined
 
-        if (options?.usePasskey && !options.receiverPairingKey && !options.selfTransfer) {
-          setState({ status: 'error', message: 'Receiver pairing key required for passkey mode' })
-          sendingRef.current = false
-          return
-        }
-
-        if (options?.usePasskey && (options.receiverPairingKey || options.selfTransfer)) {
-          // MUTUAL TRUST MODE: Use passkey mutual trust with receiver's public ID
+        if (options?.usePasskey && options.selfTransfer) {
+          // MUTUAL TRUST MODE: Use passkey for self-transfer
           // NOW WITH PERFECT FORWARD SECRECY via ephemeral session keys
           setState({ status: 'connecting', message: 'Authenticate with passkey...' })
 
@@ -186,29 +174,8 @@ export function useNostrSend(): UseNostrSendReturn {
             senderEphemeral = ephemeral
             identitySharedSecretKey = sharedSecret
 
-            // Determine receiver public key: use own identity for self-transfer, otherwise parse pairing key
-            let receiverPublicKeyBytes: Uint8Array
-            let counterpartyFingerprint: string | undefined
-            let ownVerificationSecret: Uint8Array | undefined
-            if (options.selfTransfer) {
-              receiverPublicKeyBytes = ephemeral.identityPublicKeyBytes
-            } else {
-              // Parse pairing key and verify we're a party
-              // NOTE: With HMAC signatures, we cannot verify the other party's signature
-              // Trust is established via out-of-band fingerprint verification
-              const parsedPairingKey = await parsePairingKey(
-                options.receiverPairingKey!,
-                ephemeral.identityPublicKeyBytes // Verify we're a party to this pairing key
-              )
-
-              // Extract the counterparty (receiver) from the pairing key
-              const counterparty = getPeerFromParsedPairingKey(parsedPairingKey, ephemeral.identityPublicKeyBytes)
-              receiverPublicKeyBytes = counterparty.publicId
-              counterpartyFingerprint = counterparty.fingerprint
-
-              // Get our verification secret for handshake proof (computed after nonce is created)
-              ownVerificationSecret = getOwnVerificationSecret(parsedPairingKey, ephemeral.identityPublicKeyBytes)
-            }
+            // For self-transfer, receiver is the same as sender
+            const receiverPublicKeyBytes = ephemeral.identityPublicKeyBytes
 
             // Derive AES key from passkey master key for initial payload encryption
             // NOTE: This is for the payload only. File data will use session key (PFS)
@@ -230,17 +197,6 @@ export function useNostrSend(): UseNostrSendReturn {
             const nonceBytes = crypto.getRandomValues(new Uint8Array(16))
             replayNonce = uint8ArrayToBase64(nonceBytes)
 
-            // 4. Handshake Proof: Proves sender controls their passkey (cross-user only)
-            // Uses the same nonce as replay protection
-            if (ownVerificationSecret && counterpartyFingerprint) {
-              senderHandshakeProof = await computeHandshakeProof(
-                ownVerificationSecret,
-                ephemeral.ephemeralPublicKeyBytes,
-                nonceBytes,
-                counterpartyFingerprint
-              )
-            }
-
             // Hint is receiver's public ID fingerprint (for event filtering)
             hint = await publicKeyToFingerprint(receiverPublicKeyBytes)
           } catch (err) {
@@ -251,6 +207,11 @@ export function useNostrSend(): UseNostrSendReturn {
             sendingRef.current = false
             return
           }
+        } else if (options?.usePasskey) {
+          // Passkey mode without selfTransfer - not supported anymore
+          setState({ status: 'error', message: 'Passkey mode is only for self-transfer' })
+          sendingRef.current = false
+          return
         } else {
           // Regular PIN mode
           setState({ status: 'connecting', message: 'Generating secure PIN...' })
@@ -319,26 +280,8 @@ export function useNostrSend(): UseNostrSendReturn {
 
         // Choose event type based on mode
         let exchangeEvent
-        const isCrossUserPasskey = options?.usePasskey && !options.selfTransfer
-        if (isCrossUserPasskey && senderFingerprint && receiverPkCommitment && replayNonce && senderEphemeral && options?.receiverPairingKey) {
-          // Cross-user passkey mode: use handshake flow
-          // Phase 1: Send handshake with ephemeral public key (no payload yet)
-          // Receiver will respond with their ephemeral key, then we derive session key
-          exchangeEvent = createMutualTrustHandshakeEvent(
-            secretKey,
-            salt,
-            transferId,
-            hint, // receiver's public ID fingerprint
-            senderFingerprint, // sender's public ID fingerprint
-            receiverPkCommitment, // receiver public ID commitment (relay MITM prevention)
-            replayNonce, // replay nonce (replay protection)
-            senderEphemeral.ephemeralPublicKeyBytes, // sender's ephemeral public key for ECDH
-            senderEphemeral.sessionBinding, // session binding proof
-            options.receiverPairingKey, // sender's pairing key proving intent to communicate with receiver
-            senderHandshakeProof // handshake proof proving sender controls their passkey
-          )
-        } else if (options?.usePasskey && options.selfTransfer && senderFingerprint && keyConfirmHash && receiverPkCommitment && replayNonce && senderEphemeral) {
-          // Self-transfer (same passkey): use single mutual trust event
+        if (options?.usePasskey && options.selfTransfer && senderFingerprint && keyConfirmHash && receiverPkCommitment && replayNonce && senderEphemeral) {
+          // Self-transfer (same passkey): use mutual trust event
           // Both parties have the same passkey, so they derive the same key
           exchangeEvent = createMutualTrustEvent(
             secretKey,
@@ -366,13 +309,10 @@ export function useNostrSend(): UseNostrSendReturn {
         await client.waitForConnection()
 
         // Wait for receiver ready ACK (seq=0)
-        const { receiverPubkey, receiverHint, receiverEphemeralPub, receiverSessionBinding, receiverPairingKey, receiverHandshakeProof } = await new Promise<{
+        const { receiverPubkey, receiverEphemeralPub, receiverSessionBinding } = await new Promise<{
           receiverPubkey: string
-          receiverHint?: string
           receiverEphemeralPub?: Uint8Array
           receiverSessionBinding?: Uint8Array
-          receiverPairingKey?: string
-          receiverHandshakeProof?: Uint8Array
         }>((resolve, reject) => {
           const timeout = setTimeout(() => {
             client.unsubscribe(subId)
@@ -414,11 +354,8 @@ export function useNostrSend(): UseNostrSendReturn {
                 client.unsubscribe(subId)
                 resolve({
                   receiverPubkey: event.pubkey,
-                  receiverHint: ack.hint,
                   receiverEphemeralPub: ack.receiverEphemeralPub,
                   receiverSessionBinding: ack.receiverSessionBinding,
-                  receiverPairingKey: ack.receiverPairingKey,
-                  receiverHandshakeProof: ack.receiverHandshakeProof,
                 })
               }
             }
@@ -441,87 +378,15 @@ export function useNostrSend(): UseNostrSendReturn {
             throw new Error('Security check failed: receiver did not provide ephemeral keys for PFS')
           }
 
-          // For cross-user passkey: verify receiver's pairing key proves mutual intent
-          // With pairing keys, both parties have the SAME key with both signatures
-          // The receiver echoes back the same pairing key to prove they have it
-          if (isCrossUserPasskey) {
-            if (!receiverPairingKey) {
-              throw new Error('Security check failed: receiver did not provide pairing key')
-            }
-            if (!receiverHint) {
-              throw new Error('Security check failed: receiver did not provide identity hint')
-            }
-            // Parse the pairing key and verify we're a party
-            // NOTE: With HMAC signatures, we cannot verify the other party's signature
-            const parsedReceiverPairingKey = await parsePairingKey(
-              receiverPairingKey,
-              senderEphemeral.identityPublicKeyBytes // Verify sender is a party
-            )
-            // Extract the counterparty (receiver) from the parsed pairing key
-            const counterparty = getPeerFromParsedPairingKey(parsedReceiverPairingKey, senderEphemeral.identityPublicKeyBytes)
-            // Verify the counterparty's fingerprint matches the receiver's identity hint
-            // This ensures the receiver is actually the other party to this pairing key
-            if (counterparty.fingerprint !== receiverHint) {
-              throw new Error(
-                `Receiver's identity (${receiverHint}) doesn't match pairing key counterparty (${counterparty.fingerprint}).`
-              )
-            }
-
-            // === CRITICAL: Verify receiver's handshake proof ===
-            // This proves the receiver controls their passkey, preventing impersonation with stolen pairing keys
-            if (!receiverHandshakeProof) {
-              throw new Error('Security check failed: receiver did not provide handshake proof')
-            }
-            if (!replayNonce) {
-              throw new Error('Security check failed: missing replay nonce for handshake verification')
-            }
-            // Validate nonce format before decoding (standard base64: A-Z, a-z, 0-9, +, /, =)
-            if (!/^[A-Za-z0-9+/]+=*$/.test(replayNonce)) {
-              throw new Error('Security check failed: invalid or corrupted replay nonce (malformed base64)')
-            }
-            // Get the receiver's verification secret from the pairing key
-            const receiverVs = getPeerVerificationSecret(parsedReceiverPairingKey, senderEphemeral.identityPublicKeyBytes)
-            // Decode the nonce from base64 for verification
-            let nonceBytes: Uint8Array
-            try {
-              nonceBytes = base64ToUint8Array(replayNonce)
-            } catch {
-              throw new Error('Security check failed: invalid or corrupted replay nonce (decode failed)')
-            }
-            // Verify the receiver's proof: HMAC(receiver_vs, receiver_epk || nonce || sender_fingerprint)
-            const proofValid = await verifyHandshakeProof(
-              receiverVs,
-              receiverHandshakeProof,
-              receiverEphemeralPub,
-              nonceBytes,
-              senderEphemeral.identityFingerprint
-            )
-            if (!proofValid) {
-              throw new Error('Security check failed: invalid receiver handshake proof - receiver does not control their passkey')
-            }
-          }
-
           // For self-transfer: verify receiver's session binding (same passkey = same master key)
-          // For cross-user: skip binding verification (different passkeys = different master keys)
-          if (!isCrossUserPasskey) {
-            // Verify receiver's session binding to prevent ephemeral key substitution
-            const bindingValid = await verifySessionBinding(
-              identitySharedSecretKey,
-              receiverEphemeralPub,
-              receiverSessionBinding
-            )
-            if (!bindingValid) {
-              throw new Error('Security check failed: invalid receiver session binding (potential MITM)')
-            }
+          const bindingValid = await verifySessionBinding(
+            identitySharedSecretKey,
+            receiverEphemeralPub,
+            receiverSessionBinding
+          )
+          if (!bindingValid) {
+            throw new Error('Security check failed: invalid receiver session binding (potential MITM)')
           }
-          // NOTE: For cross-user passkey mode, we CANNOT verify session binding because:
-          // - Receiver's binding is created using their passkey master key
-          // - We don't have access to receiver's master key (different passkeys = different PRF outputs)
-          // Security relies on:
-          // 1. Handshake proof verification - receiver proved they control their passkey
-          // 2. Pairing key verification - we verified receiver is a party to the pairing key
-          // 3. RPKC commitment - we committed to receiver's public ID in the handshake event
-          // 4. Ephemeral ECDH - any MITM can't derive session key without both private keys
 
           // Derive session key from ephemeral ECDH
           // SECURITY: This key is derived from ephemeral keys whose private material
@@ -537,25 +402,6 @@ export function useNostrSend(): UseNostrSendReturn {
           // or the ephemeral private key. Explicitly clear them to minimize exposure window.
           senderEphemeral = undefined
           identitySharedSecretKey = undefined
-
-          // Cross-user passkey mode: send encrypted payload now that we have session key
-          // (For self-transfer, payload was already included in the initial mutual trust event)
-          if (isCrossUserPasskey) {
-            setState({ status: 'connecting', message: 'Sending encrypted metadata...' })
-
-            // Encrypt payload with session key
-            const sessionEncryptedPayload = await encrypt(key, payloadBytes)
-
-
-            // Publish payload event addressed to receiver
-            const payloadEvent = createMutualTrustPayloadEvent(
-              secretKey,
-              receiverPubkey,
-              transferId,
-              sessionEncryptedPayload
-            )
-            await client.publish(payloadEvent)
-          }
         }
 
         // Enforce TTL: reject if session has expired
@@ -691,7 +537,7 @@ export function useNostrSend(): UseNostrSendReturn {
                 },
                 (data) => {
                   if (data === 'DONE_ACK') {
-                    // remote confirmed receipt
+                    console.debug('WebRTC: Remote confirmed receipt (DONE_ACK)')
                   }
                 }
               )
