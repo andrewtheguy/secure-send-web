@@ -145,6 +145,8 @@ Passkeys provide an alternative to PIN-based authentication using the WebAuthn P
 
 This complexity existed without a compelling use case since PIN mode already handles cross-user transfers simply. Passkey mode is now scoped to self-transfer where the same user owns both devices and has the same passkey synced via their password manager. This provides a streamlined single-round-trip experience with stronger security guarantees (hardware-backed keys, PFS, non-extractable secrets).
 
+> **Historical reference**: The cross-user passkey transfer implementation (pairing keys) is preserved at git tag [`before-removing-pairing-key`](https://github.com/andrewtheguy/secure-send-web/releases/tag/before-removing-pairing-key) for reference.
+
 **Mode selection guidance:**
 
 | Mode | Benefits | Trade-offs |
