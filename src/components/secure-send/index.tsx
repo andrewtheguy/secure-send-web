@@ -178,13 +178,13 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
             </section>
 
             <section>
-              <h3 className="font-semibold text-base mb-2">Passkey Mode</h3>
-              <p className="text-muted-foreground text-sm mb-3">Alternative to PIN - uses WebAuthn for passwordless encryption.</p>
+              <h3 className="font-semibold text-base mb-2">Passkey Mode (Self-Transfer)</h3>
+              <p className="text-muted-foreground text-sm mb-3">Send files to yourself across devices - no PIN needed.</p>
               <div className="space-y-2 text-muted-foreground text-sm">
                 <p><span className="text-foreground font-medium">Setup:</span> Create a passkey at <a href="/passkey" className="text-primary hover:underline">/passkey</a> - stored in your password manager</p>
-                <p><span className="text-foreground font-medium">Sync:</span> Both parties need the same passkey synced (1Password, iCloud Keychain, Google Password Manager)</p>
-                <p><span className="text-foreground font-medium">Verify:</span> Compare fingerprints (16-hex identifier) to confirm same passkey</p>
-                <p><span className="text-foreground font-medium">Security:</span> Keys derived from device secure hardware via WebAuthn PRF extension</p>
+                <p><span className="text-foreground font-medium">Sync:</span> Same passkey syncs across your devices (1Password, iCloud Keychain, Google Password Manager)</p>
+                <p><span className="text-foreground font-medium">Use case:</span> Transfer files between your own devices without sharing codes</p>
+                <p><span className="text-foreground font-medium">Security:</span> Hardware-backed keys via WebAuthn PRF, perfect forward secrecy</p>
               </div>
             </section>
 
