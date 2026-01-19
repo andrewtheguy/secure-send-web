@@ -8,37 +8,6 @@ Better user feedback for network errors, relay failures, and WebRTC connection i
 ## Backlog (Future Considerations)
 - Better website UI/UX
 
-### Expiration Date on Final Pairing Token
-Add an optional expiration timestamp to the completed pairing token, allowing parties to set a validity period for their pairing relationship (e.g., 30 days, 1 year, or indefinite).
-
-### Encrypted Mutual Contact Tokens
-Encrypt the mutual contact token payload so only the two parties can read it:
-
-**Current state:**
-- Token is plaintext JSON with both parties' public IDs, contact keys, and HMAC signatures
-- Anyone who intercepts the token can see who the parties are (via fingerprints)
-
-**Proposed improvement:**
-- Derive an AES-256-GCM encryption key from both parties' HMAC keys (or a shared HKDF derivation)
-- Encrypt the token payload; only parties with their HMAC key can decrypt
-- Token becomes opaque to third parties
-
-**Benefits:**
-- Privacy: Intercepted tokens reveal nothing about the parties
-- Metadata protection: Even party fingerprints are hidden
-- Same security model: Still requires out-of-band fingerprint verification
-
-**Implementation approach:**
-- During token creation, initiator encrypts with key derived from their HMAC key
-- Countersigner decrypts (derives same key from their HMAC key since challenge includes both cpks)
-- Or use a simpler scheme: encrypt with random key, include key encrypted to each party's cpk
-
-**Trade-offs:**
-- More complex token format
-- Both parties must authenticate to read token contents (already required for signing)
-- Slightly larger token size due to encryption overhead
-
-
 ### NIP-65/NIP-66 Relay Discovery
 Implement automatic relay discovery using Nostr relay list events:
 - Query seed relays for relay list events (kind 10002 NIP-65, kind 30166 NIP-66)

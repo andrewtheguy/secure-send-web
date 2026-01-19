@@ -97,68 +97,20 @@ The signaling method is encoded in the PIN's first character:
 
 Receivers don't need to select a signaling method - it's automatically detected from the PIN. Passkey mode uses fingerprints instead of PINs for identification.
 
-### Passkey Mode
+### Passkey Mode (Self-Transfer)
 
-Passkeys provide passwordless encryption using the WebAuthn PRF extension:
+Passkeys provide passwordless encryption using the WebAuthn PRF extension for transferring files to yourself across devices:
 
 1. **Setup**: Create a passkey at `/passkey` - it's stored in your password manager (1Password, iCloud Keychain, Google Password Manager, etc.)
-2. **Self-transfer**: Same passkey synced via password manager - encryption works automatically
-3. **Cross-user transfer**: Exchange a pairing key with your peer (see below). Your invite code is generated at `/passkey` when you select "I want to pair with someone" - share it with your peer to start the pairing process.
-4. **Send/Receive**: Enable "Use Passkey" in Advanced Options and authenticate with biometrics/device unlock
+2. **Sync**: The same passkey syncs across your devices via your password manager
+3. **Send/Receive**: Enable "Use Passkey" in Advanced Options and authenticate with biometrics/device unlock
 
 **Key differences from PIN mode:**
 - No PIN to memorize or share
 - Encryption keys derived from WebAuthn PRF extension (hardware-backed)
 - Fingerprint (16-char identifier) for verification
 - Same AES-256-GCM encryption strength as PIN mode
-
-### Pairing Keys (Cross-User Passkey Mode)
-
-When using passkey mode with a different person (cross-user), you need a **pairing key** - a cryptographic proof that both parties have agreed to communicate:
-
-**How to create a pairing key:**
-
-1. **Get Peer's Invite Code**: Your peer (Signer) shares their Invite Code (JSON with public ID, peer key, and issued-at timestamp) with you
-2. **Create & Send Pairing Request**: On the `/passkey` page, paste their code and click "Sign" to create the pairing request, then share it with your peer
-3. **Complete Pairing Key**: Your peer pastes the pairing request and clicks "Confirm" to complete it, then shares the completed pairing key back with you
-4. **Use Pairing Key**: Both parties save and use the same completed pairing key for transfers
-
-**Invite Code TTL:**
-- Invite codes are valid for **24 hours** from creation (`iat` timestamp)
-- Both Step 2 (initiator) and Step 3 (confirmer) validate the TTL before proceeding
-- A maximum clock skew of **5 minutes** is allowed for future-dated timestamps
-- Expired invite codes must be regenerated
-
-**Pairing flow:**
-```
-Alice (Initiator)                    Bob (Confirmer)
-      |                                     |
-      |<------ 1. Bob's Invite Code --------|
-      v                                     |
- Create pairing request                     |
-      |                                     |
-      |------ 2. Pairing request ---------->|
-      |                                     v
-      |                          Confirm pairing
-      |                                     |
-      |<----- 3. Complete pairing key ------|
-      |                                     |
-      |------ 4. Share pairing key -------->|
-      v                                     v
- +---------------------------------------------+
- |  SAME PAIRING KEY - Either can send/receive |
- +---------------------------------------------+
-```
-
-**Security properties:**
-- Both parties compute HMAC-SHA256 MACs over the same challenge (tamper-proof)
-- Each party's HMAC key is derived from their passkey PRF (non-extractable, protected by passkey authentication)
-- Pairing key contains both parties' public IDs, peer public keys, and verification secrets
-- Each party can verify their own MAC by re-authenticating to derive their HMAC key
-- Peer's MAC cannot be verified cryptographically (no access to their key) - trust is established via out-of-band fingerprint verification during invite code exchange
-- **Invite Code TTL**: See above for validation rules (24-hour expiry, 5-minute clock skew)
-- **Handshake Proofs (HP)** provide runtime authentication: both parties prove passkey control at every handshake, preventing impersonation with stolen pairing keys
-- **Only the two parties in the pairing key can use it** - party membership is cryptographically verified during the handshake; a third party cannot use someone else's pairing key
+- Perfect for sending files to yourself without sharing codes
 
 ### Cloud Storage Redundancy
 
