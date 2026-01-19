@@ -149,8 +149,8 @@ This complexity existed without a compelling use case since PIN mode already han
 
 | Mode | Benefits | Trade-offs |
 |------|----------|------------|
-| **Passkey** | Hardware-backed keys, PFS, non-extractable secrets, no PIN to share | Requires same passkey synced across devices |
-| **PIN** | Works with anyone, no prior setup needed | Requires out-of-band PIN sharing (voice, message, etc.) |
+| **Passkey** | Hardware-backed keys, PFS, non-extractable secrets, no PIN to share | Initial setup complexity, requires same passkey synced across devices |
+| **PIN** | Works with anyone, no prior setup needed | Requires receiver to manually type the PIN from sender screen |
 
 For detailed documentation on the passkey system, including key derivation, security properties, and perfect forward secrecy, see [Passkey Architecture](./PASSKEY_ARCHITECTURE.md).
 
