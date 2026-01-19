@@ -95,8 +95,8 @@ export function PasskeyCreatePage() {
       setNameError(null)
       setPageState('idle')
 
-      // Navigate to pairing immediately after successful creation
-      navigate('/passkey/pair', { state: { passkeyCreated: true } })
+      // Navigate to home after successful creation (passkey is for self-transfer)
+      navigate('/')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create passkey')
       setPageState('idle')
@@ -122,8 +122,7 @@ export function PasskeyCreatePage() {
           Create New Passkey
         </h3>
         <p className="text-sm mt-2">
-          Create a passkey to generate your invite code. Share it with peers for secure file
-          transfers without needing PINs.
+          Create a passkey to securely send files to yourself across devices without needing PINs.
         </p>
 
         <div className="mt-4 space-y-2">

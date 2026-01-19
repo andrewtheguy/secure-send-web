@@ -3,7 +3,6 @@ import { Fingerprint, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { PasskeyProvider, usePasskey } from '@/contexts/passkey-context'
-import { QRScannerModal } from '@/components/passkey'
 
 function PasskeyAlerts() {
   const { error, success } = usePasskey()
@@ -39,9 +38,9 @@ function TechnicalDetails() {
         passkey-bound session binding, ensuring only the intended recipient can decrypt.
       </p>
       <p>
-        <span className="font-medium text-foreground">Pairing keys:</span> Both parties sign the
-        same key, proving mutual consent. The initiator creates a pairing request, and the peer
-        confirms it to produce the final pairing key.
+        <span className="font-medium text-foreground">Self-transfer:</span> Passkeys sync across
+        your devices via your password manager, allowing PIN-free transfers to yourself without
+        sharing any codes.
       </p>
     </div>
   )
@@ -57,7 +56,7 @@ function PasskeyLayoutContent() {
             Passkey Setup
           </CardTitle>
           <CardDescription>
-            Generate your passkey invite code for secure, PIN-free file transfers
+            Create a passkey for secure, PIN-free file transfers to yourself
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -66,8 +65,6 @@ function PasskeyLayoutContent() {
           <TechnicalDetails />
         </CardContent>
       </Card>
-
-      <QRScannerModal />
     </div>
   )
 }

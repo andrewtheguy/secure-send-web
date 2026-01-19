@@ -7,7 +7,6 @@ import {
   useCallback,
   type ReactNode,
 } from 'react'
-import type { ParsedPairingKey } from '@/lib/crypto/pairing-key'
 
 export type MethodChoice = 'online' | 'offline'
 
@@ -20,9 +19,6 @@ interface SendConfig {
   methodChoice: MethodChoice
   usePasskey: boolean
   relayOnly: boolean
-  sendToSelf: boolean
-  parsedPairingKey: ParsedPairingKey | null
-  receiverPublicKeyInput: string
 }
 
 interface SendContextState {

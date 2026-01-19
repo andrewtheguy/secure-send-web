@@ -149,8 +149,7 @@ export function SendTransferPage() {
       const options = config.usePasskey
         ? {
             usePasskey: true,
-            receiverPairingKey: config.receiverPublicKeyInput || undefined,
-            selfTransfer: config.sendToSelf,
+            selfTransfer: true, // Passkey mode is always self-transfer
             relayOnly: config.relayOnly,
           }
         : { relayOnly: config.relayOnly }
