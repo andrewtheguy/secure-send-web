@@ -414,7 +414,7 @@ export function SendTab() {
           {usePasskey && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
               <Fingerprint className="h-3 w-3" />
-              <span>Passkey mode → self-transfer</span>
+              <span>Passkey mode — self-transfer</span>
             </div>
           )}
 

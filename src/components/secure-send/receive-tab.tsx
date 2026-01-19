@@ -1,13 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ChevronDown, ChevronRight, ArrowRight } from 'lucide-react'
+import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Switch } from '@/components/ui/switch'
-import { Label } from '@/components/ui/label'
 import { PinInput, type PinInputRef, type PinChangePayload } from './pin-input'
 import { TransferStatus } from './transfer-status'
 import { QRDisplay } from './qr-display'
 import { QRInput } from './qr-input'
+import { AdvancedOptionsPanel } from './advanced-options-panel'
 import { useNostrReceive } from '@/hooks/use-nostr-receive'
 import { useManualReceive } from '@/hooks/use-manual-receive'
 import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
@@ -271,48 +270,19 @@ export function ReceiveTab() {
             <>
               {usePasskey ? (
                 <>
-                  {/* Advanced Options containing passkey settings */}
-                  <div className="border rounded-lg overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setShowAdvanced(!showAdvanced)}
-                      className="w-full flex items-center gap-2 p-3 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      {showAdvanced ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                      Advanced Options
-                      <span className="ml-auto text-xs bg-primary/10 border border-primary/20 px-2 py-0.5 rounded">
-                        Passkey
-                      </span>
-                    </button>
-                    {showAdvanced && (
-                      <div className="p-3 pt-0 space-y-3 border-t">
-                        {/* Passkey toggle */}
-                        <div className="pt-2">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Fingerprint className="h-4 w-4 text-muted-foreground" />
-                              <Label htmlFor="use-passkey-receive" className="text-sm font-medium cursor-pointer">
-                                Use Passkey to receive
-                              </Label>
-                            </div>
-                            <Switch
-                              id="use-passkey-receive"
-                              checked={usePasskey}
-                              onCheckedChange={setUsePasskey}
-                            />
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Receive files you sent from another device using the same passkey.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <AdvancedOptionsPanel
+                    showAdvanced={showAdvanced}
+                    setShowAdvanced={setShowAdvanced}
+                    usePasskey={usePasskey}
+                    setUsePasskey={setUsePasskey}
+                    description="Receive files you sent from another device using the same passkey."
+                    showPasskeyBadge
+                  />
 
                   {/* Passkey mode indicator */}
                   <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
                     <Fingerprint className="h-3 w-3" />
-                    <span>Passkey mode → receiving from self</span>
+                    <span>Passkey mode — receiving from self</span>
                   </div>
 
                   <Button
@@ -357,54 +327,19 @@ export function ReceiveTab() {
                     Your connection is encrypted and private. Files are never stored unencrypted.
                   </div>
 
-                  <div className="border rounded-lg overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setShowAdvanced(!showAdvanced)}
-                      className="w-full flex items-center gap-2 p-3 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      {showAdvanced ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                      Advanced Options
-                      {usePasskey && (
-                        <span className="ml-auto text-xs bg-primary/10 border border-primary/20 px-2 py-0.5 rounded">
-                          Passkey
-                        </span>
-                      )}
-                    </button>
-                    {showAdvanced && (
-                      <div className="p-3 pt-0 space-y-3 border-t">
-                        <div className="pt-2">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Fingerprint className="h-4 w-4 text-muted-foreground" />
-                              <Label htmlFor="use-passkey-receive" className="text-sm font-medium cursor-pointer">
-                                Use Passkey to receive
-                              </Label>
-                            </div>
-                            <Switch
-                              id="use-passkey-receive"
-                              checked={usePasskey}
-                              onCheckedChange={setUsePasskey}
-                            />
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {usePasskey
-                              ? 'Skip PIN entry. Authenticate with the same synced passkey as the sender.'
-                              : 'Use your passkey instead of entering a PIN. Both sender and receiver must have the same passkey.'}
-                          </p>
-                          {!usePasskey && (
-                            <p className="text-xs text-muted-foreground">
-                              Use the{' '}
-                              <Link to="/passkey" className="text-primary hover:underline">
-                                Passkey setup page
-                              </Link>{' '}
-                              to create or manage your passkey.
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <AdvancedOptionsPanel
+                    showAdvanced={showAdvanced}
+                    setShowAdvanced={setShowAdvanced}
+                    usePasskey={usePasskey}
+                    setUsePasskey={setUsePasskey}
+                    description={
+                      usePasskey
+                        ? 'Skip PIN entry. Authenticate with the same synced passkey as the sender.'
+                        : 'Use your passkey instead of entering a PIN. Both sender and receiver must have the same passkey.'
+                    }
+                    showPasskeyBadge={usePasskey}
+                    showPasskeySetupLink
+                  />
 
                   <Button onClick={handleReceivePin} disabled={!canReceivePin} className="w-full bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700">
                     <Download className="mr-2 h-4 w-4" />

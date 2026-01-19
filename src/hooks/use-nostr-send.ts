@@ -537,7 +537,7 @@ export function useNostrSend(): UseNostrSendReturn {
                 },
                 (data) => {
                   if (data === 'DONE_ACK') {
-                    // remote confirmed receipt
+                    console.debug('WebRTC: Remote confirmed receipt (DONE_ACK)')
                   }
                 }
               )
