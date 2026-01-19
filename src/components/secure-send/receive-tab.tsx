@@ -453,20 +453,6 @@ export function ReceiveTab() {
             </div>
           )}
 
-          {/* Show receiver's own fingerprint during transfer for verification */}
-          {receiverOwnFingerprint && (
-            <div className="text-xs text-muted-foreground border border-cyan-500/30 bg-cyan-50/30 dark:bg-cyan-950/20 px-3 py-2 rounded">
-              <div className="flex items-center gap-2 font-mono">
-                <Fingerprint className="h-3 w-3 text-cyan-600" />
-                <span>Your fingerprint: </span>
-                <span className="font-medium text-cyan-600">
-                  {formatFingerprint(receiverOwnFingerprint)}
-                </span>
-              </div>
-              <p className="mt-1 ml-5">Sender should verify this matches your public ID.</p>
-            </div>
-          )}
-
           {/* QR Input for receiving offer */}
           {showQRInput && (
             <div className="space-y-4">
