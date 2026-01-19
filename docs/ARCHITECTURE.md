@@ -135,11 +135,22 @@ To protect against manual entry errors, the PIN includes a custom checksum:
 
 Passkeys provide an alternative to PIN-based authentication using the WebAuthn PRF extension for hardware-backed key derivation. Passkey mode is designed for self-transfer (sending files to yourself across devices using the same synced passkey).
 
-**Why self-transfer only?** Cross-user passkey transfers were previously supported via **pairing keys**—a cryptographic mechanism where both parties exchange invite codes and sign a shared token to establish trust between different passkeys. This required significant complexity: invite code exchange with TTL validation, HMAC signatures from both parties, verification secrets, handshake proofs for impersonation prevention, and two round trips instead of one. This complexity existed without a compelling use case since PIN mode already handles cross-user transfers simply. Passkey mode is now scoped to self-transfer where the same user owns both devices and has the same passkey synced via their password manager—this provides a streamlined single-round-trip experience with stronger security guarantees (hardware-backed keys, PFS, non-extractable secrets).
+**Why self-transfer only?** Cross-user passkey transfers were previously supported via **pairing keys**—a cryptographic mechanism where both parties exchange invite codes and sign a shared token to establish trust between different passkeys. This required significant complexity:
+
+- Invite code exchange with TTL validation
+- HMAC signatures from both parties
+- Verification secrets for identity binding
+- Handshake proofs to prevent impersonation
+- Two round trips instead of one
+
+This complexity existed without a compelling use case since PIN mode already handles cross-user transfers simply. Passkey mode is now scoped to self-transfer where the same user owns both devices and has the same passkey synced via their password manager. This provides a streamlined single-round-trip experience with stronger security guarantees (hardware-backed keys, PFS, non-extractable secrets).
 
 **Mode selection guidance:**
-- **Passkey mode**: Recommended for syncing files between your own devices. Provides higher security (hardware-backed keys, PFS, non-extractable secrets) and eliminates PIN sharing.
-- **PIN mode**: Required for sending to other users or recipients who don't share your passkey sync. PIN can be communicated out-of-band (voice, message, etc.).
+
+| Mode | Benefits | Trade-offs |
+|------|----------|------------|
+| **Passkey** | Hardware-backed keys, PFS, non-extractable secrets, no PIN to share | Requires same passkey synced across devices |
+| **PIN** | Works with anyone, no prior setup needed | Requires out-of-band PIN sharing (voice, message, etc.) |
 
 For detailed documentation on the passkey system, including key derivation, security properties, and perfect forward secrecy, see [Passkey Architecture](./PASSKEY_ARCHITECTURE.md).
 
@@ -526,7 +537,7 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 ## Security Considerations
 
 1. **Ephemeral Keys**: New keypair generated for each transfer
-2. **Forward Secrecy**: PIN/passkey-derived key is unique per transfer (includes random salt) - applies to all modes
+2. **Forward Secrecy**: PIN/passkey-derived key is unique per transfer (includes random salt) - applies to all modes. Note: This provides per-transfer key uniqueness but not true Perfect Forward Secrecy (PFS). PIN mode achieves key isolation through random salts; passkey mode additionally provides PFS via ephemeral ECDH session keys (see item 15)
 3. **No Server Trust**: Cloud storage and relays see only encrypted payloads and minimal routing metadata; plaintext never leaves the device
 4. **PIN Entropy**: ~67 bits (11 random chars from 69-char set + 1 checksum)
 5. **Brute-Force Resistance**: 600K PBKDF2 iterations for PIN mode; hardware rate limiting for passkey mode

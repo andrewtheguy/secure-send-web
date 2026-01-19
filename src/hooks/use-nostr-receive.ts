@@ -715,7 +715,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
           // Fire-and-forget: Query existing events in parallel with the live subscription.
           // This catches events published before we subscribed. Errors are logged inside.
-          ; (async () => {
+          void (async () => {
             try {
               const existingEvents = await client.query([
                 {

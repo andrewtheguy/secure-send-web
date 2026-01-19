@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { ChevronDown, ChevronRight, Fingerprint } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
@@ -12,6 +13,7 @@ interface AdvancedOptionsPanelProps {
   description: ReactNode
   showPasskeyBadge?: boolean
   showPasskeySetupLink?: boolean
+  id?: string
 }
 
 export function AdvancedOptionsPanel({
@@ -22,7 +24,11 @@ export function AdvancedOptionsPanel({
   description,
   showPasskeyBadge = false,
   showPasskeySetupLink = false,
+  id,
 }: AdvancedOptionsPanelProps) {
+  const generatedId = useId()
+  const switchId = id ?? `use-passkey-${generatedId}`
+
   return (
     <div className="border rounded-lg overflow-hidden">
       <button
@@ -44,12 +50,12 @@ export function AdvancedOptionsPanel({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Fingerprint className="h-4 w-4 text-muted-foreground" />
-                <Label htmlFor="use-passkey-receive" className="text-sm font-medium cursor-pointer">
+                <Label htmlFor={switchId} className="text-sm font-medium cursor-pointer">
                   Use Passkey to receive
                 </Label>
               </div>
               <Switch
-                id="use-passkey-receive"
+                id={switchId}
                 checked={usePasskey}
                 onCheckedChange={setUsePasskey}
               />

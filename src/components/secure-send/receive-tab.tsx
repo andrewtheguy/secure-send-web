@@ -332,12 +332,7 @@ export function ReceiveTab() {
                     setShowAdvanced={setShowAdvanced}
                     usePasskey={usePasskey}
                     setUsePasskey={setUsePasskey}
-                    description={
-                      usePasskey
-                        ? 'Skip PIN entry. Authenticate with the same synced passkey as the sender.'
-                        : 'Use your passkey instead of entering a PIN. Both sender and receiver must have the same passkey.'
-                    }
-                    showPasskeyBadge={usePasskey}
+                    description="Use your passkey instead of entering a PIN. Both sender and receiver must have the same passkey."
                     showPasskeySetupLink
                   />
 
