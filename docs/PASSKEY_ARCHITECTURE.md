@@ -16,7 +16,7 @@ Passkeys provide an alternative to PIN-based authentication using the WebAuthn P
 
 ## Passkey Public ID
 
-- **Public ID**: 32 bytes derived from the passkey master key via HKDF (shareable, non-secret), encoded as base64 for copy/QR
+- **Public ID**: 32 bytes derived from the passkey master key via HKDF (shareable, non-secret), encoded as base64
 - **Purpose**: Shared identifier for targeting Nostr events and validating receiver commitments (`rpkc`)
 
 **Threat model note**: Even in self-transfer flows, `rpkc` (receiver public ID commitment) validation is required because Nostr relays and the network path may be adversarial.
