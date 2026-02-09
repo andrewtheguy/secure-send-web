@@ -61,7 +61,6 @@ export function SendTransferPage() {
   // Offline-specific properties (type-safe access via discriminated union)
   const manualState = activeHook.type === 'offline' ? activeHook.hook.state : null
   const offerData = manualState?.offerData
-  const clipboardData = manualState?.clipboardData
   const submitAnswer = activeHook.type === 'offline' ? activeHook.hook.submitAnswer : undefined
 
   // Redirect if no config
@@ -284,7 +283,7 @@ export function SendTransferPage() {
               </div>
 
               {/* QR codes */}
-              <MultiQRDisplay data={offerData} clipboardData={clipboardData} />
+              <MultiQRDisplay data={offerData} />
 
               {/* Input for receiver's response */}
               <div className="pt-2 border-t">

@@ -140,9 +140,7 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
   const handleCopy = useCallback(async () => {
     if (!data || data.length === 0) return
     try {
-      const copyPayload = (clipboardData && clipboardData.length > 0)
-        ? clipboardData
-        : generateMutualClipboardData(data)
+      const copyPayload = clipboardData || generateMutualClipboardData(data)
       await navigator.clipboard.writeText(copyPayload)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)

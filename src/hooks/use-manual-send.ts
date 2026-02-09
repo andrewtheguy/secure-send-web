@@ -45,7 +45,6 @@ interface ManualTransferStateBase {
   currentRelays?: string[]
   totalRelays?: number
   offerData?: Uint8Array // Binary data for QR code
-  clipboardData?: string // Base64 for copy button
 }
 
 // Error state has required message
