@@ -121,11 +121,31 @@ export function ReceiveChunkedPage() {
           <h2 className="text-lg font-semibold text-center">Receiving File</h2>
 
           {total !== null ? (
-            <div className="space-y-2">
+            <div className="space-y-3">
               <p className="text-sm text-muted-foreground text-center">
                 Collected {collected} of {total} QR code{total !== 1 ? 's' : ''}
               </p>
               <Progress value={(collected / total) * 100} className="h-2" />
+              {total > 1 && (
+                <div className="flex flex-wrap justify-center gap-1.5">
+                  {Array.from({ length: total }, (_, i) => {
+                    const received = chunkState.collectedIndices.has(i)
+                    return (
+                      <div
+                        key={i}
+                        className={`w-7 h-7 rounded text-xs font-medium flex items-center justify-center transition-colors ${
+                          received
+                            ? 'bg-cyan-600 text-white'
+                            : 'border border-muted-foreground/30 text-muted-foreground'
+                        }`}
+                        title={`QR #${i + 1}: ${received ? 'Received' : 'Missing'}`}
+                      >
+                        {i + 1}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-sm text-muted-foreground text-center">

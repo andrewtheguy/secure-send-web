@@ -4,6 +4,7 @@ import { parseChunk, reassembleChunks, extractChunkParam } from '@/lib/chunk-uti
 interface ChunkCollectorState {
   totalChunks: number | null
   collectedCount: number
+  collectedIndices: Set<number>
   isComplete: boolean
   assembledPayload: Uint8Array | null
 }
@@ -15,6 +16,7 @@ export function useChunkCollector() {
   const [state, setState] = useState<ChunkCollectorState>({
     totalChunks: null,
     collectedCount: 0,
+    collectedIndices: new Set<number>(),
     isComplete: false,
     assembledPayload: null,
   })
@@ -34,11 +36,14 @@ export function useChunkCollector() {
     const collectedCount = chunksRef.current.size
     const isComplete = collectedCount === parsed.total
 
+    const collectedIndices = new Set(chunksRef.current.keys())
+
     if (isComplete) {
       const assembled = reassembleChunks(chunksRef.current, parsed.total)
       setState({
         totalChunks: parsed.total,
         collectedCount,
+        collectedIndices,
         isComplete: true,
         assembledPayload: assembled,
       })
@@ -46,6 +51,7 @@ export function useChunkCollector() {
       setState({
         totalChunks: parsed.total,
         collectedCount,
+        collectedIndices,
         isComplete: false,
         assembledPayload: null,
       })
