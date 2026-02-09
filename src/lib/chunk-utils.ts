@@ -34,6 +34,7 @@ export function base64urlDecode(encoded: string): Uint8Array {
 
 /**
  * Split a binary payload into chunks, each prefixed with [index][total].
+ * Distributes data evenly across chunks so all QR codes are similar size.
  * Returns an array of Uint8Array chunks ready for base64url encoding.
  */
 export function chunkPayload(binary: Uint8Array, maxDataBytes = 400): Uint8Array[] {
@@ -42,11 +43,17 @@ export function chunkPayload(binary: Uint8Array, maxDataBytes = 400): Uint8Array
     throw new Error(`Payload too large: would need ${totalChunks} chunks (max 255)`)
   }
 
+  // Distribute evenly: each chunk gets floor or ceil of (total / chunks)
+  const baseSize = Math.floor(binary.length / totalChunks)
+  const remainder = binary.length % totalChunks
+
   const chunks: Uint8Array[] = []
+  let offset = 0
   for (let i = 0; i < totalChunks; i++) {
-    const start = i * maxDataBytes
-    const end = Math.min(start + maxDataBytes, binary.length)
-    const dataSlice = binary.slice(start, end)
+    // First `remainder` chunks get one extra byte
+    const sliceLen = baseSize + (i < remainder ? 1 : 0)
+    const dataSlice = binary.slice(offset, offset + sliceLen)
+    offset += sliceLen
 
     const chunk = new Uint8Array(2 + dataSlice.length)
     chunk[0] = i          // chunk_index
