@@ -30,6 +30,11 @@ export function useChunkCollector() {
       return false
     }
 
+    // Ignore duplicates so re-scanning the same QR does not overwrite state.
+    if (chunksRef.current.has(parsed.index)) {
+      return false
+    }
+
     totalRef.current = parsed.total
     chunksRef.current.set(parsed.index, parsed.data)
 

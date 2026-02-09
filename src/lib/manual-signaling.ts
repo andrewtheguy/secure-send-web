@@ -146,7 +146,7 @@ export function isValidSignalingPayload(payload: unknown): payload is SignalingP
   if (typeof p.sdp !== 'string') return false
   if (!Array.isArray(p.candidates)) return false
   if (!(p.candidates as unknown[]).every((c) => typeof c === 'string')) return false
-  if (typeof p.createdAt !== 'number' || !Number.isFinite(p.createdAt)) return false
+  if (!Number.isFinite(p.createdAt)) return false
   if (!isValidPublicKeyArray(p.publicKey)) return false
   return true
 }
