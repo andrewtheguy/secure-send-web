@@ -61,6 +61,8 @@ export interface UseManualReceiveReturn {
   reset: () => void
 }
 
+const ICE_GATHER_TIMEOUT_MS = 5000
+
 
 export function useManualReceive(): UseManualReceiveReturn {
   const [state, setState] = useState<TransferState & ManualReceiveState>({ status: 'idle' })
@@ -314,24 +316,7 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       // Wait for ICE gathering to complete
       setState({ status: 'generating_answer', message: 'Gathering network info...' })
-
-      await new Promise<void>((resolve) => {
-        const checkIce = () => {
-          const pc = rtc.getPeerConnection()
-          if (pc.iceGatheringState === 'complete') {
-            resolve()
-          } else {
-            pc.onicegatheringstatechange = () => {
-              if (pc.iceGatheringState === 'complete') {
-                resolve()
-              }
-            }
-            // Also timeout after 10 seconds
-            setTimeout(resolve, 10000)
-          }
-        }
-        checkIce()
-      })
+      await rtc.waitForIceGatheringComplete(ICE_GATHER_TIMEOUT_MS)
 
       if (cancelledRef.current) return
 

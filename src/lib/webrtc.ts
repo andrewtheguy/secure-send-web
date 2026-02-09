@@ -117,10 +117,17 @@ export class WebRTCConnection {
                 await this.processQueue();
             } else if (signal.type === 'candidate') {
                 if (signal.candidate) {
-                    const candidate = new RTCIceCandidate(signal.candidate);
+                    let candidate: RTCIceCandidate;
+                    try {
+                        candidate = new RTCIceCandidate(signal.candidate);
+                    } catch (e) {
+                        console.warn('Ignoring invalid ICE candidate payload:', e);
+                        return;
+                    }
+
                     if (this.remoteDescriptionSet && this.pc.remoteDescription) {
                         console.log('Adding ICE candidate immediately');
-                        await this.pc.addIceCandidate(candidate);
+                        await this.addIceCandidateSafely(candidate, 'immediate');
                     } else {
                         console.log('Buffering ICE candidate (remote description not set)');
                         this.candidateQueue.push(candidate);
@@ -141,17 +148,80 @@ export class WebRTCConnection {
         return this.dataChannel;
     }
 
+    /**
+     * Wait for ICE gathering to complete with a bounded timeout.
+     * Uses event listeners + post-subscribe checks to avoid missing the completion event.
+     * If the peer connection fails while waiting, rejects immediately.
+     */
+    public async waitForIceGatheringComplete(timeoutMs: number = 5000): Promise<void> {
+        if (this.pc.iceGatheringState === 'complete') {
+            return;
+        }
+
+        await new Promise<void>((resolve, reject) => {
+            let settled = false;
+
+            const cleanup = () => {
+                this.pc.removeEventListener('icegatheringstatechange', onIceGatheringStateChange);
+                this.pc.removeEventListener('connectionstatechange', onConnectionStateChange);
+                clearTimeout(timeoutId);
+            };
+
+            const settleResolve = () => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                resolve();
+            };
+
+            const settleReject = (error: Error) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                reject(error);
+            };
+
+            const onIceGatheringStateChange = () => {
+                if (this.pc.iceGatheringState === 'complete') {
+                    settleResolve();
+                }
+            };
+
+            const onConnectionStateChange = () => {
+                if (this.pc.connectionState === 'failed' || this.pc.connectionState === 'closed') {
+                    settleReject(new Error('Connection failed while gathering network info'));
+                }
+            };
+
+            const timeoutId = setTimeout(() => {
+                settleResolve();
+            }, timeoutMs);
+
+            this.pc.addEventListener('icegatheringstatechange', onIceGatheringStateChange);
+            this.pc.addEventListener('connectionstatechange', onConnectionStateChange);
+
+            // Check after subscribing to avoid missing a race where state flips before handler attach.
+            onIceGatheringStateChange();
+            onConnectionStateChange();
+        });
+    }
+
     private async processQueue() {
         console.log(`Processing ${this.candidateQueue.length} buffered candidates`);
         while (this.candidateQueue.length > 0) {
             const c = this.candidateQueue.shift();
             if (c) {
-                try {
-                    await this.pc.addIceCandidate(c);
-                } catch (e) {
-                    console.error('Error adding buffered candidate:', e);
-                }
+                await this.addIceCandidateSafely(c, 'buffered');
             }
+        }
+    }
+
+    private async addIceCandidateSafely(candidate: RTCIceCandidate, source: 'immediate' | 'buffered') {
+        try {
+            await this.pc.addIceCandidate(candidate);
+        } catch (e) {
+            // Ignore individual ICE candidate failures so remaining candidates can still establish connectivity.
+            console.warn(`Ignoring ${source} ICE candidate error:`, e);
         }
     }
 
