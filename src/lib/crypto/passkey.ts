@@ -55,7 +55,7 @@ export async function derivePasskeyPublicId(masterKey: CryptoKey): Promise<Uint8
  */
 export async function deriveHmacKey(masterKey: CryptoKey): Promise<CryptoKey> {
   const info = new TextEncoder().encode(HMAC_KEY_LABEL)
-  return crypto.subtle.deriveKey(
+  return await crypto.subtle.deriveKey(
     {
       name: 'HKDF',
       hash: 'SHA-256',

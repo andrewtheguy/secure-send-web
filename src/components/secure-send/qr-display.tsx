@@ -20,7 +20,7 @@ export function QRDisplay({ data, label, showCopyButton = true, clipboardData, s
   // Generate QR code when data changes
   useEffect(() => {
     if (!data || data.length === 0) {
-      setQrImageUrl(null)
+      setQrImageUrl(null) // eslint-disable-line react-hooks/set-state-in-effect
       return
     }
 
@@ -40,14 +40,6 @@ export function QRDisplay({ data, label, showCopyButton = true, clipboardData, s
         setQrImageUrl(null)
       })
       .finally(() => setIsGenerating(false))
-
-    // Cleanup blob URL on unmount or data change
-    return () => {
-      if (qrImageUrl && qrImageUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(qrImageUrl)
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data])
 
   // Copy clipboard data (raw JSON)
@@ -68,7 +60,7 @@ export function QRDisplay({ data, label, showCopyButton = true, clipboardData, s
         <p className="text-sm font-medium text-muted-foreground">{label}</p>
       )}
 
-      <div className="p-4 bg-white rounded-lg min-h-[288px] min-w-[288px] flex items-center justify-center">
+      <div className="p-4 bg-white rounded-lg flex items-center justify-center">
         {isGenerating ? (
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         ) : error ? (

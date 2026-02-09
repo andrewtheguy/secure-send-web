@@ -77,6 +77,15 @@ You can also create `.env.production` (or `.env.hash` with `npm run build -- --m
 VITE_USE_HASH=true
 ```
 
+### Deployment Path Requirement (Multi-QR Manual Mode)
+
+Multi-QR URLs are generated from `window.location.origin` and then append `/r?d=...` (or `/#/r?d=...` with hash routing).
+
+- Supported: deployment at the domain root (for example `https://example.com`)
+- Not supported: deployment under a subpath (for example `https://example.com/my-app`)
+
+If the app is served from a subpath, scanned Multi-QR links will point to the domain root route and can 404.
+
 ## Transport Layer
 
 All signaling methods share a **unified encryption layer**: P2P transfers encrypt content in 128KB AES-256-GCM chunks before transmission. Cloud fallback encrypts the whole file, then splits it into 10MB upload chunks.

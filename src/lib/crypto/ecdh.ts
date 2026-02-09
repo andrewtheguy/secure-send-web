@@ -109,7 +109,7 @@ export async function importECDHPublicKey(publicKeyBytes: Uint8Array): Promise<C
     )
   }
 
-  return crypto.subtle.importKey(
+  return await crypto.subtle.importKey(
     'raw',
     toArrayBuffer(publicKeyBytes),
     {
@@ -140,7 +140,7 @@ export async function deriveSharedSecretKey(
 
   // Use deriveKey to get HKDF key material directly from ECDH
   // The shared secret stays inside Web Crypto as non-extractable key
-  return crypto.subtle.deriveKey(
+  return await crypto.subtle.deriveKey(
     {
       name: 'ECDH',
       public: peerPublicKey,
@@ -169,7 +169,7 @@ export async function deriveAESKeyFromSecretKey(
     throw new Error(`Salt too short: expected at least 16 bytes, got ${salt.length}`)
   }
 
-  return crypto.subtle.deriveKey(
+  return await crypto.subtle.deriveKey(
     {
       name: 'HKDF',
       hash: 'SHA-256',

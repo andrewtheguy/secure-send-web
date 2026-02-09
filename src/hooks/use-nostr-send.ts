@@ -756,7 +756,7 @@ export function useNostrSend(): UseNostrSendReturn {
  * 2. Then query for existing events
  * 3. Periodic re-query as safety net for relay propagation delays
  */
-async function waitForAck(
+function waitForAck(
   client: NostrClient,
   transferId: string,
   senderPubkey: string,
@@ -766,7 +766,7 @@ async function waitForAck(
   timeoutMs: number = 5 * 60 * 1000
 ): Promise<boolean> {
   if (isCancelled()) {
-    return false
+    return Promise.resolve(false)
   }
 
   return new Promise((resolve) => {

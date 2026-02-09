@@ -12,6 +12,7 @@ import {
 } from '@/pages/passkey'
 import { SendTransferLayout } from '@/pages/send/transfer/layout'
 import { SendTransferPage } from '@/pages/send/transfer'
+import { ReceiveChunkedPage } from '@/pages/receive-chunked'
 import { NotFoundPage } from '@/pages/not-found'
 
 function App() {
@@ -28,6 +29,7 @@ function App() {
             </Route>
           </Route>
           <Route path="/receive" element={<ReceivePage />} />
+          <Route path="/r" element={<ReceiveChunkedPage />} />
           <Route path="/passkey" element={<PasskeyLayout />}>
             <Route index element={<PasskeyIndexPage />} />
             <Route path="create" element={<PasskeyCreatePage />} />

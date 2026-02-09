@@ -12,7 +12,7 @@ export interface RelayAvailabilityResult {
  * Simple probe - just check if relay is reachable via WebSocket
  * Closes connection immediately after success
  */
-async function probeRelay(url: string): Promise<string | null> {
+function probeRelay(url: string): Promise<string | null> {
   return new Promise((resolve) => {
     let ws: WebSocket | null = null
     const timeout = setTimeout(() => {

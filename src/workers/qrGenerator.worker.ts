@@ -16,14 +16,8 @@ prepareZXingModule({
   fireImmediately: true,
 })
 
-// Worker-specific postMessage with transferable objects support
-const workerSelf = self as unknown as {
-  onmessage: ((e: MessageEvent) => void) | null
-  postMessage: (message: unknown, transfer?: Transferable[]) => void
-}
-
 // Listen for messages from main thread
-workerSelf.onmessage = async (e: MessageEvent) => {
+self.onmessage = async (e: MessageEvent) => {
   const { type, id, binaryBuffer, text, options } = e.data
 
   if (type === 'generate') {
@@ -41,22 +35,16 @@ workerSelf.onmessage = async (e: MessageEvent) => {
         format: 'QRCode',
         ecLevel: (options.errorCorrectionLevel as 'L' | 'M' | 'Q' | 'H') || 'M',
         sizeHint: options.width || 400,
-        withQuietZones: true
+        withQuietZones: false,
       })
 
       if (result.error) {
         throw new Error(result.error)
       }
 
-      const blob = result.image as Blob
-      const buffer = await blob.arrayBuffer()
-
-      workerSelf.postMessage(
-        { type: 'success', id, buffer, mimeType: blob.type || 'image/png' },
-        [buffer]
-      )
+      self.postMessage({ type: 'success', id, svg: result.svg })
     } catch (error) {
-      workerSelf.postMessage({ type: 'error', id, error: (error as Error).message })
+      self.postMessage({ type: 'error', id, error: (error as Error).message })
     }
   }
 }

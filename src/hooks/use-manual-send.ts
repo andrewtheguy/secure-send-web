@@ -119,11 +119,11 @@ export function useManualSend(): UseManualSendReturn {
     setState({ status: 'idle' })
   }, [clearExpirationTimeout])
 
-  const submitAnswer = useCallback((answerBinary: Uint8Array) => {
+  const submitAnswer = useCallback(async (answerBinary: Uint8Array) => {
     if (!answerResolverRef.current) return
 
     // Parse mutual payload (no decryption needed)
-    const parsed = parseMutualPayload(answerBinary)
+    const parsed = await parseMutualPayload(answerBinary)
     if (!parsed) {
       answerRejectRef.current?.(new Error('Invalid response format'))
       answerResolverRef.current = null
@@ -278,7 +278,7 @@ export function useManualSend(): UseManualSendReturn {
       if (cancelledRef.current) return
 
       // Generate binary offer data with ECDH public key
-      const offerBinary = generateMutualOfferBinary(
+      const offerBinary = await generateMutualOfferBinary(
         offerSDP!,
         iceCandidates,
         {

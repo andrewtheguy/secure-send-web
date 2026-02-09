@@ -7,7 +7,7 @@ import { useNostrSend, type UseNostrSendReturn } from '@/hooks/use-nostr-send'
 import { useManualSend, type UseManualSendReturn } from '@/hooks/use-manual-send'
 import { PinDisplay } from '@/components/secure-send/pin-display'
 import { TransferStatus } from '@/components/secure-send/transfer-status'
-import { QRDisplay } from '@/components/secure-send/qr-display'
+import { MultiQRDisplay } from '@/components/secure-send/multi-qr-display'
 import { QRInput } from '@/components/secure-send/qr-input'
 import { compressFilesToZip, getFolderName } from '@/lib/folder-utils'
 import { testRelayAvailability } from '@/lib/nostr'
@@ -274,17 +274,17 @@ export function SendTransferPage() {
             <div className="space-y-4">
               {/* Instructions at top */}
               <div className="rounded-lg bg-muted/50 border p-4 space-y-2">
-                <p className="font-medium">Show this QR code to the receiver</p>
+                <p className="font-medium">Show these QR codes to the receiver</p>
                 <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
-                  <li>Receiver opens this app and goes to <span className="font-medium text-foreground">Receive</span> tab</li>
-                  <li>Receiver scans this QR code (or pastes the copied data)</li>
+                  <li>Receiver scans any QR code with their phone camera</li>
+                  <li>App opens and guides scanning remaining codes</li>
                   <li>Receiver shows you their response QR code</li>
                   <li>You scan/paste their response below</li>
                 </ol>
               </div>
 
-              {/* QR code */}
-              <QRDisplay data={offerData} clipboardData={clipboardData || ''} />
+              {/* QR codes */}
+              <MultiQRDisplay data={offerData} clipboardData={clipboardData || ''} />
 
               {/* Input for receiver's response */}
               <div className="pt-2 border-t">

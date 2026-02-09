@@ -157,9 +157,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
           // Store key derivation function in closure for event processing
           const ecdhSharedSecret = sharedSecretKey // Capture for closure
-          deriveKeyWithSalt = async (salt: Uint8Array) => {
-            return deriveAESKeyFromSecretKey(ecdhSharedSecret, salt)
-          }
+          deriveKeyWithSalt = (salt: Uint8Array) => deriveAESKeyFromSecretKey(ecdhSharedSecret, salt)
         } catch (err) {
           setState({
             status: 'error',

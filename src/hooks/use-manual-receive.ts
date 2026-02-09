@@ -17,6 +17,7 @@ import {
   generateMutualClipboardData,
   type SignalingPayload,
 } from '@/lib/manual-signaling'
+import type { TransferState } from '@/lib/nostr'
 import type { ReceivedContent } from '@/lib/types'
 
 // Extended transfer status for Manual Exchange receive mode
@@ -30,8 +31,10 @@ export type ManualReceiveStatus =
   | 'complete'
   | 'error'
 
-// Base properties for manual receive state
-interface ManualReceiveStateBase {
+// Typed manual receive state for UI consumers.
+export interface ManualReceiveState {
+  status: ManualReceiveStatus
+  message?: string
   progress?: {
     current: number
     total: number
@@ -49,23 +52,8 @@ interface ManualReceiveStateBase {
   clipboardData?: string // Base64 for copy button
 }
 
-// Error state has required message
-interface ManualReceiveStateError extends ManualReceiveStateBase {
-  status: 'error'
-  message: string
-}
-
-// All other states have optional message
-interface ManualReceiveStateOther extends ManualReceiveStateBase {
-  status: Exclude<ManualReceiveStatus, 'error'>
-  message?: string
-}
-
-// Discriminated union for manual receive state
-export type ManualReceiveState = ManualReceiveStateError | ManualReceiveStateOther
-
 export interface UseManualReceiveReturn {
-  state: ManualReceiveState
+  state: TransferState & ManualReceiveState
   receivedContent: ReceivedContent | null
   startReceive: () => void
   submitOffer: (offerData: Uint8Array) => void
@@ -75,7 +63,7 @@ export interface UseManualReceiveReturn {
 
 
 export function useManualReceive(): UseManualReceiveReturn {
-  const [state, setState] = useState<ManualReceiveState>({ status: 'idle' })
+  const [state, setState] = useState<TransferState & ManualReceiveState>({ status: 'idle' })
   const [receivedContent, setReceivedContent] = useState<ReceivedContent | null>(null)
 
   const rtcRef = useRef<WebRTCConnection | null>(null)
@@ -103,18 +91,20 @@ export function useManualReceive(): UseManualReceiveReturn {
     setReceivedContent(null)
   }, [cancel])
 
-  const submitOffer = useCallback((offerBinary: Uint8Array) => {
+  const submitOffer = useCallback(async (offerData: Uint8Array) => {
     if (!offerResolverRef.current) return
 
     // Parse mutual payload (no decryption needed)
-    const parsed = parseMutualPayload(offerBinary)
+    const parsed = await parseMutualPayload(offerData)
     if (!parsed) {
       offerRejectRef.current?.(new Error('Invalid offer format'))
+      offerRejectRef.current = null
       offerResolverRef.current = null
       return
     }
     if (parsed.type !== 'offer') {
       offerRejectRef.current?.(new Error('Expected offer, got answer'))
+      offerRejectRef.current = null
       offerResolverRef.current = null
       return
     }
@@ -351,7 +341,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       }
 
       // Generate answer with our public key
-      const answerBinary = generateMutualAnswerBinary(answerSDP, iceCandidates, ecdhKeyPair.publicKeyBytes)
+      const answerBinary = await generateMutualAnswerBinary(answerSDP, iceCandidates, ecdhKeyPair.publicKeyBytes)
       const clipboardBase64 = generateMutualClipboardData(answerBinary)
 
       // Show answer and wait for connection
