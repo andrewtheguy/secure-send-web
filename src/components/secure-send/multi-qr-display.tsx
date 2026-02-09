@@ -25,7 +25,7 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
 
   useEffect(() => {
     if (!data || data.length === 0) {
-      setChunkQRs([])
+      setChunkQRs([]) // eslint-disable-line react-hooks/set-state-in-effect
       return
     }
 
@@ -59,16 +59,6 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
         setError('Failed to generate QR codes')
       })
       .finally(() => setIsGenerating(false))
-
-    return () => {
-      // Cleanup blob URLs
-      for (const qr of chunkQRs) {
-        if (qr.imageUrl?.startsWith('blob:')) {
-          URL.revokeObjectURL(qr.imageUrl)
-        }
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data])
 
   const handleCopy = useCallback(async () => {

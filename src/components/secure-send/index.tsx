@@ -32,14 +32,6 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
     }
   }, [siteUrl])
 
-  useEffect(() => {
-    return () => {
-      if (shareQrUrl) {
-        URL.revokeObjectURL(shareQrUrl)
-      }
-    }
-  }, [shareQrUrl])
-
   const getTitle = () => {
     switch (view) {
       case 'send':

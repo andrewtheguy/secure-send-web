@@ -7,12 +7,11 @@ const pending = new Map<number, { resolve: (url: string) => void; reject: (error
 
 // Set up message handler at module scope
 worker.onmessage = (e: MessageEvent) => {
-  const { id, buffer, type, error } = e.data
+  const { id, svg, type, error } = e.data
   const resolver = pending.get(id)
   if (resolver) {
     if (type === 'success') {
-      const blob = new Blob([buffer], { type: 'image/png' })
-      resolver.resolve(URL.createObjectURL(blob))
+      resolver.resolve(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`)
     } else {
       resolver.reject(new Error(error || 'QR generation failed'))
     }
@@ -22,7 +21,7 @@ worker.onmessage = (e: MessageEvent) => {
 
 /**
  * Generate a QR code image from binary data
- * Returns a blob URL (PNG image)
+ * Returns a data URI (SVG image)
  * Uses 8-bit byte mode for binary data
  */
 export async function generateBinaryQRCode(
@@ -43,7 +42,7 @@ export async function generateBinaryQRCode(
 
 /**
  * Generate a QR code image from text data
- * Returns a blob URL (PNG image)
+ * Returns a data URI (SVG image)
  * Uses text mode for smaller payloads like URLs
  */
 export async function generateTextQRCode(
