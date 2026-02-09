@@ -140,7 +140,7 @@ export async function deriveSharedSecretKey(
 
   // Use deriveKey to get HKDF key material directly from ECDH
   // The shared secret stays inside Web Crypto as non-extractable key
-  return crypto.subtle.deriveKey(
+  return await crypto.subtle.deriveKey(
     {
       name: 'ECDH',
       public: peerPublicKey,
