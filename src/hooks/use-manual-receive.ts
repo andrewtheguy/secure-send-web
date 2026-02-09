@@ -91,11 +91,11 @@ export function useManualReceive(): UseManualReceiveReturn {
     setReceivedContent(null)
   }, [cancel])
 
-  const submitOffer = useCallback(async (offerBinary: Uint8Array) => {
+  const submitOffer = useCallback(async (offerData: Uint8Array) => {
     if (!offerResolverRef.current) return
 
     // Parse mutual payload (no decryption needed)
-    const parsed = await parseMutualPayload(offerBinary)
+    const parsed = await parseMutualPayload(offerData)
     if (!parsed) {
       offerRejectRef.current?.(new Error('Invalid offer format'))
       offerRejectRef.current = null
