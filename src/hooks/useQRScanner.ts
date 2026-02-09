@@ -235,7 +235,7 @@ export function useQRScanner(options: UseQRScannerOptions) {
   // Start/stop scanning based on isScanning prop
   useEffect(() => {
     if (isScanning && !isScanningRef.current) {
-      startCameraScanning()
+      void startCameraScanning()
     } else if (!isScanning && isScanningRef.current) {
       stopCameraScanning()
     }
@@ -249,7 +249,7 @@ export function useQRScanner(options: UseQRScannerOptions) {
     const preferLowResChanged = preferLowResRef.current !== preferLowRes
 
     if ((facingModeChanged || preferLowResChanged) && isScanningRef.current) {
-      switchCamera()
+      void switchCamera()
     }
 
     facingModeRef.current = facingMode

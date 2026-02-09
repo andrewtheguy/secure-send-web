@@ -3,6 +3,7 @@ import { Copy, Check, Loader2, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { generateTextQRCode } from '@/lib/qr-utils'
 import { chunkPayload, buildChunkUrl } from '@/lib/chunk-utils'
+import { generateMutualClipboardData } from '@/lib/manual-signaling'
 
 interface MultiQRDisplayProps {
   data: Uint8Array
@@ -137,15 +138,16 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
   }, [data])
 
   const handleCopy = useCallback(async () => {
-    if (!clipboardData) return
+    if (!data || data.length === 0) return
     try {
-      await navigator.clipboard.writeText(clipboardData)
+      const copyPayload = clipboardData || generateMutualClipboardData(data)
+      await navigator.clipboard.writeText(copyPayload)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
       console.error('Failed to copy:', err)
     }
-  }, [clipboardData])
+  }, [clipboardData, data])
 
   if (isGenerating) {
     return (
@@ -192,7 +194,7 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
         ))}
       </div>
 
-      {showCopyButton && clipboardData && (
+      {showCopyButton && (
         <Button
           variant="outline"
           size="sm"

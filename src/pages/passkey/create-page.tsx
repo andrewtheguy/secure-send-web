@@ -96,7 +96,7 @@ export function PasskeyCreatePage() {
       setPageState('idle')
 
       // Navigate to home after successful creation (passkey is for self-transfer)
-      navigate('/')
+      void navigate('/')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create passkey')
       setPageState('idle')

@@ -592,7 +592,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                     }
                   })()
                   pendingChunkPromises.add(decryptPromise)
-                  decryptPromise.finally(() => {
+                  void decryptPromise.finally(() => {
                     pendingChunkPromises.delete(decryptPromise)
                   })
                 }
@@ -683,7 +683,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                   const signalPayload = JSON.parse(new TextDecoder().decode(decrypted))
                   if (signalPayload.type === 'signal' && signalPayload.signal) {
                     const r = initWebRTC()
-                    r.handleSignal(signalPayload.signal)
+                    await r.handleSignal(signalPayload.signal)
                   }
                 } catch (e) {
                   console.error('Signal handling error', e)

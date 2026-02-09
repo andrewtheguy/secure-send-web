@@ -14,7 +14,6 @@ import { getWebRTCConfig } from '@/lib/webrtc-config'
 import {
   parseMutualPayload,
   generateMutualAnswerBinary,
-  generateMutualClipboardData,
   type SignalingPayload,
 } from '@/lib/manual-signaling'
 import type { TransferState } from '@/lib/nostr'
@@ -60,6 +59,8 @@ export interface UseManualReceiveReturn {
   cancel: () => void
   reset: () => void
 }
+
+const ICE_GATHER_TIMEOUT_MS = 5000
 
 
 export function useManualReceive(): UseManualReceiveReturn {
@@ -119,7 +120,7 @@ export function useManualReceive(): UseManualReceiveReturn {
     setReceivedContent(null)
 
     // Start the receive flow
-    doReceive()
+    void doReceive()
   }, [])
 
   const doReceive = async () => {
@@ -314,23 +315,15 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       // Wait for ICE gathering to complete
       setState({ status: 'generating_answer', message: 'Gathering network info...' })
-
-      await new Promise<void>((resolve) => {
-        const checkIce = () => {
-          const pc = rtc.getPeerConnection()
-          if (pc.iceGatheringState === 'complete') {
-            resolve()
-          } else {
-            pc.onicegatheringstatechange = () => {
-              if (pc.iceGatheringState === 'complete') {
-                resolve()
-              }
-            }
-            // Also timeout after 10 seconds
-            setTimeout(resolve, 10000)
-          }
-        }
-        checkIce()
+      const iceGatheringComplete = await rtc.waitForIceGatheringComplete(ICE_GATHER_TIMEOUT_MS)
+      if (!iceGatheringComplete) {
+        console.warn('ICE gathering timed out while generating answer; continuing with available candidates')
+      }
+      setState({
+        status: 'generating_answer',
+        message: iceGatheringComplete
+          ? 'Preparing response code...'
+          : 'Network probe timed out. Preparing response code with available routes...',
       })
 
       if (cancelledRef.current) return
@@ -342,14 +335,12 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       // Generate answer with our public key
       const answerBinary = await generateMutualAnswerBinary(answerSDP, iceCandidates, ecdhKeyPair.publicKeyBytes)
-      const clipboardBase64 = generateMutualClipboardData(answerBinary)
 
       // Show answer and wait for connection
       setState({
         status: 'showing_answer',
         message: 'Show this to sender and wait for connection',
         answerData: answerBinary,
-        clipboardData: clipboardBase64,
         contentType: 'file',
         fileMetadata: { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! },
       })

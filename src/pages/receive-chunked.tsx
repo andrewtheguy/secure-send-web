@@ -105,12 +105,12 @@ export function ReceiveChunkedPage() {
 
   const handleCancel = useCallback(() => {
     cancel()
-    navigate('/receive')
+    void navigate('/receive')
   }, [cancel, navigate])
 
   const handleReset = useCallback(() => {
     reset()
-    navigate('/receive')
+    void navigate('/receive')
   }, [reset, navigate])
 
   // --- Collecting chunks ---

@@ -12,12 +12,12 @@ export function SendTransferLayout() {
   // Redirect to home if no config (user navigated directly to transfer page)
   useEffect(() => {
     if (!config) {
-      navigate('/', { replace: true })
+      void navigate('/', { replace: true })
     }
   }, [config, navigate])
 
   const handleBack = () => {
-    navigate('/')
+    void navigate('/')
     clearConfig()
   }
 

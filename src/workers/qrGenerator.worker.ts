@@ -14,6 +14,8 @@ prepareZXingModule({
     },
   },
   fireImmediately: true,
+}).catch((err) => {
+  console.error('prepareZXingModule failed, check WASM locateFile in qrGenerator.worker:', err)
 })
 
 // Listen for messages from main thread

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { Copy, Check, AlertCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { generateBinaryQRCode } from '@/lib/qr-utils'
+import { generateMutualClipboardData } from '@/lib/manual-signaling'
 
 interface QRDisplayProps {
   data: Uint8Array  // Binary data for QR code (gzipped JSON)
@@ -42,17 +43,20 @@ export function QRDisplay({ data, label, showCopyButton = true, clipboardData, s
       .finally(() => setIsGenerating(false))
   }, [data])
 
-  // Copy clipboard data (raw JSON)
+  // Copy signaling payload as base64 for paste flow.
   const handleCopy = useCallback(async () => {
-    if (!clipboardData) return
+    if (!data || data.length === 0) return
     try {
-      await navigator.clipboard.writeText(clipboardData)
+      const copyPayload = (clipboardData && clipboardData.length > 0)
+        ? clipboardData
+        : generateMutualClipboardData(data)
+      await navigator.clipboard.writeText(copyPayload)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
       console.error('Failed to copy:', err)
     }
-  }, [clipboardData])
+  }, [clipboardData, data])
 
   return (
     <div className="flex flex-col items-center space-y-3">
@@ -85,7 +89,7 @@ export function QRDisplay({ data, label, showCopyButton = true, clipboardData, s
         </div>
       )}
 
-      {showCopyButton && clipboardData && (
+      {showCopyButton && (
         <Button
           variant="outline"
           size="sm"

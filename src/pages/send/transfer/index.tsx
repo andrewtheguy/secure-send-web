@@ -61,13 +61,12 @@ export function SendTransferPage() {
   // Offline-specific properties (type-safe access via discriminated union)
   const manualState = activeHook.type === 'offline' ? activeHook.hook.state : null
   const offerData = manualState?.offerData
-  const clipboardData = manualState?.clipboardData
   const submitAnswer = activeHook.type === 'offline' ? activeHook.hook.submitAnswer : undefined
 
   // Redirect if no config
   useEffect(() => {
     if (!config) {
-      navigate('/', { replace: true })
+      void navigate('/', { replace: true })
     }
   }, [config, navigate])
 
@@ -129,7 +128,7 @@ export function SendTransferPage() {
       }
     }
 
-    prepareFile()
+    void prepareFile()
 
     return () => {
       cancelled = true
@@ -152,9 +151,9 @@ export function SendTransferPage() {
             relayOnly: config.relayOnly,
           }
         : { relayOnly: config.relayOnly }
-      activeHook.hook.send(compressedFile, options)
+      void activeHook.hook.send(compressedFile, options)
     } else {
-      activeHook.hook.send(compressedFile)
+      void activeHook.hook.send(compressedFile)
     }
   }, [step, compressedFile, config, activeHook])
 
@@ -177,7 +176,7 @@ export function SendTransferPage() {
   const handleCancel = useCallback(() => {
     cancel()
     clearConfig()
-    navigate('/')
+    void navigate('/')
   }, [cancel, clearConfig, navigate])
 
   const handleSwitchToOffline = useCallback(() => {
@@ -214,7 +213,7 @@ export function SendTransferPage() {
   const handleSendAnother = useCallback(() => {
     cancel()
     clearConfig()
-    navigate('/')
+    void navigate('/')
   }, [cancel, clearConfig, navigate])
 
   if (!config) {
@@ -284,7 +283,7 @@ export function SendTransferPage() {
               </div>
 
               {/* QR codes */}
-              <MultiQRDisplay data={offerData} clipboardData={clipboardData || ''} />
+              <MultiQRDisplay data={offerData} />
 
               {/* Input for receiver's response */}
               <div className="pt-2 border-t">
