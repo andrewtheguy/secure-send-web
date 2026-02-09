@@ -1,6 +1,7 @@
 # Multi-QR Manual Transfer Guide
 
-This guide covers how to use the multi-QR code feature for Manual mode (offline) file transfers.
+This guide is intentionally high-level and user-focused.
+For protocol internals, QR payload format, and implementation details, see `docs/ARCHITECTURE.md`.
 
 ## When to Use This
 
@@ -11,7 +12,7 @@ Manual mode is useful when:
 
 ## How It Works
 
-In Manual mode, the sender's offer (connection details + file metadata + encryption key) is split into multiple small URL-based QR codes. The receiver scans any one of them with their phone camera to open the app, then scans the rest in-app.
+In Manual mode, the sender's offer is split across multiple QR codes. The receiver scans one QR code to open the app, then scans the rest in-app.
 
 ## Step-by-Step
 
@@ -43,15 +44,16 @@ In Manual mode, the sender's offer (connection details + file metadata + encrypt
 - **Order doesn't matter**: You can scan the QR codes in any order
 - **Duplicates are fine**: Scanning the same QR code twice won't cause issues
 - **Copy/paste fallback**: If cameras aren't available, use the "Copy Data" button on the sender side and paste it on the receiver's `/receive` page under the "Scan Code" → "Paste" tab
-- **Single QR**: Very small payloads (under ~400 bytes) produce just one QR code — the flow still works the same way
+- **Single QR**: Very small payloads may produce just one QR code — the flow still works the same way
 - **Same network required**: Without internet, both devices must be on the same Wi-Fi or local network. With internet, STUN enables connections across different networks.
+- **Deployment path**: Host at domain root (for example `https://example.com`). Subpath deployments (for example `https://example.com/my-app`) can break scanned links.
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
 | Phone camera doesn't show a link | Make sure the QR code is well-lit and in focus. The QR contains a URL that your phone should recognize. |
-| App doesn't open from the link | Open the app manually and navigate to the URL shown in the link. The `/r?d=...` path is the chunked receive page. |
+| App doesn't open from the link | Confirm the app is deployed at domain root (no subpath). Then retry scanning and open the link again. |
 | "Camera access denied" in-app | Allow camera permissions in your browser settings and reload the page. |
 | Transfer fails after all chunks collected | Both devices must have network connectivity to each other (same Wi-Fi, or both on the internet). |
-| Sender shows expired error | The offer has a 1-hour TTL. Generate a new offer by retrying. |
+| Sender shows expired error | Generate a new offer by retrying the send flow. |

@@ -100,6 +100,7 @@ sequenceDiagram
 *Sender → Receiver (Offer):* Multi-QR URL-based chunking
 - Offer payload is split into ~400-byte chunks with a 2-byte header: `[chunk_index][total_chunks][data]`
 - Each chunk is base64url-encoded and embedded in a URL: `{origin}/r?d={base64url}` (or `{origin}/#/r?d={...}` for HashRouter)
+- Deployment requirement: app must be hosted at domain root (no subpath), because chunk URLs are built from `window.location.origin` and append `/r` or `/#/r` directly
 - Displayed as a grid of text-mode QR codes, each scannable by a phone's native camera
 - For a typical ~1200 byte offer: 3 QR codes. Single-chunk payloads (≤400 bytes) produce 1 QR code.
 - Copy/paste fallback: base64-encoded full binary for clipboard
