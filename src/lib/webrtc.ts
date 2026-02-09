@@ -152,13 +152,14 @@ export class WebRTCConnection {
      * Wait for ICE gathering to complete with a bounded timeout.
      * Uses event listeners + post-subscribe checks to avoid missing the completion event.
      * If the peer connection fails while waiting, rejects immediately.
+     * Returns true when ICE gathering reaches "complete", false on timeout.
      */
-    public async waitForIceGatheringComplete(timeoutMs: number = 5000): Promise<void> {
+    public async waitForIceGatheringComplete(timeoutMs: number = 5000): Promise<boolean> {
         if (this.pc.iceGatheringState === 'complete') {
-            return;
+            return true;
         }
 
-        await new Promise<void>((resolve, reject) => {
+        return await new Promise<boolean>((resolve, reject) => {
             let settled = false;
 
             const cleanup = () => {
@@ -167,11 +168,11 @@ export class WebRTCConnection {
                 clearTimeout(timeoutId);
             };
 
-            const settleResolve = () => {
+            const settleResolve = (completed: boolean) => {
                 if (settled) return;
                 settled = true;
                 cleanup();
-                resolve();
+                resolve(completed);
             };
 
             const settleReject = (error: Error) => {
@@ -183,7 +184,7 @@ export class WebRTCConnection {
 
             const onIceGatheringStateChange = () => {
                 if (this.pc.iceGatheringState === 'complete') {
-                    settleResolve();
+                    settleResolve(true);
                 }
             };
 
@@ -194,7 +195,7 @@ export class WebRTCConnection {
             };
 
             const timeoutId = setTimeout(() => {
-                settleResolve();
+                settleResolve(false);
             }, timeoutMs);
 
             this.pc.addEventListener('icegatheringstatechange', onIceGatheringStateChange);

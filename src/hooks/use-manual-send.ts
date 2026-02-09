@@ -258,7 +258,10 @@ export function useManualSend(): UseManualSendReturn {
 
       // Wait for ICE gathering to complete
       setState({ status: 'generating_offer', message: 'Gathering network info...' })
-      await rtc.waitForIceGatheringComplete(ICE_GATHER_TIMEOUT_MS)
+      const iceGatheringComplete = await rtc.waitForIceGatheringComplete(ICE_GATHER_TIMEOUT_MS)
+      if (!iceGatheringComplete) {
+        console.warn('ICE gathering timed out while generating offer; continuing with available candidates')
+      }
 
       if (cancelledRef.current) return
 
