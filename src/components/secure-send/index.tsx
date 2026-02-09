@@ -82,7 +82,7 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
               </Link>
             </span>
           )}
-          {view === 'receive' && 'Enter a PIN to securely receive files or messages.'}
+          {view === 'receive' && 'Use PIN mode or QR code mode to securely receive files or messages.'}
           {view === 'about' && 'Learn how Secure Send works and what keeps it secure.'}
         </CardDescription>
       </CardHeader>
@@ -95,9 +95,9 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
               <h3 className="font-semibold text-base mb-2">How It Works</h3>
               <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
                 <li>Select what you want to share (files or folder)</li>
-                <li>Click "Generate PIN & Send" to create a unique 12-character PIN</li>
-                <li>Share the PIN with your recipient through any channel (voice, chat, etc.)</li>
-                <li>Recipient enters the PIN to instantly receive your content</li>
+                <li>Choose your transfer mode: PIN mode or QR code mode</li>
+                <li>PIN mode: generate and share the PIN; QR code mode: exchange QR codes between devices</li>
+                <li>Recipient follows the same mode to complete the encrypted transfer</li>
               </ol>
             </section>
 
@@ -150,21 +150,44 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                 <li><span className="text-foreground">Passkey:</span> WebAuthn PRF extension for hardware-backed key derivation</li>
                 <li><span className="text-foreground">Max size:</span> 100 MB per transfer</li>
                 <li><span className="text-foreground">PIN expiry:</span> 1 hour</li>
-                <li><span className="text-foreground">Signaling:</span> Auto-detected from PIN (uppercase = Nostr, "2" = QR/Manual)</li>
+                <li><span className="text-foreground">Signaling:</span> Auto-detected from code format (PIN mode uses relay signaling, QR code mode uses direct QR exchange)</li>
               </ul>
             </section>
 
             <section>
-              <h3 className="font-semibold text-base mb-2">Signaling Methods</h3>
-              <p className="text-muted-foreground text-sm mb-3">Sender chooses the method in Advanced Options. Receiver auto-detects from PIN format.</p>
-              <div className="space-y-3 text-muted-foreground">
+              <h3 className="font-semibold text-base mb-2">Transfer Modes</h3>
+              <p className="text-muted-foreground text-sm mb-3">
+                Select the mode before sending. Receiver uses the matching mode to complete the transfer.
+              </p>
+              <div className="space-y-4 text-muted-foreground">
                 <div>
-                  <p className="text-foreground font-medium">Nostr (Default) — PIN starts with uppercase</p>
-                  <p className="text-sm">Requires internet. Uses decentralized Nostr relays for signaling. Devices can be on different networks. If P2P connection fails, automatically falls back to encrypted cloud transfer.</p>
+                  <p className="text-foreground font-medium">PIN mode</p>
+                  <p className="text-sm">
+                    More reliable option, but requires manual PIN input. Coordination happens through third-party relay servers.
+                    No personally identifiable information is shared, and your data remains protected with end-to-end encryption.
+                  </p>
+                  <ul className="mt-2 space-y-1 text-sm list-disc list-inside">
+                    <li>Best when sender and receiver are on different networks and you want the highest connection success rate.</li>
+                    <li>PIN is shared out-of-band (chat, voice, etc.), then receiver enters it to derive the decryption key locally.</li>
+                    <li>Relay servers coordinate signaling only; they do not get plaintext file contents or your decryption key.</li>
+                    <li>If direct peer connection fails, encrypted cloud fallback can be used when enabled by the sender.</li>
+                  </ul>
                 </div>
                 <div>
-                  <p className="text-foreground font-medium">Manual Exchange — PIN starts with "2"</p>
-                  <p className="text-sm">No internet required. Exchange signaling via QR scan or copy/paste (camera optional). With internet, works across different networks via STUN. Without internet, devices must be on same local network. P2P only, no fallback.</p>
+                  <p className="text-foreground font-medium">QR code mode</p>
+                  <p className="text-sm">
+                    Coordination happens directly through QR code exchange, with no third-party coordination servers.
+                    STUN may be used when internet is available; without internet, no third-party servers are involved at all.
+                    When STUN is used, it only sees connection setup metadata (such as IP address and port), not file contents, encryption keys, or any personally identifiable information.
+                    Your data remains end-to-end encrypted throughout the transfer.
+                  </p>
+                  <ul className="mt-2 space-y-1 text-sm list-disc list-inside">
+                    <li>Best when you prefer direct device-to-device coordination using camera scan or copy/paste.</li>
+                    <li>Offer/answer signaling is exchanged as QR chunks, so no relay coordination service is required.</li>
+                    <li>With internet, STUN can assist network traversal for peer connection setup using only connection metadata (for example IP address and port).</li>
+                    <li>Without internet, transfer can still work over a shared local network with no third-party servers.</li>
+                    <li>Typically less reliable than PIN mode due to camera quality, scan conditions, or manual QR exchange friction.</li>
+                  </ul>
                 </div>
               </div>
             </section>
