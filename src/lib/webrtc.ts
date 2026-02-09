@@ -161,7 +161,6 @@ export class WebRTCConnection {
 
         return await new Promise<boolean>((resolve, reject) => {
             let settled = false;
-            const startedAt = Date.now();
 
             const cleanup = () => {
                 this.pc.removeEventListener('icegatheringstatechange', onIceGatheringStateChange);
@@ -192,9 +191,6 @@ export class WebRTCConnection {
                 if (this.pc.connectionState === 'failed' || this.pc.connectionState === 'closed') {
                     settleReject(new Error('Connection failed while gathering network info'));
                     return;
-                }
-                if (Date.now() - startedAt >= timeoutMs) {
-                    settleResolve(false);
                 }
             };
 
