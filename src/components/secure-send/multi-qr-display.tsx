@@ -17,6 +17,14 @@ interface ChunkQR {
   total: number
 }
 
+function revokeChunkQRImageUrls(chunks: ChunkQR[]) {
+  for (const chunk of chunks) {
+    if (chunk.imageUrl) {
+      URL.revokeObjectURL(chunk.imageUrl)
+    }
+  }
+}
+
 export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: MultiQRDisplayProps) {
   const [copied, setCopied] = useState(false)
   const [chunkQRs, setChunkQRs] = useState<ChunkQR[]>([])
@@ -24,9 +32,14 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    let active = true
+    let generatedChunkQRs: ChunkQR[] = []
+
     if (!data || data.length === 0) {
       setChunkQRs([]) // eslint-disable-line react-hooks/set-state-in-effect
-      return
+      return () => {
+        revokeChunkQRImageUrls(generatedChunkQRs)
+      }
     }
 
     setIsGenerating(true)
@@ -53,12 +66,41 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
         } satisfies ChunkQR
       })
     )
-      .then(setChunkQRs)
+      .then((nextChunkQRs) => {
+        generatedChunkQRs = nextChunkQRs
+        if (!active) {
+          revokeChunkQRImageUrls(nextChunkQRs)
+          return
+        }
+
+        setChunkQRs((existingChunkQRs) => {
+          revokeChunkQRImageUrls(existingChunkQRs)
+          return nextChunkQRs
+        })
+      })
       .catch((err) => {
+        revokeChunkQRImageUrls(generatedChunkQRs)
+        if (!active) {
+          return
+        }
+
+        setChunkQRs((existingChunkQRs) => {
+          revokeChunkQRImageUrls(existingChunkQRs)
+          return []
+        })
         console.error('Failed to generate QR codes:', err)
         setError('Failed to generate QR codes')
       })
-      .finally(() => setIsGenerating(false))
+      .finally(() => {
+        if (active) {
+          setIsGenerating(false)
+        }
+      })
+
+    return () => {
+      active = false
+      revokeChunkQRImageUrls(generatedChunkQRs)
+    }
   }, [data])
 
   const handleCopy = useCallback(async () => {
