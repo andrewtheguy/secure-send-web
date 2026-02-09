@@ -38,6 +38,10 @@ export function base64urlDecode(encoded: string): Uint8Array {
  * Returns an array of Uint8Array chunks ready for base64url encoding.
  */
 export function chunkPayload(binary: Uint8Array, maxDataBytes = 400): Uint8Array[] {
+  if (binary.length === 0) {
+    return []
+  }
+
   const totalChunks = Math.max(1, Math.ceil(binary.length / maxDataBytes))
   if (totalChunks > 255) {
     throw new Error(`Payload too large: would need ${totalChunks} chunks (max 255)`)
