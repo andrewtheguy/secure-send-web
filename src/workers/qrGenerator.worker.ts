@@ -4,7 +4,7 @@
 import { writeBarcode, prepareZXingModule } from 'zxing-wasm/full'
 
 // Configure zxing-wasm to use local WASM file (cached by service worker for offline support)
-prepareZXingModule({
+void prepareZXingModule({
   overrides: {
     locateFile: (path: string, prefix: string) => {
       if (path.endsWith('.wasm')) {

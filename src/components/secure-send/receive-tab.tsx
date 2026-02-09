@@ -176,7 +176,7 @@ export function ReceiveTab() {
       setIsPinValid(false)
       pinInputRef.current?.clear()
       setPinExpired(false)
-      pinReceive(secret)
+      void pinReceive(secret)
     }
   }
 

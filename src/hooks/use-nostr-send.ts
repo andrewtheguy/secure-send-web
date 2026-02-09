@@ -445,7 +445,7 @@ export function useNostrSend(): UseNostrSendReturn {
                           offerRetryInterval = null
                         }
                       }
-                      rtc.handleSignal(signalPayload.signal)
+                      await rtc.handleSignal(signalPayload.signal)
                     }
                   } catch (err) {
                     console.error('Failed to process signaling event:', err)
@@ -574,8 +574,8 @@ export function useNostrSend(): UseNostrSendReturn {
               }
 
               rtc.createDataChannel('file-transfer')
-              rtc.createOffer()
-              queryForExistingSignals()
+              void rtc.createOffer()
+              void queryForExistingSignals()
 
               let retryCount = 0
               offerRetryInterval = setInterval(async () => {
@@ -591,7 +591,7 @@ export function useNostrSend(): UseNostrSendReturn {
                 console.log(`Retrying WebRTC offer (attempt ${retryCount + 1})...`)
                 await queryForExistingSignals()
                 if (!answerReceived && !webRTCSuccess) {
-                  rtc.createOffer()
+                  void rtc.createOffer()
                 }
               }, 5000)
 
@@ -865,13 +865,13 @@ function waitForAck(
     }
 
     // Initial query
-    queryExisting()
+    void queryExisting()
 
     // 3. Periodic re-query as safety net for relay propagation delays
     // Re-query every 3 seconds to catch any events that may have been missed
     reQueryInterval = setInterval(() => {
       if (!resolved && !isCancelled()) {
-        queryExisting()
+        void queryExisting()
       }
     }, 3000)
   })

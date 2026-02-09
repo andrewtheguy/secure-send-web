@@ -121,7 +121,7 @@ export function useManualReceive(): UseManualReceiveReturn {
     setReceivedContent(null)
 
     // Start the receive flow
-    doReceive()
+    void doReceive()
   }, [])
 
   const doReceive = async () => {

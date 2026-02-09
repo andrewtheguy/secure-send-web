@@ -56,7 +56,7 @@ export function SendTab() {
       relayOnly,
     })
     // Navigate to transfer page
-    navigate('/send/transfer')
+    void navigate('/send/transfer')
   }
 
   const addFiles = useCallback((files: File[]) => {
