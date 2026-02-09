@@ -18,9 +18,13 @@ export default defineConfig([
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
+      parserOptions: {
+        project: ['./tsconfig.eslint.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
     rules: {
-      'require-await': 'error',
+      '@typescript-eslint/require-await': 'error',
     },
   },
 ])

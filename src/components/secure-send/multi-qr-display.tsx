@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Copy, Check, Loader2, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { generateTextQRCode } from '@/lib/qr-utils'
@@ -30,20 +30,41 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
   const [chunkQRs, setChunkQRs] = useState<ChunkQR[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const chunkQRsRef = useRef<ChunkQR[]>([])
+
+  useEffect(() => {
+    chunkQRsRef.current = chunkQRs
+  }, [chunkQRs])
+
+  useEffect(() => {
+    return () => {
+      revokeChunkQRImageUrls(chunkQRsRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     let active = true
     let generatedChunkQRs: ChunkQR[] = []
 
     if (!data || data.length === 0) {
-      setChunkQRs([]) // eslint-disable-line react-hooks/set-state-in-effect
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: clear stale QR state when input is empty
+      setChunkQRs((existingChunkQRs) => {
+        revokeChunkQRImageUrls(existingChunkQRs)
+        return []
+      })
+      setError(null)
+      setIsGenerating(false)
       return () => {
-        revokeChunkQRImageUrls(generatedChunkQRs)
+        active = false
       }
     }
 
     setIsGenerating(true)
     setError(null)
+    setChunkQRs((existingChunkQRs) => {
+      revokeChunkQRImageUrls(existingChunkQRs)
+      return []
+    })
 
     const useHash = import.meta.env.VITE_USE_HASH === 'true'
     const baseUrl = window.location.origin
@@ -52,7 +73,7 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
     const urls = chunks.map(chunk => buildChunkUrl(baseUrl, chunk, useHash))
 
     // Generate QR codes for each URL
-    Promise.all(
+    Promise.allSettled(
       urls.map(async (url, i) => {
         const imageUrl = await generateTextQRCode(url, {
           width: 400,
@@ -66,17 +87,33 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
         } satisfies ChunkQR
       })
     )
-      .then((nextChunkQRs) => {
-        generatedChunkQRs = nextChunkQRs
+      .then((results) => {
+        const fulfilledChunkQRs: ChunkQR[] = []
+        let firstError: unknown = null
+
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            fulfilledChunkQRs.push(result.value)
+          } else if (firstError === null) {
+            firstError = result.reason
+          }
+        }
+
+        generatedChunkQRs = fulfilledChunkQRs
         if (!active) {
-          revokeChunkQRImageUrls(nextChunkQRs)
+          revokeChunkQRImageUrls(fulfilledChunkQRs)
           return
         }
 
-        setChunkQRs((existingChunkQRs) => {
-          revokeChunkQRImageUrls(existingChunkQRs)
-          return nextChunkQRs
-        })
+        if (firstError !== null) {
+          revokeChunkQRImageUrls(fulfilledChunkQRs)
+          setChunkQRs([])
+          console.error('Failed to generate QR codes:', firstError)
+          setError('Failed to generate QR codes')
+          return
+        }
+
+        setChunkQRs(fulfilledChunkQRs)
       })
       .catch((err) => {
         revokeChunkQRImageUrls(generatedChunkQRs)
@@ -84,10 +121,7 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
           return
         }
 
-        setChunkQRs((existingChunkQRs) => {
-          revokeChunkQRImageUrls(existingChunkQRs)
-          return []
-        })
+        setChunkQRs([])
         console.error('Failed to generate QR codes:', err)
         setError('Failed to generate QR codes')
       })
@@ -99,7 +133,6 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
 
     return () => {
       active = false
-      revokeChunkQRImageUrls(generatedChunkQRs)
     }
   }, [data])
 
