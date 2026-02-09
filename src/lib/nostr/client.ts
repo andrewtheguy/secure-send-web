@@ -33,7 +33,7 @@ export class NostrClient {
   /**
    * Ensure at least one relay is connected
    */
-  private async ensureConnected(): Promise<void> {
+  private ensureConnected(): Promise<void> {
     // Give relays time to connect by doing a dummy subscription
     // This triggers connection establishment in SimplePool
     return new Promise((resolve) => {

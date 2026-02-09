@@ -2,8 +2,12 @@
 async function deflateCompress(data: Uint8Array): Promise<Uint8Array> {
   const cs = new CompressionStream('deflate-raw')
   const writer = cs.writable.getWriter()
-  writer.write(data as ArrayBufferView<ArrayBuffer>)
-  writer.close()
+  try {
+    await writer.write(data as ArrayBufferView<ArrayBuffer>)
+    await writer.close()
+  } finally {
+    writer.releaseLock()
+  }
   const reader = cs.readable.getReader()
   const chunks: Uint8Array[] = []
   for (;;) {
@@ -25,8 +29,12 @@ async function deflateCompress(data: Uint8Array): Promise<Uint8Array> {
 async function deflateDecompress(data: Uint8Array): Promise<Uint8Array> {
   const ds = new DecompressionStream('deflate-raw')
   const writer = ds.writable.getWriter()
-  writer.write(data as ArrayBufferView<ArrayBuffer>)
-  writer.close()
+  try {
+    await writer.write(data as ArrayBufferView<ArrayBuffer>)
+    await writer.close()
+  } finally {
+    writer.releaseLock()
+  }
   const reader = ds.readable.getReader()
   const chunks: Uint8Array[] = []
   for (;;) {

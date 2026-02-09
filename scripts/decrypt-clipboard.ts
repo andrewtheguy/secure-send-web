@@ -21,7 +21,7 @@ async function readStdin(): Promise<string> {
 const PBKDF2_ITERATIONS = 600_000
 const AES_NONCE_LENGTH = 12
 
-async function deriveKey(pin: string, salt: Buffer): Promise<Buffer> {
+function deriveKey(pin: string, salt: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     crypto.pbkdf2(pin, salt, PBKDF2_ITERATIONS, 32, 'sha256', (err, key) => {
       if (err) reject(err)
@@ -30,7 +30,7 @@ async function deriveKey(pin: string, salt: Buffer): Promise<Buffer> {
   })
 }
 
-async function decrypt(key: Buffer, encrypted: Buffer): Promise<Buffer> {
+function decrypt(key: Buffer, encrypted: Buffer): Buffer {
   const nonce = encrypted.subarray(0, AES_NONCE_LENGTH)
   const ciphertext = encrypted.subarray(AES_NONCE_LENGTH, -16)
   const tag = encrypted.subarray(-16)

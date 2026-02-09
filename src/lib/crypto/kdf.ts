@@ -25,7 +25,7 @@ export async function importPinKey(pin: string): Promise<CryptoKey> {
  * Derive AES-256 key from previously imported PIN key material.
  */
 export async function deriveKeyFromPinKey(keyMaterial: CryptoKey, salt: Uint8Array): Promise<CryptoKey> {
-  return crypto.subtle.deriveKey(
+  return await crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
       salt: salt as BufferSource,

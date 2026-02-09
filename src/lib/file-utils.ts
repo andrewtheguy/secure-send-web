@@ -1,7 +1,7 @@
 /**
  * Read a File object as Uint8Array
  */
-export async function readFileAsBytes(file: File): Promise<Uint8Array> {
+export function readFileAsBytes(file: File): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = (e) => {

@@ -24,7 +24,7 @@ worker.onmessage = (e: MessageEvent) => {
  * Returns a data URI (SVG image)
  * Uses 8-bit byte mode for binary data
  */
-export async function generateBinaryQRCode(
+export function generateBinaryQRCode(
   data: Uint8Array,
   options?: {
     width?: number
@@ -45,7 +45,7 @@ export async function generateBinaryQRCode(
  * Returns a data URI (SVG image)
  * Uses text mode for smaller payloads like URLs
  */
-export async function generateTextQRCode(
+export function generateTextQRCode(
   text: string,
   options?: {
     width?: number

@@ -62,7 +62,7 @@ export async function decrypt(key: CryptoKey, encrypted: Uint8Array): Promise<Ui
 /**
  * Encrypt a string message
  */
-export async function encryptMessage(key: CryptoKey, message: string): Promise<Uint8Array> {
+export function encryptMessage(key: CryptoKey, message: string): Promise<Uint8Array> {
   const encoder = new TextEncoder()
   const plaintext = encoder.encode(message)
   return encrypt(key, plaintext)
