@@ -98,11 +98,13 @@ export function useManualReceive(): UseManualReceiveReturn {
     const parsed = await parseMutualPayload(offerBinary)
     if (!parsed) {
       offerRejectRef.current?.(new Error('Invalid offer format'))
+      offerRejectRef.current = null
       offerResolverRef.current = null
       return
     }
     if (parsed.type !== 'offer') {
       offerRejectRef.current?.(new Error('Expected offer, got answer'))
+      offerRejectRef.current = null
       offerResolverRef.current = null
       return
     }
