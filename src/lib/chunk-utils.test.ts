@@ -101,6 +101,53 @@ describe('chunkPayload / reassembleChunks', () => {
     expect(reassembleChunks(map, 1)).toEqual(original)
   })
 
+  it('produces one chunk when payload length equals maxDataBytes', () => {
+    const maxDataBytes = 400
+    const original = new Uint8Array(maxDataBytes)
+    for (let i = 0; i < original.length; i++) original[i] = i % 256
+
+    const chunks = chunkPayload(original, maxDataBytes)
+    expect(chunks.length).toBe(1)
+    expect(chunks[0][0]).toBe(0)
+    expect(chunks[0][1]).toBe(1)
+
+    const parsed = parseChunk(base64urlEncode(chunks[0]))
+    expect(parsed).not.toBeNull()
+    expect(parsed!.index).toBe(0)
+    expect(parsed!.total).toBe(1)
+
+    const map = new Map<number, Uint8Array>()
+    map.set(parsed!.index, parsed!.data)
+    expect(reassembleChunks(map, 1)).toEqual(original)
+  })
+
+  it('handles empty payload chunking semantics', () => {
+    const original = new Uint8Array(0)
+    const chunks = chunkPayload(original, 400)
+    const map = new Map<number, Uint8Array>()
+
+    // Current implementations may return [] or a single header-only chunk.
+    expect([0, 1]).toContain(chunks.length)
+
+    if (chunks.length === 0) {
+      expect(reassembleChunks(map, 0)).toEqual(original)
+      return
+    }
+
+    expect(chunks[0][0]).toBe(0)
+    expect(chunks[0][1]).toBe(1)
+
+    const parsed = parseChunk(base64urlEncode(chunks[0]))
+    if (parsed) {
+      expect(parsed.index).toBe(0)
+      expect(parsed.total).toBe(1)
+      map.set(parsed.index, parsed.data)
+      expect(reassembleChunks(map, 1)).toEqual(original)
+    } else {
+      expect(reassembleChunks(map, 1)).toBeNull()
+    }
+  })
+
   it('returns null when chunks are incomplete', () => {
     const original = new Uint8Array(1200)
     const chunks = chunkPayload(original, 400)

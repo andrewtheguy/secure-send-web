@@ -100,6 +100,9 @@ describe('Manual Signaling Utils', () => {
 
         const missingKey = { ...validPayload, publicKey: undefined }
         expect(isValidSignalingPayload(missingKey)).toBe(false)
+
+        const nonFiniteCreatedAt = { ...validPayload, createdAt: Number.POSITIVE_INFINITY }
+        expect(isValidSignalingPayload(nonFiniteCreatedAt)).toBe(false)
     })
 
     it('should handle clipboard base64 conversions', () => {
