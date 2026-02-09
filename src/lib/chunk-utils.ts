@@ -39,7 +39,7 @@ export function base64urlDecode(encoded: string): Uint8Array {
  */
 export function chunkPayload(binary: Uint8Array, maxDataBytes = 400): Uint8Array[] {
   if (binary.length === 0) {
-    return []
+    throw new Error('Payload cannot be empty')
   }
 
   const totalChunks = Math.max(1, Math.ceil(binary.length / maxDataBytes))
