@@ -161,11 +161,13 @@ export class WebRTCConnection {
 
         return await new Promise<boolean>((resolve, reject) => {
             let settled = false;
+            const startedAt = Date.now();
 
             const cleanup = () => {
                 this.pc.removeEventListener('icegatheringstatechange', onIceGatheringStateChange);
                 this.pc.removeEventListener('connectionstatechange', onConnectionStateChange);
                 clearTimeout(timeoutId);
+                clearInterval(pollId);
             };
 
             const settleResolve = (completed: boolean) => {
@@ -182,28 +184,38 @@ export class WebRTCConnection {
                 reject(error);
             };
 
-            const onIceGatheringStateChange = () => {
+            const checkState = () => {
                 if (this.pc.iceGatheringState === 'complete') {
                     settleResolve(true);
+                    return;
+                }
+                if (this.pc.connectionState === 'failed' || this.pc.connectionState === 'closed') {
+                    settleReject(new Error('Connection failed while gathering network info'));
+                    return;
+                }
+                if (Date.now() - startedAt >= timeoutMs) {
+                    settleResolve(false);
                 }
             };
 
+            const onIceGatheringStateChange = () => {
+                checkState();
+            };
+
             const onConnectionStateChange = () => {
-                if (this.pc.connectionState === 'failed' || this.pc.connectionState === 'closed') {
-                    settleReject(new Error('Connection failed while gathering network info'));
-                }
+                checkState();
             };
 
             const timeoutId = setTimeout(() => {
                 settleResolve(false);
             }, timeoutMs);
+            const pollId = setInterval(checkState, 250);
 
             this.pc.addEventListener('icegatheringstatechange', onIceGatheringStateChange);
             this.pc.addEventListener('connectionstatechange', onConnectionStateChange);
 
             // Check after subscribing to avoid missing a race where state flips before handler attach.
-            onIceGatheringStateChange();
-            onConnectionStateChange();
+            checkState();
         });
     }
 

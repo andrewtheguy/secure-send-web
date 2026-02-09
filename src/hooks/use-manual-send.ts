@@ -262,6 +262,12 @@ export function useManualSend(): UseManualSendReturn {
       if (!iceGatheringComplete) {
         console.warn('ICE gathering timed out while generating offer; continuing with available candidates')
       }
+      setState({
+        status: 'generating_offer',
+        message: iceGatheringComplete
+          ? 'Preparing exchange code...'
+          : 'Network probe timed out. Preparing exchange code with available routes...',
+      })
 
       if (cancelledRef.current) return
 

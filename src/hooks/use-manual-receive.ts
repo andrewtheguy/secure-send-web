@@ -320,6 +320,12 @@ export function useManualReceive(): UseManualReceiveReturn {
       if (!iceGatheringComplete) {
         console.warn('ICE gathering timed out while generating answer; continuing with available candidates')
       }
+      setState({
+        status: 'generating_answer',
+        message: iceGatheringComplete
+          ? 'Preparing response code...'
+          : 'Network probe timed out. Preparing response code with available routes...',
+      })
 
       if (cancelledRef.current) return
 
