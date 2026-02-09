@@ -15,6 +15,8 @@ import type { PinKeyMaterial } from '@/lib/types'
 import { Link } from 'react-router-dom'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+const PIN_MODE_DESCRIPTION = 'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.'
+const QR_MODE_DESCRIPTION = 'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. Data stays end-to-end encrypted.'
 
 // Helper to format PIN hint as XXXX-XXXX
 function formatPinHint(h: string): string {
@@ -31,8 +33,6 @@ export function ReceiveTab() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [usePasskey, setUsePasskey] = useState(false)
   const [passkeyAuthenticating, setPasskeyAuthenticating] = useState(false)
-  const pinModeDescription = 'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.'
-  const qrModeDescription = 'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. Data stays end-to-end encrypted.'
 
   // Store PIN in ref to avoid React DevTools exposure
   const pinSecretRef = useRef<PinSecret | null>(null)
@@ -276,7 +276,7 @@ export function ReceiveTab() {
                     <KeyRound className="h-4 w-4" />
                     PIN mode
                   </span>
-                  <p className="text-xs text-muted-foreground">{pinModeDescription}</p>
+                  <p className="text-xs text-muted-foreground">{PIN_MODE_DESCRIPTION}</p>
                 </div>
               </label>
 
@@ -294,7 +294,7 @@ export function ReceiveTab() {
                     <QrCode className="h-4 w-4" />
                     QR code mode
                   </span>
-                  <p className="text-xs text-muted-foreground">{qrModeDescription}</p>
+                  <p className="text-xs text-muted-foreground">{QR_MODE_DESCRIPTION}</p>
                 </div>
               </label>
             </RadioGroup>

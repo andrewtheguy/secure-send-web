@@ -287,7 +287,10 @@ export function SendTab() {
               value={methodChoice}
               onValueChange={(value) => {
                 setMethodChoice(value as MethodChoice)
-                if (value === 'offline') setRelayOnly(false)
+                if (value === 'offline') {
+                  setRelayOnly(false)
+                  setUsePasskey(false)
+                }
               }}
               className="gap-2"
             >

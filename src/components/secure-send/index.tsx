@@ -108,7 +108,7 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                   <Shield className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
                   <div>
                     <p className="font-medium">End-to-End Encryption</p>
-                    <p className="text-muted-foreground">Your content is encrypted with AES-256-GCM before it ever leaves your device. Only someone with the PIN can decrypt it.</p>
+                    <p className="text-muted-foreground">Your content is encrypted with AES-256-GCM before it ever leaves your device. Only the intended recipient can decrypt it.</p>
                   </div>
                 </div>
                 <div className="flex gap-3">
@@ -170,7 +170,7 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                     <li>Best when sender and receiver are on different networks and you want the highest connection success rate.</li>
                     <li>PIN is shared out-of-band (chat, voice, etc.), then receiver enters it to derive the decryption key locally.</li>
                     <li>Relay servers coordinate signaling only; they do not get plaintext file contents or your decryption key.</li>
-                    <li>If direct peer connection fails, encrypted cloud fallback can be used when enabled by the sender.</li>
+                    <li>If direct peer connection fails, PIN mode automatically falls back to encrypted cloud transfer. Sender can force cloud-only mode, but cannot disable fallback.</li>
                   </ul>
                 </div>
                 <div>
@@ -186,7 +186,7 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                     <li>Offer/answer signaling is exchanged as QR chunks, so no relay coordination service is required.</li>
                     <li>With internet, STUN can assist network traversal for peer connection setup using only connection metadata (for example IP address and port).</li>
                     <li>Without internet, transfer can still work over a shared local network with no third-party servers.</li>
-                    <li>Typically less reliable than PIN mode due to camera quality, scan conditions, or manual QR exchange friction.</li>
+                    <li>Typically less reliable than PIN mode due to camera quality, scan conditions, manual QR exchange friction, and no cloud fallback.</li>
                   </ul>
                 </div>
               </div>
