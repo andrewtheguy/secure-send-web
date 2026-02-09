@@ -1,64 +1,12 @@
-// Browser-native deflate via CompressionStream/DecompressionStream (no deps)
-async function deflateCompress(data: Uint8Array): Promise<Uint8Array> {
-  const cs = new CompressionStream('deflate-raw')
-  const writer = cs.writable.getWriter()
-  try {
-    await writer.write(data as ArrayBufferView<ArrayBuffer>)
-    await writer.close()
-  } finally {
-    writer.releaseLock()
-  }
-  const reader = cs.readable.getReader()
-  const chunks: Uint8Array[] = []
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      chunks.push(value)
-    }
-  } finally {
-    reader.releaseLock()
-  }
-  let totalLen = 0
-  for (const c of chunks) totalLen += c.length
-  const result = new Uint8Array(totalLen)
-  let offset = 0
-  for (const c of chunks) {
-    result.set(c, offset)
-    offset += c.length
-  }
-  return result
+import { deflateSync, inflateSync } from 'fflate'
+
+// Deterministic deflate helpers (avoid browser stream API stalls).
+function deflateCompress(data: Uint8Array): Uint8Array {
+  return deflateSync(data)
 }
 
-async function deflateDecompress(data: Uint8Array): Promise<Uint8Array> {
-  const ds = new DecompressionStream('deflate-raw')
-  const writer = ds.writable.getWriter()
-  try {
-    await writer.write(data as ArrayBufferView<ArrayBuffer>)
-    await writer.close()
-  } finally {
-    writer.releaseLock()
-  }
-  const reader = ds.readable.getReader()
-  const chunks: Uint8Array[] = []
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      chunks.push(value)
-    }
-  } finally {
-    reader.releaseLock()
-  }
-  let totalLen = 0
-  for (const c of chunks) totalLen += c.length
-  const result = new Uint8Array(totalLen)
-  let offset = 0
-  for (const c of chunks) {
-    result.set(c, offset)
-    offset += c.length
-  }
-  return result
+function deflateDecompress(data: Uint8Array): Uint8Array {
+  return inflateSync(data)
 }
 
 // Magic header: "SS03" = Secure Send version 3
@@ -169,9 +117,9 @@ export function isValidBinaryPayload(binary: Uint8Array): boolean {
 /**
  * Estimate compressed payload size in bytes (includes SS03 magic header)
  */
-export async function estimatePayloadSize(payload: SignalingPayload): Promise<number> {
+export function estimatePayloadSize(payload: SignalingPayload): number {
   const json = JSON.stringify(payload)
-  const compressed = await deflateCompress(new TextEncoder().encode(json))
+  const compressed = deflateCompress(new TextEncoder().encode(json))
   return 4 + 4 + compressed.length // 4 for SS03, 4 for INNER_MAGIC_V3
 }
 
@@ -180,7 +128,7 @@ export async function estimatePayloadSize(payload: SignalingPayload): Promise<nu
  * Format: [SS03 magic (4 bytes)][obfuscated compressed payload]
  * NOT encrypted - ECDH public keys are not secret
  */
-export async function generateMutualOfferBinary(
+export function generateMutualOfferBinary(
   offer: RTCSessionDescriptionInit,
   candidates: RTCIceCandidate[],
   metadata: {
@@ -192,7 +140,7 @@ export async function generateMutualOfferBinary(
     publicKey: Uint8Array // ECDH public key (65 bytes)
     salt: Uint8Array // Salt for AES key derivation
   }
-): Promise<Uint8Array> {
+): Uint8Array {
   const payload: SignalingPayload = {
     type: 'offer',
     sdp: offer.sdp || '',
@@ -208,7 +156,7 @@ export async function generateMutualOfferBinary(
 
   const encoder = new TextEncoder()
   const jsonBytes = encoder.encode(JSON.stringify(payload))
-  const compressed = await deflateCompress(jsonBytes)
+  const compressed = deflateCompress(jsonBytes)
 
   // Build inner: [mag!][compressed]
   const inner = new Uint8Array(4 + compressed.length)
@@ -230,12 +178,12 @@ export async function generateMutualOfferBinary(
  * Generate mutual answer as binary data
  * Format: [SS03 magic (4 bytes)][obfuscated compressed payload]
  */
-export async function generateMutualAnswerBinary(
+export function generateMutualAnswerBinary(
   answer: RTCSessionDescriptionInit,
   candidates: RTCIceCandidate[],
   publicKey: Uint8Array, // ECDH public key (65 bytes)
   createdAt: number = Date.now()
-): Promise<Uint8Array> {
+): Uint8Array {
   const payload: SignalingPayload = {
     type: 'answer',
     sdp: answer.sdp || '',
@@ -246,7 +194,7 @@ export async function generateMutualAnswerBinary(
 
   const encoder = new TextEncoder()
   const jsonBytes = encoder.encode(JSON.stringify(payload))
-  const compressed = await deflateCompress(jsonBytes)
+  const compressed = deflateCompress(jsonBytes)
 
   // Build inner: [mag!][compressed]
   const inner = new Uint8Array(4 + compressed.length)
@@ -276,7 +224,7 @@ export function isValidPublicKeyArray(arr: unknown): arr is number[] {
  * Parse mutual exchange binary payload (offer or answer)
  * Returns null if invalid format or version
  */
-export async function parseMutualPayload(binary: Uint8Array): Promise<SignalingPayload | null> {
+export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null {
   try {
     if (!isMutualPayload(binary)) {
       return null
@@ -303,7 +251,7 @@ export async function parseMutualPayload(binary: Uint8Array): Promise<SignalingP
 
         const deobfuscated = xorObfuscate(obfuscatedInner, seed)
         const compressed = deobfuscated.slice(4) // Skip INNER_MAGIC_V3
-        const jsonBytes = await deflateDecompress(compressed)
+        const jsonBytes = deflateDecompress(compressed)
         const json = new TextDecoder().decode(jsonBytes)
         const payload = JSON.parse(json)
 

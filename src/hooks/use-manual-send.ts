@@ -13,7 +13,6 @@ import { WebRTCConnection } from '@/lib/webrtc'
 import { getWebRTCConfig } from '@/lib/webrtc-config'
 import {
   generateMutualOfferBinary,
-  generateMutualClipboardData,
   parseMutualPayload,
   type SignalingPayload,
 } from '@/lib/manual-signaling'
@@ -286,15 +285,11 @@ export function useManualSend(): UseManualSendReturn {
         }
       )
 
-      // Generate base64 clipboard data
-      const clipboardBase64 = generateMutualClipboardData(offerBinary)
-
       // Show offer and wait for answer
       setState({
         status: 'showing_offer',
         message: 'Show this to receiver, then scan/paste their response',
         offerData: offerBinary,
-        clipboardData: clipboardBase64,
         contentType: 'file',
         fileMetadata: { fileName, fileSize, mimeType },
       })

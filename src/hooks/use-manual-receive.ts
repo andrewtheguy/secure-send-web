@@ -14,7 +14,6 @@ import { getWebRTCConfig } from '@/lib/webrtc-config'
 import {
   parseMutualPayload,
   generateMutualAnswerBinary,
-  generateMutualClipboardData,
   type SignalingPayload,
 } from '@/lib/manual-signaling'
 import type { TransferState } from '@/lib/nostr'
@@ -336,14 +335,12 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       // Generate answer with our public key
       const answerBinary = await generateMutualAnswerBinary(answerSDP, iceCandidates, ecdhKeyPair.publicKeyBytes)
-      const clipboardBase64 = generateMutualClipboardData(answerBinary)
 
       // Show answer and wait for connection
       setState({
         status: 'showing_answer',
         message: 'Show this to sender and wait for connection',
         answerData: answerBinary,
-        clipboardData: clipboardBase64,
         contentType: 'file',
         fileMetadata: { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! },
       })
