@@ -1,24 +1,51 @@
-import { init as initZstd, compress as zstdCompress, decompress as zstdDecompress } from '@bokuweb/zstd-wasm'
-
-// Lazy-init zstd WASM once
-let zstdReady: Promise<void> | null = null
-function ensureZstd(): Promise<void> {
-  if (!zstdReady) {
-    // In browser: load from /public via origin; in tests/Node: let the library resolve it
-    if (typeof window !== 'undefined') {
-      const wasmUrl = new URL('/zstd.wasm', window.location.origin).href
-      // Runtime JS accepts path arg; types are misresolved to node entry which omits it
-      zstdReady = (initZstd as (path?: string) => Promise<void>)(wasmUrl)
-    } else {
-      zstdReady = initZstd()
-    }
+// Browser-native deflate via CompressionStream/DecompressionStream (no deps)
+async function deflateCompress(data: Uint8Array): Promise<Uint8Array> {
+  const cs = new CompressionStream('deflate-raw')
+  const writer = cs.writable.getWriter()
+  writer.write(data as ArrayBufferView<ArrayBuffer>)
+  writer.close()
+  const reader = cs.readable.getReader()
+  const chunks: Uint8Array[] = []
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
   }
-  return zstdReady
+  let totalLen = 0
+  for (const c of chunks) totalLen += c.length
+  const result = new Uint8Array(totalLen)
+  let offset = 0
+  for (const c of chunks) {
+    result.set(c, offset)
+    offset += c.length
+  }
+  return result
 }
 
-const ZSTD_LEVEL = 22 // max compression
+async function deflateDecompress(data: Uint8Array): Promise<Uint8Array> {
+  const ds = new DecompressionStream('deflate-raw')
+  const writer = ds.writable.getWriter()
+  writer.write(data as ArrayBufferView<ArrayBuffer>)
+  writer.close()
+  const reader = ds.readable.getReader()
+  const chunks: Uint8Array[] = []
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+  }
+  let totalLen = 0
+  for (const c of chunks) totalLen += c.length
+  const result = new Uint8Array(totalLen)
+  let offset = 0
+  for (const c of chunks) {
+    result.set(c, offset)
+    offset += c.length
+  }
+  return result
+}
 
-// Magic header: "SS03" = Secure Send version 3 (zstd compression)
+// Magic header: "SS03" = Secure Send version 3
 const MAGIC_HEADER_V2 = new Uint8Array([0x53, 0x53, 0x30, 0x33])
 // Inner magic: "mag!" (0x6d 0x61 0x67 0x21) - inside obfuscated area to verify seed
 const INNER_MAGIC_V2 = new Uint8Array([0x6d, 0x61, 0x67, 0x21])
@@ -127,9 +154,8 @@ export function isValidBinaryPayload(binary: Uint8Array): boolean {
  * Estimate compressed payload size in bytes (includes SS03 magic header)
  */
 export async function estimatePayloadSize(payload: SignalingPayload): Promise<number> {
-  await ensureZstd()
   const json = JSON.stringify(payload)
-  const compressed = zstdCompress(new TextEncoder().encode(json), ZSTD_LEVEL)
+  const compressed = await deflateCompress(new TextEncoder().encode(json))
   return 4 + 4 + compressed.length // 4 for SS03, 4 for INNER_MAGIC_V2
 }
 
@@ -151,8 +177,6 @@ export async function generateMutualOfferBinary(
     salt: Uint8Array // Salt for AES key derivation
   }
 ): Promise<Uint8Array> {
-  await ensureZstd()
-
   const payload: SignalingPayload = {
     type: 'offer',
     sdp: offer.sdp || '',
@@ -168,7 +192,7 @@ export async function generateMutualOfferBinary(
 
   const encoder = new TextEncoder()
   const jsonBytes = encoder.encode(JSON.stringify(payload))
-  const compressed = zstdCompress(jsonBytes, ZSTD_LEVEL)
+  const compressed = await deflateCompress(jsonBytes)
 
   // Build inner: [mag!][compressed]
   const inner = new Uint8Array(4 + compressed.length)
@@ -196,8 +220,6 @@ export async function generateMutualAnswerBinary(
   publicKey: Uint8Array, // ECDH public key (65 bytes)
   createdAt: number = Date.now()
 ): Promise<Uint8Array> {
-  await ensureZstd()
-
   const payload: SignalingPayload = {
     type: 'answer',
     sdp: answer.sdp || '',
@@ -208,7 +230,7 @@ export async function generateMutualAnswerBinary(
 
   const encoder = new TextEncoder()
   const jsonBytes = encoder.encode(JSON.stringify(payload))
-  const compressed = zstdCompress(jsonBytes, ZSTD_LEVEL)
+  const compressed = await deflateCompress(jsonBytes)
 
   // Build inner: [mag!][compressed]
   const inner = new Uint8Array(4 + compressed.length)
@@ -244,8 +266,6 @@ export async function parseMutualPayload(binary: Uint8Array): Promise<SignalingP
       return null
     }
 
-    await ensureZstd()
-
     const obfuscatedInner = binary.subarray(4)
     const currentBucket = Math.floor(Date.now() / 1000 / BUCKET_SEC)
 
@@ -267,7 +287,7 @@ export async function parseMutualPayload(binary: Uint8Array): Promise<SignalingP
 
         const deobfuscated = xorObfuscate(obfuscatedInner, seed)
         const compressed = deobfuscated.slice(4) // Skip INNER_MAGIC_V2
-        const jsonBytes = zstdDecompress(compressed)
+        const jsonBytes = await deflateDecompress(compressed)
         const json = new TextDecoder().decode(jsonBytes)
         const payload = JSON.parse(json)
 
