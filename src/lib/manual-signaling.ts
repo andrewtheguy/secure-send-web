@@ -10,10 +10,14 @@ async function deflateCompress(data: Uint8Array): Promise<Uint8Array> {
   }
   const reader = cs.readable.getReader()
   const chunks: Uint8Array[] = []
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    chunks.push(value)
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
   }
   let totalLen = 0
   for (const c of chunks) totalLen += c.length
@@ -37,10 +41,14 @@ async function deflateDecompress(data: Uint8Array): Promise<Uint8Array> {
   }
   const reader = ds.readable.getReader()
   const chunks: Uint8Array[] = []
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    chunks.push(value)
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
   }
   let totalLen = 0
   for (const c of chunks) totalLen += c.length
