@@ -240,11 +240,9 @@ export function ReceiveChunkedPage() {
   }
 
   // --- Transferring ---
-  // Extract manual-specific state
-  const rawStateAny = receiveState as unknown as Record<string, unknown>
-  const answerData = rawStateAny.answerData instanceof Uint8Array ? rawStateAny.answerData : undefined
-  const clipboardData = typeof rawStateAny.clipboardData === 'string' ? rawStateAny.clipboardData : undefined
-  const showQRDisplay = answerData && receiveState.status === 'showing_answer'
+  const answerData = receiveState.answerData
+  const clipboardData = receiveState.clipboardData
+  const showQRDisplay = receiveState.status === 'showing_answer' && answerData instanceof Uint8Array
 
   return (
     <div className="flex w-full justify-center">
