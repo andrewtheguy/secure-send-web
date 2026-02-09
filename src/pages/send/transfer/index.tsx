@@ -249,14 +249,14 @@ export function SendTransferPage() {
                 Unable to connect to relay servers
               </p>
               <p className="text-sm text-amber-700 dark:text-amber-300">
-                You can switch to Manual mode (works offline) or retry the connection.
+                PIN mode is temporarily unavailable. Switch to QR code mode or retry the connection.
               </p>
             </div>
           </div>
           <div className="flex gap-2">
             <Button onClick={handleSwitchToOffline} className="flex-1" size="sm">
               <QrCode className="mr-2 h-4 w-4" />
-              Switch to Manual
+              Switch to QR Mode
             </Button>
             <Button onClick={handleRetry} variant="outline" size="sm">
               Retry
@@ -268,7 +268,7 @@ export function SendTransferPage() {
       {/* Active transfer */}
       {step === 'active' && (
         <>
-          {/* Manual mode: showing offer */}
+          {/* QR code mode: showing offer */}
           {!isOnline && offerData && submitAnswer && state.status === 'showing_offer' && (
             <div className="space-y-4">
               {/* Instructions at top */}
@@ -293,7 +293,7 @@ export function SendTransferPage() {
             </div>
           )}
 
-          {/* Manual mode: other states (connecting, transferring, etc.) */}
+          {/* QR code mode: other states (connecting, transferring, etc.) */}
           {!isOnline && state.status !== 'showing_offer' && (
             <TransferStatus state={state} />
           )}

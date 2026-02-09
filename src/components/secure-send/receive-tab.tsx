@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { PinInput, type PinInputRef, type PinChangePayload } from './pin-input'
 import { TransferStatus } from './transfer-status'
 import { QRDisplay } from './qr-display'
@@ -15,6 +15,8 @@ import type { PinKeyMaterial } from '@/lib/types'
 import { Link } from 'react-router-dom'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+const PIN_MODE_DESCRIPTION = 'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.'
+const QR_MODE_DESCRIPTION = 'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. Data stays end-to-end encrypted.'
 
 // Helper to format PIN hint as XXXX-XXXX
 function formatPinHint(h: string): string {
@@ -257,18 +259,46 @@ export function ReceiveTab() {
     <div className="space-y-4 pt-4">
       {state.status === 'idle' ? (
         <>
-          <Tabs value={receiveMode} onValueChange={(v) => setReceiveMode(v as ReceiveMode)}>
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="pin" className="flex items-center gap-2">
-                <KeyRound className="h-4 w-4" />
-                Enter PIN
-              </TabsTrigger>
-              <TabsTrigger value="scan" className="flex items-center gap-2">
-                <QrCode className="h-4 w-4" />
-                Scan Code
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+            <p className="text-sm font-medium">Transfer mode</p>
+            <RadioGroup value={receiveMode} onValueChange={(value) => setReceiveMode(value as ReceiveMode)} className="gap-2">
+              <label
+                htmlFor="receive-mode-pin"
+                className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
+                  receiveMode === 'pin'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:bg-muted/60'
+                }`}
+              >
+                <RadioGroupItem id="receive-mode-pin" value="pin" className="mt-0.5" />
+                <div className="space-y-1">
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    <KeyRound className="h-4 w-4" />
+                    PIN mode
+                  </span>
+                  <p className="text-xs text-muted-foreground">{PIN_MODE_DESCRIPTION}</p>
+                </div>
+              </label>
+
+              <label
+                htmlFor="receive-mode-qr"
+                className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
+                  receiveMode === 'scan'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:bg-muted/60'
+                }`}
+              >
+                <RadioGroupItem id="receive-mode-qr" value="scan" className="mt-0.5" />
+                <div className="space-y-1">
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    <QrCode className="h-4 w-4" />
+                    QR code mode
+                  </span>
+                  <p className="text-xs text-muted-foreground">{QR_MODE_DESCRIPTION}</p>
+                </div>
+              </label>
+            </RadioGroup>
+          </div>
 
           {receiveMode === 'pin' ? (
             <>
@@ -351,7 +381,7 @@ export function ReceiveTab() {
             <>
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">
-                  For <span className="font-medium text-foreground">Manual mode</span> transfers only.
+                  For <span className="font-medium text-foreground">QR code mode</span> transfers only.
                   Scan or paste the sender's QR code to receive their content.
                 </p>
               </div>

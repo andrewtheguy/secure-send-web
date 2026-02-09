@@ -1,9 +1,10 @@
 import { useState, useRef, useCallback } from 'react'
-import { Send, X, FileUp, Upload, FolderUp, ChevronDown, ChevronRight, Info, Fingerprint, Wifi, WifiOff, Cloud } from 'lucide-react'
+import { Send, X, FileUp, Upload, FolderUp, ChevronDown, ChevronRight, Info, Fingerprint, Cloud, KeyRound, QrCode } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { MAX_MESSAGE_SIZE } from '@/lib/crypto'
 import { formatFileSize } from '@/lib/file-utils'
 import { getTotalSize, supportsFolderSelection, getFolderName } from '@/lib/folder-utils'
@@ -45,6 +46,10 @@ export function SendTab() {
   const canSendFiles = selectedFiles.length > 0 && !isFilesOverLimit
   const canSendFolder = folderFiles && folderFiles.length > 0 && !isFolderOverLimit
   const canSend = mode === 'file' ? canSendFiles : canSendFolder
+  const pinModeDescription = 'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.'
+  const pinModeHowItWorksDescription = 'More reliable option, but requires manual PIN input. Coordination happens through third-party relay servers. No personally identifiable information is shared, and your data remains protected with end-to-end encryption.'
+  const qrModeDescription = 'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. Data stays end-to-end encrypted.'
+  const qrModeHowItWorksDescription = 'Coordination happens through QR exchange. If internet is available, STUN is only used for connection setup metadata (such as IP address and port). STUN does not receive your file contents, encryption keys, or any personally identifiable information. Without internet, no third-party servers are involved. Data stays end-to-end encrypted.'
 
   const handleSend = () => {
     // Set context with all the configuration
@@ -275,35 +280,56 @@ export function SendTab() {
             </div>
           )}
 
-          {/* Connection method toggle - visible on main UI */}
-          <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/30">
-            <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-full ${methodChoice === 'online' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-amber-100 dark:bg-amber-900/30'}`}>
-                {methodChoice === 'online' ? (
-                  <Wifi className="h-4 w-4 text-green-600 dark:text-green-400" />
-                ) : (
-                  <WifiOff className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                )}
-              </div>
-              <div>
-                <Label htmlFor="use-internet" className="text-sm font-medium cursor-pointer">
-                  {methodChoice === 'online' ? 'Internet required' : 'No internet required'}
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  {methodChoice === 'online'
-                    ? 'Auto-connect via relay servers.'
-                    : 'Manual QR exchange. Devices must be on a shared network if internet is not available.'}
-                </p>
-              </div>
-            </div>
-            <Switch
-              id="use-internet"
-              checked={methodChoice === 'online'}
-              onCheckedChange={(checked) => {
-                setMethodChoice(checked ? 'online' : 'offline')
-                if (!checked) setRelayOnly(false)
+          {/* Transfer mode selector */}
+          <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+            <p className="text-sm font-medium">Transfer mode</p>
+            <RadioGroup
+              value={methodChoice}
+              onValueChange={(value) => {
+                setMethodChoice(value as MethodChoice)
+                if (value === 'offline') {
+                  setRelayOnly(false)
+                  setUsePasskey(false)
+                }
               }}
-            />
+              className="gap-2"
+            >
+              <label
+                htmlFor="send-mode-pin"
+                className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
+                  methodChoice === 'online'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:bg-muted/60'
+                }`}
+              >
+                <RadioGroupItem id="send-mode-pin" value="online" className="mt-0.5" />
+                <div className="space-y-1">
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    <KeyRound className="h-4 w-4" />
+                    PIN mode
+                  </span>
+                  <p className="text-xs text-muted-foreground">{pinModeDescription}</p>
+                </div>
+              </label>
+
+              <label
+                htmlFor="send-mode-qr"
+                className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
+                  methodChoice === 'offline'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:bg-muted/60'
+                }`}
+              >
+                <RadioGroupItem id="send-mode-qr" value="offline" className="mt-0.5" />
+                <div className="space-y-1">
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    <QrCode className="h-4 w-4" />
+                    QR code mode
+                  </span>
+                  <p className="text-xs text-muted-foreground">{qrModeDescription}</p>
+                </div>
+              </label>
+            </RadioGroup>
           </div>
 
           {/* How it works info box */}
@@ -316,8 +342,8 @@ export function SendTab() {
                 <p className="font-medium mb-1">How it works</p>
                 <p className="text-muted-foreground">
                   {methodChoice === 'online'
-                    ? <>Share a PIN with your recipient—only they can decrypt and receive your files.<br />Your files are encrypted on your device before sending.<br />Poor or no internet? Toggle above for manual QR exchange.</>
-                    : <>Exchange QR codes with your recipient to establish a secure connection.<br />Your files are encrypted on your device before sending.</>}
+                    ? <>Share your PIN with the recipient so they can connect and decrypt your files.<br />{pinModeHowItWorksDescription}</>
+                    : <>Exchange QR codes with your recipient to establish the transfer session.<br />{qrModeHowItWorksDescription}</>}
                 </p>
               </div>
             </div>
@@ -343,11 +369,11 @@ export function SendTab() {
                 {/* Technical details about current mode */}
                 <p className="text-xs text-muted-foreground">
                   {methodChoice === 'online'
-                    ? 'Online mode: Uses Nostr relays for signaling. If P2P fails, encrypted data transfers via cloud.'
-                    : 'Offline mode: Exchange signaling via QR scan or copy/paste. Devices must be on same local network.'}
+                    ? `PIN mode: ${pinModeDescription}`
+                    : `QR code mode: ${qrModeDescription}`}
                 </p>
 
-                {/* Force cloud transfer - only for online mode */}
+                {/* Force cloud transfer - only for PIN mode */}
                 {methodChoice === 'online' && (
                   <div className="flex items-center gap-2">
                     <input
@@ -363,7 +389,7 @@ export function SendTab() {
                   </div>
                 )}
 
-                {/* Passkey toggle - only for online mode */}
+                {/* Passkey toggle - only for PIN mode */}
                 {methodChoice === 'online' && (
                   <div className="pt-3 border-t space-y-3">
                     <div className="flex items-center gap-1 mb-2">
@@ -420,7 +446,7 @@ export function SendTab() {
 
           <Button onClick={handleSend} disabled={!canSend} className="w-full">
             <Send className="mr-2 h-4 w-4" />
-            {methodChoice === 'offline' ? 'Generate & Send' : 'Generate Secure PIN'}
+            {methodChoice === 'offline' ? 'Start QR Code Transfer' : 'Generate Secure PIN'}
             <ChevronRight className="ml-1 h-3 w-3" />
           </Button>
     </div>
