@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Download, X, RotateCcw, FileDown, RefreshCw, Loader2, Camera, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
@@ -16,6 +16,7 @@ type PageStep = 'collecting' | 'transferring'
 
 export function ReceiveChunkedPage() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [step, setStep] = useState<PageStep>('collecting')
   const [scanError, setScanError] = useState<string | null>(null)
   const [cameraReady, setCameraReady] = useState(false)
@@ -104,11 +105,13 @@ export function ReceiveChunkedPage() {
 
   const handleCancel = useCallback(() => {
     cancel()
-  }, [cancel])
+    navigate('/receive')
+  }, [cancel, navigate])
 
   const handleReset = useCallback(() => {
     reset()
-  }, [reset])
+    navigate('/receive')
+  }, [reset, navigate])
 
   // --- Collecting chunks ---
   if (step === 'collecting') {
@@ -237,8 +240,6 @@ export function ReceiveChunkedPage() {
   }
 
   // --- Transferring ---
-  const isActive = receiveState.status !== 'idle' && receiveState.status !== 'error' && receiveState.status !== 'complete'
-
   // Extract manual-specific state
   const rawStateAny = receiveState as unknown as Record<string, unknown>
   const answerData = rawStateAny.answerData instanceof Uint8Array ? rawStateAny.answerData : undefined
@@ -290,7 +291,7 @@ export function ReceiveChunkedPage() {
 
         {/* Action buttons */}
         <div className="flex gap-2">
-          {isActive && (
+          {receiveState.status !== 'complete' && receiveState.status !== 'error' && (
             <Button variant="outline" onClick={handleCancel} className="flex-1">
               <X className="mr-2 h-4 w-4" />
               Cancel
