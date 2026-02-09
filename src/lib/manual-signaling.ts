@@ -1,7 +1,25 @@
-import pako from 'pako'
+import { init as initZstd, compress as zstdCompress, decompress as zstdDecompress } from '@bokuweb/zstd-wasm'
 
-// Magic header: "SS02" = Secure Send version 2 (ECDH mutual exchange)
-const MAGIC_HEADER_V2 = new Uint8Array([0x53, 0x53, 0x30, 0x32])
+// Lazy-init zstd WASM once
+let zstdReady: Promise<void> | null = null
+function ensureZstd(): Promise<void> {
+  if (!zstdReady) {
+    // In browser: load from /public via origin; in tests/Node: let the library resolve it
+    if (typeof window !== 'undefined') {
+      const wasmUrl = new URL('/zstd.wasm', window.location.origin).href
+      // Runtime JS accepts path arg; types are misresolved to node entry which omits it
+      zstdReady = (initZstd as (path?: string) => Promise<void>)(wasmUrl)
+    } else {
+      zstdReady = initZstd()
+    }
+  }
+  return zstdReady
+}
+
+const ZSTD_LEVEL = 22 // max compression
+
+// Magic header: "SS03" = Secure Send version 3 (zstd compression)
+const MAGIC_HEADER_V2 = new Uint8Array([0x53, 0x53, 0x30, 0x33])
 // Inner magic: "mag!" (0x6d 0x61 0x67 0x21) - inside obfuscated area to verify seed
 const INNER_MAGIC_V2 = new Uint8Array([0x6d, 0x61, 0x67, 0x21])
 const BUCKET_SEC = 3600 // 1 hour
@@ -106,20 +124,21 @@ export function isValidBinaryPayload(binary: Uint8Array): boolean {
 }
 
 /**
- * Estimate compressed payload size in bytes (includes SS02 magic header)
+ * Estimate compressed payload size in bytes (includes SS03 magic header)
  */
-export function estimatePayloadSize(payload: SignalingPayload): number {
+export async function estimatePayloadSize(payload: SignalingPayload): Promise<number> {
+  await ensureZstd()
   const json = JSON.stringify(payload)
-  const compressed = pako.deflate(json)
-  return 4 + 4 + compressed.length // 4 for SS02, 4 for INNER_MAGIC_V2
+  const compressed = zstdCompress(new TextEncoder().encode(json), ZSTD_LEVEL)
+  return 4 + 4 + compressed.length // 4 for SS03, 4 for INNER_MAGIC_V2
 }
 
 /**
  * Generate mutual offer as binary data
- * Format: [SS02 magic (4 bytes)][obfuscated compressed payload]
+ * Format: [SS03 magic (4 bytes)][obfuscated compressed payload]
  * NOT encrypted - ECDH public keys are not secret
  */
-export function generateMutualOfferBinary(
+export async function generateMutualOfferBinary(
   offer: RTCSessionDescriptionInit,
   candidates: RTCIceCandidate[],
   metadata: {
@@ -131,7 +150,9 @@ export function generateMutualOfferBinary(
     publicKey: Uint8Array // ECDH public key (65 bytes)
     salt: Uint8Array // Salt for AES key derivation
   }
-): Uint8Array {
+): Promise<Uint8Array> {
+  await ensureZstd()
+
   const payload: SignalingPayload = {
     type: 'offer',
     sdp: offer.sdp || '',
@@ -147,7 +168,7 @@ export function generateMutualOfferBinary(
 
   const encoder = new TextEncoder()
   const jsonBytes = encoder.encode(JSON.stringify(payload))
-  const compressed = pako.deflate(jsonBytes)
+  const compressed = zstdCompress(jsonBytes, ZSTD_LEVEL)
 
   // Build inner: [mag!][compressed]
   const inner = new Uint8Array(4 + compressed.length)
@@ -158,7 +179,7 @@ export function generateMutualOfferBinary(
   const seed = getSeedForBucket(currentBucket)
   const obfuscatedInner = xorObfuscate(inner, seed)
 
-  // Final binary: [SS02][obfuscatedInner]
+  // Final binary: [SS03][obfuscatedInner]
   const result = new Uint8Array(4 + obfuscatedInner.length)
   result.set(MAGIC_HEADER_V2, 0)
   result.set(obfuscatedInner, 4)
@@ -167,14 +188,16 @@ export function generateMutualOfferBinary(
 
 /**
  * Generate mutual answer as binary data
- * Format: [SS02 magic (4 bytes)][obfuscated compressed payload]
+ * Format: [SS03 magic (4 bytes)][obfuscated compressed payload]
  */
-export function generateMutualAnswerBinary(
+export async function generateMutualAnswerBinary(
   answer: RTCSessionDescriptionInit,
   candidates: RTCIceCandidate[],
   publicKey: Uint8Array, // ECDH public key (65 bytes)
   createdAt: number = Date.now()
-): Uint8Array {
+): Promise<Uint8Array> {
+  await ensureZstd()
+
   const payload: SignalingPayload = {
     type: 'answer',
     sdp: answer.sdp || '',
@@ -185,7 +208,7 @@ export function generateMutualAnswerBinary(
 
   const encoder = new TextEncoder()
   const jsonBytes = encoder.encode(JSON.stringify(payload))
-  const compressed = pako.deflate(jsonBytes)
+  const compressed = zstdCompress(jsonBytes, ZSTD_LEVEL)
 
   // Build inner: [mag!][compressed]
   const inner = new Uint8Array(4 + compressed.length)
@@ -196,7 +219,7 @@ export function generateMutualAnswerBinary(
   const seed = getSeedForBucket(currentBucket)
   const obfuscatedInner = xorObfuscate(inner, seed)
 
-  // Final binary: [SS02][obfuscatedInner]
+  // Final binary: [SS03][obfuscatedInner]
   const result = new Uint8Array(4 + obfuscatedInner.length)
   result.set(MAGIC_HEADER_V2, 0)
   result.set(obfuscatedInner, 4)
@@ -215,12 +238,13 @@ export function isValidPublicKeyArray(arr: unknown): arr is number[] {
  * Parse mutual exchange binary payload (offer or answer)
  * Returns null if invalid format or version
  */
-export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null {
+export async function parseMutualPayload(binary: Uint8Array): Promise<SignalingPayload | null> {
   try {
     if (!isMutualPayload(binary)) {
       return null
     }
 
+    await ensureZstd()
 
     const obfuscatedInner = binary.subarray(4)
     const currentBucket = Math.floor(Date.now() / 1000 / BUCKET_SEC)
@@ -243,7 +267,7 @@ export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null 
 
         const deobfuscated = xorObfuscate(obfuscatedInner, seed)
         const compressed = deobfuscated.slice(4) // Skip INNER_MAGIC_V2
-        const jsonBytes = pako.inflate(compressed)
+        const jsonBytes = zstdDecompress(compressed)
         const json = new TextDecoder().decode(jsonBytes)
         const payload = JSON.parse(json)
 

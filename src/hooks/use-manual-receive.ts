@@ -103,11 +103,11 @@ export function useManualReceive(): UseManualReceiveReturn {
     setReceivedContent(null)
   }, [cancel])
 
-  const submitOffer = useCallback((offerBinary: Uint8Array) => {
+  const submitOffer = useCallback(async (offerBinary: Uint8Array) => {
     if (!offerResolverRef.current) return
 
     // Parse mutual payload (no decryption needed)
-    const parsed = parseMutualPayload(offerBinary)
+    const parsed = await parseMutualPayload(offerBinary)
     if (!parsed) {
       offerRejectRef.current?.(new Error('Invalid offer format'))
       offerResolverRef.current = null
@@ -351,7 +351,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       }
 
       // Generate answer with our public key
-      const answerBinary = generateMutualAnswerBinary(answerSDP, iceCandidates, ecdhKeyPair.publicKeyBytes)
+      const answerBinary = await generateMutualAnswerBinary(answerSDP, iceCandidates, ecdhKeyPair.publicKeyBytes)
       const clipboardBase64 = generateMutualClipboardData(answerBinary)
 
       // Show answer and wait for connection

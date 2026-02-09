@@ -69,10 +69,13 @@ sequenceDiagram
     participant Receiver
     Sender->>Sender: Generate ECDH keypair, create WebRTC offer
     Sender->>Sender: Obfuscate signaling payload (includes salt)
-    Sender->>Receiver: Display Offer QR (scan or paste)
-    Receiver->>Receiver: Parse payload, derive shared secret
+    Sender->>Sender: Split payload into URL-based QR chunks
+    Sender->>Receiver: Display multi-QR grid (URL QR codes)
+    Receiver->>Receiver: Scan any QR with phone camera → opens /r page
+    Receiver->>Receiver: Scan remaining QR codes in-app
+    Receiver->>Receiver: Reassemble chunks, parse payload, derive shared secret
     Receiver->>Receiver: Create WebRTC answer
-    Receiver-->>Sender: Display Answer QR (scan or paste)
+    Receiver-->>Sender: Display Answer QR (single binary QR)
     Sender->>Receiver: Process answer, establish WebRTC
     Note over Sender,Receiver: P2P Data Channel (128KB encrypted chunks)
     Receiver-->>Sender: ACK
@@ -80,8 +83,8 @@ sequenceDiagram
 ```
 
 **Requirements:**
-- Both devices need either a working camera OR ability to copy/paste text (camera optional)
-- Encrypted signaling data can be exchanged via QR scan or clipboard
+- Receiver needs a phone camera to scan the sender's URL QR codes (or can use clipboard copy/paste as fallback)
+- Sender needs a camera OR clipboard to receive the answer back
 
 **Network Requirements:**
 - **With internet**: Works across different networks (STUN server enables NAT traversal)
@@ -93,8 +96,17 @@ sequenceDiagram
 - Without internet: WebRTC discovers local ICE candidates directly, connection establishes via local IP addresses
 
 **QR Code Format:**
-- QR: binary → binary QR code (8-bit byte mode, ~2000 bytes capacity)
-- Copy/paste: base64 encode binary → text string for clipboard
+
+*Sender → Receiver (Offer):* Multi-QR URL-based chunking
+- Offer payload is split into ~400-byte chunks with a 2-byte header: `[chunk_index][total_chunks][data]`
+- Each chunk is base64url-encoded and embedded in a URL: `{origin}/r?d={base64url}` (or `{origin}/#/r?d={...}` for HashRouter)
+- Displayed as a grid of text-mode QR codes, each scannable by a phone's native camera
+- For a typical ~1200 byte offer: 3 QR codes. Single-chunk payloads (≤400 bytes) produce 1 QR code.
+- Copy/paste fallback: base64-encoded full binary for clipboard
+
+*Receiver → Sender (Answer):* Single binary QR code
+- Answer payloads are smaller (no file metadata) and use a single binary QR code (8-bit byte mode)
+- The sender is already in-app with scanner active, so URL navigation is unnecessary
 ## Key Components
 
 ### Cryptography (`src/lib/crypto/`)
@@ -288,19 +300,28 @@ A 2-hour sliding window (current bucket + 1 previous bucket) is used to verify i
 
 
 **Output Methods:**
+
+*Offer (Sender → Receiver):*
 | Method | Encoding | Use Case |
 |--------|----------|----------|
-| QR Code | Deflate-compressed binary | Camera available, most compact |
+| Multi-QR URL | Chunked payload → base64url → URL QR codes | Primary: receiver scans with phone camera to open app |
+| Copy/Paste | Base64-encoded full binary | Fallback: no camera, text-safe for clipboard |
+
+*Answer (Receiver → Sender):*
+| Method | Encoding | Use Case |
+|--------|----------|----------|
+| QR Code | Deflate-compressed binary (single QR) | Camera available, sender already in-app |
 | Copy/Paste | Base64-encoded binary | No camera, text-safe for clipboard |
 
 **Key Features:**
 - No signaling server required - manual exchange via QR scan or copy/paste
-- Camera optional - obfuscated payload can be copied as text and pasted on other device
+- Multi-QR offer: payload split into URL-based QR codes (~400 bytes each) for easy phone scanning
+- Receiver scans any QR code with phone camera → app opens at `/r` route with first chunk → scans remaining codes in-app
+- Copy/paste fallback for environments without camera
 - No internet required when devices are on same local network
 - With internet: works across different networks via STUN (stun.l.google.com) for NAT traversal
 - Not air-gapped: requires network connectivity between devices (either local network or internet)
-- Binary mode QR codes for efficient byte encoding
-- Single QR code per payload (no chunking needed)
+- URL QR codes use text mode (alphanumeric); answer QR uses binary mode (8-bit byte)
 - Uses `zxing-wasm` for both generation and scanning
 
 **Security Model:**
@@ -356,28 +377,33 @@ Fallback storage when P2P connection cannot be established (30s timeout window).
 
 **`use-manual-send.ts`** - Sender logic (Manual Exchange):
 1. Read content (file), validate size
-2. Generate PIN and salt, derive encryption key
+2. Generate ECDH keypair and salt
 3. Create WebRTC offer with ICE candidates
 4. Wait for ICE gathering to complete
-5. Encrypt offer payload (includes salt) with PIN: JSON → deflate → encrypt → binary QR code
-6. Display QR code and encrypted JSON copy button
+5. Obfuscate offer payload (includes salt, ECDH public key, file metadata): JSON → deflate → obfuscate → binary
+6. Display as multi-QR URL grid (chunked into ~400-byte URL QR codes) + base64 copy button
 7. Wait for user to input receiver's answer (scan or paste)
-8. Process answer, establish WebRTC connection
+8. Process answer, derive shared secret from ECDH, establish WebRTC connection
 9. Encrypt and send data in 128KB chunks via data channel
 10. Wait for receiver ACK
 
 **`use-manual-receive.ts`** - Receiver logic (Manual Exchange):
-1. Validate PIN entered by user
-2. Wait for user to input sender's offer (scan or paste)
-3. Decrypt offer with PIN, extract metadata and salt
-4. Derive decryption key from PIN and salt
-5. Create WebRTC answer with ICE candidates
-6. Encrypt answer payload with PIN: JSON → deflate → encrypt → binary QR code
-7. Display QR code and encrypted JSON copy button
-8. Wait for WebRTC connection to establish
-9. Receive encrypted chunks, store temporarily
-10. After transfer complete, decrypt all chunks and write to preallocated buffer
-11. Present content
+1. Wait for offer data (from multi-QR chunk collector or paste)
+2. De-obfuscate offer, extract metadata, ECDH public key, and salt
+3. Generate ECDH keypair, derive shared secret and AES key
+4. Create WebRTC answer with ICE candidates
+5. Obfuscate answer payload: JSON → deflate → obfuscate → single binary QR code
+6. Display QR code and base64 copy button
+7. Wait for WebRTC connection to establish
+8. Receive encrypted chunks, store temporarily
+9. After transfer complete, decrypt all chunks and write to preallocated buffer
+10. Present content
+
+**`use-chunk-collector.ts`** - Multi-QR chunk collection (used by `/r` receive page):
+1. Parse incoming chunks (from URL query param or scanned QR codes)
+2. Track collection progress with `Map<index, data>`
+3. Reject chunks with mismatched `total` (guards against mixing different offers)
+4. Auto-reassemble when all chunks collected
 
 ## Data Encryption
 
@@ -590,6 +616,7 @@ src/
 │   │   ├── client.ts        # Relay client
 │   │   └── relays.ts        # Default relays
 │   ├── manual-signaling.ts  # Manual exchange signaling (signaling option 2)
+│   ├── chunk-utils.ts       # Multi-QR chunking/reassembly utilities
 │   ├── qr-utils.ts          # Binary QR code generation (zxing-wasm)
 │   ├── webrtc.ts            # WebRTC connection management
 │   ├── cloud-storage.ts     # Cloud fallback (Nostr mode only)
@@ -602,15 +629,18 @@ src/
 │   ├── use-nostr-receive.ts # Receiver hook (Nostr mode)
 │   ├── use-manual-send.ts   # Sender hook (Manual Exchange mode)
 │   ├── use-manual-receive.ts # Receiver hook (Manual Exchange mode)
+│   ├── use-chunk-collector.ts # Multi-QR chunk collection state management
 │   └── useQRScanner.ts      # Camera-based QR scanning hook
 ├── components/
 │   └── secure-send/
-│       ├── qr-display.tsx   # Binary QR code display
+│       ├── qr-display.tsx   # Binary QR code display (single QR, used for answer)
+│       ├── multi-qr-display.tsx # Multi-QR URL grid display (used for offer)
 │       ├── qr-scanner.tsx   # QR scanner (binary mode)
 │       └── qr-input.tsx     # Dual input (scan or paste)
 └── pages/
     ├── send.tsx             # Send page
     ├── receive.tsx          # Receive page
+    ├── receive-chunked.tsx  # Multi-QR chunked receive page (/r route)
     ├── about.tsx            # About page
     └── passkey.tsx          # Passkey setup/test page
 ```
