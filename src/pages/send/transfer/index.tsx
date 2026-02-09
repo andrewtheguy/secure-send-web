@@ -284,7 +284,7 @@ export function SendTransferPage() {
               </div>
 
               {/* QR codes */}
-              <MultiQRDisplay data={offerData} clipboardData={clipboardData || ''} />
+              <MultiQRDisplay data={offerData} clipboardData={clipboardData} />
 
               {/* Input for receiver's response */}
               <div className="pt-2 border-t">
