@@ -57,6 +57,7 @@ describe('chunkPayload / reassembleChunks', () => {
     const map = new Map<number, Uint8Array>()
     for (let i = chunks.length - 1; i >= 0; i--) {
       const parsed = parseChunk(base64urlEncode(chunks[i]))
+      expect(parsed).not.toBeNull()
       map.set(parsed!.index, parsed!.data)
     }
 
@@ -70,11 +71,11 @@ describe('chunkPayload / reassembleChunks', () => {
 
     const map = new Map<number, Uint8Array>()
     for (const chunk of chunks) {
-      const parsed = parseChunk(base64urlEncode(chunk))
+      const parsed = parseChunk(base64urlEncode(chunk))!
       map.set(parsed!.index, parsed!.data)
     }
     // Re-add first chunk
-    const firstParsed = parseChunk(base64urlEncode(chunks[0]))
+    const firstParsed = parseChunk(base64urlEncode(chunks[0]))!
     map.set(firstParsed!.index, firstParsed!.data)
 
     expect(map.size).toBe(2)
@@ -106,6 +107,7 @@ describe('chunkPayload / reassembleChunks', () => {
 
     const map = new Map<number, Uint8Array>()
     const parsed = parseChunk(base64urlEncode(chunks[0]))
+    expect(parsed).not.toBeNull()
     map.set(parsed!.index, parsed!.data)
 
     expect(reassembleChunks(map, 3)).toBeNull()
