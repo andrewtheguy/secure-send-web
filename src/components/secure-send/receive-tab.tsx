@@ -166,7 +166,7 @@ export function ReceiveTab() {
   const canReceivePin = isPinValid && state.status === 'idle'
   const canReceiveScan = state.status === 'idle'
 
-  const handleReceivePin = () => {
+  const handleReceivePin = async () => {
     const secret = pinSecretRef.current
     if (canReceivePin && secret && pinReceive) {
       clearPinInactivityTimeout()
@@ -176,7 +176,11 @@ export function ReceiveTab() {
       setIsPinValid(false)
       pinInputRef.current?.clear()
       setPinExpired(false)
-      void pinReceive(secret)
+      try {
+        await pinReceive(secret)
+      } catch (err) {
+        console.error('Failed to start PIN receive flow:', err)
+      }
     }
   }
 
