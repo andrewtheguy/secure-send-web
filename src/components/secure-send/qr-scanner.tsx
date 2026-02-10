@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { RefreshCw, AlertCircle, Loader2, Camera } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
@@ -26,15 +26,42 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
   const chunksRef = useRef<Map<number, Uint8Array>>(new Map())
   const totalChunksRef = useRef<number | null>(null)
 
+  const clearChunkRefs = useCallback(() => {
+    chunksRef.current.clear()
+    totalChunksRef.current = null
+  }, [])
+
+  // Clear chunk state on unmount
+  useEffect(() => {
+    return clearChunkRefs
+  }, [clearChunkRefs])
+
+  // Clear chunk state when disabled
+  useEffect(() => {
+    if (disabled) {
+      clearChunkRefs()
+    }
+  }, [disabled, clearChunkRefs])
+
   const handleScan = useCallback((binaryData: Uint8Array) => {
     if (expectedType === 'offer') {
       // URL-based QR codes from MultiQRDisplay
       const text = new TextDecoder().decode(binaryData)
       const param = extractChunkParam(text)
-      if (!param) return
+      if (!param) {
+        console.debug('QRScanner: unrecognized QR text', text)
+        setError('Unrecognized QR code format')
+        onError?.('Unrecognized QR code format')
+        return
+      }
 
       const chunk = parseChunk(param)
-      if (!chunk) return
+      if (!chunk) {
+        console.debug('QRScanner: failed to parse chunk param', param)
+        setError('Could not parse QR code data')
+        onError?.('Could not parse QR code data')
+        return
+      }
 
       // Reset if total changed (different transfer)
       if (totalChunksRef.current !== null && totalChunksRef.current !== chunk.total) {
@@ -49,12 +76,16 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
 
       if (chunksRef.current.size === chunk.total) {
         const assembled = reassembleChunks(chunksRef.current, chunk.total)
-        chunksRef.current.clear()
-        totalChunksRef.current = null
+        clearChunkRefs()
         setCollectedCount(0)
         setTotalChunks(null)
         if (assembled) {
           onScan(assembled)
+        } else {
+          console.error('QRScanner: reassembleChunks failed for', chunk.total, 'chunks')
+          const msg = 'Failed to reassemble QR data. Please try scanning again.'
+          setError(msg)
+          onError?.(msg)
         }
       }
     } else {
@@ -68,7 +99,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
       setError(null)
       onScan(binaryData)
     }
-  }, [onScan, onError, expectedType])
+  }, [onScan, onError, expectedType, clearChunkRefs])
 
   const handleError = useCallback((err: string) => {
     setError(err)
@@ -92,7 +123,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
     setFacingMode((prev) => prev === 'environment' ? 'user' : 'environment')
   }, [])
 
-  const needsMoreChunks = totalChunks !== null && totalChunks > 1 && collectedCount < totalChunks
+  const needsMoreChunks = !disabled && totalChunks !== null && totalChunks > 1 && collectedCount < totalChunks
 
   return (
     <div className="space-y-3">
