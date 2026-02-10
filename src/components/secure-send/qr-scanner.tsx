@@ -49,9 +49,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
       const text = new TextDecoder().decode(binaryData)
       const param = extractChunkParam(text)
       if (!param) {
-        console.debug('QRScanner: unrecognized QR text', text)
-        setError('Unrecognized QR code format')
-        onError?.('Unrecognized QR code format')
+        console.debug('QRScanner: no chunk param found in QR text', text)
         return
       }
 
