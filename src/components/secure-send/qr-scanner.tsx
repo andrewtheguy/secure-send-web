@@ -22,9 +22,24 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
   )
   const [collectedCount, setCollectedCount] = useState(0)
   const [totalChunks, setTotalChunks] = useState<number | null>(null)
+  const [warning, setWarning] = useState<string | null>(null)
+  const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const chunksRef = useRef<Map<number, Uint8Array>>(new Map())
   const totalChunksRef = useRef<number | null>(null)
+
+  const showWarning = useCallback((msg: string) => {
+    if (warningTimerRef.current) clearTimeout(warningTimerRef.current)
+    setWarning(msg)
+    warningTimerRef.current = setTimeout(() => setWarning(null), 3000)
+  }, [])
+
+  // Clear warning timer on unmount
+  useEffect(() => {
+    return () => {
+      if (warningTimerRef.current) clearTimeout(warningTimerRef.current)
+    }
+  }, [])
 
   const clearChunkRefs = useCallback(() => {
     chunksRef.current.clear()
@@ -50,6 +65,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
       const param = extractChunkParam(text)
       if (!param) {
         console.debug('QRScanner: no chunk param found in QR text', text)
+        showWarning('Unrecognized QR code, keep scanning...')
         return
       }
 
@@ -71,6 +87,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
       setTotalChunks(chunk.total)
       setCollectedCount(chunksRef.current.size)
       setError(null)
+      setWarning(null)
 
       if (chunksRef.current.size === chunk.total) {
         const assembled = reassembleChunks(chunksRef.current, chunk.total)
@@ -97,7 +114,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
       setError(null)
       onScan(binaryData)
     }
-  }, [onScan, onError, expectedType, clearChunkRefs])
+  }, [onScan, onError, expectedType, clearChunkRefs, showWarning])
 
   const handleError = useCallback((err: string) => {
     setError(err)
@@ -156,6 +173,13 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
         />
 
         <canvas ref={canvasRef} className="hidden" />
+
+        {/* Auto-dismissing warning banner */}
+        {warning && !error && (
+          <div className="absolute bottom-0 left-0 right-0 bg-black/70 px-2 py-1.5 pointer-events-none">
+            <p className="text-xs text-yellow-300 text-center">{warning}</p>
+          </div>
+        )}
 
         {/* Scanning overlay */}
         {cameraReady && !error && (
