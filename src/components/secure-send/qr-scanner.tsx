@@ -1,8 +1,10 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { RefreshCw, AlertCircle, Loader2, Camera } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
 import { useQRScanner } from '@/hooks/useQRScanner'
 import { isValidBinaryPayload } from '@/lib/manual-signaling'
+import { extractChunkParam, parseChunk, reassembleChunks } from '@/lib/chunk-utils'
 import { isMobileDevice } from '@/lib/utils'
 
 interface QRScannerProps {
@@ -18,17 +20,55 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>(
     isMobileDevice() ? 'environment' : 'user'
   )
+  const [collectedCount, setCollectedCount] = useState(0)
+  const [totalChunks, setTotalChunks] = useState<number | null>(null)
+
+  const chunksRef = useRef<Map<number, Uint8Array>>(new Map())
+  const totalChunksRef = useRef<number | null>(null)
 
   const handleScan = useCallback((binaryData: Uint8Array) => {
-    if (!isValidBinaryPayload(binaryData)) {
-      setError('Invalid or unsupported QR payload format')
-      onError?.('Invalid or unsupported QR payload format')
-      return
-    }
+    if (expectedType === 'offer') {
+      // URL-based QR codes from MultiQRDisplay
+      const text = new TextDecoder().decode(binaryData)
+      const param = extractChunkParam(text)
+      if (!param) return
 
-    setError(null)
-    onScan(binaryData)
-  }, [onScan, onError])
+      const chunk = parseChunk(param)
+      if (!chunk) return
+
+      // Reset if total changed (different transfer)
+      if (totalChunksRef.current !== null && totalChunksRef.current !== chunk.total) {
+        chunksRef.current.clear()
+      }
+
+      totalChunksRef.current = chunk.total
+      chunksRef.current.set(chunk.index, chunk.data)
+      setTotalChunks(chunk.total)
+      setCollectedCount(chunksRef.current.size)
+      setError(null)
+
+      if (chunksRef.current.size === chunk.total) {
+        const assembled = reassembleChunks(chunksRef.current, chunk.total)
+        chunksRef.current.clear()
+        totalChunksRef.current = null
+        setCollectedCount(0)
+        setTotalChunks(null)
+        if (assembled) {
+          onScan(assembled)
+        }
+      }
+    } else {
+      // Binary SS03 payload from QRDisplay
+      if (!isValidBinaryPayload(binaryData)) {
+        setError('Invalid or unsupported QR payload format')
+        onError?.('Invalid or unsupported QR payload format')
+        return
+      }
+
+      setError(null)
+      onScan(binaryData)
+    }
+  }, [onScan, onError, expectedType])
 
   const handleError = useCallback((err: string) => {
     setError(err)
@@ -51,6 +91,8 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
   const handleSwitchCamera = useCallback(() => {
     setFacingMode((prev) => prev === 'environment' ? 'user' : 'environment')
   }, [])
+
+  const needsMoreChunks = totalChunks !== null && totalChunks > 1 && collectedCount < totalChunks
 
   return (
     <div className="space-y-3">
@@ -100,6 +142,16 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
         </p>
       )}
 
+      {/* Multi-chunk progress */}
+      {needsMoreChunks && (
+        <div className="space-y-1.5">
+          <p className="text-xs text-muted-foreground text-center">
+            Collected {collectedCount} of {totalChunks} QR codes
+          </p>
+          <Progress value={(collectedCount / totalChunks) * 100} className="h-1.5" />
+        </div>
+      )}
+
       {availableCameras.length > 1 && (
         <div className="flex justify-center">
           <Button
@@ -116,7 +168,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
       )}
 
       <p className="text-xs text-muted-foreground text-center">
-        Point your camera at the {expectedType} QR code
+        Point your camera at the {expectedType} QR code{needsMoreChunks ? 's' : ''}
       </p>
     </div>
   )
