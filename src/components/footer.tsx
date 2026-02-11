@@ -1,4 +1,32 @@
-import { Lock, Shield, Zap } from 'lucide-react'
+import { Info, Lock, Shield, Zap } from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+
+interface FooterLabelProps {
+  shortLabel: string
+  fullLabel: string
+}
+
+function FooterLabel({ shortLabel, fullLabel }: FooterLabelProps) {
+  return (
+    <>
+      <span className="hidden sm:inline">{fullLabel}</span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="sm:hidden rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={fullLabel}
+          >
+            {shortLabel}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="center" className="sm:hidden max-w-[220px] p-2 text-xs leading-relaxed">
+          {fullLabel}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  )
+}
 
 export function Footer() {
   return (
@@ -6,16 +34,31 @@ export function Footer() {
       <div className="mx-auto flex w-full max-w-5xl items-center justify-center gap-6 px-6 py-4 text-xs text-muted-foreground">
         <div className="flex items-center gap-1.5">
           <Lock className="h-3.5 w-3.5 text-accent" />
-          <span>End-to-end encrypted</span>
+          <FooterLabel shortLabel="E2E" fullLabel="End-to-end encrypted" />
         </div>
         <div className="flex items-center gap-1.5">
           <Zap className="h-3.5 w-3.5 text-secondary" />
-          <span>Direct P2P transfer</span>
+          <FooterLabel shortLabel="P2P" fullLabel="Direct P2P transfer" />
         </div>
         <div className="flex items-center gap-1.5">
           <Shield className="h-3.5 w-3.5 text-primary" />
-          <span>No sign-up required</span>
+          <FooterLabel shortLabel="No sign-up" fullLabel="No sign-up required" />
         </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 rounded-sm px-0.5 py-0.5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="Version compatibility notice"
+            >
+              <span>v0.0.1</span>
+              <Info className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="center" className="max-w-[280px] p-2 text-xs leading-relaxed">
+            Compatibility is not expected between v0.0.x versions. Sender and receiver should use the same app version.
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </footer>
   )
