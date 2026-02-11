@@ -71,6 +71,7 @@ export interface UseManualSendReturn {
 
 const ICE_GATHER_TIMEOUT_MS = 5000
 const MANUAL_CONNECTION_TIMEOUT_MS = 120000
+const ACK_TIMEOUT_MS = 30000
 
 
 export function useManualSend(): UseManualSendReturn {
@@ -429,7 +430,7 @@ export function useManualSend(): UseManualSendReturn {
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Timeout waiting for acknowledgment'))
-        }, 30000)
+        }, ACK_TIMEOUT_MS)
 
         const dc = rtc.getDataChannel()
         if (!dc) {
