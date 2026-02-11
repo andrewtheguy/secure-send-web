@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Download, X, RotateCcw, FileDown, RefreshCw, Loader2, Camera, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Progress } from '@/components/ui/progress'
 import { useChunkCollector } from '@/hooks/use-chunk-collector'
 import { useManualReceive } from '@/hooks/use-manual-receive'
 import { useQRScanner } from '@/hooks/useQRScanner'
@@ -116,6 +115,9 @@ export function ReceiveChunkedPage() {
   if (step === 'collecting') {
     const total = chunkState.totalChunks
     const collected = chunkState.collectedCount
+    const collectedPercent = total !== null && total > 0
+      ? Math.round((collected / total) * 100)
+      : 0
 
     return (
       <div className="flex w-full justify-center">
@@ -125,28 +127,33 @@ export function ReceiveChunkedPage() {
           {total !== null ? (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground text-center">
-                Collected {collected} of {total} QR code{total !== 1 ? 's' : ''}
+                Collected {collected} of {total} QR code{total !== 1 ? 's' : ''} (
+                {collectedPercent}%)
               </p>
-              <Progress value={(collected / total) * 100} className="h-2" />
               {total > 1 && (
-                <div className="flex flex-wrap justify-center gap-1.5">
-                  {Array.from({ length: total }, (_, i) => {
-                    const received = chunkState.collectedIndices.has(i)
-                    return (
-                      <div
-                        key={i}
-                        className={`w-7 h-7 rounded text-xs font-medium flex items-center justify-center transition-colors ${
-                          received
-                            ? 'bg-cyan-600 text-white'
-                            : 'border border-muted-foreground/30 text-muted-foreground'
-                        }`}
-                        title={`QR #${i + 1}: ${received ? 'Received' : 'Missing'}`}
-                      >
-                        {i + 1}
-                      </div>
-                    )
-                  })}
-                </div>
+                <>
+                  <div className="flex flex-wrap justify-center gap-1.5">
+                    {Array.from({ length: total }, (_, i) => {
+                      const received = chunkState.collectedIndices.has(i)
+                      return (
+                        <div
+                          key={i}
+                          className={`w-7 h-7 rounded text-xs font-medium flex items-center justify-center transition-colors ${
+                            received
+                              ? 'bg-cyan-600 text-white'
+                              : 'border border-muted-foreground/30 text-muted-foreground'
+                          }`}
+                          title={`QR #${i + 1}: ${received ? 'Received' : 'Missing'}`}
+                        >
+                          {i + 1}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <p className="text-xs text-muted-foreground text-center">
+                    QR codes can be scanned in any order, but all QR codes must be scanned.
+                  </p>
+                </>
               )}
             </div>
           ) : (

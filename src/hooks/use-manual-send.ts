@@ -70,6 +70,8 @@ export interface UseManualSendReturn {
 }
 
 const ICE_GATHER_TIMEOUT_MS = 5000
+const MANUAL_CONNECTION_TIMEOUT_MS = 120000
+const ACK_TIMEOUT_MS = 30000
 
 
 export function useManualSend(): UseManualSendReturn {
@@ -342,29 +344,38 @@ export function useManualSend(): UseManualSendReturn {
 
       // Wait for data channel to open
       await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Connection timeout'))
-        }, 30000)
-
         const pc = rtc.getPeerConnection()
+        const dc = rtc.getDataChannel()
+        const timeout = setTimeout(() => {
+          cleanup()
+          reject(new Error('Connection timeout'))
+        }, MANUAL_CONNECTION_TIMEOUT_MS)
+
+        const cleanup = () => {
+          clearTimeout(timeout)
+          pc.onconnectionstatechange = null
+          if (dc) {
+            dc.onopen = null
+          }
+        }
+
         const checkConnection = () => {
           if (pc.connectionState === 'connected') {
-            const dc = rtc.getDataChannel()
-            if (dc && dc.readyState === 'open') {
-              clearTimeout(timeout)
+            const currentDc = rtc.getDataChannel()
+            if (currentDc && currentDc.readyState === 'open') {
+              cleanup()
               resolve()
             }
           } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-            clearTimeout(timeout)
+            cleanup()
             reject(new Error('Connection failed'))
           }
         }
 
         pc.onconnectionstatechange = checkConnection
-        const dc = rtc.getDataChannel()
         if (dc) {
           dc.onopen = () => {
-            clearTimeout(timeout)
+            cleanup()
             resolve()
           }
         }
@@ -419,7 +430,7 @@ export function useManualSend(): UseManualSendReturn {
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Timeout waiting for acknowledgment'))
-        }, 30000)
+        }, ACK_TIMEOUT_MS)
 
         const dc = rtc.getDataChannel()
         if (!dc) {

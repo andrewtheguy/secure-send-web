@@ -61,6 +61,7 @@ export interface UseManualReceiveReturn {
 }
 
 const ICE_GATHER_TIMEOUT_MS = 5000
+const MANUAL_CONNECTION_TIMEOUT_MS = 120000
 
 
 export function useManualReceive(): UseManualReceiveReturn {
@@ -349,7 +350,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Connection timeout'))
-        }, 60000) // 60 seconds for connection
+        }, MANUAL_CONNECTION_TIMEOUT_MS)
 
         dataChannelResolver = () => {
           clearTimeout(timeout)

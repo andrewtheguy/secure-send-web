@@ -56,6 +56,11 @@ interface UseQRScannerOptions {
   preferLowRes?: boolean
 }
 
+function isBenignPlayInterruptionError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  return err.message.includes('play() request was interrupted by a new load request')
+}
+
 export function useQRScanner(options: UseQRScannerOptions) {
   const {
     onScan,
@@ -72,6 +77,8 @@ export function useQRScanner(options: UseQRScannerOptions) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const scanLoopRef = useRef<number | null>(null)
   const isScanningRef = useRef<boolean>(false)
+  const isScanningRequestedRef = useRef<boolean>(isScanning)
+  const startAttemptRef = useRef(0)
   const cameraStreamRef = useRef<MediaStream | null>(null)
   const workerRef = useRef<Worker>(scannerWorker)
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
@@ -154,6 +161,8 @@ export function useQRScanner(options: UseQRScannerOptions) {
   }, [scanInterval, scanVideoFrame])
 
   const stopCameraScanning = useCallback(() => {
+    startAttemptRef.current += 1 // Cancel any pending async start attempt.
+    isScanningRequestedRef.current = false
     isScanningRef.current = false
 
     if (cameraStreamRef.current) {
@@ -162,6 +171,7 @@ export function useQRScanner(options: UseQRScannerOptions) {
     }
 
     if (videoRef.current) {
+      videoRef.current.pause()
       videoRef.current.srcObject = null
     }
 
@@ -172,8 +182,12 @@ export function useQRScanner(options: UseQRScannerOptions) {
   }, [])
 
   const startCameraScanning = useCallback(async () => {
+    const attemptId = ++startAttemptRef.current
+    const shouldAbortStart = () => attemptId !== startAttemptRef.current || !isScanningRequestedRef.current
+
     try {
       await new Promise((resolve) => setTimeout(resolve, 100))
+      if (shouldAbortStart()) return
 
       if (!videoRef.current) {
         throw new Error('Video element not available')
@@ -193,10 +207,25 @@ export function useQRScanner(options: UseQRScannerOptions) {
       }
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints)
+      if (shouldAbortStart()) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
+
       cameraStreamRef.current = stream
       videoRef.current.srcObject = stream
 
       await videoRef.current.play()
+      if (shouldAbortStart()) {
+        stream.getTracks().forEach((track) => track.stop())
+        cameraStreamRef.current = null
+        if (videoRef.current) {
+          videoRef.current.pause()
+          videoRef.current.srcObject = null
+        }
+        return
+      }
+
       await enumerateCameras()
 
       if (onCameraReady) {
@@ -205,6 +234,9 @@ export function useQRScanner(options: UseQRScannerOptions) {
 
       startScanLoop()
     } catch (err) {
+      if (isBenignPlayInterruptionError(err) || shouldAbortStart()) {
+        return
+      }
       const errorMessage = err instanceof Error ? err.message : 'Failed to access camera'
       if (onError) {
         onError(`Camera access denied or unavailable. ${errorMessage}`)
@@ -214,6 +246,9 @@ export function useQRScanner(options: UseQRScannerOptions) {
   }, [facingMode, preferLowRes, enumerateCameras, onCameraReady, onError, startScanLoop])
 
   const switchCamera = useCallback(async () => {
+    startAttemptRef.current += 1 // Cancel current async start attempt before switching.
+    isScanningRef.current = false
+
     if (scanLoopRef.current !== null) {
       cancelAnimationFrame(scanLoopRef.current)
       scanLoopRef.current = null
@@ -234,9 +269,11 @@ export function useQRScanner(options: UseQRScannerOptions) {
 
   // Start/stop scanning based on isScanning prop
   useEffect(() => {
+    isScanningRequestedRef.current = isScanning
+
     if (isScanning && !isScanningRef.current) {
       void startCameraScanning()
-    } else if (!isScanning && isScanningRef.current) {
+    } else if (!isScanning) {
       stopCameraScanning()
     }
   }, [isScanning, startCameraScanning, stopCameraScanning])
@@ -248,7 +285,7 @@ export function useQRScanner(options: UseQRScannerOptions) {
     const facingModeChanged = facingModeRef.current !== facingMode
     const preferLowResChanged = preferLowResRef.current !== preferLowRes
 
-    if ((facingModeChanged || preferLowResChanged) && isScanningRef.current) {
+    if ((facingModeChanged || preferLowResChanged) && isScanningRequestedRef.current) {
       void switchCamera()
     }
 
@@ -259,30 +296,10 @@ export function useQRScanner(options: UseQRScannerOptions) {
 
   // Cleanup on unmount
   useEffect(() => {
-    const videoEl = videoRef.current
-
     return () => {
-      isScanningRef.current = false
-      const stream = cameraStreamRef.current
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop())
-        cameraStreamRef.current = null
-      }
-
-      const scanLoopId = scanLoopRef.current
-      if (scanLoopId !== null) {
-        cancelAnimationFrame(scanLoopId)
-        scanLoopRef.current = null
-      }
-
-      if (videoEl) {
-        const el = videoEl
-        setTimeout(() => {
-          el.srcObject = null
-        }, 50)
-      }
+      stopCameraScanning()
     }
-  }, [])
+  }, [stopCameraScanning])
 
   return {
     videoRef,
