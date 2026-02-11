@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import { parseChunk, reassembleChunks, extractChunkParam } from '@/lib/chunk-utils'
+import { parseChunk, reassembleChunks, extractChunkParam, isValidPayloadChecksum } from '@/lib/chunk-utils'
 
 interface ChunkCollectorState {
   totalChunks: number | null
@@ -7,11 +7,13 @@ interface ChunkCollectorState {
   collectedIndices: Set<number>
   isComplete: boolean
   assembledPayload: Uint8Array | null
+  error: string | null
 }
 
 export function useChunkCollector() {
   const chunksRef = useRef(new Map<number, Uint8Array>())
   const totalRef = useRef<number | null>(null)
+  const checksumRef = useRef<number | null>(null)
 
   const [state, setState] = useState<ChunkCollectorState>({
     totalChunks: null,
@@ -19,7 +21,22 @@ export function useChunkCollector() {
     collectedIndices: new Set<number>(),
     isComplete: false,
     assembledPayload: null,
+    error: null,
   })
+
+  const resetCollector = useCallback((error: string | null) => {
+    chunksRef.current.clear()
+    totalRef.current = null
+    checksumRef.current = null
+    setState({
+      totalChunks: null,
+      collectedCount: 0,
+      collectedIndices: new Set<number>(),
+      isComplete: false,
+      assembledPayload: null,
+      error,
+    })
+  }, [])
 
   const addChunk = useCallback((encoded: string): boolean => {
     const parsed = parseChunk(encoded)
@@ -27,6 +44,19 @@ export function useChunkCollector() {
 
     // Reject chunks with mismatched total (guards against mixing different offers)
     if (totalRef.current !== null && parsed.total !== totalRef.current) {
+      return false
+    }
+
+    if (parsed.index === 0) {
+      const parsedChecksum = parsed.checksum
+      if (typeof parsedChecksum !== 'number' || !Number.isFinite(parsedChecksum)) {
+        return false
+      }
+      if (checksumRef.current !== null && checksumRef.current !== parsedChecksum) {
+        return false
+      }
+      checksumRef.current = parsedChecksum
+    } else if (parsed.checksum !== undefined) {
       return false
     }
 
@@ -45,12 +75,27 @@ export function useChunkCollector() {
 
     if (isComplete) {
       const assembled = reassembleChunks(chunksRef.current, parsed.total)
+      const expectedChecksum = checksumRef.current
+      if (!assembled) {
+        resetCollector('Invalid QR payload')
+        return false
+      }
+      if (expectedChecksum === null || !Number.isFinite(expectedChecksum)) {
+        resetCollector('Invalid QR payload')
+        return false
+      }
+      if (!isValidPayloadChecksum(assembled, expectedChecksum)) {
+        resetCollector('Invalid QR payload')
+        return false
+      }
+
       setState({
         totalChunks: parsed.total,
         collectedCount,
         collectedIndices,
         isComplete: true,
         assembledPayload: assembled,
+        error: null,
       })
     } else {
       setState({
@@ -59,11 +104,12 @@ export function useChunkCollector() {
         collectedIndices,
         isComplete: false,
         assembledPayload: null,
+        error: null,
       })
     }
 
     return true
-  }, [])
+  }, [resetCollector])
 
   const addChunkFromUrl = useCallback((url: string): boolean => {
     const param = extractChunkParam(url)

@@ -16,6 +16,12 @@ A web application for sending encrypted files and folders with PIN-based or pass
 - **No accounts required**: Ephemeral keypairs generated per transfer
 - **PWA Support**: Install as a Progressive Web App for offline access
 
+## Version Compatibility (v0.0.x)
+
+During `v0.0.x`, compatibility between different app versions is not guaranteed.
+Sender and receiver should use the same app version for transfers.
+The current app version is shown in the footer.
+
 ## How It Works
 
 ### Sending Files or Folders
@@ -63,23 +69,13 @@ npm run dev
 npm run build
 ```
 
-### Hash Routing (Static Hosting)
+### Routing (Required)
 
-For hosts that require hash-based routing (e.g. no server rewrites), build with:
-
-```bash
-VITE_USE_HASH=true npm run build
-```
-
-You can also create `.env.production` (or `.env.hash` with `npm run build -- --mode hash`) containing:
-
-```
-VITE_USE_HASH=true
-```
+The app uses `BrowserRouter` only. Configure hosting to rewrite unknown paths to `index.html`.
 
 ### Deployment Path Requirement (Multi-QR Manual Mode)
 
-Multi-QR URLs are generated from `window.location.origin` and then append `/r?d=...` (or `/#/r?d=...` with hash routing).
+Multi-QR URLs are generated from `window.location.origin` and then append `/r#d=...`.
 
 - Supported: deployment at the domain root (for example `https://example.com`)
 - Not supported: deployment under a subpath (for example `https://example.com/my-app`)

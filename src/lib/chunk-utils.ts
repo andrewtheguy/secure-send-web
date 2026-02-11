@@ -3,8 +3,33 @@
  * and reassembling them on the receiver side.
  *
  * Chunk wire format (before base64url):
- *   [1 byte: chunk_index (0-based)] [1 byte: total_chunks] [N bytes: data]
+ *   chunk 0: [1 byte: chunk_index][1 byte: total_chunks][4 bytes: payload_crc32_be][N bytes: data]
+ *   chunk 1..N-1: [1 byte: chunk_index][1 byte: total_chunks][N bytes: data]
  */
+
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256)
+  for (let i = 0; i < 256; i++) {
+    let crc = i
+    for (let j = 0; j < 8; j++) {
+      crc = (crc & 1) !== 0 ? (crc >>> 1) ^ 0xEDB88320 : crc >>> 1
+    }
+    table[i] = crc >>> 0
+  }
+  return table
+})()
+
+export function computeCrc32(data: Uint8Array): number {
+  let crc = 0xFFFFFFFF
+  for (let i = 0; i < data.length; i++) {
+    crc = CRC32_TABLE[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8)
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0
+}
+
+export function isValidPayloadChecksum(payload: Uint8Array, expectedChecksum: number): boolean {
+  return computeCrc32(payload) === (expectedChecksum >>> 0)
+}
 
 export function base64urlEncode(data: Uint8Array): string {
   let binary = ''
@@ -33,7 +58,8 @@ export function base64urlDecode(encoded: string): Uint8Array {
 }
 
 /**
- * Split a binary payload into chunks, each prefixed with [index][total].
+ * Split a binary payload into chunks with [index][total] headers.
+ * Chunk index 0 includes payload-wide CRC32 for final integrity validation.
  * Distributes data evenly across chunks so all QR codes are similar size.
  * Returns an array of Uint8Array chunks ready for base64url encoding.
  */
@@ -50,6 +76,7 @@ export function chunkPayload(binary: Uint8Array, maxDataBytes = 400): Uint8Array
   // Distribute evenly: each chunk gets floor or ceil of (total / chunks)
   const baseSize = Math.floor(binary.length / totalChunks)
   const remainder = binary.length % totalChunks
+  const payloadChecksum = computeCrc32(binary)
 
   const chunks: Uint8Array[] = []
   let offset = 0
@@ -59,10 +86,19 @@ export function chunkPayload(binary: Uint8Array, maxDataBytes = 400): Uint8Array
     const dataSlice = binary.slice(offset, offset + sliceLen)
     offset += sliceLen
 
-    const chunk = new Uint8Array(2 + dataSlice.length)
-    chunk[0] = i          // chunk_index
+    const headerSize = i === 0 ? 6 : 2
+    const chunk = new Uint8Array(headerSize + dataSlice.length)
+    chunk[0] = i // chunk_index
     chunk[1] = totalChunks // total_chunks
-    chunk.set(dataSlice, 2)
+    if (i === 0) {
+      chunk[2] = (payloadChecksum >>> 24) & 0xFF
+      chunk[3] = (payloadChecksum >>> 16) & 0xFF
+      chunk[4] = (payloadChecksum >>> 8) & 0xFF
+      chunk[5] = payloadChecksum & 0xFF
+      chunk.set(dataSlice, 6)
+    } else {
+      chunk.set(dataSlice, 2)
+    }
     chunks.push(chunk)
   }
 
@@ -71,23 +107,21 @@ export function chunkPayload(binary: Uint8Array, maxDataBytes = 400): Uint8Array
 
 /**
  * Build a URL for a single chunk.
- * For HashRouter: {baseUrl}/#/r?d={base64url}
- * For BrowserRouter: {baseUrl}/r?d={base64url}
+ * Format: {baseUrl}/r#d={base64url}
  */
-export function buildChunkUrl(baseUrl: string, chunk: Uint8Array, useHash: boolean): string {
+export function buildChunkUrl(baseUrl: string, chunk: Uint8Array): string {
   const encoded = base64urlEncode(chunk)
   const base = baseUrl.replace(/\/$/, '')
-  if (useHash) {
-    return `${base}/#/r?d=${encoded}`
-  }
-  return `${base}/r?d=${encoded}`
+  return `${base}/r#d=${encoded}`
 }
 
 /**
  * Parse a base64url-encoded chunk string into its components.
  * Returns null if the chunk is invalid.
  */
-export function parseChunk(encoded: string): { index: number; total: number; data: Uint8Array } | null {
+export function parseChunk(
+  encoded: string
+): { index: number; total: number; data: Uint8Array; checksum?: number } | null {
   try {
     const bytes = base64urlDecode(encoded)
     if (bytes.length < 3) return null // Need at least index + total + 1 byte data
@@ -96,8 +130,20 @@ export function parseChunk(encoded: string): { index: number; total: number; dat
     const total = bytes[1]
     if (total === 0 || index >= total) return null
 
+    if (index === 0) {
+      if (bytes.length < 7) return null // Need index + total + checksum(4) + 1 byte data
+      const checksum = (
+        (bytes[2] * 0x1000000) +
+        (bytes[3] << 16) +
+        (bytes[4] << 8) +
+        bytes[5]
+      ) >>> 0
+      const data = bytes.slice(6)
+      return { index, total, data, checksum }
+    }
+
     const data = bytes.slice(2)
-    return { index, total, data }
+    return { index, total, data, checksum: undefined }
   } catch {
     return null
   }
@@ -134,28 +180,20 @@ export function reassembleChunks(chunks: Map<number, Uint8Array>, total: number)
 }
 
 /**
- * Extract the `d` query parameter from a URL string.
- * Handles both hash and non-hash URLs.
+ * Extract the `d` parameter from the URL fragment.
+ * Supports only fragment format: /r#d=...
  */
 export function extractChunkParam(url: string): string | null {
   try {
     const parsed = new URL(url)
-
-    // Try regular query params first (BrowserRouter: /r?d=...)
-    const fromQuery = parsed.searchParams.get('d')
-    if (fromQuery) return fromQuery
-
-    // Try hash-based query params (HashRouter: /#/r?d=...)
     const hash = parsed.hash
-    if (hash) {
-      const qIdx = hash.indexOf('?')
-      if (qIdx !== -1) {
-        const hashParams = new URLSearchParams(hash.slice(qIdx + 1))
-        return hashParams.get('d')
-      }
-    }
+    if (!hash || hash.length < 2) return null
 
-    return null
+    const hashParams = new URLSearchParams(hash.slice(1))
+    const d = hashParams.get('d')
+    if (!d) return null
+
+    return d
   } catch {
     return null
   }

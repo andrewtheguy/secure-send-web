@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useSearchParams, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { Download, X, RotateCcw, FileDown, RefreshCw, Loader2, Camera, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
@@ -15,7 +15,6 @@ import { isMobileDevice } from '@/lib/utils'
 type PageStep = 'collecting' | 'transferring'
 
 export function ReceiveChunkedPage() {
-  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const [step, setStep] = useState<PageStep>('collecting')
   const [scanError, setScanError] = useState<string | null>(null)
@@ -29,15 +28,15 @@ export function ReceiveChunkedPage() {
 
   const initialChunkFed = useRef(false)
 
-  // Feed the initial chunk from URL query param on mount
+  // Feed the initial chunk from URL fragment on mount
   useEffect(() => {
     if (initialChunkFed.current) return
-    const d = searchParams.get('d')
+    initialChunkFed.current = true
+    const d = extractChunkParam(window.location.href)
     if (d) {
-      initialChunkFed.current = true
       addChunk(d)
     }
-  }, [searchParams, addChunk])
+  }, [addChunk])
 
   // When all chunks collected, start the receive flow
   useEffect(() => {
@@ -154,6 +153,13 @@ export function ReceiveChunkedPage() {
             <p className="text-sm text-muted-foreground text-center">
               Reading first QR code...
             </p>
+          )}
+
+          {chunkState.error && (
+            <div className="text-sm text-destructive text-center space-y-1">
+              <p>{chunkState.error}</p>
+              <p>Please rescan the sender QR codes.</p>
+            </div>
           )}
 
           {/* Scanner for remaining chunks */}

@@ -67,11 +67,10 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
       return []
     })
 
-    const useHash = import.meta.env.VITE_USE_HASH === 'true'
     const baseUrl = window.location.origin
 
     const chunks = chunkPayload(data)
-    const urls = chunks.map(chunk => buildChunkUrl(baseUrl, chunk, useHash))
+    const urls = chunks.map(chunk => buildChunkUrl(baseUrl, chunk))
 
     // Generate QR codes for each URL
     Promise.allSettled(
