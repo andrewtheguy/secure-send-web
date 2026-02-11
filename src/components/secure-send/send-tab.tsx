@@ -368,10 +368,6 @@ export function SendTab() {
               </button>
               {showAdvanced && (
                 <div className="p-3 pt-0 space-y-3 border-t">
-                  <p className="text-xs text-muted-foreground">
-                    {`PIN mode: ${pinModeDescription}`}
-                  </p>
-
                   <div className="flex items-center gap-2">
                     <input
                       id="force-cloud-transfer"

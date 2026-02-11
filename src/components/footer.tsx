@@ -14,7 +14,7 @@ function FooterLabel({ shortLabel, fullLabel }: FooterLabelProps) {
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className="sm:hidden rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="sm:hidden rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={fullLabel}
           >
             {shortLabel}

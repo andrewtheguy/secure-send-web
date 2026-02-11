@@ -156,9 +156,10 @@ export function ReceiveChunkedPage() {
           )}
 
           {chunkState.error && (
-            <p className="text-sm text-destructive text-center">
-              {chunkState.error}. Please rescan the sender QR codes.
-            </p>
+            <div className="text-sm text-destructive text-center space-y-1">
+              <p>{chunkState.error}</p>
+              <p>Please rescan the sender QR codes.</p>
+            </div>
           )}
 
           {/* Scanner for remaining chunks */}

@@ -48,13 +48,14 @@ export function useChunkCollector() {
     }
 
     if (parsed.index === 0) {
-      if (typeof parsed.checksum !== 'number') {
+      const parsedChecksum = parsed.checksum
+      if (typeof parsedChecksum !== 'number' || !Number.isFinite(parsedChecksum)) {
         return false
       }
-      if (checksumRef.current !== null && checksumRef.current !== parsed.checksum) {
+      if (checksumRef.current !== null && checksumRef.current !== parsedChecksum) {
         return false
       }
-      checksumRef.current = parsed.checksum
+      checksumRef.current = parsedChecksum
     } else if (parsed.checksum !== undefined) {
       return false
     }
@@ -75,7 +76,15 @@ export function useChunkCollector() {
     if (isComplete) {
       const assembled = reassembleChunks(chunksRef.current, parsed.total)
       const expectedChecksum = checksumRef.current
-      if (!assembled || expectedChecksum === null || !isValidPayloadChecksum(assembled, expectedChecksum)) {
+      if (!assembled) {
+        resetCollector('Invalid QR payload')
+        return false
+      }
+      if (expectedChecksum === null || !Number.isFinite(expectedChecksum)) {
+        resetCollector('Invalid QR payload')
+        return false
+      }
+      if (!isValidPayloadChecksum(assembled, expectedChecksum)) {
         resetCollector('Invalid QR payload')
         return false
       }

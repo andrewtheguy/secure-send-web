@@ -102,13 +102,16 @@ sequenceDiagram
 - Chunk wire format (raw bytes before base64url):
   - `chunk_index`: `u8` (1 byte, 0-based)
   - `total_chunks`: `u8` (1 byte, valid range `1..255`)
-  - `payload_crc32_be_u32` (chunk `0` only): 4-byte big-endian CRC-32/ISO-HDLC over the full reassembled payload (poly `0x04C11DB7`, reflected input/output, init `0xFFFFFFFF`, xorout `0xFFFFFFFF`; reflected table form `0xEDB88320`)
+  - `payload_crc32_be_u32` (carried only in chunk `0`): 4-byte big-endian CRC-32/ISO-HDLC over the full reassembled payload (poly `0x04C11DB7`, reflected input/output, init `0xFFFFFFFF`, xorout `0xFFFFFFFF`; reflected table form `0xEDB88320`)
   - Chunk `0`: `[chunk_index:u8][total_chunks:u8][payload_crc32_be_u32][data]`
   - Chunk `1..N-1`: `[chunk_index:u8][total_chunks:u8][data]`
 - Limits implied by the `u8` headers:
   - Maximum chunks: `255` (`chunk_index` valid range `0..254`, with `chunk_index < total_chunks`)
   - With ~400 data bytes per chunk, maximum payload size is `102,000` bytes (`255 * 400`) before base64url encoding.
-- Payload integrity check uses `payload_crc32_be_u32` embedded only in chunk `0` and validated after full reassembly.
+- CRC32 sequencing and failure handling:
+  - CRC32 is carried only in chunk `0`; receivers MUST buffer chunk `1..N-1` data until chunk `0` is received (this spec does not define a streaming-without-chunk-0 mode).
+  - CRC32 validation is deferred until full reassembly is complete and chunk `0` (with `payload_crc32_be_u32`) is available.
+  - On CRC32 failure after full reassembly, receivers MUST drop the reassembled payload, log a checksum/protocol error, and fail the current transfer attempt (retry/rescan is an implementation-level recovery action).
 - Each chunk is base64url-encoded and embedded in a URL: `{origin}/r#d={base64url}`
 - Deployment requirement: app must be hosted at domain root (no subpath), because chunk URLs are built from `window.location.origin` and append `/r` directly
 - Displayed as a grid of text-mode QR codes, each scannable by a phone's native camera
