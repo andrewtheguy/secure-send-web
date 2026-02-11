@@ -275,8 +275,9 @@ export function SendTransferPage() {
               <div className="rounded-lg bg-muted/50 border p-4 space-y-2">
                 <p className="font-medium">Show these QR codes to the receiver</p>
                 <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
-                  <li>Receiver scans any QR code with their phone camera</li>
+                  <li>Receiver scans <strong>any</strong> QR code with their phone camera to get started</li>
                   <li>App opens and guides scanning remaining codes</li>
+                  <li>QR codes do not need to be scanned in order, but all QR codes must be scanned</li>
                   <li>Receiver shows you their response QR code</li>
                   <li>You scan/paste their response below</li>
                 </ol>
