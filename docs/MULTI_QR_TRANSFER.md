@@ -13,6 +13,7 @@ Manual mode is useful when:
 ## How It Works
 
 In Manual mode, the sender's offer is split across multiple QR codes. The receiver scans one QR code to open the app, then scans the rest in-app.
+Each QR opens the receive route using fragment format (`/r#d=...`), and the full payload is integrity-checked before transfer starts.
 
 ## Step-by-Step
 

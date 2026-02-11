@@ -7,6 +7,7 @@ import {
   reassembleChunks,
   buildChunkUrl,
   extractChunkParam,
+  isValidPayloadChecksum,
 } from './chunk-utils'
 
 describe('base64url', () => {
@@ -37,14 +38,23 @@ describe('chunkPayload / reassembleChunks', () => {
     expect(chunks.length).toBe(3)
 
     const map = new Map<number, Uint8Array>()
+    let checksum: number | null = null
     for (const chunk of chunks) {
       const parsed = parseChunk(base64urlEncode(chunk))
       expect(parsed).not.toBeNull()
+      if (parsed!.index === 0) {
+        expect(typeof parsed!.checksum).toBe('number')
+        checksum = parsed!.checksum!
+      } else {
+        expect(parsed!.checksum).toBeUndefined()
+      }
       map.set(parsed!.index, parsed!.data)
     }
 
     const reassembled = reassembleChunks(map, 3)
     expect(reassembled).toEqual(original)
+    expect(checksum).not.toBeNull()
+    expect(isValidPayloadChecksum(reassembled!, checksum!)).toBe(true)
   })
 
   it('handles out-of-order reassembly', () => {
@@ -55,14 +65,18 @@ describe('chunkPayload / reassembleChunks', () => {
 
     // Insert in reverse order
     const map = new Map<number, Uint8Array>()
+    let checksum: number | null = null
     for (let i = chunks.length - 1; i >= 0; i--) {
       const parsed = parseChunk(base64urlEncode(chunks[i]))
       expect(parsed).not.toBeNull()
+      if (parsed!.index === 0) checksum = parsed!.checksum!
       map.set(parsed!.index, parsed!.data)
     }
 
     const reassembled = reassembleChunks(map, 3)
     expect(reassembled).toEqual(original)
+    expect(checksum).not.toBeNull()
+    expect(isValidPayloadChecksum(reassembled!, checksum!)).toBe(true)
   })
 
   it('duplicate chunk is idempotent', () => {
@@ -97,10 +111,13 @@ describe('chunkPayload / reassembleChunks', () => {
     expect(parsed).not.toBeNull()
     expect(parsed!.index).toBe(0)
     expect(parsed!.total).toBe(1)
+    expect(typeof parsed!.checksum).toBe('number')
 
     const map = new Map<number, Uint8Array>()
     map.set(parsed!.index, parsed!.data)
-    expect(reassembleChunks(map, 1)).toEqual(original)
+    const reassembled = reassembleChunks(map, 1)
+    expect(reassembled).toEqual(original)
+    expect(isValidPayloadChecksum(reassembled!, parsed!.checksum!)).toBe(true)
   })
 
   it('produces one chunk when payload length equals maxDataBytes', () => {
@@ -117,10 +134,13 @@ describe('chunkPayload / reassembleChunks', () => {
     expect(parsed).not.toBeNull()
     expect(parsed!.index).toBe(0)
     expect(parsed!.total).toBe(1)
+    expect(typeof parsed!.checksum).toBe('number')
 
     const map = new Map<number, Uint8Array>()
     map.set(parsed!.index, parsed!.data)
-    expect(reassembleChunks(map, 1)).toEqual(original)
+    const reassembled = reassembleChunks(map, 1)
+    expect(reassembled).toEqual(original)
+    expect(isValidPayloadChecksum(reassembled!, parsed!.checksum!)).toBe(true)
   })
 
   it('throws for empty payload', () => {
@@ -161,47 +181,82 @@ describe('parseChunk', () => {
     const bad = new Uint8Array([0, 0, 99])
     expect(parseChunk(base64urlEncode(bad))).toBeNull()
   })
+
+  it('returns null when chunk 0 has no checksum bytes', () => {
+    const bad = new Uint8Array([0, 1, 99]) // missing 4-byte checksum
+    expect(parseChunk(base64urlEncode(bad))).toBeNull()
+  })
+
+  it('parses non-zero chunk without checksum field', () => {
+    const chunk = new Uint8Array([1, 2, 99])
+    const parsed = parseChunk(base64urlEncode(chunk))
+    expect(parsed).not.toBeNull()
+    expect(parsed!.index).toBe(1)
+    expect(parsed!.total).toBe(2)
+    expect(parsed!.checksum).toBeUndefined()
+    expect(parsed!.data).toEqual(new Uint8Array([99]))
+  })
+})
+
+describe('payload checksum', () => {
+  it('fails validation when reassembled payload is tampered', () => {
+    const original = new Uint8Array(1200)
+    for (let i = 0; i < original.length; i++) original[i] = i % 256
+    const chunks = chunkPayload(original, 400)
+
+    const map = new Map<number, Uint8Array>()
+    let checksum: number | null = null
+    for (const chunk of chunks) {
+      const parsed = parseChunk(base64urlEncode(chunk))
+      expect(parsed).not.toBeNull()
+      if (parsed!.index === 0) checksum = parsed!.checksum!
+      map.set(parsed!.index, parsed!.data)
+    }
+
+    const reassembled = reassembleChunks(map, 3)
+    expect(reassembled).not.toBeNull()
+    expect(checksum).not.toBeNull()
+    expect(isValidPayloadChecksum(reassembled!, checksum!)).toBe(true)
+
+    const tampered = reassembled!.slice()
+    tampered[0] ^= 0xFF
+    expect(isValidPayloadChecksum(tampered, checksum!)).toBe(false)
+  })
 })
 
 describe('buildChunkUrl / extractChunkParam', () => {
-  it('builds and extracts BrowserRouter URL', () => {
-    const chunk = new Uint8Array([0, 2, 1, 2, 3])
-    const url = buildChunkUrl('https://example.com', chunk, false)
+  it('builds and extracts URL with fragment payload', () => {
+    const chunk = chunkPayload(new Uint8Array([1, 2, 3]), 400)[0]
+    const url = buildChunkUrl('https://example.com', chunk)
 
-    expect(url).toMatch(/^https:\/\/example\.com\/r\?d=/)
+    expect(url).toMatch(/^https:\/\/example\.com\/r#d=/)
     const param = extractChunkParam(url)
     expect(param).not.toBeNull()
 
     const parsed = parseChunk(param!)
     expect(parsed).not.toBeNull()
     expect(parsed!.index).toBe(0)
-    expect(parsed!.total).toBe(2)
+    expect(parsed!.total).toBe(1)
     expect(parsed!.data).toEqual(new Uint8Array([1, 2, 3]))
   })
 
-  it('builds and extracts HashRouter URL', () => {
-    const chunk = new Uint8Array([1, 3, 4, 5, 6])
-    const url = buildChunkUrl('https://example.com', chunk, true)
-
-    expect(url).toMatch(/^https:\/\/example\.com\/#\/r\?d=/)
-    const param = extractChunkParam(url)
-    expect(param).not.toBeNull()
-
-    const parsed = parseChunk(param!)
-    expect(parsed).not.toBeNull()
-    expect(parsed!.index).toBe(1)
-    expect(parsed!.total).toBe(3)
-  })
-
   it('strips trailing slash from base URL', () => {
-    const chunk = new Uint8Array([0, 1, 99])
-    const url = buildChunkUrl('https://example.com/', chunk, false)
-    expect(url).toMatch(/^https:\/\/example\.com\/r\?d=/)
+    const chunk = chunkPayload(new Uint8Array([99]), 400)[0]
+    const url = buildChunkUrl('https://example.com/', chunk)
+    expect(url).toMatch(/^https:\/\/example\.com\/r#d=/)
     expect(url).not.toMatch(/\/\/r/)
   })
 
   it('returns null for URL without d param', () => {
     expect(extractChunkParam('https://example.com/r')).toBeNull()
+  })
+
+  it('returns null for old query-string format', () => {
+    expect(extractChunkParam('https://example.com/r?d=abc')).toBeNull()
+  })
+
+  it('returns null for old hash-router format', () => {
+    expect(extractChunkParam('https://example.com/#/r?d=abc')).toBeNull()
   })
 
   it('returns null for invalid URL', () => {

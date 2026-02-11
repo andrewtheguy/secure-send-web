@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { useQRScanner } from '@/hooks/useQRScanner'
 import { isValidBinaryPayload } from '@/lib/manual-signaling'
-import { extractChunkParam, parseChunk, reassembleChunks } from '@/lib/chunk-utils'
+import { extractChunkParam, parseChunk, reassembleChunks, isValidPayloadChecksum } from '@/lib/chunk-utils'
 import { isMobileDevice } from '@/lib/utils'
 
 interface QRScannerProps {
@@ -27,6 +27,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
 
   const chunksRef = useRef<Map<number, Uint8Array>>(new Map())
   const totalChunksRef = useRef<number | null>(null)
+  const checksumRef = useRef<number | null>(null)
 
   const showWarning = useCallback((msg: string) => {
     if (warningTimerRef.current) clearTimeout(warningTimerRef.current)
@@ -44,6 +45,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
   const clearChunkRefs = useCallback(() => {
     chunksRef.current.clear()
     totalChunksRef.current = null
+    checksumRef.current = null
   }, [])
 
   // Clear chunk state on unmount
@@ -79,7 +81,37 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
 
       // Reset if total changed (different transfer)
       if (totalChunksRef.current !== null && totalChunksRef.current !== chunk.total) {
-        chunksRef.current.clear()
+        clearChunkRefs()
+      }
+
+      if (chunk.index === 0) {
+        if (typeof chunk.checksum !== 'number') {
+          const msg = 'Invalid QR payload. Please start scanning again.'
+          setError(msg)
+          onError?.(msg)
+          clearChunkRefs()
+          setCollectedCount(0)
+          setTotalChunks(null)
+          return
+        }
+        if (checksumRef.current !== null && checksumRef.current !== chunk.checksum) {
+          const msg = 'Invalid QR payload. Please start scanning again.'
+          setError(msg)
+          onError?.(msg)
+          clearChunkRefs()
+          setCollectedCount(0)
+          setTotalChunks(null)
+          return
+        }
+        checksumRef.current = chunk.checksum
+      } else if (chunk.checksum !== undefined) {
+        const msg = 'Invalid QR payload. Please start scanning again.'
+        setError(msg)
+        onError?.(msg)
+        clearChunkRefs()
+        setCollectedCount(0)
+        setTotalChunks(null)
+        return
       }
 
       totalChunksRef.current = chunk.total
@@ -91,14 +123,15 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
 
       if (chunksRef.current.size === chunk.total) {
         const assembled = reassembleChunks(chunksRef.current, chunk.total)
+        const expectedChecksum = checksumRef.current
         clearChunkRefs()
         setCollectedCount(0)
         setTotalChunks(null)
-        if (assembled) {
+        if (assembled && expectedChecksum !== null && isValidPayloadChecksum(assembled, expectedChecksum)) {
           onScan(assembled)
         } else {
-          console.error('QRScanner: reassembleChunks failed for', chunk.total, 'chunks')
-          const msg = 'Failed to reassemble QR data. Please try scanning again.'
+          console.error('QRScanner: invalid payload for', chunk.total, 'chunks')
+          const msg = 'Invalid QR payload. Please start scanning again.'
           setError(msg)
           onError?.(msg)
         }

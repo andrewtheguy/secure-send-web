@@ -98,9 +98,13 @@ sequenceDiagram
 **QR Code Format:**
 
 *Sender → Receiver (Offer):* Multi-QR URL-based chunking
-- Offer payload is split into ~400-byte chunks with a 2-byte header: `[chunk_index][total_chunks][data]`
-- Each chunk is base64url-encoded and embedded in a URL: `{origin}/r?d={base64url}` (or `{origin}/#/r?d={...}` for HashRouter)
-- Deployment requirement: app must be hosted at domain root (no subpath), because chunk URLs are built from `window.location.origin` and append `/r` or `/#/r` directly
+- Offer payload is split into ~400-byte chunks.
+- Chunk wire format:
+  - Chunk `0`: `[chunk_index][total_chunks][payload_crc32_be_u32][data]`
+  - Chunk `1..N-1`: `[chunk_index][total_chunks][data]`
+- Payload integrity check uses CRC32 embedded only in chunk `0` and validated after full reassembly.
+- Each chunk is base64url-encoded and embedded in a URL: `{origin}/r#d={base64url}`
+- Deployment requirement: app must be hosted at domain root (no subpath), because chunk URLs are built from `window.location.origin` and append `/r` directly
 - Displayed as a grid of text-mode QR codes, each scannable by a phone's native camera
 - For a typical ~1200 byte offer: 3 QR codes. Single-chunk payloads (≤400 bytes) produce 1 QR code.
 - Copy/paste fallback: base64-encoded full binary for clipboard
@@ -401,7 +405,7 @@ Fallback storage when P2P connection cannot be established (30s timeout window).
 10. Present content
 
 **`use-chunk-collector.ts`** - Multi-QR chunk collection (used by `/r` receive page):
-1. Parse incoming chunks (from URL query param or scanned QR codes)
+1. Parse incoming chunks (from URL fragment or scanned QR codes)
 2. Track collection progress with `Map<index, data>`
 3. Reject chunks with mismatched `total` (guards against mixing different offers)
 4. Auto-reassemble when all chunks collected
@@ -562,6 +566,7 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 **No Backward Compatibility**
 - Requests/payloads missing TTL fields are rejected (treated as invalid).
 - Nostr P2P completion requires `DONE:N` (legacy `DONE` without chunk count is unsupported).
+- Multi-QR offer links require `/r#d=...` and first-chunk CRC32 metadata; older URL or chunk formats are rejected.
 
 ## Security Considerations
 

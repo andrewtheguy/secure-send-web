@@ -63,23 +63,13 @@ npm run dev
 npm run build
 ```
 
-### Hash Routing (Static Hosting)
+### Routing (Required)
 
-For hosts that require hash-based routing (e.g. no server rewrites), build with:
-
-```bash
-VITE_USE_HASH=true npm run build
-```
-
-You can also create `.env.production` (or `.env.hash` with `npm run build -- --mode hash`) containing:
-
-```
-VITE_USE_HASH=true
-```
+The app uses `BrowserRouter` only. Configure hosting to rewrite unknown paths to `index.html`.
 
 ### Deployment Path Requirement (Multi-QR Manual Mode)
 
-Multi-QR URLs are generated from `window.location.origin` and then append `/r?d=...` (or `/#/r?d=...` with hash routing).
+Multi-QR URLs are generated from `window.location.origin` and then append `/r#d=...`.
 
 - Supported: deployment at the domain root (for example `https://example.com`)
 - Not supported: deployment under a subpath (for example `https://example.com/my-app`)
