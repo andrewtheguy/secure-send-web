@@ -229,7 +229,7 @@ describe('buildChunkUrl / extractChunkParam', () => {
     const chunk = chunkPayload(new Uint8Array([1, 2, 3]), 400)[0]
     const url = buildChunkUrl('https://example.com', chunk)
 
-    expect(url).toMatch(/^https:\/\/example\.com\/r#d=/)
+    expect(url).toMatch(/^https:\/\/example\.com\/r#[A-Za-z0-9_-]+$/)
     const param = extractChunkParam(url)
     expect(param).not.toBeNull()
 
@@ -243,12 +243,16 @@ describe('buildChunkUrl / extractChunkParam', () => {
   it('strips trailing slash from base URL', () => {
     const chunk = chunkPayload(new Uint8Array([99]), 400)[0]
     const url = buildChunkUrl('https://example.com/', chunk)
-    expect(url).toMatch(/^https:\/\/example\.com\/r#d=/)
+    expect(url).toMatch(/^https:\/\/example\.com\/r#[A-Za-z0-9_-]+$/)
     expect(url).not.toMatch(/\/\/r/)
   })
 
-  it('returns null for URL without d param', () => {
+  it('returns null for URL without fragment payload', () => {
     expect(extractChunkParam('https://example.com/r')).toBeNull()
+  })
+
+  it('returns null for legacy d-param fragment format', () => {
+    expect(extractChunkParam('https://example.com/r#d=abc')).toBeNull()
   })
 
   it('returns null for old query-string format', () => {

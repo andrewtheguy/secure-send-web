@@ -51,7 +51,7 @@ export function Footer() {
               className="inline-flex items-center gap-1.5 rounded-sm px-0.5 py-0.5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label="Version compatibility notice"
             >
-              <span>v0.0.1</span>
+              <span>v0.0.2</span>
               <Info className="h-3.5 w-3.5" />
             </button>
           </DropdownMenuTrigger>

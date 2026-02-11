@@ -75,7 +75,7 @@ The app uses `BrowserRouter` only. Configure hosting to rewrite unknown paths to
 
 ### Deployment Path Requirement (Multi-QR Manual Mode)
 
-Multi-QR URLs are generated from `window.location.origin` and then append `/r#d=...`.
+Multi-QR URLs are generated from `window.location.origin` and then append `/r#...`.
 
 - Supported: deployment at the domain root (for example `https://example.com`)
 - Not supported: deployment under a subpath (for example `https://example.com/my-app`)
