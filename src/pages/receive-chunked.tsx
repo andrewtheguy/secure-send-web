@@ -115,6 +115,9 @@ export function ReceiveChunkedPage() {
   if (step === 'collecting') {
     const total = chunkState.totalChunks
     const collected = chunkState.collectedCount
+    const collectedPercent = total !== null && total > 0
+      ? Math.round((collected / total) * 100)
+      : 0
 
     return (
       <div className="flex w-full justify-center">
@@ -125,7 +128,7 @@ export function ReceiveChunkedPage() {
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground text-center">
                 Collected {collected} of {total} QR code{total !== 1 ? 's' : ''} (
-                {Math.round((collected / total) * 100)}%)
+                {collectedPercent}%)
               </p>
               {total > 1 && (
                 <>

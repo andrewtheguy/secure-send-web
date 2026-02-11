@@ -343,29 +343,38 @@ export function useManualSend(): UseManualSendReturn {
 
       // Wait for data channel to open
       await new Promise<void>((resolve, reject) => {
+        const pc = rtc.getPeerConnection()
+        const dc = rtc.getDataChannel()
         const timeout = setTimeout(() => {
+          cleanup()
           reject(new Error('Connection timeout'))
         }, MANUAL_CONNECTION_TIMEOUT_MS)
 
-        const pc = rtc.getPeerConnection()
+        const cleanup = () => {
+          clearTimeout(timeout)
+          pc.onconnectionstatechange = null
+          if (dc) {
+            dc.onopen = null
+          }
+        }
+
         const checkConnection = () => {
           if (pc.connectionState === 'connected') {
-            const dc = rtc.getDataChannel()
-            if (dc && dc.readyState === 'open') {
-              clearTimeout(timeout)
+            const currentDc = rtc.getDataChannel()
+            if (currentDc && currentDc.readyState === 'open') {
+              cleanup()
               resolve()
             }
           } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-            clearTimeout(timeout)
+            cleanup()
             reject(new Error('Connection failed'))
           }
         }
 
         pc.onconnectionstatechange = checkConnection
-        const dc = rtc.getDataChannel()
         if (dc) {
           dc.onopen = () => {
-            clearTimeout(timeout)
+            cleanup()
             resolve()
           }
         }
