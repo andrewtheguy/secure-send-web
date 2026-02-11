@@ -70,6 +70,7 @@ export interface UseManualSendReturn {
 }
 
 const ICE_GATHER_TIMEOUT_MS = 5000
+const MANUAL_CONNECTION_TIMEOUT_MS = 120000
 
 
 export function useManualSend(): UseManualSendReturn {
@@ -344,7 +345,7 @@ export function useManualSend(): UseManualSendReturn {
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Connection timeout'))
-        }, 30000)
+        }, MANUAL_CONNECTION_TIMEOUT_MS)
 
         const pc = rtc.getPeerConnection()
         const checkConnection = () => {

@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { RefreshCw, AlertCircle, Loader2, Camera } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Progress } from '@/components/ui/progress'
 import { useQRScanner } from '@/hooks/useQRScanner'
 import { isValidBinaryPayload } from '@/lib/manual-signaling'
 import {
@@ -27,6 +26,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
     isMobileDevice() ? 'environment' : 'user'
   )
   const [collectedCount, setCollectedCount] = useState(0)
+  const [collectedIndices, setCollectedIndices] = useState<Set<number>>(new Set())
   const [totalChunks, setTotalChunks] = useState<number | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
   const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -54,13 +54,18 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
     checksumRef.current = null
   }, [])
 
+  const clearChunkProgressState = useCallback(() => {
+    setCollectedCount(0)
+    setCollectedIndices(new Set())
+    setTotalChunks(null)
+  }, [])
+
   const handleInvalidPayload = useCallback((msg: string) => {
     setError(msg)
     onError?.(msg)
     clearChunkRefs()
-    setCollectedCount(0)
-    setTotalChunks(null)
-  }, [clearChunkRefs, onError])
+    clearChunkProgressState()
+  }, [clearChunkRefs, onError, clearChunkProgressState])
 
   // Clear chunk state on unmount
   useEffect(() => {
@@ -96,6 +101,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
       // Reset if total changed (different transfer)
       if (totalChunksRef.current !== null && totalChunksRef.current !== chunk.total) {
         clearChunkRefs()
+        clearChunkProgressState()
       }
 
       if (chunk.index === 0) {
@@ -120,6 +126,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
       chunksRef.current.set(chunk.index, chunk.data)
       setTotalChunks(chunk.total)
       setCollectedCount(chunksRef.current.size)
+      setCollectedIndices(new Set(chunksRef.current.keys()))
       setError(null)
       setWarning(null)
 
@@ -127,8 +134,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
         const assembled = reassembleChunks(chunksRef.current, chunk.total)
         const expectedChecksum = checksumRef.current
         clearChunkRefs()
-        setCollectedCount(0)
-        setTotalChunks(null)
+        clearChunkProgressState()
         if (assembled === null) {
           console.error('QRScanner: reassembly failed')
           const msg = 'Invalid QR payload. Please start scanning again.'
@@ -164,7 +170,7 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
       setError(null)
       onScan(binaryData)
     }
-  }, [onScan, onError, expectedType, clearChunkRefs, showWarning, handleInvalidPayload])
+  }, [onScan, onError, expectedType, clearChunkRefs, clearChunkProgressState, showWarning, handleInvalidPayload])
 
   const handleError = useCallback((err: string) => {
     setError(err)
@@ -247,11 +253,32 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
 
       {/* Multi-chunk progress */}
       {needsMoreChunks && (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <p className="text-xs text-muted-foreground text-center">
-            Collected {collectedCount} of {totalChunks} QR codes
+            Collected {collectedCount} of {totalChunks} QR codes (
+            {Math.round((collectedCount / totalChunks) * 100)}%)
           </p>
-          <Progress value={(collectedCount / totalChunks) * 100} className="h-1.5" />
+          <div className="flex flex-wrap justify-center gap-1.5">
+            {Array.from({ length: totalChunks ?? 0 }, (_, i) => {
+              const received = collectedIndices.has(i)
+              return (
+                <div
+                  key={i}
+                  className={`w-7 h-7 rounded text-xs font-medium flex items-center justify-center transition-colors ${
+                    received
+                      ? 'bg-cyan-600 text-white'
+                      : 'border border-muted-foreground/30 text-muted-foreground'
+                  }`}
+                  title={`QR #${i + 1}: ${received ? 'Received' : 'Missing'}`}
+                >
+                  {i + 1}
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground text-center">
+            QR codes can be scanned in any order, but all QR codes must be scanned.
+          </p>
         </div>
       )}
 
