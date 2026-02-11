@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { parseClipboardPayload, isValidBinaryPayload } from '@/lib/manual-signaling'
+import { isMobileDevice } from '@/lib/utils'
 import { QRScanner } from './qr-scanner'
 
 interface QRInputProps {
@@ -16,10 +17,9 @@ interface QRInputProps {
 export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProps) {
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
-  // Receiver (offer) defaults to scan, Sender (answer) defaults to paste
-  const [inputMode, setInputMode] = useState<'scan' | 'paste'>(
-    expectedType === 'offer' ? 'scan' : 'paste'
-  )
+  const [inputMode, setInputMode] = useState<'scan' | 'paste'>('scan')
+  const [scanStarted, setScanStarted] = useState(false)
+  const scanActionVerb = isMobileDevice() ? 'Tap' : 'Click'
 
   const handlePaste = useCallback(async () => {
     try {
@@ -68,46 +68,58 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
     }
   }, [])
 
+  const handleStartScan = useCallback(() => {
+    setError(null)
+    setScanStarted(true)
+  }, [])
+
+  const handleInputModeChange = useCallback((mode: 'scan' | 'paste') => {
+    setInputMode(mode)
+    if (mode !== 'scan') {
+      setScanStarted(false)
+    }
+  }, [])
+
   return (
     <div className="space-y-3">
       {label && (
         <p className="text-sm font-medium">{label}</p>
       )}
 
-      <Tabs value={inputMode} onValueChange={(v) => setInputMode(v as 'scan' | 'paste')}>
+      <Tabs value={inputMode} onValueChange={(v) => handleInputModeChange(v as 'scan' | 'paste')}>
         <TabsList className="grid w-full grid-cols-2">
-          {expectedType === 'offer' ? (
-            <>
-              <TabsTrigger value="scan" disabled={disabled}>
-                <Camera className="h-4 w-4 mr-2" />
-                Scan
-              </TabsTrigger>
-              <TabsTrigger value="paste" disabled={disabled}>
-                <ClipboardPaste className="h-4 w-4 mr-2" />
-                Paste
-              </TabsTrigger>
-            </>
-          ) : (
-            <>
-              <TabsTrigger value="paste" disabled={disabled}>
-                <ClipboardPaste className="h-4 w-4 mr-2" />
-                Paste
-              </TabsTrigger>
-              <TabsTrigger value="scan" disabled={disabled}>
-                <Camera className="h-4 w-4 mr-2" />
-                Scan
-              </TabsTrigger>
-            </>
-          )}
+          <TabsTrigger value="scan" disabled={disabled}>
+            <Camera className="h-4 w-4 mr-2" />
+            Scan
+          </TabsTrigger>
+          <TabsTrigger value="paste" disabled={disabled}>
+            <ClipboardPaste className="h-4 w-4 mr-2" />
+            Paste
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="scan" className="mt-3">
-          <QRScanner
-            expectedType={expectedType}
-            onScan={handleScanSuccess}
-            onError={handleScanError}
-            disabled={disabled}
-          />
+          {scanStarted ? (
+            <QRScanner
+              expectedType={expectedType}
+              onScan={handleScanSuccess}
+              onError={handleScanError}
+              disabled={disabled}
+            />
+          ) : (
+              <button
+                type="button"
+                onClick={handleStartScan}
+                disabled={disabled}
+                className="w-full rounded-lg border border-dashed p-6 text-center cursor-pointer transition-colors hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+              <Camera className="h-6 w-6 mx-auto mb-2" />
+              <p className="text-base font-medium">Start scanning</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {`${scanActionVerb} anywhere in this area to start the camera scanner.`}
+              </p>
+            </button>
+          )}
         </TabsContent>
 
         <TabsContent value="paste" className="mt-3">
