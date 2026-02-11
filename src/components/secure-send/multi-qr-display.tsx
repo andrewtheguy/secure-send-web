@@ -172,7 +172,7 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
         {data.length.toLocaleString()} bytes &bull; {chunkQRs.length} QR code{chunkQRs.length !== 1 ? 's' : ''}
       </div>
 
-      <div className={`grid gap-4 ${chunkQRs.length === 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'} w-full max-w-[600px]`}>
+      <div className={`grid gap-4 ${chunkQRs.length === 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'} w-full max-w-[600px] lg:w-fit lg:max-w-none`}>
         {chunkQRs.map((qr) => (
           <div key={qr.index} className="flex flex-col items-center gap-1">
             <div className="p-2 bg-white rounded-lg flex items-center justify-center">
@@ -180,7 +180,9 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
                 <img
                   src={qr.imageUrl}
                   alt={`QR Code ${qr.index + 1} of ${qr.total}`}
-                  className="block w-full h-auto"
+                  width={400}
+                  height={400}
+                  className="block w-full h-auto lg:w-auto"
                 />
               ) : null}
             </div>
