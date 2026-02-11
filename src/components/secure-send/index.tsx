@@ -179,7 +179,7 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                     Coordination happens directly through QR code exchange, with no third-party coordination servers.
                     STUN may be used when internet is available; without internet, no third-party servers are involved at all.
                     When STUN is used, it only sees connection setup metadata (such as IP address and port), not file contents, encryption keys, or any personally identifiable information.
-                    Your data remains end-to-end encrypted throughout the transfer.
+                    Your data remains end-to-end encrypted throughout the transfer, regardless of internet availability and whether STUN is used.
                   </p>
                   <ul className="mt-2 space-y-1 text-sm list-disc list-inside">
                     <li>Best when you prefer direct device-to-device coordination using camera scan or copy/paste.</li>

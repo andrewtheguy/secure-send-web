@@ -49,7 +49,7 @@ export function SendTab() {
   const pinModeDescription = 'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.'
   const pinModeHowItWorksDescription = 'More reliable option, but requires manual PIN input. Coordination happens through third-party relay servers. No personally identifiable information is shared, and your data remains protected with end-to-end encryption.'
   const qrModeDescription = 'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. Data stays end-to-end encrypted.'
-  const qrModeHowItWorksDescription = 'Coordination happens through QR exchange. If internet is available, STUN is only used for connection setup metadata (such as IP address and port). STUN does not receive your file contents, encryption keys, or any personally identifiable information. Without internet, no third-party servers are involved. Data stays end-to-end encrypted.'
+  const qrModeHowItWorksDescription = 'Coordination happens through QR exchange. If internet is available, STUN is used for connection setup metadata (such as IP address and port); it does not receive your file contents, encryption keys, or any personally identifiable information. It also works without internet when the devices can reach each other over a network path (for example, the same LAN/Wi-Fi). Without internet, no third-party servers are involved. Data stays end-to-end encrypted regardless of internet availability and whether STUN is used.'
 
   const handleSend = () => {
     // Set context with all the configuration
