@@ -98,16 +98,31 @@ sequenceDiagram
 **QR Code Format:**
 
 *Sender → Receiver (Offer):* Multi-QR URL-based chunking
-- Offer payload is split into ~400-byte chunks.
+- Offer payload uses `maxDataBytes = 400` payload bytes per chunk (headers are added after payload slicing).
 - Chunk wire format (raw bytes before base64url):
   - `chunk_index`: `u8` (1 byte, 0-based)
   - `total_chunks`: `u8` (1 byte, valid range `1..255`)
   - `payload_crc32_be_u32` (carried only in chunk `0`): 4-byte big-endian CRC-32/ISO-HDLC over the full reassembled payload (poly `0x04C11DB7`, reflected input/output, init `0xFFFFFFFF`, xorout `0xFFFFFFFF`; reflected table form `0xEDB88320`)
   - Chunk `0`: `[chunk_index:u8][total_chunks:u8][payload_crc32_be_u32][data]`
   - Chunk `1..N-1`: `[chunk_index:u8][total_chunks:u8][data]`
+- Header overhead and usable payload bytes:
+  - Chunk `0` header size: `6` bytes (`chunk_index` 1 + `total_chunks` 1 + `payload_crc32_be_u32` 4) -> usable payload data up to `400` bytes, raw chunk bytes up to `406`.
+  - Chunk `1..N-1` header size: `2` bytes (`chunk_index` 1 + `total_chunks` 1) -> usable payload data up to `400` bytes, raw chunk bytes up to `402`.
+- Chunk data rebalancing (to avoid a tiny last QR payload):
+  - After `total_chunks = ceil(payload_bytes / 400)` is chosen, data bytes are distributed evenly: `base_size = floor(payload_bytes / total_chunks)`, `remainder = payload_bytes % total_chunks`.
+  - The first `remainder` chunks carry `base_size + 1` data bytes; the remaining chunks carry `base_size` data bytes (difference between chunk payload sizes is at most 1 byte).
+- Base64url size expansion (for raw chunk length `n` bytes, unpadded):
+  - `n % 3 == 0` -> encoded length `4 * (n / 3)`
+  - `n % 3 == 1` -> encoded length `4 * floor(n / 3) + 2`
+  - `n % 3 == 2` -> encoded length `4 * floor(n / 3) + 3`
+- Typical `1200`-byte payload example:
+  - `total_chunks = ceil(1200 / 400) = 3` (data slices are `400`, `400`, `400` bytes).
+  - Chunk `0`: `406` raw bytes -> `542` base64url chars in `d` -> URL fragment `#d=` length `545` chars (`/r#d=` length `547`, excluding origin).
+  - Chunk `1`: `402` raw bytes -> `536` base64url chars in `d` -> URL fragment `#d=` length `539` chars (`/r#d=` length `541`, excluding origin).
+  - Chunk `2`: same as chunk `1`.
 - Limits implied by the `u8` headers:
   - Maximum chunks: `255` (`chunk_index` valid range `0..254`, with `chunk_index < total_chunks`)
-  - With ~400 data bytes per chunk, maximum payload size is `102,000` bytes (`255 * 400`) before base64url encoding.
+  - With `400` data bytes per chunk, maximum payload size is `102,000` bytes (`255 * 400`) before base64url encoding.
 - CRC32 sequencing and failure handling:
   - CRC32 is carried only in chunk `0`; receivers MUST buffer chunk `1..N-1` data until chunk `0` is received (this spec does not define a streaming-without-chunk-0 mode).
   - CRC32 validation is deferred until full reassembly is complete and chunk `0` (with `payload_crc32_be_u32`) is available.
@@ -115,7 +130,7 @@ sequenceDiagram
 - Each chunk is base64url-encoded and embedded in a URL: `{origin}/r#d={base64url}`
 - Deployment requirement: app must be hosted at domain root (no subpath), because chunk URLs are built from `window.location.origin` and append `/r` directly
 - Displayed as a grid of text-mode QR codes, each scannable by a phone's native camera
-- For a typical ~1200 byte offer: 3 QR codes. Single-chunk payloads (≤400 bytes) produce 1 QR code.
+- For a typical `1200`-byte offer: `3` QR codes. Single-chunk payloads (`≤400` payload bytes) produce `1` QR code.
 - Copy/paste fallback: base64-encoded full binary for clipboard
 
 *Receiver → Sender (Answer):* Single binary QR code
