@@ -117,8 +117,8 @@ sequenceDiagram
   - `n % 3 == 2` -> encoded length `4 * floor(n / 3) + 3`
 - Typical `1200`-byte payload example:
   - `total_chunks = ceil(1200 / 400) = 3` (data slices are `400`, `400`, `400` bytes).
-  - Chunk `0`: `406` raw bytes -> `542` base64url chars in `d` -> URL fragment `#d=` length `545` chars (`/r#d=` length `547`, excluding origin).
-  - Chunk `1`: `402` raw bytes -> `536` base64url chars in `d` -> URL fragment `#d=` length `539` chars (`/r#d=` length `541`, excluding origin).
+  - Chunk `0`: `406` raw bytes -> `542` base64url chars in hash payload -> URL fragment `#` length `543` chars (`/r#` length `545`, excluding origin).
+  - Chunk `1`: `402` raw bytes -> `536` base64url chars in hash payload -> URL fragment `#` length `537` chars (`/r#` length `539`, excluding origin).
   - Chunk `2`: same as chunk `1`.
 - Limits implied by the `u8` headers:
   - Maximum chunks: `255` (`chunk_index` valid range `0..254`, with `chunk_index < total_chunks`)
@@ -127,7 +127,7 @@ sequenceDiagram
   - CRC32 is carried only in chunk `0`; receivers MUST buffer chunk `1..N-1` data until chunk `0` is received (this spec does not define a streaming-without-chunk-0 mode).
   - CRC32 validation is deferred until full reassembly is complete and chunk `0` (with `payload_crc32_be_u32`) is available.
   - On CRC32 failure after full reassembly, receivers MUST drop the reassembled payload, log a checksum/protocol error, and fail the current transfer attempt (retry/rescan is an implementation-level recovery action).
-- Each chunk is base64url-encoded and embedded in a URL: `{origin}/r#d={base64url}`
+- Each chunk is base64url-encoded and embedded in a URL: `{origin}/r#{base64url}`
 - Deployment requirement: app must be hosted at domain root (no subpath), because chunk URLs are built from `window.location.origin` and append `/r` directly
 - Displayed as a grid of text-mode QR codes, each scannable by a phone's native camera
 - For a typical `1200`-byte offer: `3` QR codes. Single-chunk payloads (`≤400` payload bytes) produce `1` QR code.
@@ -590,7 +590,7 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 **No Backward Compatibility**
 - Requests/payloads missing TTL fields are rejected (treated as invalid).
 - Nostr P2P completion requires `DONE:N` (legacy `DONE` without chunk count is unsupported).
-- Multi-QR offer links require `/r#d=...` and first-chunk CRC32 metadata; older URL or chunk formats are rejected.
+- Multi-QR offer links require `/r#...` (raw hash payload, no `d=` prefix) and first-chunk CRC32 metadata; older URL or chunk formats are rejected.
 
 ## Security Considerations
 

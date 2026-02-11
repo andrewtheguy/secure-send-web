@@ -1,5 +1,6 @@
 import { Info, Lock, Shield, Zap } from 'lucide-react'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { APP_VERSION } from '@/lib/app-version'
 
 interface FooterLabelProps {
   shortLabel: string
@@ -51,7 +52,7 @@ export function Footer() {
               className="inline-flex items-center gap-1.5 rounded-sm px-0.5 py-0.5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label="Version compatibility notice"
             >
-              <span>v0.0.1</span>
+              <span>{`v${APP_VERSION}`}</span>
               <Info className="h-3.5 w-3.5" />
             </button>
           </DropdownMenuTrigger>

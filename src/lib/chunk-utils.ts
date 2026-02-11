@@ -107,12 +107,12 @@ export function chunkPayload(binary: Uint8Array, maxDataBytes = 400): Uint8Array
 
 /**
  * Build a URL for a single chunk.
- * Format: {baseUrl}/r#d={base64url}
+ * Format: {baseUrl}/r#{base64url}
  */
 export function buildChunkUrl(baseUrl: string, chunk: Uint8Array): string {
   const encoded = base64urlEncode(chunk)
   const base = baseUrl.replace(/\/$/, '')
-  return `${base}/r#d=${encoded}`
+  return `${base}/r#${encoded}`
 }
 
 /**
@@ -180,8 +180,8 @@ export function reassembleChunks(chunks: Map<number, Uint8Array>, total: number)
 }
 
 /**
- * Extract the `d` parameter from the URL fragment.
- * Supports only fragment format: /r#d=...
+ * Extract the chunk payload token from the URL fragment.
+ * Supports only fragment format: /r#{base64url}
  */
 export function extractChunkParam(url: string): string | null {
   try {
@@ -189,11 +189,12 @@ export function extractChunkParam(url: string): string | null {
     const hash = parsed.hash
     if (!hash || hash.length < 2) return null
 
-    const hashParams = new URLSearchParams(hash.slice(1))
-    const d = hashParams.get('d')
-    if (!d) return null
+    const payload = hash.slice(1)
+    // No backward compatibility: reject legacy /r#d=... links.
+    if (payload.startsWith('d=')) return null
+    if (!/^[A-Za-z0-9_-]+$/.test(payload)) return null
 
-    return d
+    return payload
   } catch {
     return null
   }
