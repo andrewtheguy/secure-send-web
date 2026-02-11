@@ -290,6 +290,7 @@ export function SendTab() {
                 if (value === 'offline') {
                   setRelayOnly(false)
                   setUsePasskey(false)
+                  setShowAdvanced(false)
                 }
               }}
               className="gap-2"
@@ -349,32 +350,28 @@ export function SendTab() {
             </div>
           </div>
 
-          {/* Advanced Options */}
-          <div className="border rounded-lg overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="w-full flex items-center gap-2 p-3 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-            >
-              {showAdvanced ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              Advanced Options
-              {usePasskey && (
-                <span className="ml-auto text-xs bg-primary/10 text-primary px-2 py-0.5 rounded">
-                  Passkey
-                </span>
-              )}
-            </button>
-            {showAdvanced && (
-              <div className="p-3 pt-0 space-y-3 border-t">
-                {/* Technical details about current mode */}
-                <p className="text-xs text-muted-foreground">
-                  {methodChoice === 'online'
-                    ? `PIN mode: ${pinModeDescription}`
-                    : `QR code mode: ${qrModeDescription}`}
-                </p>
+          {/* Advanced Options (PIN mode only) */}
+          {methodChoice === 'online' && (
+            <div className="border rounded-lg overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className="w-full flex items-center gap-2 p-3 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+              >
+                {showAdvanced ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                Advanced Options
+                {usePasskey && (
+                  <span className="ml-auto text-xs bg-primary/10 text-primary px-2 py-0.5 rounded">
+                    Passkey
+                  </span>
+                )}
+              </button>
+              {showAdvanced && (
+                <div className="p-3 pt-0 space-y-3 border-t">
+                  <p className="text-xs text-muted-foreground">
+                    {`PIN mode: ${pinModeDescription}`}
+                  </p>
 
-                {/* Force cloud transfer - only for PIN mode */}
-                {methodChoice === 'online' && (
                   <div className="flex items-center gap-2">
                     <input
                       id="force-cloud-transfer"
@@ -387,10 +384,7 @@ export function SendTab() {
                       Force cloud transfer (skip P2P)
                     </Label>
                   </div>
-                )}
 
-                {/* Passkey toggle - only for PIN mode */}
-                {methodChoice === 'online' && (
                   <div className="pt-3 border-t space-y-3">
                     <div className="flex items-center gap-1 mb-2">
                       <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded">
@@ -425,10 +419,10 @@ export function SendTab() {
                       </p>
                     )}
                   </div>
-                )}
-              </div>
-            )}
-          </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {relayOnly && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded">
