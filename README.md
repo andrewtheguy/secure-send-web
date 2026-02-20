@@ -16,11 +16,10 @@ A web application for sending encrypted files and folders with PIN-based or pass
 - **No accounts required**: Ephemeral keypairs generated per transfer
 - **PWA Support**: Install as a Progressive Web App for offline access
 
-## Version Compatibility (v0.0.x)
+## Version Compatibility
 
-During `v0.0.x`, compatibility between different app versions is not guaranteed.
+During `v0.0.x` (as shown in the app footer), compatibility between different app versions is not guaranteed.
 Sender and receiver should use the same app version for transfers.
-The current app version is shown in the footer.
 
 ## How It Works
 
