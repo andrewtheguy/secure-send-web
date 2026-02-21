@@ -155,6 +155,10 @@ interface ServiceTestResult {
   latency?: number
   error?: string
   supportsPost?: boolean
+  corsUpload?: boolean // hardcoded config value
+  corsDownload?: boolean // hardcoded config value
+  directUploadWorks?: boolean // actual test result (upload without proxy)
+  directDownloadWorks?: boolean // actual test result (download without proxy)
 }
 
 interface ConfigMismatch {
@@ -202,6 +206,7 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
   // Track tested values for config comparison
   const testedProxyPostSupport: Map<string, boolean> = new Map()
   const testedServerCorsUpload: Map<string, boolean> = new Map()
+  const testedServerCorsDownload: Map<string, boolean> = new Map()
 
   // ==========================================================================
   // PHASE 1: Test CORS Proxies POST support first
@@ -350,88 +355,94 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
   if (!firstWorkingPostProxy && !firstWorkingGetProxy) {
     console.log('   %c⚠ Skipped - No working CORS proxy available', 'color: #f59e0b;')
     for (const server of UPLOAD_SERVERS) {
-      serverResults.push({ name: server.name, status: 'failed', error: 'No CORS proxy' })
+      const directWorks = directUploadResults.get(server.name)?.success ?? false
+      serverResults.push({ name: server.name, status: 'failed', error: 'No CORS proxy', corsUpload: server.corsUpload, corsDownload: server.corsDownload, directUploadWorks: directWorks, directDownloadWorks: false })
     }
   } else {
     for (const server of UPLOAD_SERVERS) {
       const directResult = directUploadResults.get(server.name)
+      const directUploadWorked = directResult?.success ?? false
+      let directDownloadWorks = false
       const start = Date.now()
 
-      // If direct upload worked, verify download and record success
+      // Step 1: Get a download URL (either from direct upload or via proxy upload)
+      let fileUrl: string | null = null
+
       if (directResult?.success && directResult.url) {
+        fileUrl = directResult.url
+      } else if (firstWorkingPostProxy) {
         try {
-          // Verify download (may need proxy for download even if upload is direct)
-          let downloadUrl = directResult.url
-          const needsProxyForDownload = !server.corsDownload
-
-          if (needsProxyForDownload && firstWorkingGetProxy) {
-            downloadUrl = firstWorkingGetProxy.buildUrl(directResult.url)
-          }
-
-          const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), 15000)
-          const response = await fetch(downloadUrl, { signal: controller.signal })
-          clearTimeout(timeoutId)
-
-          if (response.ok) {
-            const downloaded = new Uint8Array(await response.arrayBuffer())
-            if (downloaded.length === testData.length && downloaded.every((b, i) => b === testData[i])) {
-              const latency = Date.now() - start
-              serverResults.push({ name: server.name, status: 'ok', latency })
-              console.log(`   %c✓ ${server.name}%c - ${latency}ms (direct upload + download verified)`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
-              continue
-            }
-          }
-
-          serverResults.push({ name: server.name, status: 'failed', error: 'Download verification failed' })
-          console.log(`   %c✗ ${server.name}%c - Download verification failed`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+          const proxyUrl = firstWorkingPostProxy.buildUrl(server.url)
+          fileUrl = await uploadToUrl(proxyUrl, server, testData, 'test.bin')
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : 'Unknown error'
-          serverResults.push({ name: server.name, status: 'failed', error: errorMsg })
-          console.log(`   %c✗ ${server.name}%c - ${errorMsg}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+          serverResults.push({ name: server.name, status: 'failed', error: errorMsg, corsUpload: server.corsUpload, corsDownload: server.corsDownload, directUploadWorks: directUploadWorked, directDownloadWorks })
+          console.log(`   %c✗ ${server.name}%c - Upload failed: ${errorMsg}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+          continue
         }
-        continue
-      }
-
-      // Direct upload failed, try via CORS proxy
-      if (!firstWorkingPostProxy) {
-        serverResults.push({ name: server.name, status: 'failed', error: 'No POST CORS proxy available' })
+      } else {
+        serverResults.push({ name: server.name, status: 'failed', error: 'No POST CORS proxy available', corsUpload: server.corsUpload, corsDownload: server.corsDownload, directUploadWorks: directUploadWorked, directDownloadWorks })
         console.log(`   %c✗ ${server.name}%c - No POST CORS proxy available`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
         continue
       }
 
+      // Step 2: Try direct download first to discover actual corsDownload behavior
       try {
-        const proxyUrl = firstWorkingPostProxy.buildUrl(server.url)
-        const uploadUrl = await uploadToUrl(proxyUrl, server, testData, 'test.bin')
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
+        const response = await fetch(fileUrl, { signal: controller.signal })
+        clearTimeout(timeoutId)
 
-        // Verify download
-        let downloadUrl = uploadUrl
-        const needsProxyForDownload = !server.corsDownload
-
-        if (needsProxyForDownload && firstWorkingGetProxy) {
-          downloadUrl = firstWorkingGetProxy.buildUrl(uploadUrl)
+        if (response.ok) {
+          const downloaded = new Uint8Array(await response.arrayBuffer())
+          if (downloaded.length === testData.length && downloaded.every((b, i) => b === testData[i])) {
+            directDownloadWorks = true
+          }
         }
+      } catch {
+        // Direct download failed (CORS blocked)
+      }
+      testedServerCorsDownload.set(server.name, directDownloadWorks)
 
+      // Step 3: If direct download worked, we're done
+      if (directDownloadWorks) {
+        const latency = Date.now() - start
+        const uploadMethod = directUploadWorked ? 'direct upload' : `upload via ${firstWorkingPostProxy!.name}`
+        serverResults.push({ name: server.name, status: 'ok', latency, corsUpload: server.corsUpload, corsDownload: server.corsDownload, directUploadWorks: directUploadWorked, directDownloadWorks })
+        console.log(`   %c✓ ${server.name}%c - ${latency}ms (${uploadMethod} + direct download)`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
+        continue
+      }
+
+      // Step 4: Direct download failed, try via CORS proxy
+      if (!firstWorkingGetProxy) {
+        serverResults.push({ name: server.name, status: 'failed', error: 'Direct download failed, no GET proxy', corsUpload: server.corsUpload, corsDownload: server.corsDownload, directUploadWorks: directUploadWorked, directDownloadWorks })
+        console.log(`   %c✗ ${server.name}%c - Direct download failed, no GET proxy`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
+        continue
+      }
+
+      try {
+        const proxyDownloadUrl = firstWorkingGetProxy.buildUrl(fileUrl)
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), 15000)
-        const response = await fetch(downloadUrl, { signal: controller.signal })
+        const response = await fetch(proxyDownloadUrl, { signal: controller.signal })
         clearTimeout(timeoutId)
 
         if (response.ok) {
           const downloaded = new Uint8Array(await response.arrayBuffer())
           if (downloaded.length === testData.length && downloaded.every((b, i) => b === testData[i])) {
             const latency = Date.now() - start
-            serverResults.push({ name: server.name, status: 'ok', latency })
-            console.log(`   %c✓ ${server.name}%c - ${latency}ms (via ${firstWorkingPostProxy.name})`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
+            const uploadMethod = directUploadWorked ? 'direct upload' : `upload via ${firstWorkingPostProxy!.name}`
+            serverResults.push({ name: server.name, status: 'ok', latency, corsUpload: server.corsUpload, corsDownload: server.corsDownload, directUploadWorks: directUploadWorked, directDownloadWorks })
+            console.log(`   %c✓ ${server.name}%c - ${latency}ms (${uploadMethod} + download via ${firstWorkingGetProxy.name})`, 'color: #22c55e; font-weight: bold;', 'color: #6b7280;')
             continue
           }
         }
 
-        serverResults.push({ name: server.name, status: 'failed', error: 'Download verification failed' })
+        serverResults.push({ name: server.name, status: 'failed', error: 'Download verification failed', corsUpload: server.corsUpload, corsDownload: server.corsDownload, directUploadWorks: directUploadWorked, directDownloadWorks })
         console.log(`   %c✗ ${server.name}%c - Download verification failed`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Unknown error'
-        serverResults.push({ name: server.name, status: 'failed', error: errorMsg })
+        serverResults.push({ name: server.name, status: 'failed', error: errorMsg, corsUpload: server.corsUpload, corsDownload: server.corsDownload, directUploadWorks: directUploadWorked, directDownloadWorks })
         console.log(`   %c✗ ${server.name}%c - ${errorMsg}`, 'color: #ef4444; font-weight: bold;', 'color: #6b7280;')
       }
     }
@@ -458,10 +469,9 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
     }
   }
 
-  // Check upload server corsUpload mismatches
+  // Check upload server corsUpload and corsDownload mismatches
   for (const server of UPLOAD_SERVERS) {
     const testedCorsUpload = testedServerCorsUpload.get(server.name)
-
     if (testedCorsUpload !== undefined && testedCorsUpload !== server.corsUpload) {
       configMismatches.push({
         type: 'uploadServer',
@@ -472,6 +482,20 @@ export async function testAllServices(): Promise<TestAllServicesResult> {
         recommendation: testedCorsUpload
           ? `Set corsUpload: true for ${server.name}`
           : `Set corsUpload: false for ${server.name}`,
+      })
+    }
+
+    const testedCorsDownload = testedServerCorsDownload.get(server.name)
+    if (testedCorsDownload !== undefined && testedCorsDownload !== server.corsDownload) {
+      configMismatches.push({
+        type: 'uploadServer',
+        name: server.name,
+        field: 'corsDownload',
+        hardcodedValue: server.corsDownload,
+        testedValue: testedCorsDownload,
+        recommendation: testedCorsDownload
+          ? `Set corsDownload: true for ${server.name}`
+          : `Set corsDownload: false for ${server.name}`,
       })
     }
   }
