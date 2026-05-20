@@ -85,24 +85,23 @@ worker.onmessageerror = () => {
   rejectAllPendingRequests('QR worker message error')
 }
 
-/**
- * Generate a QR code image from binary data
- * Returns a data URI (SVG image)
- * Uses 8-bit byte mode for binary data
- */
-export function generateBinaryQRCode(
-  data: Uint8Array,
-  options?: {
-    width?: number
-    errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H'
-  }
+interface QRCodeOptions {
+  width?: number
+  errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H'
+}
+
+function postGenerateRequest(
+  buffer: ArrayBuffer,
+  forceByteMode: boolean,
+  options: QRCodeOptions | undefined
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const id = registerPendingRequest(resolve, reject)
-    // Create a copy of the buffer to transfer
-    const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
     try {
-      worker.postMessage({ type: 'generate', id, binaryBuffer: buffer, options: options || {} }, [buffer])
+      worker.postMessage(
+        { type: 'generate', id, binaryBuffer: buffer, forceByteMode, options: options || {} },
+        [buffer]
+      )
     } catch (error) {
       const request = takePendingRequest(id)
       if (!request) {
@@ -116,29 +115,27 @@ export function generateBinaryQRCode(
 }
 
 /**
+ * Generate a QR code image from binary data
+ * Returns a data URI (SVG image)
+ * Uses 8-bit byte mode for binary data
+ */
+export function generateBinaryQRCode(data: Uint8Array, options?: QRCodeOptions): Promise<string> {
+  // Copy out of the source view's underlying buffer so the worker gets an
+  // exclusively-owned ArrayBuffer it can transfer without disturbing the caller.
+  const buffer = data.buffer.slice(
+    data.byteOffset,
+    data.byteOffset + data.byteLength
+  ) as ArrayBuffer
+  return postGenerateRequest(buffer, true, options)
+}
+
+/**
  * Generate a QR code image from text data
  * Returns a data URI (SVG image)
- * Uses text mode for smaller payloads like URLs
+ * Encoded as UTF-8 bytes; byte mode is left off so fast-qr can pick numeric/alphanumeric
+ * mode for compatible payloads (shorter URLs).
  */
-export function generateTextQRCode(
-  text: string,
-  options?: {
-    width?: number
-    errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H'
-  }
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const id = registerPendingRequest(resolve, reject)
-    try {
-      worker.postMessage({ type: 'generate', id, text, options: options || {} })
-    } catch (error) {
-      const request = takePendingRequest(id)
-      if (!request) {
-        return
-      }
-      request.reject(
-        error instanceof Error ? error : new Error('Failed to post QR generation request')
-      )
-    }
-  })
+export function generateTextQRCode(text: string, options?: QRCodeOptions): Promise<string> {
+  const bytes = new TextEncoder().encode(text)
+  return postGenerateRequest(bytes.buffer as ArrayBuffer, false, options)
 }
