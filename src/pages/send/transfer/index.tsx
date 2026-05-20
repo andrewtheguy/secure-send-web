@@ -272,15 +272,25 @@ export function SendTransferPage() {
           {!isOnline && offerData && submitAnswer && state.status === 'showing_offer' && (
             <div className="space-y-4">
               {/* Instructions at top */}
-              <div className="rounded-lg bg-muted/50 border p-4 space-y-2">
-                <p className="font-medium">Show these QR codes to the receiver</p>
-                <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
-                  <li>Receiver scans <strong>any</strong> QR code with their phone camera to get started</li>
-                  <li>App opens and guides scanning remaining codes</li>
-                  <li>QR codes do not need to be scanned in order, but all QR codes must be scanned</li>
-                  <li>Receiver shows you their response QR code</li>
-                  <li>You scan/paste their response below</li>
-                </ol>
+              <div className="rounded-lg bg-muted/50 border p-4 space-y-3">
+                <div className="space-y-2">
+                  <p className="font-medium">Show these QR codes to the receiver</p>
+                  <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
+                    <li>Receiver scans <strong>any</strong> QR code with their phone camera to get started</li>
+                    <li>App opens and guides scanning remaining codes</li>
+                    <li>QR codes do not need to be scanned in order, but all QR codes must be scanned</li>
+                    <li>Receiver shows you their response QR code</li>
+                    <li>You scan/paste their response below</li>
+                  </ol>
+                </div>
+                <div className="rounded-md bg-background/70 border border-dashed p-3 text-sm">
+                  <p className="font-medium">Camera not working? Use copy &amp; paste instead</p>
+                  <p className="text-muted-foreground mt-1">
+                    Tap <strong>Copy Data</strong> below the QR codes to copy the offer, send it to the receiver
+                    over any channel (chat, email, AirDrop), then use the <strong>Paste</strong> tab below to
+                    submit their response.
+                  </p>
+                </div>
               </div>
 
               {/* QR codes */}
