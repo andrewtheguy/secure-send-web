@@ -9,6 +9,16 @@ export interface RxingReaderOptions {
   binarizerFallback?: boolean
 }
 
+// Hardcoded to 1: the live scanner consumes `results[0]` and the underlying
+// multi-decode loop short-circuits on the first valid detection.
+//
+// Possible future direction (still under consideration): when scanning the
+// sender's multi-QR grid for chunked offers (see multi-qr-display.tsx +
+// chunk-utils.ts), bumping this would let one camera frame contribute
+// multiple chunks at once instead of one-per-frame. Unclear whether it
+// actually helps — those QR codes are already dense, and people might end
+// up needing to scan one by one anyways. Would also require the scanner
+// worker + useQRScanner consumer to handle `Uint8Array[]` with length > 1.
 const MAX_NUMBER_OF_SYMBOLS = 1
 
 let wasmInitialized = false
