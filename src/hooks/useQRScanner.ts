@@ -1,9 +1,9 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import { isMobileDevice } from '@/lib/utils'
-import ZXingWorker from '@/workers/zxing-qr-scanner.worker?worker'
+import RxingScannerWorker from '@/workers/rxing-qr-scanner.worker?worker'
 
 // Eager-load worker on module import for offline support
-const scannerWorker = new ZXingWorker()
+const scannerWorker = new RxingScannerWorker()
 
 // Module-level state for debouncing (shared across hook instances)
 let lastScannedHash = ''
@@ -68,7 +68,8 @@ export function useQRScanner(options: UseQRScannerOptions) {
     onCameraReady,
     isScanning,
     facingMode = 'environment',
-    scanInterval = 33, // Faster for better QR detection
+    scanInterval = 125, // ms between scan attempts (~8fps); static QR codes don't need high frame rates and the maximized-detection reader options are expensive
+
     debounceMs = 500,
     preferLowRes = true, // Default true for QR scanning
   } = options
@@ -123,12 +124,10 @@ export function useQRScanner(options: UseQRScannerOptions) {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
 
-      // Send to worker with binary mode enabled
       workerRef.current.postMessage(
         {
           type: 'scan',
           imageData,
-          binary: true, // Always use binary mode for gzipped data
         },
         [imageData.data.buffer]
       )

@@ -1,53 +1,42 @@
 // QR Generation Worker
-// Offloads expensive writeBarcode calls from main thread
+// Offloads expensive QR encoding from the main thread.
 
-import { writeBarcode, prepareZXingModule } from 'zxing-wasm/full'
+import { generateFastQrSvgString } from '@/lib/wasm/fastQrWasm'
 
-// Configure zxing-wasm to use local WASM file (cached by service worker for offline support)
-prepareZXingModule({
-  overrides: {
-    locateFile: (path: string, prefix: string) => {
-      if (path.endsWith('.wasm')) {
-        return `/${path}`
-      }
-      return prefix + path
-    },
-  },
-  fireImmediately: true,
-}).catch((err) => {
-  console.error('prepareZXingModule failed, check WASM locateFile in qrGenerator.worker:', err)
-})
+interface WorkerRequest {
+  type: 'generate'
+  id: number
+  binaryBuffer: ArrayBuffer
+  forceByteMode: boolean
+  options?: {
+    width?: number
+    errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H'
+  }
+}
 
-// Listen for messages from main thread
-self.onmessage = async (e: MessageEvent) => {
-  const { type, id, binaryBuffer, text, options } = e.data
+self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
+  const { type, id, binaryBuffer, forceByteMode, options } = e.data
 
-  if (type === 'generate') {
-    try {
-      let payload: Uint8Array | string
-      if (typeof text === 'string') {
-        payload = text
-      } else if (binaryBuffer instanceof ArrayBuffer) {
-        payload = new Uint8Array(binaryBuffer)
-      } else {
-        throw new Error('Missing QR payload')
-      }
+  if (type !== 'generate') return
 
-      const result = await writeBarcode(payload, {
-        format: 'QRCode',
-        ecLevel: (options.errorCorrectionLevel as 'L' | 'M' | 'Q' | 'H') || 'M',
-        sizeHint: options.width || 400,
-        withQuietZones: false,
-      })
+  try {
+    const dimension = options?.width ?? 400
 
-      if (result.error) {
-        throw new Error(result.error)
-      }
+    const svg = await generateFastQrSvgString(new Uint8Array(binaryBuffer), {
+      margin: 0,
+      errorCorrectionLevel: options?.errorCorrectionLevel ?? 'M',
+      forceByteMode,
+      svgWidth: dimension,
+      svgHeight: dimension,
+    })
 
-      self.postMessage({ type: 'success', id, svg: result.svg })
-    } catch (error) {
-      self.postMessage({ type: 'error', id, error: (error as Error).message })
-    }
+    self.postMessage({ type: 'success', id, svg })
+  } catch (error) {
+    self.postMessage({
+      type: 'error',
+      id,
+      error: error instanceof Error ? error.message : String(error),
+    })
   }
 }
 

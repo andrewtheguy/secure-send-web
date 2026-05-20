@@ -1,0 +1,69 @@
+import initFastQrWasm, { generate_qr_svg } from '@andrewtheguy/fast-qr-wasm'
+
+export type FastQrErrorCorrectionLevel = 'L' | 'M' | 'Q' | 'H'
+
+export interface FastQrSvgGenerateOptions {
+  margin?: number
+  errorCorrectionLevel?: FastQrErrorCorrectionLevel
+  forceByteMode?: boolean
+  svgWidth?: number
+  svgHeight?: number
+}
+
+let wasmInitialized = false
+let wasmInitPromise: Promise<void> | null = null
+
+function normalizeMargin(margin?: number): number {
+  const normalizedMargin = Number(margin ?? 1)
+  if (!Number.isFinite(normalizedMargin) || !Number.isInteger(normalizedMargin) || normalizedMargin < 0) {
+    throw new TypeError('Invalid margin: expected a finite integer >= 0')
+  }
+  return normalizedMargin
+}
+
+function normalizeOptionalDimension(value: number | undefined, name: string): number | undefined {
+  if (value === undefined) return undefined
+  const n = Number(value)
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+    throw new TypeError(`Invalid ${name}: expected a finite integer > 0`)
+  }
+  return n
+}
+
+export async function ensureFastQrWasmInit(): Promise<void> {
+  if (wasmInitialized) return
+
+  if (!wasmInitPromise) {
+    wasmInitPromise = (async () => {
+      await initFastQrWasm()
+      wasmInitialized = true
+    })().catch((error) => {
+      wasmInitPromise = null
+      throw error
+    })
+  }
+
+  await wasmInitPromise
+}
+
+export async function generateFastQrSvgString(
+  payload: Uint8Array,
+  options: FastQrSvgGenerateOptions = {}
+): Promise<string> {
+  await ensureFastQrWasmInit()
+
+  const normalizedMargin = normalizeMargin(options.margin)
+  const errorCorrectionLevel = options.errorCorrectionLevel ?? 'M'
+  const forceByteMode = options.forceByteMode ?? false
+  const svgWidth = normalizeOptionalDimension(options.svgWidth, 'svgWidth')
+  const svgHeight = normalizeOptionalDimension(options.svgHeight, 'svgHeight')
+
+  return generate_qr_svg(
+    payload,
+    normalizedMargin,
+    errorCorrectionLevel,
+    forceByteMode,
+    svgWidth,
+    svgHeight
+  )
+}
