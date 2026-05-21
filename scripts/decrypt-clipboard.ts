@@ -5,9 +5,9 @@
  *    or: echo '<base64-data>' | npx tsx scripts/decrypt-clipboard.ts <pin>
  */
 
-import crypto from 'crypto'
-import zlib from 'zlib'
-import { createInterface } from 'readline'
+import crypto from 'node:crypto'
+import zlib from 'node:zlib'
+import { createInterface } from 'node:readline'
 
 async function readStdin(): Promise<string> {
   const rl = createInterface({ input: process.stdin })
@@ -93,7 +93,7 @@ async function main(): Promise<void> {
     // Decompress (deflate was used before encryption)
     const jsonBytes = zlib.inflateSync(compressed)
     console.log('Decompressed JSON:', jsonBytes.length, 'bytes')
-    console.log('Compression ratio:', ((compressed.length / jsonBytes.length) * 100).toFixed(1) + '%')
+    console.log('Compression ratio:', `${((compressed.length / jsonBytes.length) * 100).toFixed(1)}%`)
 
     const json = jsonBytes.toString('utf8')
 
