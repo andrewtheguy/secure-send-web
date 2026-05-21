@@ -1,13 +1,13 @@
 // QR Generation Worker
 // Offloads expensive QR encoding from the main thread.
 
-import { generateFastQrSvgString } from '@/lib/wasm/fastQrWasm'
+import { generateFastQrSvgString, type FastQrMode } from '@/lib/wasm/fastQrWasm'
 
 interface WorkerRequest {
   type: 'generate'
   id: number
   binaryBuffer: ArrayBuffer
-  forceByteMode: boolean
+  mode: FastQrMode
   options?: {
     width?: number
     errorCorrectionLevel?: 'L' | 'M' | 'Q' | 'H'
@@ -15,7 +15,7 @@ interface WorkerRequest {
 }
 
 self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
-  const { type, id, binaryBuffer, forceByteMode, options } = e.data
+  const { type, id, binaryBuffer, mode, options } = e.data
 
   if (type !== 'generate') return
 
@@ -25,7 +25,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     const svg = await generateFastQrSvgString(new Uint8Array(binaryBuffer), {
       margin: 0,
       errorCorrectionLevel: options?.errorCorrectionLevel ?? 'M',
-      forceByteMode,
+      mode,
       svgWidth: dimension,
       svgHeight: dimension,
     })

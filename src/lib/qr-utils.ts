@@ -1,4 +1,5 @@
 import QRWorker from '@/workers/qrGenerator.worker?worker'
+import type { FastQrMode } from '@/lib/wasm/fastQrWasm'
 
 // Eager-load worker on module import for offline support
 const worker = new QRWorker()
@@ -92,14 +93,14 @@ interface QRCodeOptions {
 
 function postGenerateRequest(
   buffer: ArrayBuffer,
-  forceByteMode: boolean,
+  mode: FastQrMode,
   options: QRCodeOptions | undefined
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const id = registerPendingRequest(resolve, reject)
     try {
       worker.postMessage(
-        { type: 'generate', id, binaryBuffer: buffer, forceByteMode, options: options || {} },
+        { type: 'generate', id, binaryBuffer: buffer, mode, options: options || {} },
         [buffer]
       )
     } catch (error) {
@@ -126,7 +127,7 @@ export function generateBinaryQRCode(data: Uint8Array, options?: QRCodeOptions):
     data.byteOffset,
     data.byteOffset + data.byteLength
   ) as ArrayBuffer
-  return postGenerateRequest(buffer, true, options)
+  return postGenerateRequest(buffer, 'byte', options)
 }
 
 /**
@@ -137,5 +138,5 @@ export function generateBinaryQRCode(data: Uint8Array, options?: QRCodeOptions):
  */
 export function generateTextQRCode(text: string, options?: QRCodeOptions): Promise<string> {
   const bytes = new TextEncoder().encode(text)
-  return postGenerateRequest(bytes.buffer as ArrayBuffer, false, options)
+  return postGenerateRequest(bytes.buffer as ArrayBuffer, 'auto', options)
 }

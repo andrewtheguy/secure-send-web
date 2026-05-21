@@ -2,10 +2,17 @@ import initFastQrWasm, { generate_qr_svg } from '@andrewtheguy/fast-qr-wasm'
 
 export type FastQrErrorCorrectionLevel = 'L' | 'M' | 'Q' | 'H'
 
+/**
+ * QR encoding mode. `'auto'` picks the most compact mode for the payload;
+ * the other values pin a specific encoding (use `'byte'` for arbitrary
+ * binary data).
+ */
+export type FastQrMode = 'auto' | 'numeric' | 'alphanumeric' | 'byte'
+
 export interface FastQrSvgGenerateOptions {
   margin?: number
   errorCorrectionLevel?: FastQrErrorCorrectionLevel
-  forceByteMode?: boolean
+  mode?: FastQrMode
   svgWidth?: number
   svgHeight?: number
 }
@@ -54,7 +61,7 @@ export async function generateFastQrSvgString(
 
   const normalizedMargin = normalizeMargin(options.margin)
   const errorCorrectionLevel = options.errorCorrectionLevel ?? 'M'
-  const forceByteMode = options.forceByteMode ?? false
+  const mode = options.mode ?? 'auto'
   const svgWidth = normalizeOptionalDimension(options.svgWidth, 'svgWidth')
   const svgHeight = normalizeOptionalDimension(options.svgHeight, 'svgHeight')
 
@@ -62,7 +69,7 @@ export async function generateFastQrSvgString(
     payload,
     normalizedMargin,
     errorCorrectionLevel,
-    forceByteMode,
+    mode,
     svgWidth,
     svgHeight
   )
