@@ -1,4 +1,5 @@
 import initRxingWasm, { read_qr_codes_rgba } from '@andrewtheguy/rxing-wasm'
+import rxingWasmUrl from '@andrewtheguy/rxing-wasm/rxing_wasm_bg.wasm?url'
 
 export type Binarizer = 'hybrid' | 'global'
 
@@ -29,7 +30,7 @@ export async function ensureRxingWasmInit(): Promise<void> {
 
   if (!wasmInitPromise) {
     wasmInitPromise = (async () => {
-      await initRxingWasm()
+      await initRxingWasm({ module_or_path: rxingWasmUrl })
       wasmInitialized = true
     })().catch((error) => {
       wasmInitPromise = null

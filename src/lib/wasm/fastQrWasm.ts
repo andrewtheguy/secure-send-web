@@ -1,4 +1,5 @@
 import initFastQrWasm, { generate_qr_svg } from '@andrewtheguy/fast-qr-wasm'
+import fastQrWasmUrl from '@andrewtheguy/fast-qr-wasm/fast_qr_wasm_bg.wasm?url'
 
 export type FastQrErrorCorrectionLevel = 'L' | 'M' | 'Q' | 'H'
 
@@ -42,7 +43,7 @@ export async function ensureFastQrWasmInit(): Promise<void> {
 
   if (!wasmInitPromise) {
     wasmInitPromise = (async () => {
-      await initFastQrWasm()
+      await initFastQrWasm({ module_or_path: fastQrWasmUrl })
       wasmInitialized = true
     })().catch((error) => {
       wasmInitPromise = null
