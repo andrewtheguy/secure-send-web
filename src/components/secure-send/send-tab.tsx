@@ -148,7 +148,7 @@ export function SendTab() {
                   {/* File list */}
                   <div className="max-h-[160px] overflow-y-auto space-y-1 border rounded-lg p-2">
                     {selectedFiles.map((file, index) => (
-                      <div key={`${file.name}-${file.size}-${index}`} className="flex items-center gap-2 py-1 px-2 rounded hover:bg-muted/50 group">
+                      <div key={`${file.name}-${file.size}-${file.lastModified}`} className="flex items-center gap-2 py-1 px-2 rounded hover:bg-muted/50 group">
                         <FileUp className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                         <span className="flex-1 truncate text-sm">{file.name}</span>
                         <span className="text-xs text-muted-foreground flex-shrink-0">{formatFileSize(file.size)}</span>
@@ -179,14 +179,15 @@ export function SendTab() {
                   </div>
                 </div>
               ) : (
-                <div
+                <button
+                  type="button"
                   onClick={() => fileInputRef.current?.click()}
                   onDrop={handleDrop}
                   onDragEnter={handleDragEnter}
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
                   className={`
-                    min-h-[200px] border-2 border-dashed rounded-lg
+                    w-full min-h-[200px] border-2 border-dashed rounded-lg
                     flex flex-col items-center justify-center gap-3
                     cursor-pointer transition-colors
                     ${isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 hover:border-muted-foreground/50'}
@@ -199,7 +200,7 @@ export function SendTab() {
                       Max size: {formatFileSize(MAX_MESSAGE_SIZE)}
                     </p>
                   </div>
-                </div>
+                </button>
               )}
               <input
                 ref={fileInputRef}
@@ -218,8 +219,17 @@ export function SendTab() {
 
           {mode === 'folder' && (
             <div className="space-y-2">
+              {/* biome-ignore lint/a11y/useSemanticElements: cannot use <button> because the "Remove" Button is nested inside when folderFiles is set */}
               <div
+                role="button"
+                tabIndex={0}
                 onClick={() => folderInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    folderInputRef.current?.click()
+                  }
+                }}
                 className={`
                   min-h-[200px] border-2 border-dashed rounded-lg
                   flex flex-col items-center justify-center gap-3

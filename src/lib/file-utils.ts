@@ -54,7 +54,7 @@ export function formatFileSize(bytes: number): string {
     sizes.length - 1
   )
 
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
+  return `${parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`
 }
 
 /**

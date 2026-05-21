@@ -67,7 +67,7 @@ export class NostrClient {
         lastError = err as Error
         if (attempt < maxRetries - 1) {
           // Wait before retry (exponential backoff: 500ms, 1000ms, 2000ms)
-          await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt)))
+          await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt))
         }
       }
     }

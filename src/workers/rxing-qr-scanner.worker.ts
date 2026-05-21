@@ -39,5 +39,3 @@ self.onmessage = async (e: MessageEvent<ScanMessage>) => {
     self.postMessage(result)
   }
 }
-
-export {}

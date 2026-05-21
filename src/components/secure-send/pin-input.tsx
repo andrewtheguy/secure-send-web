@@ -435,6 +435,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         {useWords ? (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {words.map((word, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length word slots; index IS the position
               <div key={i} className="relative group">
                 <Input
                   ref={el => { inputRefs.current[i] = el }}
@@ -475,7 +476,8 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
                   >
                     {suggestions.slice(0, 10).map((s, si) => (
                       <button
-                        key={si}
+                        key={s}
+                        type="button"
                         id={`suggestion-${i}-${si}`}
                         className={`w-full text-left px-3 py-1.5 text-sm font-mono transition-colors ${si === selectedIndex
                           ? 'bg-primary text-primary-foreground'
@@ -536,8 +538,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
           <div className="flex justify-between items-center text-xs">
             <div className="flex items-center gap-1.5">
               {useWords ? (
-                <>
-                  {wordIsComplete && !wordHasChecksumError ? (
+                wordIsComplete && !wordHasChecksumError ? (
                     <span className="text-green-600 flex items-center gap-1">
                       <CheckCircle2 className="h-3 w-3" /> PIN Valid
                     </span>
@@ -549,11 +550,9 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
                     <span className="text-muted-foreground">
                       {wordDisplayLength}/7 words validated
                     </span>
-                  )}
-                </>
+                  )
               ) : (
-                <>
-                  {charIsComplete && !charHasChecksumError ? (
+                charIsComplete && !charHasChecksumError ? (
                     <span className="text-green-600 flex items-center gap-1">
                       <CheckCircle2 className="h-3 w-3" /> PIN Valid
                     </span>
@@ -565,8 +564,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
                     <span className="text-muted-foreground">
                       {charDisplayLength}/{PIN_LENGTH} characters
                     </span>
-                  )}
-                </>
+                  )
               )}
               {error && <span className="text-destructive">• {error}</span>}
             </div>

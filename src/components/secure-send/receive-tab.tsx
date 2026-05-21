@@ -301,8 +301,7 @@ export function ReceiveTab() {
           </div>
 
           {receiveMode === 'pin' ? (
-            <>
-              {usePasskey ? (
+            usePasskey ? (
                 <>
                   <AdvancedOptionsPanel
                     showAdvanced={showAdvanced}
@@ -332,7 +331,7 @@ export function ReceiveTab() {
                 <>
                   {/* Regular PIN mode */}
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Enter PIN from sender</label>
+                    <div className="text-sm font-medium">Enter PIN from sender</div>
                     <PinInput ref={pinInputRef} onPinChange={handlePinChange} disabled={isActive} />
                     {timeRemaining > 0 && (
                       <p className="text-xs text-amber-600 font-medium">
@@ -375,8 +374,7 @@ export function ReceiveTab() {
                     Receive
                   </Button>
                 </>
-              )}
-            </>
+              )
           ) : (
             <>
               <div className="space-y-2">

@@ -137,6 +137,7 @@ export function ReceiveChunkedPage() {
                       const received = chunkState.collectedIndices.has(i)
                       return (
                         <div
+                          // biome-ignore lint/suspicious/noArrayIndexKey: fixed-position chunk grid; index IS the identity
                           key={i}
                           className={`w-7 h-7 rounded text-xs font-medium flex items-center justify-center transition-colors ${
                             received
@@ -214,7 +215,7 @@ export function ReceiveChunkedPage() {
                 )}
               </div>
 
-              {scanError && scanError.includes('denied') && (
+              {scanError?.includes('denied') && (
                 <p className="text-xs text-muted-foreground text-center">
                   Please allow camera access in your browser settings and reload the page.
                 </p>
