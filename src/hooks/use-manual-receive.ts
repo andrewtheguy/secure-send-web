@@ -113,6 +113,7 @@ export function useManualReceive(): UseManualReceiveReturn {
     offerResolverRef.current?.(parsed)
   }, [])
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: doReceive is defined below and only invoked at call time; references stable refs/setState
   const startReceive = useCallback(() => {
     // Guard against concurrent invocations
     if (receivingRef.current) return

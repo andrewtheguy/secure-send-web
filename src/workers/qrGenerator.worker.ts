@@ -39,5 +39,3 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     })
   }
 }
-
-export {}

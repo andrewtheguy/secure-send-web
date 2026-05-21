@@ -279,7 +279,7 @@ export function useNostrSend(): UseNostrSendReturn {
         })
 
         // Choose event type based on mode
-        let exchangeEvent
+        let exchangeEvent: Event
         if (options?.usePasskey && options.selfTransfer && senderFingerprint && keyConfirmHash && receiverPkCommitment && replayNonce && senderEphemeral) {
           // Self-transfer (same passkey): use mutual trust event
           // Both parties have the same passkey, so they derive the same key

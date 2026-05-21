@@ -259,8 +259,6 @@ export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null 
           return payload
         }
       } catch {
-        // Continue to next bucket if this one fails
-        continue
       }
     }
 

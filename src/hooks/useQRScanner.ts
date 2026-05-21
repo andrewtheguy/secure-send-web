@@ -165,7 +165,9 @@ export function useQRScanner(options: UseQRScannerOptions) {
     isScanningRef.current = false
 
     if (cameraStreamRef.current) {
-      cameraStreamRef.current.getTracks().forEach((track) => track.stop())
+      cameraStreamRef.current.getTracks().forEach((track) => {
+        track.stop()
+      })
       cameraStreamRef.current = null
     }
 
@@ -207,7 +209,9 @@ export function useQRScanner(options: UseQRScannerOptions) {
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints)
       if (shouldAbortStart()) {
-        stream.getTracks().forEach((track) => track.stop())
+        stream.getTracks().forEach((track) => {
+          track.stop()
+        })
         return
       }
 
@@ -216,7 +220,9 @@ export function useQRScanner(options: UseQRScannerOptions) {
 
       await videoRef.current.play()
       if (shouldAbortStart()) {
-        stream.getTracks().forEach((track) => track.stop())
+        stream.getTracks().forEach((track) => {
+          track.stop()
+        })
         cameraStreamRef.current = null
         if (videoRef.current) {
           videoRef.current.pause()
@@ -254,7 +260,9 @@ export function useQRScanner(options: UseQRScannerOptions) {
     }
 
     if (cameraStreamRef.current) {
-      cameraStreamRef.current.getTracks().forEach((track) => track.stop())
+      cameraStreamRef.current.getTracks().forEach((track) => {
+        track.stop()
+      })
       cameraStreamRef.current = null
     }
 
@@ -280,6 +288,7 @@ export function useQRScanner(options: UseQRScannerOptions) {
   // Restart camera when facingMode or preferLowRes changes
   const facingModeRef = useRef(facingMode)
   const preferLowResRef = useRef(preferLowRes)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — only react to facingMode/preferLowRes changes; switchCamera identity changes with them and would cause duplicate runs
   useEffect(() => {
     const facingModeChanged = facingModeRef.current !== facingMode
     const preferLowResChanged = preferLowResRef.current !== preferLowRes
@@ -290,7 +299,6 @@ export function useQRScanner(options: UseQRScannerOptions) {
 
     facingModeRef.current = facingMode
     preferLowResRef.current = preferLowRes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facingMode, preferLowRes])
 
   // Cleanup on unmount

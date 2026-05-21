@@ -199,6 +199,7 @@ export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProp
             {useWords ? (
               <div className="grid grid-cols-2 gap-1.5">
                 {words.map((word, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length PIN word slots
                   <div key={i} className="relative">
                     <Input
                       value={isMasked ? '\u2022\u2022\u2022\u2022\u2022' : word}
@@ -339,6 +340,7 @@ export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProp
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {words.map((word, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length PIN word slots
               <div key={i} className="relative">
                 <Input
                   value={isMasked ? '\u2022\u2022\u2022\u2022\u2022' : word}

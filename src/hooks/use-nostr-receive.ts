@@ -331,7 +331,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             eventSalt = parsed.salt
             break
           } catch {
-            continue
           }
         } else {
           // PIN mode
@@ -351,7 +350,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             selectedCreatedAtSec = event.created_at || null
             break
           } catch {
-            continue
           }
         }
       }

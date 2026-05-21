@@ -72,8 +72,8 @@ export function TransferStatus({ state, betweenProgressAndChunks }: TransferStat
                 {state.totalRelays !== undefined && ` / ${state.totalRelays}`}
               </p>
               <ul className="space-y-0.5 pl-3">
-                {state.currentRelays!.map((relay, idx) => (
-                  <li key={idx} className="text-muted-foreground truncate" title={relay}>
+                {state.currentRelays!.map((relay) => (
+                  <li key={relay} className="text-muted-foreground truncate" title={relay}>
                     • {relay.replace('wss://', '')}
                   </li>
                 ))}
