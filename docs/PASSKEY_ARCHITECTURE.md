@@ -39,7 +39,7 @@ flowchart TD
 
 **Non-extractable keys**: Keys marked as non-extractable cannot be exported from the Web Crypto key store, preventing extraction via XSS attacks or memory exfiltration and keeping raw key material confined to the browser's secure runtime.
 
-> **Exception**: the raw 32-byte WebAuthn PRF output is briefly visible as an `ArrayBuffer` returned by `getClientExtensionResults()` before being imported as the non-extractable HKDF master key. This is a WebAuthn spec limitation; a proposed `asCryptoKey` PRF option ([w3c/webauthn#1895](https://github.com/w3c/webauthn/issues/1895), [PR #1945](https://github.com/w3c/webauthn/pull/1945)) was abandoned in 2024 and no browser ships it. The buffer is passed straight into `importKey` and never stored in a named variable.
+> **Exception**: the raw 32-byte WebAuthn PRF output is briefly visible as an `ArrayBuffer` returned by `getClientExtensionResults()` before being imported as the non-extractable HKDF master key. This is a WebAuthn spec limitation; a proposed `asCryptoKey` PRF option ([w3c/webauthn#1895](https://github.com/w3c/webauthn/issues/1895), [PR #1945](https://github.com/w3c/webauthn/pull/1945)) was abandoned in 2024 and no browser ships it. The implementation imports the buffer immediately, then overwrites that JS-visible `ArrayBuffer` on a best-effort basis. This cleanup cannot guarantee that browser or Web Crypto internals kept no copies.
 
 1. **Master Key**: Single passkey prompt derives HKDF master key via PRF
 2. **Public ID**: HKDF with label derives a 32-byte shareable identifier

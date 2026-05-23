@@ -1,4 +1,5 @@
 export * from './constants'
+export * from './memory'
 export * from './pin'
 export * from './kdf'
 export * from './aes-gcm'
