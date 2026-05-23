@@ -5,9 +5,17 @@ import RxingScannerWorker from '@/workers/rxing-qr-scanner.worker?worker'
 // Eager-load worker on module import for offline support
 const scannerWorker = new RxingScannerWorker()
 
-// Module-level state for debouncing (shared across hook instances)
-let lastScannedHash = ''
-let lastScanTime = 0
+function fnv1aHash(bytes: Uint8Array): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < bytes.length; i++) {
+    h ^= bytes[i]
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16)
+}
+
+// Module-level state for per-QR debouncing (shared across hook instances)
+const recentScanTimestamps = new Map<string, number>()
 
 // Current callback reference (updated by active hook instance)
 let currentOnScan: ((data: Uint8Array) => void) | null = null
@@ -17,22 +25,32 @@ let currentDebounceMs = 500
 scannerWorker.onmessage = (e: MessageEvent) => {
   if (e.data.type === 'result') {
     if (e.data.data && Array.isArray(e.data.data) && e.data.data.length > 0) {
-      const scannedData = e.data.data[0] as Uint8Array
       const now = Date.now()
 
-      // Create hash for debouncing binary data
-      const dataHash = Array.from(scannedData.slice(0, 32)).join(',')
-
-      // Debounce duplicate scans
-      if (currentDebounceMs > 0 && dataHash === lastScannedHash && now - lastScanTime < currentDebounceMs) {
-        return
+      if (recentScanTimestamps.size > 50) {
+        const pruneThreshold = now - currentDebounceMs * 2
+        for (const [hash, ts] of recentScanTimestamps) {
+          if (ts < pruneThreshold) {
+            recentScanTimestamps.delete(hash)
+          }
+        }
       }
 
-      lastScannedHash = dataHash
-      lastScanTime = now
+      for (const scannedData of e.data.data) {
+        const dataHash = fnv1aHash(scannedData as Uint8Array)
 
-      if (currentOnScan) {
-        currentOnScan(scannedData)
+        if (currentDebounceMs > 0) {
+          const lastTime = recentScanTimestamps.get(dataHash)
+          if (lastTime !== undefined && now - lastTime < currentDebounceMs) {
+            continue
+          }
+        }
+
+        recentScanTimestamps.set(dataHash, now)
+
+        if (currentOnScan) {
+          currentOnScan(scannedData as Uint8Array)
+        }
       }
     }
     if (e.data.error) {

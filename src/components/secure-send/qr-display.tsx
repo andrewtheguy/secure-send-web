@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Copy, Check, AlertCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { generateBinaryQRCode } from '@/lib/qr-utils'
@@ -12,24 +12,29 @@ interface QRDisplayProps {
   showSize?: boolean
 }
 
+const MIN_QR_SIZE = 150
+
 export function QRDisplay({ data, label, showCopyButton = true, clipboardData, showSize = true }: QRDisplayProps) {
   const [copied, setCopied] = useState(false)
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
 
-  // Generate QR code when data changes
   useEffect(() => {
     if (!data || data.length === 0) {
       setQrImageUrl(null) // eslint-disable-line react-hooks/set-state-in-effect
       return
     }
 
+    const measuredWidth = containerRef.current?.clientWidth ?? 0
+    const qrWidth = Math.max(measuredWidth, MIN_QR_SIZE)
+
     setIsGenerating(true)
     setError(null)
 
     generateBinaryQRCode(data, {
-      width: 400,
+      width: qrWidth,
       errorCorrectionLevel: 'M'
     })
       .then((url) => {
@@ -64,23 +69,23 @@ export function QRDisplay({ data, label, showCopyButton = true, clipboardData, s
         <p className="text-sm font-medium text-muted-foreground">{label}</p>
       )}
 
-      <div className="p-4 bg-white rounded-lg flex items-center justify-center">
-        {isGenerating ? (
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        ) : error ? (
-          <div className="text-destructive text-sm flex items-center">
-            <AlertCircle className="h-4 w-4 mr-2" />
-            {error}
-          </div>
-        ) : qrImageUrl ? (
-          <img
-            src={qrImageUrl}
-            alt="QR Code"
-            width={256}
-            height={256}
-            className="block"
-          />
-        ) : null}
+      <div className="p-4 bg-white rounded-lg w-full">
+        <div ref={containerRef} className="flex items-center justify-center w-full">
+          {isGenerating ? (
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          ) : error ? (
+            <div className="text-destructive text-sm flex items-center">
+              <AlertCircle className="h-4 w-4 mr-2" />
+              {error}
+            </div>
+          ) : qrImageUrl ? (
+            <img
+              src={qrImageUrl}
+              alt="QR Code"
+              className="block w-full h-auto"
+            />
+          ) : null}
+        </div>
       </div>
 
       {showSize && (

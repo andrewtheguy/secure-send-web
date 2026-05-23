@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { Copy, Check, Loader2, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { generateTextQRCode } from '@/lib/qr-utils'
@@ -11,130 +11,89 @@ interface MultiQRDisplayProps {
   showCopyButton?: boolean
 }
 
-interface ChunkQR {
+interface ChunkInfo {
   url: string
-  imageUrl: string | null
   index: number
   total: number
 }
 
-function revokeChunkQRImageUrls(chunks: ChunkQR[]) {
-  for (const chunk of chunks) {
-    if (chunk.imageUrl) {
-      URL.revokeObjectURL(chunk.imageUrl)
-    }
-  }
-}
+const MIN_QR_SIZE = 150
 
 export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: MultiQRDisplayProps) {
   const [copied, setCopied] = useState(false)
-  const [chunkQRs, setChunkQRs] = useState<ChunkQR[]>([])
-  const [isGenerating, setIsGenerating] = useState(false)
+  const [qrImageUrls, setQrImageUrls] = useState<Map<number, string>>(new Map())
   const [error, setError] = useState<string | null>(null)
-  const chunkQRsRef = useRef<ChunkQR[]>([])
+  const containerRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    chunkQRsRef.current = chunkQRs
-  }, [chunkQRs])
-
-  useEffect(() => {
-    return () => {
-      revokeChunkQRImageUrls(chunkQRsRef.current)
-    }
-  }, [])
-
-  useEffect(() => {
-    let active = true
-    let generatedChunkQRs: ChunkQR[] = []
-
-    if (!data || data.length === 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: clear stale QR state when input is empty
-      setChunkQRs((existingChunkQRs) => {
-        revokeChunkQRImageUrls(existingChunkQRs)
-        return []
-      })
-      setError(null)
-      setIsGenerating(false)
-      return () => {
-        active = false
-      }
-    }
-
-    setIsGenerating(true)
-    setError(null)
-    setChunkQRs((existingChunkQRs) => {
-      revokeChunkQRImageUrls(existingChunkQRs)
-      return []
-    })
-
+  const chunkInfos = useMemo((): ChunkInfo[] => {
+    if (!data || data.length === 0) return []
     const baseUrl = window.location.origin
-
     const chunks = chunkPayload(data)
-    const urls = chunks.map(chunk => buildChunkUrl(baseUrl, chunk))
+    return chunks.map((chunk, i) => ({
+      url: buildChunkUrl(baseUrl, chunk),
+      index: i,
+      total: chunks.length,
+    }))
+  }, [data])
 
-    // Generate QR codes for each URL
+  useEffect(() => {
+    if (chunkInfos.length === 0) {
+      setQrImageUrls(new Map())
+      setError(null)
+      return
+    }
+
+    let active = true
+
+    const measuredWidth = containerRef.current?.clientWidth ?? 0
+    const qrWidth = Math.max(measuredWidth, MIN_QR_SIZE)
+
+    setError(null)
+    setQrImageUrls(new Map())
+
     Promise.allSettled(
-      urls.map(async (url, i) => {
-        const imageUrl = await generateTextQRCode(url, {
-          width: 400,
+      chunkInfos.map(async (info) => {
+        const imageUrl = await generateTextQRCode(info.url, {
+          width: qrWidth,
           errorCorrectionLevel: 'M',
         })
-        return {
-          url,
-          imageUrl,
-          index: i,
-          total: chunks.length,
-        } satisfies ChunkQR
+        return { index: info.index, imageUrl }
       })
     )
       .then((results) => {
-        const fulfilledChunkQRs: ChunkQR[] = []
+        if (!active) return
+
+        const urls = new Map<number, string>()
         let firstError: unknown = null
 
         for (const result of results) {
           if (result.status === 'fulfilled') {
-            fulfilledChunkQRs.push(result.value)
+            urls.set(result.value.index, result.value.imageUrl)
           } else if (firstError === null) {
             firstError = result.reason
           }
         }
 
-        generatedChunkQRs = fulfilledChunkQRs
-        if (!active) {
-          revokeChunkQRImageUrls(fulfilledChunkQRs)
-          return
-        }
-
         if (firstError !== null) {
-          revokeChunkQRImageUrls(fulfilledChunkQRs)
-          setChunkQRs([])
           console.error('Failed to generate QR codes:', firstError)
           setError('Failed to generate QR codes')
+          setQrImageUrls(new Map())
           return
         }
 
-        setChunkQRs(fulfilledChunkQRs)
+        setQrImageUrls(urls)
       })
       .catch((err) => {
-        revokeChunkQRImageUrls(generatedChunkQRs)
-        if (!active) {
-          return
-        }
-
-        setChunkQRs([])
+        if (!active) return
         console.error('Failed to generate QR codes:', err)
         setError('Failed to generate QR codes')
-      })
-      .finally(() => {
-        if (active) {
-          setIsGenerating(false)
-        }
+        setQrImageUrls(new Map())
       })
 
     return () => {
       active = false
     }
-  }, [data])
+  }, [chunkInfos])
 
   const handleCopy = useCallback(async () => {
     if (!data || data.length === 0) return
@@ -148,15 +107,6 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
     }
   }, [clipboardData, data])
 
-  if (isGenerating) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-8">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">Generating QR codes...</p>
-      </div>
-    )
-  }
-
   if (error) {
     return (
       <div className="flex items-center justify-center text-destructive text-sm py-8">
@@ -166,29 +116,38 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
     )
   }
 
+  if (chunkInfos.length === 0) return null
+
   return (
     <div className="flex flex-col items-center space-y-4">
       <div className="text-xs text-muted-foreground">
-        {data.length.toLocaleString()} bytes &bull; {chunkQRs.length} QR code{chunkQRs.length !== 1 ? 's' : ''}
+        {data.length.toLocaleString()} bytes &bull; {chunkInfos.length} QR code{chunkInfos.length !== 1 ? 's' : ''}
       </div>
 
-      <div className={`grid gap-4 ${chunkQRs.length === 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'} w-full max-w-[600px] lg:w-fit lg:max-w-none`}>
-        {chunkQRs.map((qr) => (
-          <div key={qr.index} className="flex flex-col items-center gap-1">
-            <div className="p-2 bg-white rounded-lg flex items-center justify-center">
-              {qr.imageUrl ? (
-                <img
-                  src={qr.imageUrl}
-                  alt={`QR Code ${qr.index + 1} of ${qr.total}`}
-                  width={400}
-                  height={400}
-                  className="block w-full h-auto lg:w-auto"
-                />
-              ) : null}
+      <div className={`grid gap-4 ${chunkInfos.length === 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'} w-full max-w-[600px]`}>
+        {chunkInfos.map((info, i) => (
+          <div key={info.index} className="flex flex-col items-center gap-1">
+            <div className="p-2 bg-white rounded-lg w-full">
+              <div
+                ref={i === 0 ? containerRef : undefined}
+                className="flex items-center justify-center w-full"
+              >
+                {qrImageUrls.has(info.index) ? (
+                  <img
+                    src={qrImageUrls.get(info.index)}
+                    alt={`QR Code ${info.index + 1} of ${info.total}`}
+                    className="block w-full h-auto"
+                  />
+                ) : (
+                  <div className="aspect-square w-full flex items-center justify-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+              </div>
             </div>
-            {qr.total > 1 && (
+            {info.total > 1 && (
               <p className="text-xs text-muted-foreground font-medium">
-                {qr.index + 1} of {qr.total}
+                {info.index + 1} of {info.total}
               </p>
             )}
           </div>
