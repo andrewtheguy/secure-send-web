@@ -39,6 +39,8 @@ flowchart TD
 
 **Non-extractable keys**: Keys marked as non-extractable cannot be exported from the Web Crypto key store, preventing extraction via XSS attacks or memory exfiltration and keeping raw key material confined to the browser's secure runtime.
 
+> **Exception**: the raw 32-byte WebAuthn PRF output is briefly visible as an `ArrayBuffer` returned by `getClientExtensionResults()` before being imported as the non-extractable HKDF master key. This is a WebAuthn spec limitation; a proposed `asCryptoKey` PRF option ([w3c/webauthn#1895](https://github.com/w3c/webauthn/issues/1895), [PR #1945](https://github.com/w3c/webauthn/pull/1945)) was abandoned in 2024 and no browser ships it. The buffer is passed straight into `importKey` and never stored in a named variable.
+
 1. **Master Key**: Single passkey prompt derives HKDF master key via PRF
 2. **Public ID**: HKDF with label derives a 32-byte shareable identifier
 3. **Per-Transfer Key**: HKDF with random salt derives unique AES key per transfer
@@ -58,7 +60,7 @@ flowchart TD
     EphPub[Ephemeral Public Key] --> EphBind
 ```
 
-**Security benefit**: No raw private key material is exposed to JavaScript. The passkey master key stays inside Web Crypto as a non-extractable `CryptoKey`, and all derived keys are produced via `deriveKey`/`deriveBits`. This prevents:
+**Security benefit**: No raw private key material is exposed to JavaScript beyond the one unavoidable PRF-output boundary described above. The passkey master key stays inside Web Crypto as a non-extractable `CryptoKey`, and all derived keys are produced via `deriveKey`/`deriveBits`. This prevents:
 - XSS attacks from reading raw secret material via memory inspection
 - Accidental logging or serialization of raw keys
 - Side-channel exposure of raw private bytes

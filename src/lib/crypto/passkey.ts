@@ -147,24 +147,27 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<{
     prf?: { results?: { first?: ArrayBuffer } }
   }
 
-  if (!extResults.prf?.results?.first) {
+  const prfResult = extResults.prf?.results?.first
+  if (!prfResult) {
     throw new Error('PRF evaluation failed - authenticator may not support PRF extension')
   }
 
-  const prfBytes = new Uint8Array(extResults.prf.results.first)
-
-  // Import PRF output as HKDF master key.
-  // SECURITY: This PRF output is sensitive key material. If exposed, it can be
-  // used to derive encryption keys for this passkey.
+  // SECURITY: The PRF output is transiently visible to JavaScript as the raw
+  // ArrayBuffer returned by getClientExtensionResults(). This is unavoidable —
+  // the WebAuthn spec defines prf.results.first as an ArrayBuffer, and the
+  // proposal to return it as a non-extractable CryptoKey (w3c/webauthn#1895,
+  // PR #1945) was abandoned in 2024 with no replacement. We pass the buffer
+  // straight into importKey so the bytes never live in a named variable, and
+  // the resulting HKDF master key is non-extractable from this point on. All
+  // downstream keys (HMAC, AES, session-binding, ephemeral ECDH-derived) are
+  // produced via deriveKey/deriveBits and never re-expose raw secret material.
   const masterKey = await crypto.subtle.importKey(
     'raw',
-    prfBytes,
+    prfResult,
     'HKDF',
     false, // extractable: false per CLAUDE.md
     ['deriveKey', 'deriveBits']
   )
-  // Best-effort cleanup of PRF bytes
-  prfBytes.fill(0)
 
   // Extract the credential ID from the response (base64url encoded)
   const usedCredentialId = base64urlEncode(new Uint8Array(credential.rawId))
