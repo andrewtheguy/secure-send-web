@@ -198,6 +198,38 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
 
   return (
     <div className="space-y-3">
+      {/* Multi-chunk progress */}
+      {needsMoreChunks && (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground text-center">
+            Collected {collectedCount} of {totalChunks} QR codes (
+            {Math.round((collectedCount / totalChunks) * 100)}%)
+          </p>
+          <div className="flex flex-wrap justify-center gap-1.5">
+            {Array.from({ length: totalChunks ?? 0 }, (_, i) => {
+              const received = collectedIndices.has(i)
+              return (
+                <div
+                  // biome-ignore lint/suspicious/noArrayIndexKey: fixed-position chunk grid; index IS the identity
+                  key={i}
+                  className={`w-7 h-7 rounded text-xs font-medium flex items-center justify-center transition-colors ${
+                    received
+                      ? 'bg-cyan-600 text-white'
+                      : 'border border-muted-foreground/30 text-muted-foreground'
+                  }`}
+                  title={`QR #${i + 1}: ${received ? 'Received' : 'Missing'}`}
+                >
+                  {i + 1}
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground text-center">
+            QR codes can be scanned in any order, but all QR codes must be scanned.
+          </p>
+        </div>
+      )}
+
       <div className="relative bg-black rounded-lg overflow-hidden aspect-square max-w-[300px] mx-auto">
         {!cameraReady && !error && (
           <div className="absolute inset-0 flex items-center justify-center bg-muted">
@@ -249,38 +281,6 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
         <p className="text-xs text-muted-foreground text-center">
           Please allow camera access in your browser settings and reload the page.
         </p>
-      )}
-
-      {/* Multi-chunk progress */}
-      {needsMoreChunks && (
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground text-center">
-            Collected {collectedCount} of {totalChunks} QR codes (
-            {Math.round((collectedCount / totalChunks) * 100)}%)
-          </p>
-          <div className="flex flex-wrap justify-center gap-1.5">
-            {Array.from({ length: totalChunks ?? 0 }, (_, i) => {
-              const received = collectedIndices.has(i)
-              return (
-                <div
-                  // biome-ignore lint/suspicious/noArrayIndexKey: fixed-position chunk grid; index IS the identity
-                  key={i}
-                  className={`w-7 h-7 rounded text-xs font-medium flex items-center justify-center transition-colors ${
-                    received
-                      ? 'bg-cyan-600 text-white'
-                      : 'border border-muted-foreground/30 text-muted-foreground'
-                  }`}
-                  title={`QR #${i + 1}: ${received ? 'Received' : 'Missing'}`}
-                >
-                  {i + 1}
-                </div>
-              )
-            })}
-          </div>
-          <p className="text-xs text-muted-foreground text-center">
-            QR codes can be scanned in any order, but all QR codes must be scanned.
-          </p>
-        </div>
       )}
 
       {availableCameras.length > 1 && (
