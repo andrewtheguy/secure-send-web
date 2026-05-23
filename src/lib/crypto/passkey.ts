@@ -11,6 +11,7 @@ import {
   importECDHPublicKey,
   generateECDHKeyPair,
 } from './ecdh'
+import { wipeBufferSource } from './memory'
 
 // Constants
 const PASSKEY_MASTER_LABEL = 'secure-send-passkey-master-v1'
@@ -152,22 +153,26 @@ export async function getPasskeyMasterKey(credentialId?: string): Promise<{
     throw new Error('PRF evaluation failed - authenticator may not support PRF extension')
   }
 
-  // SECURITY: The PRF output is transiently visible to JavaScript as the raw
-  // ArrayBuffer returned by getClientExtensionResults(). This is unavoidable —
-  // the WebAuthn spec defines prf.results.first as an ArrayBuffer, and the
-  // proposal to return it as a non-extractable CryptoKey (w3c/webauthn#1895,
-  // PR #1945) was abandoned in 2024 with no replacement. We pass the buffer
-  // straight into importKey so the bytes never live in a named variable, and
-  // the resulting HKDF master key is non-extractable from this point on. All
-  // downstream keys (HMAC, AES, session-binding, ephemeral ECDH-derived) are
-  // produced via deriveKey/deriveBits and never re-expose raw secret material.
-  const masterKey = await crypto.subtle.importKey(
-    'raw',
-    prfResult,
-    'HKDF',
-    false, // extractable: false per CLAUDE.md
-    ['deriveKey', 'deriveBits']
-  )
+  let masterKey: CryptoKey
+  try {
+    // SECURITY: The PRF output is transiently visible to JavaScript as the raw
+    // ArrayBuffer returned by getClientExtensionResults(). This is unavoidable:
+    // the WebAuthn spec defines prf.results.first as an ArrayBuffer, and the
+    // proposal to return it as a non-extractable CryptoKey (w3c/webauthn#1895,
+    // PR #1945) was abandoned in 2024 with no replacement. We import it
+    // immediately, then wipe the JS-visible ArrayBuffer in finally. That wipe
+    // is best-effort only; it cannot clear browser/Web Crypto internal copies.
+    // The resulting HKDF master key is non-extractable from this point on.
+    masterKey = await crypto.subtle.importKey(
+      'raw',
+      prfResult,
+      'HKDF',
+      false, // extractable: false per CLAUDE.md
+      ['deriveKey', 'deriveBits']
+    )
+  } finally {
+    wipeBufferSource(prfResult)
+  }
 
   // Extract the credential ID from the response (base64url encoded)
   const usedCredentialId = base64urlEncode(new Uint8Array(credential.rawId))

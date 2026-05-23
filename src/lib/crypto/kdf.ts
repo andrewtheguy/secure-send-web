@@ -1,13 +1,17 @@
 import { PBKDF2_ITERATIONS, PBKDF2_HASH, SALT_LENGTH, AES_KEY_LENGTH } from './constants'
+import { wipeBufferSource } from './memory'
 
 /**
  * Import a PIN into non-extractable PBKDF2 key material.
- * The raw Uint8Array buffer is zeroed after import to avoid lingering plaintext.
+ * The TextEncoder output is wiped after import to avoid lingering plaintext bytes.
  *
  * SECURITY IMPACT: If pinData is exposed in memory, an attacker can derive the
  * same PBKDF2 keys and decrypt PIN-protected transfers.
  * Scope note: PIN-derived keys are session-scoped and typically expire (~1 hour),
  * so exposure risk is bounded to that TTL window, but still high within it.
+ *
+ * Cleanup note: this only clears the temporary encoded bytes. The original PIN
+ * string is managed by the JS engine and cannot be explicitly wiped.
  */
 export async function importPinKey(pin: string): Promise<CryptoKey> {
   const encoder = new TextEncoder()
@@ -16,8 +20,7 @@ export async function importPinKey(pin: string): Promise<CryptoKey> {
   try {
     return await crypto.subtle.importKey('raw', pinData, 'PBKDF2', false, ['deriveBits', 'deriveKey'])
   } finally {
-    // Best-effort zeroization of the temporary buffer
-    pinData.fill(0)
+    wipeBufferSource(pinData)
   }
 }
 
