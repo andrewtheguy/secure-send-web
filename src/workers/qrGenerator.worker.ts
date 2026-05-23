@@ -22,13 +22,15 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   try {
     const dimension = options?.width ?? 400
 
-    const svg = await generateFastQrSvgString(new Uint8Array(binaryBuffer), {
+    let svg = await generateFastQrSvgString(new Uint8Array(binaryBuffer), {
       margin: 0,
       errorCorrectionLevel: options?.errorCorrectionLevel ?? 'M',
       mode,
       svgWidth: dimension,
       svgHeight: dimension,
     })
+
+    svg = svg.replace('<svg ', '<svg shape-rendering="crispEdges" ')
 
     self.postMessage({ type: 'success', id, svg })
   } catch (error) {
