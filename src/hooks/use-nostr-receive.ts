@@ -14,7 +14,6 @@ import {
   createNostrClient,
   generateEphemeralKeys,
   parsePinExchangeEvent,
-  parseMutualTrustEvent,
   createAckEvent,
   parseChunkNotifyEvent,
   DEFAULT_RELAYS,
@@ -32,32 +31,13 @@ import { downloadFromCloud } from '@/lib/cloud-storage'
 import type { Event } from 'nostr-tools'
 import { WebRTCConnection } from '@/lib/webrtc'
 import { getWebRTCConfig } from '@/lib/webrtc-config'
-import {
-  getPasskeySessionKeypair,
-  verifySessionBinding,
-  deriveSessionEncryptionKey,
-  type EphemeralSessionKeypair,
-} from '@/lib/crypto/passkey'
-import {
-  deriveAESKeyFromSecretKey,
-  publicKeyToFingerprint,
-  deriveKeyConfirmationFromSecretKey,
-  hashKeyConfirmation,
-  verifyPublicKeyCommitment,
-  constantTimeEqual,
-} from '@/lib/crypto/ecdh'
-
-export interface ReceiveOptions {
-  usePasskey?: boolean
-  selfTransfer?: boolean // For receiving from self (passkey mode)
-}
 
 export interface UseNostrReceiveReturn {
   state: TransferState
   receivedContent: ReceivedContent | null
   ownPublicKey: Uint8Array | null
   ownFingerprint: string | null
-  receive: (pinMaterial: PinKeyMaterial | ReceiveOptions) => Promise<void>
+  receive: (pinMaterial: PinKeyMaterial) => Promise<void>
   cancel: () => void
   reset: () => void
 }
@@ -91,100 +71,24 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     setOwnFingerprint(null)
   }, [cancel])
 
-  const receive = useCallback(async (arg: PinKeyMaterial | ReceiveOptions) => {
+  const receive = useCallback(async (pinMaterial: PinKeyMaterial) => {
     // Guard against concurrent invocations
     if (receivingRef.current) return
     receivingRef.current = true
     cancelledRef.current = false
     setReceivedContent(null)
 
-    // Determine mode
-    const usePasskey = 'usePasskey' in arg && arg.usePasskey === true
-    const isSelfTransfer = 'selfTransfer' in arg && (arg as ReceiveOptions).selfTransfer
-    const isMutualTrustMode = usePasskey && isSelfTransfer
-    const pinMaterial = !usePasskey ? (arg as PinKeyMaterial) : null
-
-    // Closure variables for mutual trust mode - keeps sensitive data scoped
-    let ownPublicKeyBytes: Uint8Array | null = null
-    // SECURITY: sharedSecretKey is a non-extractable CryptoKey - raw secret bytes never exposed to JS
-    let sharedSecretKey: CryptoKey | null = null
-    let deriveKeyWithSalt: ((salt: Uint8Array) => Promise<CryptoKey>) | null = null
-    // PFS: Ephemeral session keypair for Perfect Forward Secrecy
-    let receiverEphemeral: EphemeralSessionKeypair | null = null
-    let identitySharedSecretKey: CryptoKey | null = null
-
     try {
-      let hint: string
       let key: CryptoKey | null = null
-      let expectedSenderFingerprint: string | undefined
 
-      if (isMutualTrustMode) {
-        // MUTUAL TRUST MODE: Use passkey for self-transfer
-        // NOW WITH PERFECT FORWARD SECRECY via ephemeral session keys
-        setState({ status: 'connecting', message: 'Authenticate with passkey...' })
-
-        try {
-          // Authenticate and get ephemeral session keypair with identity binding
-          // SECURITY: Ephemeral private key is NEVER exposed as raw bytes (Web Crypto generateKey)
-          const {
-            ephemeral,
-            identitySharedSecretKey: sharedSecret,
-          } = await getPasskeySessionKeypair()
-
-          // Store identity info for display
-          setOwnPublicKey(ephemeral.identityPublicKeyBytes)
-          setOwnFingerprint(ephemeral.identityFingerprint)
-
-          // Store in closure for event processing
-          ownPublicKeyBytes = ephemeral.identityPublicKeyBytes
-
-          // Store for later use (creating ACK with ephemeral key)
-          receiverEphemeral = ephemeral
-          identitySharedSecretKey = sharedSecret
-
-          // For self-transfer, sender is the same as receiver
-          const senderPublicKeyBytes = ephemeral.identityPublicKeyBytes
-
-          // Calculate expected sender fingerprint for verification
-          expectedSenderFingerprint = await publicKeyToFingerprint(senderPublicKeyBytes)
-
-          // Store passkey master key for key derivation and binding verification
-          // SECURITY: Raw secret bytes are never exposed to JavaScript
-          sharedSecretKey = sharedSecret
-
-          // Hint is our own public ID fingerprint (sender addresses events to us)
-          hint = ephemeral.identityFingerprint
-
-          // Store key derivation function in closure for event processing
-          const ecdhSharedSecret = sharedSecretKey // Capture for closure
-          deriveKeyWithSalt = (salt: Uint8Array) => deriveAESKeyFromSecretKey(ecdhSharedSecret, salt)
-        } catch (err) {
-          setState({
-            status: 'error',
-            message: err instanceof Error ? err.message : 'Passkey authentication failed',
-          })
-          receivingRef.current = false
-          return
-        }
-      } else if (usePasskey && !isSelfTransfer) {
-        // Passkey mode without selfTransfer - not supported anymore
-        setState({ status: 'error', message: 'Passkey mode is only for self-transfer' })
-        receivingRef.current = false
-        return
-      } else if (pinMaterial) {
-        // PIN mode: use provided material
-        if (!pinMaterial.key || !pinMaterial.hint) {
-          setState({ status: 'error', message: 'PIN unavailable. Please re-enter.' })
-          receivingRef.current = false
-          return
-        }
-        setState({ status: 'connecting', message: 'Deriving encryption key...' })
-        hint = pinMaterial.hint
-      } else {
-        setState({ status: 'error', message: 'No credentials provided' })
+      // PIN mode: use provided material
+      if (!pinMaterial.key || !pinMaterial.hint) {
+        setState({ status: 'error', message: 'PIN unavailable. Please re-enter.' })
         receivingRef.current = false
         return
       }
+      setState({ status: 'connecting', message: 'Deriving encryption key...' })
+      const hint = pinMaterial.hint
 
       if (cancelledRef.current) return
 
@@ -212,7 +116,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       if (events.length === 0) {
         setState({
           status: 'error',
-          message: isMutualTrustMode ? 'No transfer found for this passkey' : 'No transfer found for this PIN',
+          message: 'No transfer found for this PIN',
         })
         return
       }
@@ -224,11 +128,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       let sawExpiredCandidate = false
       let sawNonExpiredCandidate = false
       let selectedCreatedAtSec: number | null = null
-      // Security: Store nonce for ready ACK echo
-      let eventNonce: string | undefined
-      // PFS: Store sender's ephemeral public key and salt for session key derivation
-      let senderEphemeralPub: Uint8Array | undefined
-      let eventSalt: Uint8Array | undefined
 
       const sortedEvents = [...events].sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
 
@@ -245,112 +144,23 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         }
         sawNonExpiredCandidate = true
 
-        if (isMutualTrustMode) {
-          // Self-transfer mode: parse mutual trust event (has payload)
-          const parsed = parseMutualTrustEvent(event)
-          if (!parsed) continue
+        // PIN mode
+        const parsed = parsePinExchangeEvent(event)
+        if (!parsed) continue
 
-          // === SECURITY VERIFICATION 1: Sender fingerprint (constant-time) ===
-          if (!constantTimeEqual(parsed.senderFingerprint, expectedSenderFingerprint!)) {
-            console.log('Sender fingerprint mismatch')
-            continue
-          }
+        try {
+          const derivedKey = await deriveKeyFromPinKey(pinMaterial.key, parsed.salt)
+          const decrypted = await decrypt(derivedKey, parsed.encryptedPayload)
+          const decoder = new TextDecoder()
+          const payloadStr = decoder.decode(decrypted)
+          payload = JSON.parse(payloadStr) as PinExchangePayload
 
-          // === SECURITY VERIFICATION 2: Receiver public ID commitment ===
-          // Verify this event was addressed to us (prevents relay MITM)
-          if (!ownPublicKeyBytes) {
-            console.error('Own public ID not available for RPKC verification')
-            continue
-          }
-          const rpkcValid = await verifyPublicKeyCommitment(ownPublicKeyBytes, parsed.receiverPkCommitment)
-          if (!rpkcValid) {
-            console.log('Receiver public ID commitment mismatch - event not addressed to us')
-            continue
-          }
-
-          // Verify closure variables are available
-          if (!deriveKeyWithSalt) {
-            console.error('Key derivation function not available')
-            continue
-          }
-          if (!sharedSecretKey) {
-            console.error('Shared secret key not available for key confirmation')
-            continue
-          }
-
-          try {
-            // Derive key using closure function
-            const derivedKey = await deriveKeyWithSalt(parsed.salt)
-
-            // Try to decrypt
-            const decrypted = await decrypt(derivedKey, parsed.encryptedPayload)
-            const decoder = new TextDecoder()
-            const payloadStr = decoder.decode(decrypted)
-            payload = JSON.parse(payloadStr) as PinExchangePayload
-
-            // === SECURITY VERIFICATION 3: Key confirmation ===
-            // Verify we derived the same shared secret (detects MITM)
-            const confirmValue = await deriveKeyConfirmationFromSecretKey(sharedSecretKey, parsed.salt)
-            const computedKcHash = await hashKeyConfirmation(confirmValue)
-            if (!constantTimeEqual(computedKcHash, parsed.keyConfirmHash)) {
-              console.error('Key confirmation mismatch - potential MITM attack')
-              continue
-            }
-
-            // === PFS VERIFICATION: Verify sender's ephemeral key binding ===
-            // In passkey mode, PFS is mandatory - sender MUST provide ephemeral keys
-            if (!parsed.senderEphemeralPub || !parsed.senderSessionBinding) {
-              console.error('Sender did not provide ephemeral keys - PFS is mandatory in passkey mode')
-              continue
-            }
-
-            if (!identitySharedSecretKey) {
-              console.error('Identity shared secret not available for ephemeral key verification')
-              continue
-            }
-
-            const bindingValid = await verifySessionBinding(
-              identitySharedSecretKey,
-              parsed.senderEphemeralPub,
-              parsed.senderSessionBinding
-            )
-            if (!bindingValid) {
-              console.error('Sender ephemeral key binding invalid - potential MITM')
-              continue
-            }
-            // Store sender's ephemeral key for session key derivation
-            senderEphemeralPub = parsed.senderEphemeralPub
-
-            transferId = parsed.transferId
-            senderPubkey = event.pubkey
-            key = derivedKey
-            selectedCreatedAtSec = event.created_at || null
-            // Store nonce for ready ACK echo (replay protection)
-            eventNonce = parsed.nonce
-            // Store salt for session key derivation
-            eventSalt = parsed.salt
-            break
-          } catch {
-          }
-        } else {
-          // PIN mode
-          const parsed = parsePinExchangeEvent(event)
-          if (!parsed) continue
-
-          try {
-            const derivedKey = await deriveKeyFromPinKey(pinMaterial!.key, parsed.salt)
-            const decrypted = await decrypt(derivedKey, parsed.encryptedPayload)
-            const decoder = new TextDecoder()
-            const payloadStr = decoder.decode(decrypted)
-            payload = JSON.parse(payloadStr) as PinExchangePayload
-
-            transferId = parsed.transferId
-            senderPubkey = event.pubkey
-            key = derivedKey
-            selectedCreatedAtSec = event.created_at || null
-            break
-          } catch {
-          }
+          transferId = parsed.transferId
+          senderPubkey = event.pubkey
+          key = derivedKey
+          selectedCreatedAtSec = event.created_at || null
+          break
+        } catch {
         }
       }
 
@@ -361,9 +171,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         }
         setState({
           status: 'error',
-          message: isMutualTrustMode
-            ? 'Could not decrypt transfer. Wrong passkey?'
-            : 'Could not decrypt transfer. Wrong PIN?',
+          message: 'Could not decrypt transfer. Wrong PIN?',
         })
         return
       }
@@ -375,9 +183,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         }
         setState({
           status: 'error',
-          message: isMutualTrustMode
-            ? 'No transfer found from this sender'
-            : 'Could not decrypt transfer. Wrong PIN?',
+          message: 'Could not decrypt transfer. Wrong PIN?',
         })
         return
       }
@@ -392,44 +198,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Generate receiver keypair
       const { secretKey } = generateEphemeralKeys()
 
-      // PFS: Derive session encryption key from ephemeral ECDH
-      // In passkey mode, this is mandatory - we already verified sender has ephemeral keys
-      if (isMutualTrustMode && (!receiverEphemeral || !senderEphemeralPub || !eventSalt)) {
-        throw new Error('Passkey mode requires ephemeral keys and salt for PFS key derivation')
-      }
-      if (receiverEphemeral && senderEphemeralPub && eventSalt) {
-        // Derive session key from ephemeral ECDH
-        // SECURITY: This key is derived from ephemeral keys whose private material
-        // was NEVER exposed as raw bytes, providing true Perfect Forward Secrecy
-        key = await deriveSessionEncryptionKey(
-          receiverEphemeral.ephemeralPrivateKey,
-          senderEphemeralPub,
-          eventSalt
-        )
-      }
-
-      // Send ready ACK (seq=0) - include nonce for replay protection in mutual trust mode
-      // Include receiver's ephemeral key and binding for PFS
-      const readyAck = createAckEvent(
-        secretKey,
-        senderPubkey,
-        transferId,
-        0,
-        hint,
-        eventNonce,
-        receiverEphemeral?.ephemeralPublicKeyBytes,
-        receiverEphemeral?.sessionBinding
-      )
+      // Send ready ACK (seq=0)
+      const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0, hint)
       await client.publish(readyAck)
-
-      // === MEMORY CLEANUP ===
-      // Now that we have the session key (key) and have published the ACK (which needed the ephemeral public key),
-      // we no longer need the passkey master secrets or the ephemeral private key.
-      // Explicitly clear them to minimize exposure window.
-      receiverEphemeral = null
-      identitySharedSecretKey = null
-      sharedSecretKey = null
-      deriveKeyWithSalt = null // Release closure capturing master key
 
       if (cancelledRef.current) return
 

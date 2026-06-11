@@ -17,7 +17,6 @@ interface SendConfig {
 
   // Configuration
   methodChoice: MethodChoice
-  usePasskey: boolean
   relayOnly: boolean
 }
 

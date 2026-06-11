@@ -1,6 +1,6 @@
 # Secure Send
 
-A web application for sending encrypted files and folders with PIN-based or passkey-based Nostr signaling, plus optional cloud fallback. Uses WebRTC for direct P2P connections.
+A web application for sending encrypted files and folders with PIN-based Nostr signaling, plus optional cloud fallback. Uses WebRTC for direct P2P connections.
 
 **Demo:** [https://securesend.kuvi.app/](https://securesend.kuvi.app/)
 
@@ -10,7 +10,6 @@ A web application for sending encrypted files and folders with PIN-based or pass
 - **Works offline**: No internet required after page load when using Manual Exchange on same local network
 - **Flexible signaling**: Nostr (default) or Manual Exchange (QR/copy-paste). Manual Exchange works across networks with internet, or on same local network without internet.
 - **PIN-based security (Nostr)**: Nostr signaling payloads are encrypted with the PIN
-- **Passkey support**: Use synced passkeys (1Password, iCloud Keychain, Google Password Manager) for passwordless encryption - no PIN memorization needed
 - **File or folder transfer**: Send files or folders up to 100MB
 - **End-to-end encryption**: All transfers use AES-256-GCM encryption
 - **No accounts required**: Ephemeral keypairs generated per transfer
@@ -42,7 +41,6 @@ Sender and receiver should use the same app version for transfers.
 - **PBKDF2-SHA256** with 600,000 iterations for key derivation (browser-compatible)
 - **AES-256-GCM** authenticated encryption
 - **PIN never transmitted (Nostr)**: Only a hash hint is visible to relays
-- **Passkey security**: Keys derived via WebAuthn PRF extension from device secure hardware (Touch ID, Face ID, Windows Hello, etc.)
 - **Ephemeral identities**: New Nostr keypairs generated per transfer
 - **1-hour expiration**: PIN exchange events expire automatically
 - **Manual exchange signaling**: QR payloads are time-bucketed obfuscated; file data is encrypted with ECDH-derived AES
@@ -99,22 +97,7 @@ The signaling method is encoded in the PIN's first character:
 - **Uppercase letter** (A-Z): Nostr signaling
 - **Digit "2"**: Manual exchange (QR or copy/paste)
 
-Receivers don't need to select a signaling method - it's automatically detected from the PIN. Passkey mode uses fingerprints instead of PINs for identification.
-
-### Passkey Mode (Self-Transfer)
-
-Passkeys provide passwordless encryption using the WebAuthn PRF extension for transferring files to yourself across devices:
-
-1. **Setup**: Create a passkey at `/passkey` - it's stored in your password manager (1Password, iCloud Keychain, Google Password Manager, etc.)
-2. **Sync**: The same passkey syncs across your devices via your password manager
-3. **Send/Receive**: Enable "Use Passkey" in Advanced Options and authenticate with biometrics/device unlock
-
-**Key differences from PIN mode:**
-- No PIN to memorize or share
-- Encryption keys derived from WebAuthn PRF extension (hardware-backed)
-- Fingerprint (16-char identifier) for verification
-- Same AES-256-GCM encryption strength as PIN mode
-- Perfect for sending files to yourself without sharing codes
+Receivers don't need to select a signaling method - it's automatically detected from the PIN.
 
 ### Cloud Storage Redundancy
 

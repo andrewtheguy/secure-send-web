@@ -1,18 +1,16 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint, ArrowRight } from 'lucide-react'
+import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { PinInput, type PinInputRef, type PinChangePayload } from './pin-input'
 import { TransferStatus } from './transfer-status'
 import { QRDisplay } from './qr-display'
 import { QRInput } from './qr-input'
-import { AdvancedOptionsPanel } from './advanced-options-panel'
 import { useNostrReceive } from '@/hooks/use-nostr-receive'
 import { useManualReceive } from '@/hooks/use-manual-receive'
 import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
 import type { SignalingMethod } from '@/lib/nostr/types'
 import type { PinKeyMaterial } from '@/lib/types'
-import { Link } from 'react-router-dom'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 const PIN_MODE_DESCRIPTION = 'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.'
@@ -30,9 +28,6 @@ type ReceiveMode = 'pin' | 'scan'
 
 export function ReceiveTab() {
   const [receiveMode, setReceiveMode] = useState<ReceiveMode>('pin')
-  const [showAdvanced, setShowAdvanced] = useState(false)
-  const [usePasskey, setUsePasskey] = useState(false)
-  const [passkeyAuthenticating, setPasskeyAuthenticating] = useState(false)
 
   // Store PIN in ref to avoid React DevTools exposure
   const pinSecretRef = useRef<PinSecret | null>(null)
@@ -43,13 +38,6 @@ export function ReceiveTab() {
   const [timeRemaining, setTimeRemaining] = useState(0)
   const [, setDetectedMethod] = useState<SignalingMethod>('nostr')
   const [pinFingerprint, setPinFingerprint] = useState<string | null>(null)
-
-  // Auto-expand Advanced Options when passkey mode is enabled
-  useEffect(() => {
-    if (usePasskey) {
-      setShowAdvanced(true)
-    }
-  }, [usePasskey])
 
   // All hooks must be called unconditionally (React rules)
   const nostrHook = useNostrReceive()
@@ -232,25 +220,6 @@ export function ReceiveTab() {
     }
   }
 
-  // Handle passkey authentication for receiving (always self-transfer)
-  const handlePasskeyAuth = async () => {
-    if (passkeyAuthenticating) return
-
-    setPasskeyAuthenticating(true)
-
-    try {
-      // Passkey mode is always self-transfer
-      await nostrHook.receive({
-        usePasskey: true,
-        selfTransfer: true,
-      })
-    } catch {
-      // Error will be handled by the hook
-    } finally {
-      setPasskeyAuthenticating(false)
-    }
-  }
-
   const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
   const showQRInput = isManualMode && state.status === 'waiting_for_offer'
   const showQRDisplay = isManualMode && answerData && state.status === 'showing_answer'
@@ -301,80 +270,43 @@ export function ReceiveTab() {
           </div>
 
           {receiveMode === 'pin' ? (
-            usePasskey ? (
-                <>
-                  <AdvancedOptionsPanel
-                    showAdvanced={showAdvanced}
-                    setShowAdvanced={setShowAdvanced}
-                    usePasskey={usePasskey}
-                    setUsePasskey={setUsePasskey}
-                    description="Receive files you sent from another device using the same passkey."
-                    showPasskeyBadge
-                  />
+            <>
+              {/* PIN mode */}
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Enter PIN from sender</div>
+                <PinInput ref={pinInputRef} onPinChange={handlePinChange} disabled={isActive} />
+                {timeRemaining > 0 && (
+                  <p className="text-xs text-amber-600 font-medium">
+                    PIN will be cleared in {formatTime(timeRemaining)}
+                  </p>
+                )}
+                {pinExpired && (
+                  <p className="text-xs text-muted-foreground">
+                    PIN cleared due to inactivity. Please re-enter.
+                  </p>
+                )}
+              </div>
 
-                  {/* Passkey mode indicator */}
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
+              {isPinValid && pinFingerprint && (
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2 font-mono">
                     <Fingerprint className="h-3 w-3" />
-                    <span>Passkey mode — receiving from self</span>
+                    PIN Fingerprint: {pinFingerprint}
                   </div>
+                  <p>- It should match the sender's PIN fingerprint if you entered the same words/PIN.</p>
+                  <p>- After you enter the correct PIN the app locks it into a key that cannot be read back out; this fingerprint is the one-way checksum you can compare to confirm both sides derived the same secret, and it cannot be reversed to recover the PIN or decrypt any data.</p>
+                </div>
+              )}
 
-                  <Button
-                    onClick={handlePasskeyAuth}
-                    disabled={passkeyAuthenticating}
-                    className="w-full bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700"
-                  >
-                    <Fingerprint className="mr-2 h-4 w-4" />
-                    {passkeyAuthenticating ? 'Authenticating...' : 'Authenticate & Receive from Self'}
-                  </Button>
-                </>
-              ) : (
-                <>
-                  {/* Regular PIN mode */}
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Enter PIN from sender</div>
-                    <PinInput ref={pinInputRef} onPinChange={handlePinChange} disabled={isActive} />
-                    {timeRemaining > 0 && (
-                      <p className="text-xs text-amber-600 font-medium">
-                        PIN will be cleared in {formatTime(timeRemaining)}
-                      </p>
-                    )}
-                    {pinExpired && (
-                      <p className="text-xs text-muted-foreground">
-                        PIN cleared due to inactivity. Please re-enter.
-                      </p>
-                    )}
-                  </div>
+              <div className="text-xs text-muted-foreground text-center pb-2">
+                Your connection is encrypted and private. Files are never stored unencrypted.
+              </div>
 
-                  {isPinValid && pinFingerprint && (
-                    <div className="space-y-1 text-xs text-muted-foreground">
-                      <div className="flex items-center gap-2 font-mono">
-                        <Fingerprint className="h-3 w-3" />
-                        PIN Fingerprint: {pinFingerprint}
-                      </div>
-                      <p>- It should match the sender's PIN fingerprint if you entered the same words/PIN.</p>
-                      <p>- After you enter the correct PIN the app locks it into a key that cannot be read back out; this fingerprint is the one-way checksum you can compare to confirm both sides derived the same secret, and it cannot be reversed to recover the PIN or decrypt any data.</p>
-                    </div>
-                  )}
-
-                  <div className="text-xs text-muted-foreground text-center pb-2">
-                    Your connection is encrypted and private. Files are never stored unencrypted.
-                  </div>
-
-                  <AdvancedOptionsPanel
-                    showAdvanced={showAdvanced}
-                    setShowAdvanced={setShowAdvanced}
-                    usePasskey={usePasskey}
-                    setUsePasskey={setUsePasskey}
-                    description="Use your passkey instead of entering a PIN. Both sender and receiver must have the same passkey."
-                    showPasskeySetupLink
-                  />
-
-                  <Button onClick={handleReceivePin} disabled={!canReceivePin} className="w-full bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700">
-                    <Download className="mr-2 h-4 w-4" />
-                    Receive
-                  </Button>
-                </>
-              )
+              <Button onClick={handleReceivePin} disabled={!canReceivePin} className="w-full bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700">
+                <Download className="mr-2 h-4 w-4" />
+                Receive
+              </Button>
+            </>
           ) : (
             <>
               <div className="space-y-2">
@@ -394,22 +326,6 @@ export function ReceiveTab() {
       ) : (
         <>
           <TransferStatus state={state} />
-
-          {/* Passkey authentication help */}
-          {state.status === 'connecting' && state.message?.toLowerCase().includes('passkey') && (
-            <div className="text-xs text-muted-foreground border border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 px-3 py-2 rounded space-y-1">
-              <p>A passkey prompt should appear from your browser or password manager.</p>
-              <p className="text-amber-700 dark:text-amber-400">
-                If no prompt appears, you may not have a passkey registered for this app yet.
-              </p>
-              <p>
-                <Link to="/passkey" className="text-primary hover:underline inline-flex items-center gap-1">
-                  Set up a passkey first <ArrowRight className="h-3 w-3" />
-                </Link>
-                {' '}— you'll need the same passkey synced from the sender (via 1Password, iCloud, Google, etc.)
-              </p>
-            </div>
-          )}
 
           {/* QR Input for receiving offer */}
           {showQRInput && (
