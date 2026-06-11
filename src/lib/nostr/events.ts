@@ -15,7 +15,7 @@ export function generateEphemeralKeys(): { secretKey: Uint8Array; publicKey: str
  * Create PIN exchange event (kind 24243)
  * Contains encrypted payload with transfer metadata.
  *
- * @param hint - Identifier for event filtering: one-way PBKDF2-SHA256 derivation of the PIN (first 16 hex chars); see computePinHint
+ * @param hint - Time-bucketed event-filtering tag: one-way PBKDF2-SHA256 derivation of the PIN (first 16 hex chars), salted with the current hourly bucket; see computePinHint
  *
  * TTL Behavior:
  * - Events include an 'expiration' tag set to 1 hour from creation (NIP-40)
