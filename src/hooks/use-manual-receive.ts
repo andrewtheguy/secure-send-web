@@ -8,6 +8,8 @@ import {
   MAX_MESSAGE_SIZE,
   ENCRYPTION_CHUNK_SIZE,
   TRANSFER_EXPIRATION_MS,
+  AES_NONCE_LENGTH,
+  AES_TAG_LENGTH,
   ENCRYPTED_CHUNK_OVERHEAD,
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
@@ -277,7 +279,7 @@ export function useManualReceive(): UseManualReceiveReturn {
             const expectedEncryptedBytes = totalBytes! + expectedChunks * ENCRYPTED_CHUNK_OVERHEAD
 
             try {
-              const { chunkIndex } = parseChunkMessage(encryptedChunk)
+              const { chunkIndex, encryptedData } = parseChunkMessage(encryptedChunk)
               if (receivedEncryptedChunkIndices.has(chunkIndex)) {
                 transferRejecter?.(new Error(`Duplicate chunk index: ${chunkIndex}`))
                 return
@@ -291,11 +293,11 @@ export function useManualReceive(): UseManualReceiveReturn {
                 chunkIndex === expectedChunks - 1
                   ? totalBytes! - chunkIndex * ENCRYPTION_CHUNK_SIZE
                   : ENCRYPTION_CHUNK_SIZE
-              const expectedEncryptedLength = expectedPlaintextLength + ENCRYPTED_CHUNK_OVERHEAD
-              if (encryptedChunk.length !== expectedEncryptedLength) {
+              const expectedEncryptedLength = expectedPlaintextLength + AES_NONCE_LENGTH + AES_TAG_LENGTH
+              if (encryptedData.length !== expectedEncryptedLength) {
                 transferRejecter?.(
                   new Error(
-                    `Invalid encrypted chunk ${chunkIndex} length: expected ${expectedEncryptedLength}, got ${encryptedChunk.length}`
+                    `Invalid encrypted chunk ${chunkIndex} length: expected ${expectedEncryptedLength}, got ${encryptedData.length}`
                   )
                 )
                 return
