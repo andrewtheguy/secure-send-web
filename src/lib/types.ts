@@ -9,11 +9,9 @@ export interface ReceivedFile {
 export type ReceivedContent = ReceivedFile
 
 /**
- * Key material derived from either PIN or passkey authentication.
+ * Key material derived from PIN authentication.
  * @property key - The derived CryptoKey for encryption/decryption
- * @property hint - Identifier for Nostr event filtering:
- *   - PIN mode: SHA-256(PIN) truncated to 8 hex chars
- *   - Passkey mode: Fingerprint derived from passkey public ID (16 hex chars)
+ * @property hint - Identifier for Nostr event filtering: SHA-256(PIN) truncated to 8 hex chars
  */
 export interface PinKeyMaterial {
   key: CryptoKey

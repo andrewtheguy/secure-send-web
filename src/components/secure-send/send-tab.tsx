@@ -1,14 +1,13 @@
 import { useState, useRef, useCallback } from 'react'
-import { Send, X, FileUp, Upload, FolderUp, ChevronDown, ChevronRight, Info, Fingerprint, Cloud, KeyRound, QrCode } from 'lucide-react'
+import { Send, X, FileUp, Upload, FolderUp, ChevronDown, ChevronRight, Info, Cloud, KeyRound, QrCode } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { MAX_MESSAGE_SIZE } from '@/lib/crypto'
 import { formatFileSize } from '@/lib/file-utils'
 import { getTotalSize, supportsFolderSelection, getFolderName } from '@/lib/folder-utils'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useSend } from '@/contexts/send-context'
 
 type ContentMode = 'file' | 'folder'
@@ -29,7 +28,6 @@ export function SendTab() {
   const [mode, setMode] = useState<ContentMode>('file')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [methodChoice, setMethodChoice] = useState<MethodChoice>('online')
-  const [usePasskey, setUsePasskey] = useState(false)
   const [relayOnly, setRelayOnly] = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [folderFiles, setFolderFiles] = useState<FileList | null>(null) // Keep FileList for folder to preserve paths
@@ -57,7 +55,6 @@ export function SendTab() {
       selectedFiles,
       folderFiles,
       methodChoice,
-      usePasskey,
       relayOnly,
     })
     // Navigate to transfer page
@@ -299,7 +296,6 @@ export function SendTab() {
                 setMethodChoice(value as MethodChoice)
                 if (value === 'offline') {
                   setRelayOnly(false)
-                  setUsePasskey(false)
                   setShowAdvanced(false)
                 }
               }}
@@ -370,11 +366,6 @@ export function SendTab() {
               >
                 {showAdvanced ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 Advanced Options
-                {usePasskey && (
-                  <span className="ml-auto text-xs bg-primary/10 text-primary px-2 py-0.5 rounded">
-                    Passkey
-                  </span>
-                )}
               </button>
               {showAdvanced && (
                 <div className="p-3 pt-0 space-y-3 border-t">
@@ -390,41 +381,6 @@ export function SendTab() {
                       Force cloud transfer (skip P2P)
                     </Label>
                   </div>
-
-                  <div className="pt-3 border-t space-y-3">
-                    <div className="flex items-center gap-1 mb-2">
-                      <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded">
-                        Power User
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Fingerprint className="h-4 w-4 text-muted-foreground" />
-                        <Label htmlFor="use-passkey" className="text-sm font-medium cursor-pointer">
-                          Use Passkey Mode
-                        </Label>
-                      </div>
-                      <Switch
-                        id="use-passkey"
-                        checked={usePasskey}
-                        onCheckedChange={setUsePasskey}
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {usePasskey
-                        ? 'Send files to yourself across devices using your passkey. No PIN needed.'
-                        : 'Use passkey-based encryption for self-transfer across your devices.'}
-                    </p>
-                    {!usePasskey && (
-                      <p className="text-xs text-muted-foreground">
-                        Use the{' '}
-                        <Link to="/passkey" className="text-primary hover:underline">
-                          Passkey setup page
-                        </Link>{' '}
-                        to create your passkey.
-                      </p>
-                    )}
-                  </div>
                 </div>
               )}
             </div>
@@ -434,13 +390,6 @@ export function SendTab() {
             <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded">
               <Cloud className="h-3 w-3" />
               <span>Cloud-only mode</span>
-            </div>
-          )}
-
-          {usePasskey && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/10 border border-primary/20 px-3 py-2 rounded">
-              <Fingerprint className="h-3 w-3" />
-              <span>Passkey mode — self-transfer</span>
             </div>
           )}
 

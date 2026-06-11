@@ -2,7 +2,7 @@
 
 ## Overview
 
-Secure Send is a browser-based encrypted file and folder transfer application. It supports PIN-based or passkey-based encryption for Nostr signaling, a manual exchange method (QR or copy/paste with time-bucketed obfuscation), and direct P2P (WebRTC) data transfer with optional cloud fallback (Nostr mode only).
+Secure Send is a browser-based encrypted file and folder transfer application. It supports PIN-based encryption for Nostr signaling, a manual exchange method (QR or copy/paste with time-bucketed obfuscation), and direct P2P (WebRTC) data transfer with optional cloud fallback (Nostr mode only).
 
 ## Core Principles
 
@@ -11,7 +11,6 @@ Secure Send is a browser-based encrypted file and folder transfer application. I
 3. **Memory-Efficient Streaming**: P2P receive paths write decrypted chunks directly into a growing buffer. Manual Exchange receive temporarily buffers encrypted chunks before decrypting into a preallocated output buffer.
 4. **Pluggable Signaling**: Signaling (Nostr, QR) is decoupled from the transfer layer. The same encryption/chunking logic is used regardless of signaling method.
 5. **Dual PIN Representation**: A 12-character alphanumeric PIN serves as the shared secret. To improve shareability (e.g., via voice), this PIN can be bijectively mapped to a 7-word sequence from the BIP-39 wordlist.
-6. **Passkey Support**: Alternative to PIN-based authentication using WebAuthn PRF extension. Keys are derived from hardware-backed secure elements (Touch ID, Face ID, Windows Hello) when passkeys are synced via password managers. See [Passkey Architecture](./PASSKEY_ARCHITECTURE.md#how-it-works) for details.
 
 ## Signaling Methods
 
@@ -144,8 +143,7 @@ sequenceDiagram
 |-----------|-------------|
 | `pin.ts` | Alphanumeric (12-char) and Word (7-word) PIN handling, weighted checksums, signaling detection |
 | `kdf.ts` | Key derivation using PBKDF2-SHA256 (600,000 iterations) |
-| `passkey.ts` | WebAuthn PRF extension for passkey-based key derivation. See [Key Derivation Flow](./PASSKEY_ARCHITECTURE.md#key-derivation-flow) |
-| `ecdh.ts` | ECDH key exchange (non-extractable keys), fingerprints, key confirmation, public key commitment, constant-time comparison. See [Passkey Fingerprint](./PASSKEY_ARCHITECTURE.md#passkey-fingerprint) |
+| `ecdh.ts` | ECDH key exchange (non-extractable keys) used by manual exchange mode |
 | `aes-gcm.ts` | AES-256-GCM encryption/decryption |
 | `stream-crypto.ts` | Streaming encryption/decryption (128KB chunks, protocol-agnostic) |
 | `constants.ts` | Crypto parameters, charsets (69 chars), BIP-39 wordlist (2048 words) |
@@ -171,31 +169,6 @@ To protect against manual entry errors, the PIN includes a custom checksum:
 - **Algorithm**: `sum(char_index * (position + 1)) % charset_size`.
 - **Detection**: Effectively catches single-character errors and swaps (transpositions).
 - **Independent Validation**: Both characters and word sequences are validated against the same underlying checksum logic.
-
-### Passkey Architecture
-
-Passkeys provide an alternative to PIN-based authentication using the WebAuthn PRF extension for hardware-backed key derivation. Passkey mode is designed for self-transfer (sending files to yourself across devices using the same synced passkey).
-
-**Why self-transfer only?** Cross-user passkey transfers were previously supported via **pairing keys**—a cryptographic mechanism where both parties exchange invite codes and sign a shared token to establish trust between different passkeys. This required significant complexity:
-
-- Invite code exchange with TTL validation
-- HMAC signatures from both parties
-- Verification secrets for identity binding
-- Handshake proofs to prevent impersonation
-- Two round trips instead of one
-
-This complexity existed without a compelling use case since PIN mode already handles cross-user transfers simply. Passkey mode is now scoped to self-transfer where the same user owns both devices and has the same passkey synced via their password manager. This provides a streamlined single-round-trip experience with stronger security guarantees (hardware-backed keys, PFS, non-extractable secrets).
-
-> **Historical reference**: The cross-user passkey transfer implementation (pairing keys) is preserved at git tag [`before-removing-pairing-key`](https://github.com/andrewtheguy/secure-send-web/releases/tag/before-removing-pairing-key) for reference.
-
-**Mode selection guidance:**
-
-| Mode | Benefits | Trade-offs |
-|------|----------|------------|
-| **Passkey** | Hardware-backed keys, PFS, non-extractable secrets, no PIN to share | Initial setup complexity, requires same passkey synced across devices |
-| **PIN** | Works with anyone, no prior setup needed | Requires receiver to manually type the PIN from sender screen |
-
-For detailed documentation on the passkey system, including key derivation, security properties, and perfect forward secrecy, see [Passkey Architecture](./PASSKEY_ARCHITECTURE.md).
 
 ### User Interface Architecture
 
@@ -354,7 +327,7 @@ A 2-hour sliding window (current bucket + 1 previous bucket) is used to verify i
 - Uses `zxing-wasm` for both generation and scanning
 
 **Security Model:**
-- **Nostr**: PIN or passkey encrypts signaling metadata to prevent unauthorized connection establishment
+- **Nostr**: PIN encrypts signaling metadata to prevent unauthorized connection establishment
 - **Manual**: Signaling is obfuscated and time-limited; confidentiality of content is provided by ECDH-derived AES-256-GCM over the data channel
 - **All modes**: Once WebRTC connection is established, DTLS encrypts all data in transit
 
@@ -468,14 +441,6 @@ interface PinExchangePayload {
 2. **Salt Generation**: 16 random bytes (included in signaling payload for receiver)
 3. **Key Derivation**: PBKDF2-SHA256 with 600,000 iterations
 4. **Chunk Encryption**: AES-256-GCM with 12-byte nonce per 128KB chunk
-
-**Passkey Mode:** (See [Key Derivation Flow](./PASSKEY_ARCHITECTURE.md#key-derivation-flow) for details)
-1. **Passkey Authentication**: WebAuthn prompt (biometric/device unlock)
-2. **Master Key**: PRF extension output imported as HKDF key
-3. **Salt Generation**: 16 random bytes (included in signaling payload)
-4. **Key Derivation**: HKDF-SHA256 with salt derives per-transfer AES key
-5. **Chunk Encryption**: Same AES-256-GCM with 12-byte nonce per 128KB chunk
-6. **Perfect Forward Secrecy**: Ephemeral ECDH session keys protect each transfer. See [PFS](./PASSKEY_ARCHITECTURE.md#perfect-forward-secrecy-pfs)
 
 ### What's Encrypted Where
 
@@ -595,37 +560,16 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 ## Security Considerations
 
 1. **Ephemeral Keys**: New keypair generated for each transfer
-2. **Forward Secrecy**: PIN/passkey-derived key is unique per transfer (includes random salt) - applies to all modes. Note: This provides per-transfer key uniqueness but not true Perfect Forward Secrecy (PFS). PIN mode achieves key isolation through random salts; passkey mode additionally provides PFS via ephemeral ECDH session keys (see item 15)
+2. **Forward Secrecy**: The PIN-derived key is unique per transfer (includes random salt). Note: This provides per-transfer key uniqueness through random salts, not true Perfect Forward Secrecy (PFS).
 3. **No Server Trust**: Cloud storage and relays see only encrypted payloads and minimal routing metadata; plaintext never leaves the device
 4. **PIN Entropy**: ~67 bits (11 random chars from 69-char set + 1 checksum)
-5. **Brute-Force Resistance**: 600K PBKDF2 iterations for PIN mode; hardware rate limiting for passkey mode
-6. **PIN/Passkey Role**: Encrypts signaling (preventing unauthorized P2P connection) AND content (defense in depth)
+5. **Brute-Force Resistance**: 600K PBKDF2 iterations for PIN mode
+6. **PIN Role**: Encrypts signaling (preventing unauthorized P2P connection) AND content (defense in depth)
 7. **Transport Security**: All P2P transfers (Nostr, Manual Exchange) use both AES-256-GCM encryption (128KB chunks) and WebRTC DTLS
 8. **Protocol-Agnostic Security**: Same encryption layer used regardless of signaling method - no security difference between Nostr or Manual Exchange
-9. **Passkey Security**: WebAuthn PRF extension provides hardware-backed key derivation with origin-bound credentials and phishing resistance
-10. **Passkey Sync**: For self-transfer scenarios (both devices owned by same user), requires same passkey synced via password manager (1Password, iCloud Keychain, Google Password Manager) - no out-of-band PIN sharing needed. Cross-user transfers require PIN mode since different users cannot share passkey credentials.
-11. **XSS Protection**: Sensitive cryptographic material (shared secrets, key derivation functions) stored in closure scope, not on global `window` object
-12. **Resource Cleanup**: All error paths properly clean up timeouts and subscriptions to prevent resource leaks
-13. **Input Validation**: Cryptographic functions validate inputs (nonce length, key confirmation size) before operations to provide deterministic errors
-14. **Non-Extractable Keys**: In passkey mutual trust mode, the passkey master key and the ephemeral ECDH shared secret are kept as non-extractable `CryptoKey` objects - raw bytes never exposed to JavaScript, preventing exfiltration via XSS or memory inspection. See [Mutual Trust Key Derivation](./PASSKEY_ARCHITECTURE.md#mutual-trust-key-derivation-non-extractable-keys)
-15. **Perfect Forward Secrecy (PFS)**: Passkey mode uses ephemeral session keys generated via Web Crypto's `generateKey()` - raw private key material is NEVER exposed to JavaScript. Compromising the passkey public ID or a single session's memory does not help decrypt past or future sessions. PFS is mandatory in passkey mode. See [PFS](./PASSKEY_ARCHITECTURE.md#perfect-forward-secrecy-pfs)
-
-### Security Properties by Mode
-
-| Property | PIN Mode | Passkey Mode (Self-Transfer) |
-|----------|----------|------------------------------|
-| Key Source | User-memorized PIN | Hardware secure element |
-| Brute Force Resistance | 600K PBKDF2 iterations | Hardware rate limiting |
-| Phishing Resistance | None | Origin-bound credentials |
-| Sync Method | Out-of-band sharing | Password manager sync |
-| Verification | PIN match | Fingerprint comparison |
-| Key Confirmation | N/A | HKDF-derived hash |
-| Relay MITM Protection | N/A | Public ID commitment |
-| Replay Protection | TTL only | TTL + nonce |
-| Session Binding Verification | N/A | Yes (same master key) |
-| Shared Secret Protection | Raw bytes in memory | Non-extractable CryptoKey |
-| Perfect Forward Secrecy | No | Yes (ephemeral ECDH) |
-| Round Trips | 1 | 1 |
+9. **XSS Protection**: Sensitive cryptographic material (shared secrets, key derivation functions) stored in closure scope, not on global `window` object
+10. **Resource Cleanup**: All error paths properly clean up timeouts and subscriptions to prevent resource leaks
+11. **Input Validation**: Cryptographic functions validate inputs before operations to provide deterministic errors
 
 ## File Structure
 
@@ -636,8 +580,7 @@ src/
 │   │   ├── constants.ts     # Parameters and limits
 │   │   ├── pin.ts           # PIN generation/validation
 │   │   ├── kdf.ts           # Key derivation (PBKDF2)
-│   │   ├── passkey.ts       # Passkey/WebAuthn PRF key derivation
-│   │   ├── ecdh.ts          # ECDH key exchange, fingerprints
+│   │   ├── ecdh.ts          # ECDH key exchange (manual exchange mode)
 │   │   ├── aes-gcm.ts       # Encryption/decryption
 │   │   └── stream-crypto.ts # Streaming chunk encryption (P2P)
 │   ├── nostr/               # Nostr protocol (signaling option 1)
@@ -671,8 +614,7 @@ src/
     ├── send.tsx             # Send page
     ├── receive.tsx          # Receive page
     ├── receive-chunked.tsx  # Multi-QR chunked receive page (/r route)
-    ├── about.tsx            # About page
-    └── passkey.tsx          # Passkey setup/test page
+    └── about.tsx            # About page
 ```
 
 **Crypto parameters**: Key tunables like `PBKDF2_ITERATIONS`, `ENCRYPTION_CHUNK_SIZE`, and `CLOUD_CHUNK_SIZE` live in [src/lib/crypto/constants.ts](src/lib/crypto/constants.ts) for quick lookup.

@@ -144,14 +144,7 @@ export function SendTransferPage() {
     setStep('active')
 
     if (activeHook.type === 'online') {
-      const options = config.usePasskey
-        ? {
-            usePasskey: true,
-            selfTransfer: true, // Passkey mode is always self-transfer
-            relayOnly: config.relayOnly,
-          }
-        : { relayOnly: config.relayOnly }
-      void activeHook.hook.send(compressedFile, options)
+      void activeHook.hook.send(compressedFile, { relayOnly: config.relayOnly })
     } else {
       void activeHook.hook.send(compressedFile)
     }
@@ -315,7 +308,7 @@ export function SendTransferPage() {
               state={state}
               betweenProgressAndChunks={
                 pin && state.status === 'waiting_for_receiver'
-                  ? <PinDisplay pin={pin} passkeyFingerprint={null} onExpire={handleCancel} />
+                  ? <PinDisplay pin={pin} onExpire={handleCancel} />
                   : undefined
               }
             />

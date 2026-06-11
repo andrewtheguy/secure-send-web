@@ -17,7 +17,6 @@ import {
   createNostrClient,
   generateEphemeralKeys,
   createPinExchangeEvent,
-  createMutualTrustEvent,
   parseAckEvent,
   createSignalingEvent,
   parseSignalingEvent,
@@ -35,36 +34,17 @@ import type { Event } from 'nostr-tools'
 import { readFileAsBytes } from '@/lib/file-utils'
 import { WebRTCConnection } from '@/lib/webrtc'
 import { getWebRTCConfig } from '@/lib/webrtc-config'
-import {
-  getPasskeySessionKeypair,
-  verifySessionBinding,
-  deriveSessionEncryptionKey,
-  type EphemeralSessionKeypair,
-} from '@/lib/crypto/passkey'
-import {
-  deriveAESKeyFromSecretKey,
-  publicKeyToFingerprint,
-  deriveKeyConfirmationFromSecretKey,
-  hashKeyConfirmation,
-  computePublicKeyCommitment,
-  constantTimeEqual,
-} from '@/lib/crypto/ecdh'
-import { uint8ArrayToBase64 } from '@/lib/nostr/events'
 
 export interface UseNostrSendReturn {
   state: TransferState
   pin: string | null
-  ownPublicKey: Uint8Array | null
-  ownFingerprint: string | null
-  send: (content: File, options?: WebRTCOptions & { selfTransfer?: boolean }) => Promise<void>
+  send: (content: File, options?: WebRTCOptions) => Promise<void>
   cancel: () => void
 }
 
 export function useNostrSend(): UseNostrSendReturn {
   const [state, setState] = useState<TransferState>({ status: 'idle' })
   const [pin, setPin] = useState<string | null>(null)
-  const [ownPublicKey, setOwnPublicKey] = useState<Uint8Array | null>(null)
-  const [ownFingerprint, setOwnFingerprint] = useState<string | null>(null)
 
   const clientRef = useRef<NostrClient | null>(null)
   const cancelledRef = useRef(false)
@@ -87,13 +67,11 @@ export function useNostrSend(): UseNostrSendReturn {
       clientRef.current = null
     }
     setPin(null)
-    setOwnPublicKey(null)
-    setOwnFingerprint(null)
     setState({ status: 'idle' })
   }, [clearExpirationTimeout])
 
   const send = useCallback(
-    async (content: File, options?: WebRTCOptions & { selfTransfer?: boolean }) => {
+    async (content: File, options?: WebRTCOptions) => {
       // Guard against concurrent invocations
       if (sendingRef.current) return
       sendingRef.current = true
@@ -141,93 +119,19 @@ export function useNostrSend(): UseNostrSendReturn {
         // Generate credentials and derive key
         const sessionStartTime = Date.now()
         const salt = generateSalt()
-        let key: CryptoKey
-        let hint: string
-        let senderFingerprint: string | undefined
-        // Security: Key confirmation, receiver PK commitment, and replay nonce
-        let keyConfirmHash: string | undefined
-        let receiverPkCommitment: string | undefined
-        let replayNonce: string | undefined
-        // PFS: Ephemeral session keypair for Perfect Forward Secrecy
-        let senderEphemeral: EphemeralSessionKeypair | undefined
-        let identitySharedSecretKey: CryptoKey | undefined
 
-        if (options?.usePasskey && options.selfTransfer) {
-          // MUTUAL TRUST MODE: Use passkey for self-transfer
-          // NOW WITH PERFECT FORWARD SECRECY via ephemeral session keys
-          setState({ status: 'connecting', message: 'Authenticate with passkey...' })
-
-          try {
-            // Authenticate and get ephemeral session keypair with identity binding
-            // SECURITY: Ephemeral private key is NEVER exposed as raw bytes (Web Crypto generateKey)
-            const {
-              ephemeral,
-              identitySharedSecretKey: sharedSecret,
-            } = await getPasskeySessionKeypair()
-
-            // Store identity info for display
-            setOwnPublicKey(ephemeral.identityPublicKeyBytes)
-            setOwnFingerprint(ephemeral.identityFingerprint)
-            senderFingerprint = ephemeral.identityFingerprint
-
-            // Store for later use (deriving session key after ACK)
-            senderEphemeral = ephemeral
-            identitySharedSecretKey = sharedSecret
-
-            // For self-transfer, receiver is the same as sender
-            const receiverPublicKeyBytes = ephemeral.identityPublicKeyBytes
-
-            // Derive AES key from passkey master key for initial payload encryption
-            // NOTE: This is for the payload only. File data will use session key (PFS)
-            key = await deriveAESKeyFromSecretKey(sharedSecret, salt)
-
-            // === SECURITY ENHANCEMENTS ===
-
-            // 1. Key Confirmation: Derive confirmation value and hash it
-            // This proves both parties derived the same identity shared secret
-            const confirmValue = await deriveKeyConfirmationFromSecretKey(sharedSecret, salt)
-            keyConfirmHash = await hashKeyConfirmation(confirmValue)
-
-            // 2. Receiver Public Key Commitment: Prevents relay MITM attacks
-            // Sender commits to the receiver's identity public ID
-            receiverPkCommitment = await computePublicKeyCommitment(receiverPublicKeyBytes)
-
-            // 3. Replay Nonce: Prevents replay attacks within TTL window
-            // Receiver must echo this nonce in their ready ACK
-            const nonceBytes = crypto.getRandomValues(new Uint8Array(16))
-            replayNonce = uint8ArrayToBase64(nonceBytes)
-
-            // Hint is receiver's public ID fingerprint (for event filtering)
-            hint = await publicKeyToFingerprint(receiverPublicKeyBytes)
-          } catch (err) {
-            setState({
-              status: 'error',
-              message: err instanceof Error ? err.message : 'Passkey authentication failed',
-            })
-            sendingRef.current = false
-            return
-          }
-        } else if (options?.usePasskey) {
-          // Passkey mode without selfTransfer - not supported anymore
-          setState({ status: 'error', message: 'Passkey mode is only for self-transfer' })
-          sendingRef.current = false
-          return
-        } else {
-          // Regular PIN mode
-          setState({ status: 'connecting', message: 'Generating secure PIN...' })
-          const newPin = generatePinForMethod('nostr')
-          hint = await computePinHint(newPin)
-          key = await deriveKeyFromPin(newPin, salt)
-          setPin(newPin)
-        }
+        // PIN mode
+        setState({ status: 'connecting', message: 'Generating secure PIN...' })
+        const newPin = generatePinForMethod('nostr')
+        const hint = await computePinHint(newPin)
+        const key = await deriveKeyFromPin(newPin, salt)
+        setPin(newPin)
 
         // Best-effort cleanup: clear state after expiration
         clearExpirationTimeout()
         expirationTimeoutRef.current = setTimeout(() => {
           if (!cancelledRef.current && sendingRef.current) {
             setPin(null)
-            setOwnPublicKey(null)
-            setOwnFingerprint(null)
             setState({ status: 'error', message: 'Session expired. Please try again.' })
             sendingRef.current = false
             if (clientRef.current) {
@@ -278,28 +182,7 @@ export function useNostrSend(): UseNostrSendReturn {
           totalRelays: DEFAULT_RELAYS.length,
         })
 
-        // Choose event type based on mode
-        let exchangeEvent: Event
-        if (options?.usePasskey && options.selfTransfer && senderFingerprint && keyConfirmHash && receiverPkCommitment && replayNonce && senderEphemeral) {
-          // Self-transfer (same passkey): use mutual trust event
-          // Both parties have the same passkey, so they derive the same key
-          exchangeEvent = createMutualTrustEvent(
-            secretKey,
-            encryptedPayload,
-            salt,
-            transferId,
-            hint, // receiver's public ID fingerprint
-            senderFingerprint, // sender's public ID fingerprint
-            keyConfirmHash, // key confirmation hash (MITM detection)
-            receiverPkCommitment, // receiver public ID commitment (relay MITM prevention)
-            replayNonce, // replay nonce (replay protection)
-            senderEphemeral.ephemeralPublicKeyBytes, // PFS: sender's ephemeral public key
-            senderEphemeral.sessionBinding // PFS: session binding proof
-          )
-        } else {
-          // PIN mode
-          exchangeEvent = createPinExchangeEvent(secretKey, encryptedPayload, salt, transferId, hint)
-        }
+        const exchangeEvent = createPinExchangeEvent(secretKey, encryptedPayload, salt, transferId, hint)
 
         await client.publish(exchangeEvent)
 
@@ -309,10 +192,8 @@ export function useNostrSend(): UseNostrSendReturn {
         await client.waitForConnection()
 
         // Wait for receiver ready ACK (seq=0)
-        const { receiverPubkey, receiverEphemeralPub, receiverSessionBinding } = await new Promise<{
+        const { receiverPubkey } = await new Promise<{
           receiverPubkey: string
-          receiverEphemeralPub?: Uint8Array
-          receiverSessionBinding?: Uint8Array
         }>((resolve, reject) => {
           const timeout = setTimeout(() => {
             client.unsubscribe(subId)
@@ -339,23 +220,10 @@ export function useNostrSend(): UseNostrSendReturn {
 
               const ack = parseAckEvent(event)
               if (ack && ack.transferId === transferId && ack.seq === 0) {
-                // For mutual trust mode, verify nonce to prevent replay attacks
-                if (replayNonce) {
-                  if (!ack.nonce || !constantTimeEqual(ack.nonce, replayNonce)) {
-                    console.error('Nonce mismatch in ready ACK - potential replay attack')
-                    clearTimeout(timeout)
-                    client.unsubscribe(subId)
-                    reject(new Error('Security check failed: nonce mismatch'))
-                    return
-                  }
-                }
-
                 clearTimeout(timeout)
                 client.unsubscribe(subId)
                 resolve({
                   receiverPubkey: event.pubkey,
-                  receiverEphemeralPub: ack.receiverEphemeralPub,
-                  receiverSessionBinding: ack.receiverSessionBinding,
                 })
               }
             }
@@ -366,43 +234,6 @@ export function useNostrSend(): UseNostrSendReturn {
 
         // Receiver connected - credentials no longer needed for display
         setPin(null)
-        setOwnPublicKey(null)
-        setOwnFingerprint(null)
-
-        // PFS: Derive session encryption key from ephemeral ECDH
-        // This key provides Perfect Forward Secrecy - compromising identity keys
-        // doesn't help decrypt this session's data
-        if (senderEphemeral && identitySharedSecretKey) {
-          // In passkey mode, PFS is mandatory - receiver MUST provide ephemeral keys
-          if (!receiverEphemeralPub || !receiverSessionBinding) {
-            throw new Error('Security check failed: receiver did not provide ephemeral keys for PFS')
-          }
-
-          // For self-transfer: verify receiver's session binding (same passkey = same master key)
-          const bindingValid = await verifySessionBinding(
-            identitySharedSecretKey,
-            receiverEphemeralPub,
-            receiverSessionBinding
-          )
-          if (!bindingValid) {
-            throw new Error('Security check failed: invalid receiver session binding (potential MITM)')
-          }
-
-          // Derive session key from ephemeral ECDH
-          // SECURITY: This key is derived from ephemeral keys whose private material
-          // was NEVER exposed as raw bytes, providing true Perfect Forward Secrecy
-          key = await deriveSessionEncryptionKey(
-            senderEphemeral.ephemeralPrivateKey,
-            receiverEphemeralPub,
-            salt
-          )
-
-          // === MEMORY CLEANUP ===
-          // Now that we have the session key (key), we no longer need the passkey master secrets
-          // or the ephemeral private key. Explicitly clear them to minimize exposure window.
-          senderEphemeral = undefined
-          identitySharedSecretKey = undefined
-        }
 
         // Enforce TTL: reject if session has expired
         if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
@@ -721,8 +552,6 @@ export function useNostrSend(): UseNostrSendReturn {
       } catch (error) {
         if (!cancelledRef.current) {
           setPin(null)
-          setOwnPublicKey(null)
-          setOwnFingerprint(null)
           setState((prevState) => ({
             ...prevState,
             status: 'error',
@@ -743,8 +572,8 @@ export function useNostrSend(): UseNostrSendReturn {
 
   // Memoize return object to prevent unnecessary re-renders in consumers
   return useMemo(
-    () => ({ state, pin, ownPublicKey, ownFingerprint, send, cancel }),
-    [state, pin, ownPublicKey, ownFingerprint, send, cancel]
+    () => ({ state, pin, send, cancel }),
+    [state, pin, send, cancel]
   )
 }
 

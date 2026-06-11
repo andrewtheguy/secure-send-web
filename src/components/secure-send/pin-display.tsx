@@ -1,17 +1,15 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Check, Copy, AlertCircle, Eye, EyeOff, Clock, Hash, MessageSquareText, Fingerprint, ArrowRight } from 'lucide-react'
+import { Check, Copy, AlertCircle, Eye, EyeOff, Clock, Hash, MessageSquareText, Fingerprint } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PIN_DISPLAY_TIMEOUT_MS, pinToWords, computePinHint } from '@/lib/crypto'
-import { formatFingerprint } from '@/lib/crypto/ecdh'
 
 interface PinDisplayProps {
   pin: string
-  passkeyFingerprint?: string | null
   onExpire: () => void
 }
 
-export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProps) {
+export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState(false)
   const [isMasked, setIsMasked] = useState(false)
@@ -145,173 +143,6 @@ export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProp
     return () => { cancelled = true }
   }, [pin])
 
-  // Format passkey fingerprint for display (e.g., "A1B2-C3D4-E5F6-7890")
-  const formattedPasskeyFingerprint = useMemo(() => {
-    if (!passkeyFingerprint) return ''
-    return formatFingerprint(passkeyFingerprint)
-  }, [passkeyFingerprint])
-
-  // Dual mode: side-by-side layout
-  if (passkeyFingerprint) {
-    return (
-      <div className="flex flex-col gap-4 p-6 rounded-lg bg-muted/50 border">
-        {/* Header with timer */}
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-muted-foreground">
-            Receiver can use either option
-          </h3>
-          <div className="flex items-center gap-2 text-sm">
-            <Clock className="h-4 w-4 text-amber-600" />
-            <span className="font-mono font-medium text-amber-600">
-              {formatTime(timeRemaining)}
-            </span>
-          </div>
-        </div>
-
-        {/* Progress bar */}
-        <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
-          <div
-            className="h-full bg-amber-600"
-            style={{ width: `${progressPercentage}%` }}
-          />
-        </div>
-
-        {/* Mobile-only hint for Option 2 */}
-        <div className="md:hidden flex items-center gap-2 text-xs font-medium text-cyan-600 bg-cyan-50 dark:bg-cyan-950/30 px-3 py-2 rounded-lg border border-cyan-500/30 animate-pulse">
-          <Fingerprint className="h-3.5 w-3.5" />
-          <span>Passkey available as Option 2</span>
-          <ArrowRight className="h-3 w-3 ml-auto rotate-90" />
-        </div>
-
-        {/* Side-by-side options */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Option 1: PIN */}
-          <div className="flex flex-col gap-3 p-4 rounded-lg border bg-muted/30">
-            <div className="flex items-center gap-2">
-              <Hash className="h-4 w-4 text-green-600" />
-              <h4 className="text-sm font-medium">Option 1: PIN</h4>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Works for any receiver - no passkey required
-            </p>
-
-            {/* PIN Display */}
-            {useWords ? (
-              <div className="grid grid-cols-2 gap-1.5">
-                {words.map((word, i) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length PIN word slots
-                  <div key={i} className="relative">
-                    <Input
-                      value={isMasked ? '\u2022\u2022\u2022\u2022\u2022' : word}
-                      readOnly
-                      className="text-center font-mono text-xs h-8 bg-background border-green-500/50 cursor-default select-all"
-                    />
-                    <span className="absolute left-1 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
-                      {i + 1}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <Input
-                value={isMasked ? maskedPin : pin}
-                readOnly
-                className="text-center font-mono text-lg tracking-wider h-10 bg-background border-green-500 cursor-default select-all"
-              />
-            )}
-
-            {/* Action buttons */}
-            <div className="flex gap-2">
-              <Button
-                variant="default"
-                size="sm"
-                className="flex-1"
-                onClick={handleCopy}
-              >
-                {copied ? (
-                  <>
-                    <Check className="h-3 w-3 mr-1" />
-                    Copied!
-                  </>
-                ) : error ? (
-                  <>
-                    <AlertCircle className="h-3 w-3 mr-1" />
-                    Failed
-                  </>
-                ) : (
-                  <>
-                    <Copy className="h-3 w-3 mr-1" />
-                    Copy {useWords ? 'words' : 'PIN'}
-                  </>
-                )}
-              </Button>
-
-              {hasCopied && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={toggleMask}
-                  title={isMasked ? 'Show PIN' : 'Hide PIN'}
-                >
-                  {isMasked ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
-                </Button>
-              )}
-            </div>
-
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggleMode}
-              className="text-xs"
-            >
-              {useWords ? 'Show as characters' : 'Show as words'}
-            </Button>
-          </div>
-
-          {/* Option 2: Passkey */}
-          <div className="flex flex-col gap-3 p-4 rounded-lg border border-cyan-500/50 bg-cyan-50/30 dark:bg-cyan-950/20">
-            <div className="flex items-center gap-2">
-              <Fingerprint className="h-4 w-4 text-cyan-600" />
-              <h4 className="text-sm font-medium">Option 2: Passkey</h4>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Receiver with same synced passkey can authenticate directly
-            </p>
-
-            <div className="flex items-center justify-center h-10 bg-background rounded-md border border-dashed border-cyan-500/50">
-              <span className="text-cyan-600 font-medium">No PIN needed</span>
-            </div>
-
-            <p className="text-xs text-muted-foreground text-center">
-              Receiver selects &quot;Use Passkey&quot; and authenticates
-            </p>
-          </div>
-        </div>
-
-        {/* Fingerprints for verification */}
-        <div className="text-xs text-muted-foreground border-t pt-3 space-y-2">
-          {fingerprint && (
-            <div>
-              <div className="flex items-center gap-2 font-mono">
-                <Hash className="h-3 w-3" />
-                PIN Fingerprint: {fingerprint}
-              </div>
-              <p className="mt-0.5 ml-5">Compare with receiver to verify same PIN was entered.</p>
-            </div>
-          )}
-          <div>
-            <div className="flex items-center gap-2 font-mono">
-              <Fingerprint className="h-3 w-3" />
-              Passkey Fingerprint: {formattedPasskeyFingerprint}
-            </div>
-            <p className="mt-0.5 ml-5">Compare with receiver to verify same passkey is used.</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // Single mode: original layout
   return (
     <div className="flex flex-col gap-4 p-6 rounded-lg bg-muted/50 border">
       {/* Header with timer */}

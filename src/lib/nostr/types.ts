@@ -89,10 +89,8 @@ export interface ChunkNotifyPayload {
 }
 
 /**
- * Transfer metadata for both PIN and passkey modes.
- * @property hint - Identifier for Nostr event filtering:
- *   - PIN mode: SHA-256(PIN) truncated to 8 hex chars
- *   - Passkey mode: Fingerprint derived from passkey public ID (16 hex chars)
+ * Transfer metadata for PIN mode.
+ * @property hint - Identifier for Nostr event filtering: SHA-256(PIN) truncated to 8 hex chars
  */
 export interface TransferMetadata {
   pin: string
@@ -118,7 +116,6 @@ export interface SignalingPayload {
 
 export interface WebRTCOptions {
   relayOnly?: boolean
-  usePasskey?: boolean
 }
 
 // Signaling method for P2P connection
