@@ -411,37 +411,58 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       if (cancelledRef.current) return
 
-      // Send acknowledgment
-      rtc.send('ACK')
-
       // Decrypt and reassemble chunks
-      let contentData = new Uint8Array(totalBytes!)
+      const contentData = new Uint8Array(totalBytes!)
+      const expectedChunks = Math.ceil(totalBytes! / ENCRYPTION_CHUNK_SIZE)
+      const receivedChunkIndices = new Set<number>()
       let totalDecryptedBytes = 0
 
-      for (const encryptedChunk of receivedChunks) {
-        try {
-          // Parse chunk to get index and encrypted data
-          const { chunkIndex, encryptedData } = parseChunkMessage(encryptedChunk)
-          const decryptedChunk = await decryptChunk(key, encryptedData)
-
-          // Calculate write position based on chunk index
-          const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE
-
-          // Ensure buffer is large enough
-          const requiredSize = writePosition + decryptedChunk.length
-          if (contentData.length < requiredSize) {
-            const newBuffer = new Uint8Array(Math.max(requiredSize, contentData.length * 2))
-            newBuffer.set(contentData)
-            contentData = newBuffer
-          }
-
-          // Write to correct position based on chunk index
-          contentData.set(decryptedChunk, writePosition)
-          totalDecryptedBytes += decryptedChunk.length
-        } catch (err) {
-          console.error('Failed to decrypt chunk:', err)
-        }
+      if (receivedChunks.length !== expectedChunks) {
+        throw new Error(`Missing chunks: got ${receivedChunks.length}, expected ${expectedChunks}`)
       }
+
+      for (const encryptedChunk of receivedChunks) {
+        // Parse chunk to get index and encrypted data
+        const { chunkIndex, encryptedData } = parseChunkMessage(encryptedChunk)
+        if (receivedChunkIndices.has(chunkIndex)) {
+          throw new Error(`Duplicate chunk index: ${chunkIndex}`)
+        }
+        if (chunkIndex >= expectedChunks) {
+          throw new Error(`Chunk index out of range: ${chunkIndex}`)
+        }
+
+        const decryptedChunk = await decryptChunk(key, encryptedData, chunkIndex)
+
+        // Calculate write position based on chunk index
+        const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE
+        const expectedChunkLength =
+          chunkIndex === expectedChunks - 1
+            ? totalBytes! - writePosition
+            : ENCRYPTION_CHUNK_SIZE
+
+        if (decryptedChunk.length !== expectedChunkLength) {
+          throw new Error(
+            `Invalid chunk ${chunkIndex} length: expected ${expectedChunkLength}, got ${decryptedChunk.length}`
+          )
+        }
+
+        const requiredSize = writePosition + decryptedChunk.length
+        if (requiredSize > contentData.length) {
+          throw new Error(`Chunk ${chunkIndex} exceeds expected file size`)
+        }
+
+        // Write to correct position based on authenticated chunk index
+        contentData.set(decryptedChunk, writePosition)
+        receivedChunkIndices.add(chunkIndex)
+        totalDecryptedBytes += decryptedChunk.length
+      }
+
+      if (receivedChunkIndices.size !== expectedChunks || totalDecryptedBytes !== totalBytes) {
+        throw new Error(`Incomplete transfer: got ${totalDecryptedBytes} bytes, expected ${totalBytes}`)
+      }
+
+      // Send acknowledgment only after all encrypted chunks authenticate and reassemble.
+      rtc.send('ACK')
 
       // Trim buffer to actual content size
       const receivedData = contentData.slice(0, totalDecryptedBytes)

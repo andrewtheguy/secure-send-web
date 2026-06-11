@@ -11,14 +11,27 @@ import { generateNonce } from './aes-gcm'
  * 
  * Encrypted chunk format:
  *   [2-byte chunk index (big-endian)][12-byte nonce][ciphertext][16-byte tag]
+ *
+ * The chunk index is also passed as AES-GCM additional authenticated data.
+ * That keeps the wire format compact while making the write position tamper-evident.
  * 
  * Total overhead per chunk: 2 + 12 + 16 = 30 bytes
  */
 
-// Chunk index is 2 bytes (big-endian), supporting up to 65535 chunks
-// With 64KB chunks, this allows files up to ~4GB
+// Chunk index is 2 bytes (big-endian), supporting up to 65535 chunks.
 const CHUNK_INDEX_SIZE = 2
 const OVERHEAD_PER_CHUNK = CHUNK_INDEX_SIZE + AES_NONCE_LENGTH + AES_TAG_LENGTH
+
+function encodeChunkIndex(chunkIndex: number): Uint8Array {
+    if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex > 0xFFFF) {
+        throw new Error(`Chunk index out of range: ${chunkIndex}`)
+    }
+
+    return new Uint8Array([
+        (chunkIndex >> 8) & 0xFF,
+        chunkIndex & 0xFF,
+    ])
+}
 
 /**
  * Encrypt a single chunk with chunk index prefix.
@@ -33,14 +46,15 @@ export async function encryptChunk(
     plaintext: Uint8Array,
     chunkIndex: number
 ): Promise<Uint8Array> {
-    if (chunkIndex < 0 || chunkIndex > 0xFFFF) {
-        throw new Error(`Chunk index out of range: ${chunkIndex}`)
-    }
-
+    const chunkIndexBytes = encodeChunkIndex(chunkIndex)
     const nonce = generateNonce()
 
     const ciphertext = await crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv: nonce as BufferSource },
+        {
+            name: 'AES-GCM',
+            iv: nonce as BufferSource,
+            additionalData: chunkIndexBytes as BufferSource,
+        },
         key,
         plaintext as BufferSource
     )
@@ -49,8 +63,7 @@ export async function encryptChunk(
     const result = new Uint8Array(CHUNK_INDEX_SIZE + nonce.length + ciphertext.byteLength)
 
     // Write chunk index as big-endian 16-bit
-    result[0] = (chunkIndex >> 8) & 0xFF
-    result[1] = chunkIndex & 0xFF
+    result.set(chunkIndexBytes, 0)
 
     // Write nonce
     result.set(nonce, CHUNK_INDEX_SIZE)
@@ -95,17 +108,23 @@ export function parseChunkMessage(data: ArrayBuffer | Uint8Array): {
  */
 export async function decryptChunk(
     key: CryptoKey,
-    encryptedData: Uint8Array
+    encryptedData: Uint8Array,
+    chunkIndex: number
 ): Promise<Uint8Array> {
     if (encryptedData.length < AES_NONCE_LENGTH + AES_TAG_LENGTH) {
         throw new Error(`Encrypted data too short: ${encryptedData.length} bytes`)
     }
 
+    const chunkIndexBytes = encodeChunkIndex(chunkIndex)
     const nonce = encryptedData.slice(0, AES_NONCE_LENGTH)
     const ciphertext = encryptedData.slice(AES_NONCE_LENGTH)
 
     const plaintext = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: nonce as BufferSource },
+        {
+            name: 'AES-GCM',
+            iv: nonce as BufferSource,
+            additionalData: chunkIndexBytes as BufferSource,
+        },
         key,
         ciphertext as BufferSource
     )

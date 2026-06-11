@@ -247,6 +247,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           let combinedBuffer: Uint8Array | null = expectedSize > 0 ? new Uint8Array(expectedSize) : null
           const receivedChunkIndices: Set<number> = new Set()
           const pendingChunkPromises: Set<Promise<void>> = new Set()
+          const expectedP2PChunks = Math.ceil(resolvedFileSize / ENCRYPTION_CHUNK_SIZE)
           let totalDecryptedBytes = 0
           let settled = false
           let cloudTransferStarted = false
@@ -279,8 +280,14 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 if (typeof data === 'string' && data.startsWith('DONE:')) {
                   void (async () => {
                     const expectedChunks = parseInt(data.split(':')[1], 10)
-                    if (!Number.isFinite(expectedChunks)) {
+                    if (!Number.isInteger(expectedChunks) || expectedChunks <= 0) {
                       reject(new Error('Invalid DONE message: missing chunk count'))
+                      return
+                    }
+                    if (expectedChunks !== expectedP2PChunks) {
+                      reject(
+                        new Error(`Invalid DONE message: expected ${expectedP2PChunks} chunks, got ${expectedChunks}`)
+                      )
                       return
                     }
 
@@ -291,6 +298,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                     if (receivedChunkIndices.size !== expectedChunks) {
                       reject(
                         new Error(`Missing chunks: got ${receivedChunkIndices.size}, expected ${expectedChunks}`)
+                      )
+                      return
+                    }
+                    if (totalDecryptedBytes !== resolvedFileSize) {
+                      reject(
+                        new Error(`Incomplete transfer: got ${totalDecryptedBytes} bytes, expected ${resolvedFileSize}`)
                       )
                       return
                     }
@@ -325,9 +338,29 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                   const decryptPromise = (async () => {
                     try {
                       const { chunkIndex, encryptedData } = parseChunkMessage(data)
-                      const decryptedChunk = await decryptChunk(key!, encryptedData)
+                      if (receivedChunkIndices.has(chunkIndex)) {
+                        throw new Error(`Duplicate chunk index: ${chunkIndex}`)
+                      }
+                      if (chunkIndex >= expectedP2PChunks) {
+                        throw new Error(`Chunk index out of range: ${chunkIndex}`)
+                      }
+
+                      const decryptedChunk = await decryptChunk(key!, encryptedData, chunkIndex)
                       const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE
                       const requiredSize = writePosition + decryptedChunk.length
+                      const expectedChunkLength =
+                        chunkIndex === expectedP2PChunks - 1
+                          ? resolvedFileSize - writePosition
+                          : ENCRYPTION_CHUNK_SIZE
+
+                      if (decryptedChunk.length !== expectedChunkLength) {
+                        throw new Error(
+                          `Invalid chunk ${chunkIndex} length: expected ${expectedChunkLength}, got ${decryptedChunk.length}`
+                        )
+                      }
+                      if (requiredSize > resolvedFileSize) {
+                        throw new Error(`Chunk ${chunkIndex} exceeds expected file size`)
+                      }
 
                       if (!combinedBuffer || combinedBuffer.length < requiredSize) {
                         const newBuffer = new Uint8Array(

@@ -1,10 +1,13 @@
 import { AES_KEY_LENGTH } from './constants'
 
 /**
- * ECDH Key Exchange for Mutual Authentication
+ * ECDH key agreement for Manual Exchange mode.
  *
  * SECURITY: Keys are generated as non-extractable to prevent exfiltration.
  * Public keys can still be exported even when non-extractable.
+ *
+ * ECDH by itself does not authenticate the peer. Manual mode relies on the
+ * user-controlled QR/clipboard exchange path for authenticity.
  */
 
 /**

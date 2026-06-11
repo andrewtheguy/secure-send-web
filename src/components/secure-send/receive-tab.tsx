@@ -15,7 +15,7 @@ import type { PinKeyMaterial } from '@/lib/types'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 const PIN_MODE_DESCRIPTION = 'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.'
-const QR_MODE_DESCRIPTION = 'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. Data stays end-to-end encrypted.'
+const QR_MODE_DESCRIPTION = 'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.'
 
 type PinSecret = PinKeyMaterial & { method: SignalingMethod | null }
 
@@ -294,7 +294,7 @@ export function ReceiveTab() {
               )}
 
               <div className="text-xs text-muted-foreground text-center pb-2">
-                Your connection is encrypted and private. Files are never stored unencrypted.
+                File data is encrypted before transfer. Relays or STUN may still see routing metadata.
               </div>
 
               <Button onClick={handleReceivePin} disabled={!canReceivePin} className="w-full bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700">
@@ -307,7 +307,7 @@ export function ReceiveTab() {
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">
                   For <span className="font-medium text-foreground">QR code mode</span> transfers only.
-                  Scan or paste the sender's QR code to receive their content.
+                  Scan or paste the intended sender's QR code to receive their content.
                 </p>
               </div>
 
