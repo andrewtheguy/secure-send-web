@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import {
-  deriveKeyFromPinKey,
+  deriveNostrTransferKeysFromPinKey,
   computePinHintFromKey,
   decrypt,
   encrypt,
@@ -12,6 +12,7 @@ import {
   TRANSFER_EXPIRATION_MS,
   AES_NONCE_LENGTH,
   AES_TAG_LENGTH,
+  type NostrTransferKeys,
 } from '@/lib/crypto'
 import {
   createNostrClient,
@@ -74,7 +75,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     setReceivedContent(null)
 
     try {
-      let key: CryptoKey | null = null
+      let keys: NostrTransferKeys | null = null
 
       // PIN mode: use provided material
       if (!pinMaterial.key || !pinMaterial.fingerprint) {
@@ -82,7 +83,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         receivingRef.current = false
         return
       }
-      setState({ status: 'connecting', message: 'Deriving encryption key...' })
+      setState({ status: 'connecting', message: 'Deriving encryption keys...' })
 
       // The PIN hint is salted with the current time bucket, so the sender's hint is
       // tied to the bucket it published in. Derive both the current and previous bucket
@@ -155,15 +156,15 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         if (!parsed) continue
 
         try {
-          const derivedKey = await deriveKeyFromPinKey(pinMaterial.key, parsed.salt)
-          const decrypted = await decrypt(derivedKey, parsed.encryptedPayload)
+          const derivedKeys = await deriveNostrTransferKeysFromPinKey(pinMaterial.key, parsed.salt)
+          const decrypted = await decrypt(derivedKeys.metadata, parsed.encryptedPayload)
           const decoder = new TextDecoder()
           const payloadStr = decoder.decode(decrypted)
           payload = JSON.parse(payloadStr) as PinExchangePayload
 
           transferId = parsed.transferId
           senderPubkey = event.pubkey
-          key = derivedKey
+          keys = derivedKeys
           selectedCreatedAtSec = event.created_at || null
           // Echo back the exact hint the sender published (current or previous bucket)
           matchedHint = parsed.hint
@@ -175,7 +176,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         }
       }
 
-      if (!payload || !key) {
+      if (!payload || !keys) {
         if (!sawNonExpiredCandidate && sawExpiredCandidate) {
           setState({ status: 'error', message: 'Transfer expired. Ask sender to start a new transfer.' })
           return
@@ -237,8 +238,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Generate receiver keypair only after the decrypted metadata is accepted.
       const { secretKey } = generateEphemeralKeys()
 
-      // Send ready ACK (seq=0), authenticated with the PIN-derived key.
-      const readyAck = await createAuthenticatedAckEvent(secretKey, senderPubkey, transferId, 0, key, matchedHint)
+      // Send ready ACK (seq=0), authenticated with the PIN-derived signals key.
+      const readyAck = await createAuthenticatedAckEvent(secretKey, senderPubkey, transferId, 0, keys.signals, matchedHint)
       await client.publish(readyAck)
 
       if (cancelledRef.current) return
@@ -294,7 +295,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               async (signal) => {
                 const signalPayload = { type: 'signal', signal }
                 const signalJson = JSON.stringify(signalPayload)
-                const encryptedSignal = await encrypt(key!, new TextEncoder().encode(signalJson))
+                const encryptedSignal = await encrypt(keys!.signals, new TextEncoder().encode(signalJson))
                 const event = createSignalingEvent(secretKey, senderPubkey!, transferId!, encryptedSignal)
                 await client.publish(event)
               },
@@ -381,7 +382,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                         )
                       }
 
-                      const decryptedChunk = await decryptChunk(key!, encryptedData, chunkIndex)
+                      const decryptedChunk = await decryptChunk(keys!.p2pContent, encryptedData, chunkIndex)
                       const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE
                       const requiredSize = writePosition + decryptedChunk.length
                       const expectedChunkLength =
@@ -499,7 +500,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 senderPubkey!,
                 transferId!,
                 chunkPayload.chunkIndex + 1,
-                key!
+                keys!.signals
               )
               await client.publish(chunkAck)
 
@@ -536,7 +537,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               const signalData = parseSignalingEvent(event)
               if (signalData && signalData.transferId === transferId) {
                 try {
-                  const decrypted = await decrypt(key!, signalData.encryptedSignal)
+                  const decrypted = await decrypt(keys!.signals, signalData.encryptedSignal)
                   const signalPayload = JSON.parse(new TextDecoder().decode(decrypted))
                   if (signalPayload.type === 'signal' && signalPayload.signal) {
                     const r = initWebRTC()
@@ -600,16 +601,16 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         webRTCSuccess = true
       } else {
         setState((s) => ({ ...s, message: 'Decrypting...' }))
-        if (!key) {
-          throw new Error('Session key not available for decryption')
+        if (!keys) {
+          throw new Error('Session keys not available for decryption')
         }
-        contentData = await decrypt(key, transferResult.data)
+        contentData = await decrypt(keys.cloudContent, transferResult.data)
       }
 
       if (cancelledRef.current) return
 
       // Send completion ACK
-      const completeAck = await createAuthenticatedAckEvent(secretKey, senderPubkey, transferId, -1, key)
+      const completeAck = await createAuthenticatedAckEvent(secretKey, senderPubkey, transferId, -1, keys.signals)
       await client.publish(completeAck)
 
       // Set received content

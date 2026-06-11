@@ -1,3 +1,5 @@
+import type { NostrTransferKeys } from '../crypto/kdf'
+
 // Event kinds (matching wormhole-rs)
 export const EVENT_KIND_DATA_TRANSFER = 24242
 export const EVENT_KIND_PIN_EXCHANGE = 24243
@@ -97,7 +99,7 @@ export interface TransferMetadata {
   pin: string
   hint: string
   salt: Uint8Array
-  key: CryptoKey
+  keys: NostrTransferKeys
   transferId: string
   secretKey: Uint8Array
   publicKey: string
