@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import {
   deriveKeyFromPinKey,
+  computePinHintFromKey,
   decrypt,
   encrypt,
   parseChunkMessage,
@@ -74,13 +75,23 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       let key: CryptoKey | null = null
 
       // PIN mode: use provided material
-      if (!pinMaterial.key || !pinMaterial.hint) {
+      if (!pinMaterial.key || !pinMaterial.fingerprint) {
         setState({ status: 'error', message: 'PIN unavailable. Please re-enter.' })
         receivingRef.current = false
         return
       }
       setState({ status: 'connecting', message: 'Deriving encryption key...' })
-      const hint = pinMaterial.hint
+
+      // The PIN hint is salted with the current time bucket, so the sender's hint is
+      // tied to the bucket it published in. Derive both the current and previous bucket
+      // hints and query for either, so a transfer created just before a bucket rollover
+      // is still found (one look-back covers the whole non-expired window, since the
+      // bucket width equals the transfer lifetime). Mirrors the QR signaling parser,
+      // which de-obfuscates against the current and previous time bucket.
+      const [hintCurrent, hintPrev] = await Promise.all([
+        computePinHintFromKey(pinMaterial.key, 0),
+        computePinHintFromKey(pinMaterial.key, 1),
+      ])
 
       if (cancelledRef.current) return
 
@@ -94,11 +105,11 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Search for exchange event
       setState({ status: 'receiving', message: 'Searching for sender...' })
 
-      // Query for events with matching hint
+      // Query for events matching the current or previous time-bucket hint
       const events = await client.query([
         {
           kinds: [EVENT_KIND_PIN_EXCHANGE],
-          '#h': [hint],
+          '#h': [hintCurrent, hintPrev],
           limit: 10,
         },
       ])
@@ -120,6 +131,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       let sawExpiredCandidate = false
       let sawNonExpiredCandidate = false
       let selectedCreatedAtSec: number | null = null
+      let matchedHint: string = hintCurrent
 
       const sortedEvents = [...events].sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
 
@@ -151,6 +163,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           senderPubkey = event.pubkey
           key = derivedKey
           selectedCreatedAtSec = event.created_at || null
+          // Echo back the exact hint the sender published (current or previous bucket)
+          matchedHint = parsed.hint
           break
         } catch {
           // Silently ignore decryption failures and continue trying other candidates.
@@ -194,7 +208,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       const { secretKey } = generateEphemeralKeys()
 
       // Send ready ACK (seq=0)
-      const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0, hint)
+      const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0, matchedHint)
       await client.publish(readyAck)
 
       if (cancelledRef.current) return

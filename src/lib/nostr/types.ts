@@ -90,7 +90,8 @@ export interface ChunkNotifyPayload {
 
 /**
  * Transfer metadata for PIN mode.
- * @property hint - Identifier for Nostr event filtering: SHA-256(PIN) truncated to 8 hex chars
+ * @property hint - Time-bucketed Nostr event-filtering tag: a one-way PBKDF2-SHA256
+ *   derivation of the PIN truncated to 16 hex chars (see computePinHint)
  */
 export interface TransferMetadata {
   pin: string
