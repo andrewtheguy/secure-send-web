@@ -45,8 +45,12 @@ export const CLOUD_CHUNK_SIZE = 10 * 1024 * 1024 // 10MB per cloud chunk
 // Max message size (100MB - P2P handles full size, cloud falls back to chunked)
 export const MAX_MESSAGE_SIZE = 100 * 1024 * 1024 // 100MB
 
-// PIN hint length
-export const PIN_HINT_LENGTH = 8 // hex characters
+// PIN hint length.
+// 16 hex chars = 64 bits. The hint is both the Nostr `#h` filter tag and the
+// displayed PIN fingerprint. 64 bits is birthday-collision-free at any realistic
+// concurrent-transfer scale and gives the fingerprint strong second-preimage
+// resistance (combined with the PBKDF2 iteration count below).
+export const PIN_HINT_LENGTH = 16 // hex characters
 
 // Domain-separation salt for the PIN hint KDF.
 // Shared (public) constant so sender and receiver derive the same hint from the
