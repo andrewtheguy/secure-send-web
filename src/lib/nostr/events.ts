@@ -81,7 +81,8 @@ export function parsePinExchangeEvent(event: Event): {
 /**
  * Create ACK event (kind 24242)
  * seq=0 for ready ACK, seq=-1 for completion ACK
- * hint is optional - used to indicate which key the receiver used
+ * hint is optional - used to confirm which PIN exchange event was processed
+ * (event correlation/debugging); it carries no key-selection meaning in PIN-only mode
  */
 export function createAckEvent(
   secretKey: Uint8Array,
@@ -97,7 +98,7 @@ export function createAckEvent(
     ['type', 'ack'],
   ]
 
-  // Add hint tag if provided (for key selection)
+  // Add hint tag if provided (PIN hash, for event correlation/debugging)
   if (hint) {
     tags.push(['h', hint])
   }

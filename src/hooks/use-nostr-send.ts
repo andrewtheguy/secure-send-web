@@ -38,8 +38,6 @@ import { getWebRTCConfig } from '@/lib/webrtc-config'
 export interface UseNostrSendReturn {
   state: TransferState
   pin: string | null
-  ownPublicKey: Uint8Array | null
-  ownFingerprint: string | null
   send: (content: File, options?: WebRTCOptions) => Promise<void>
   cancel: () => void
 }
@@ -47,8 +45,6 @@ export interface UseNostrSendReturn {
 export function useNostrSend(): UseNostrSendReturn {
   const [state, setState] = useState<TransferState>({ status: 'idle' })
   const [pin, setPin] = useState<string | null>(null)
-  const [ownPublicKey, setOwnPublicKey] = useState<Uint8Array | null>(null)
-  const [ownFingerprint, setOwnFingerprint] = useState<string | null>(null)
 
   const clientRef = useRef<NostrClient | null>(null)
   const cancelledRef = useRef(false)
@@ -71,8 +67,6 @@ export function useNostrSend(): UseNostrSendReturn {
       clientRef.current = null
     }
     setPin(null)
-    setOwnPublicKey(null)
-    setOwnFingerprint(null)
     setState({ status: 'idle' })
   }, [clearExpirationTimeout])
 
@@ -138,8 +132,6 @@ export function useNostrSend(): UseNostrSendReturn {
         expirationTimeoutRef.current = setTimeout(() => {
           if (!cancelledRef.current && sendingRef.current) {
             setPin(null)
-            setOwnPublicKey(null)
-            setOwnFingerprint(null)
             setState({ status: 'error', message: 'Session expired. Please try again.' })
             sendingRef.current = false
             if (clientRef.current) {
@@ -242,8 +234,6 @@ export function useNostrSend(): UseNostrSendReturn {
 
         // Receiver connected - credentials no longer needed for display
         setPin(null)
-        setOwnPublicKey(null)
-        setOwnFingerprint(null)
 
         // Enforce TTL: reject if session has expired
         if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
@@ -562,8 +552,6 @@ export function useNostrSend(): UseNostrSendReturn {
       } catch (error) {
         if (!cancelledRef.current) {
           setPin(null)
-          setOwnPublicKey(null)
-          setOwnFingerprint(null)
           setState((prevState) => ({
             ...prevState,
             status: 'error',
@@ -584,8 +572,8 @@ export function useNostrSend(): UseNostrSendReturn {
 
   // Memoize return object to prevent unnecessary re-renders in consumers
   return useMemo(
-    () => ({ state, pin, ownPublicKey, ownFingerprint, send, cancel }),
-    [state, pin, ownPublicKey, ownFingerprint, send, cancel]
+    () => ({ state, pin, send, cancel }),
+    [state, pin, send, cancel]
   )
 }
 

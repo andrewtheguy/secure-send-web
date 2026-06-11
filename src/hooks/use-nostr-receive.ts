@@ -35,8 +35,6 @@ import { getWebRTCConfig } from '@/lib/webrtc-config'
 export interface UseNostrReceiveReturn {
   state: TransferState
   receivedContent: ReceivedContent | null
-  ownPublicKey: Uint8Array | null
-  ownFingerprint: string | null
   receive: (pinMaterial: PinKeyMaterial) => Promise<void>
   cancel: () => void
   reset: () => void
@@ -45,8 +43,6 @@ export interface UseNostrReceiveReturn {
 export function useNostrReceive(): UseNostrReceiveReturn {
   const [state, setState] = useState<TransferState>({ status: 'idle' })
   const [receivedContent, setReceivedContent] = useState<ReceivedContent | null>(null)
-  const [ownPublicKey, setOwnPublicKey] = useState<Uint8Array | null>(null)
-  const [ownFingerprint, setOwnFingerprint] = useState<string | null>(null)
 
   const clientRef = useRef<NostrClient | null>(null)
   const cancelledRef = useRef(false)
@@ -59,16 +55,12 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       clientRef.current.close()
       clientRef.current = null
     }
-    setOwnPublicKey(null)
-    setOwnFingerprint(null)
     setState({ status: 'idle' })
   }, [])
 
   const reset = useCallback(() => {
     cancel()
     setReceivedContent(null)
-    setOwnPublicKey(null)
-    setOwnFingerprint(null)
   }, [cancel])
 
   const receive = useCallback(async (pinMaterial: PinKeyMaterial) => {
@@ -161,6 +153,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           selectedCreatedAtSec = event.created_at || null
           break
         } catch {
+          // Silently ignore decryption failures and continue trying other candidates.
+          // A failure here just means this event wasn't encrypted with our PIN key
+          // (wrong/stale event sharing the same hint), not a real error.
         }
       }
 
@@ -563,5 +558,5 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     }
   }, [])
 
-  return { state, receivedContent, ownPublicKey, ownFingerprint, receive, cancel, reset }
+  return { state, receivedContent, receive, cancel, reset }
 }
