@@ -11,6 +11,7 @@ import {
   PIN_HINT_ITERATIONS,
 } from './constants'
 import { importPinKey } from './kdf'
+import { wipeBufferSource } from './memory'
 
 /**
  * Compute checksum character using weighted sum
@@ -245,18 +246,42 @@ export async function computePinHintFromKey(keyMaterial: CryptoKey, bucketOffset
 }
 
 /**
- * Compute the PIN fingerprint: a stable, time-independent PBKDF2-SHA-256 derivation of
- * the PIN, displayed to both sender and receiver so they can visually confirm they
- * entered the same PIN.
+ * Compute the PIN fingerprint: a stable, time-independent one-way derivation of the PIN,
+ * displayed to both sender and receiver so they can visually confirm they entered the
+ * same PIN.
  *
- * Unlike the wire hint (computePinHint), the fingerprint is salted only with the static
- * domain-separation salt — NOT the time bucket — because it never crosses the network
- * and is only compared by humans. Keeping it time-independent means the two sides always
- * display the same value, even across a time-bucket rollover.
+ * Unlike the wire hint (computePinHint), this is a single salted SHA-256 — NOT the
+ * expensive 600,000-iteration PBKDF2 — because the fingerprint never crosses the network
+ * and is only compared by humans on-device. There is no published value for an attacker
+ * to brute-force, so the PBKDF2 work-factor (which exists to slow reversing a relayed
+ * hint back to its PIN) buys nothing here; a fast hash keeps PIN entry/display snappy.
+ *
+ * Salted with the static PIN_HINT_SALT (no time bucket) so the two sides always display
+ * the same value, even across a time-bucket rollover, and domain-separated from any
+ * other PIN derivation.
  */
 export async function computePinFingerprint(pin: string): Promise<string> {
-  const keyMaterial = await importPinKey(pin)
-  return derivePinBits(keyMaterial, PIN_HINT_SALT)
+  const encoder = new TextEncoder()
+  // Encode salt and PIN separately (avoids materializing a concatenated PIN string)
+  const saltBytes = encoder.encode(`${PIN_HINT_SALT}:`)
+  const pinBytes = encoder.encode(pin)
+  const input = new Uint8Array(saltBytes.length + pinBytes.length)
+  input.set(saltBytes, 0)
+  input.set(pinBytes, saltBytes.length)
+
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', input)
+    const hex = Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+
+    // Truncate to exact length (needed if PIN_HINT_LENGTH is odd)
+    return hex.slice(0, PIN_HINT_LENGTH)
+  } finally {
+    // Best-effort: clear the PIN bytes from the temporary buffers
+    wipeBufferSource(pinBytes)
+    wipeBufferSource(input)
+  }
 }
 
 /**
