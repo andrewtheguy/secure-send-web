@@ -8,6 +8,7 @@ import {
   MAX_MESSAGE_SIZE,
   ENCRYPTION_CHUNK_SIZE,
   TRANSFER_EXPIRATION_MS,
+  ENCRYPTED_CHUNK_OVERHEAD,
 } from '@/lib/crypto'
 import { WebRTCConnection } from '@/lib/webrtc'
 import { getWebRTCConfig } from '@/lib/webrtc-config'
@@ -215,6 +216,7 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       // Track received data
       const receivedChunks: Uint8Array[] = []
+      const receivedEncryptedChunkIndices = new Set<number>()
       let receivedBytes = 0
       let transferComplete = false
       let dataChannelResolver: (() => void) | null = null
@@ -271,6 +273,44 @@ export function useManualReceive(): UseManualReceiveReturn {
           } else if (data instanceof ArrayBuffer) {
             // Store encrypted chunk for later decryption
             const encryptedChunk = new Uint8Array(data)
+            const expectedChunks = Math.ceil(totalBytes! / ENCRYPTION_CHUNK_SIZE)
+            const expectedEncryptedBytes = totalBytes! + expectedChunks * ENCRYPTED_CHUNK_OVERHEAD
+
+            try {
+              const { chunkIndex } = parseChunkMessage(encryptedChunk)
+              if (receivedEncryptedChunkIndices.has(chunkIndex)) {
+                transferRejecter?.(new Error(`Duplicate chunk index: ${chunkIndex}`))
+                return
+              }
+              if (chunkIndex >= expectedChunks) {
+                transferRejecter?.(new Error(`Chunk index out of range: ${chunkIndex}`))
+                return
+              }
+
+              const expectedPlaintextLength =
+                chunkIndex === expectedChunks - 1
+                  ? totalBytes! - chunkIndex * ENCRYPTION_CHUNK_SIZE
+                  : ENCRYPTION_CHUNK_SIZE
+              const expectedEncryptedLength = expectedPlaintextLength + ENCRYPTED_CHUNK_OVERHEAD
+              if (encryptedChunk.length !== expectedEncryptedLength) {
+                transferRejecter?.(
+                  new Error(
+                    `Invalid encrypted chunk ${chunkIndex} length: expected ${expectedEncryptedLength}, got ${encryptedChunk.length}`
+                  )
+                )
+                return
+              }
+              if (receivedBytes + encryptedChunk.length > expectedEncryptedBytes) {
+                transferRejecter?.(new Error('Transfer exceeds advertised size'))
+                return
+              }
+
+              receivedEncryptedChunkIndices.add(chunkIndex)
+            } catch (err) {
+              transferRejecter?.(err instanceof Error ? err : new Error('Invalid encrypted chunk'))
+              return
+            }
+
             receivedChunks.push(encryptedChunk)
             receivedBytes += encryptedChunk.length
 
@@ -414,7 +454,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       // Decrypt and reassemble chunks
       const contentData = new Uint8Array(totalBytes!)
       const expectedChunks = Math.ceil(totalBytes! / ENCRYPTION_CHUNK_SIZE)
-      const receivedChunkIndices = new Set<number>()
+      const decryptedChunkIndices = new Set<number>()
       let totalDecryptedBytes = 0
 
       if (receivedChunks.length !== expectedChunks) {
@@ -424,7 +464,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       for (const encryptedChunk of receivedChunks) {
         // Parse chunk to get index and encrypted data
         const { chunkIndex, encryptedData } = parseChunkMessage(encryptedChunk)
-        if (receivedChunkIndices.has(chunkIndex)) {
+        if (decryptedChunkIndices.has(chunkIndex)) {
           throw new Error(`Duplicate chunk index: ${chunkIndex}`)
         }
         if (chunkIndex >= expectedChunks) {
@@ -453,11 +493,11 @@ export function useManualReceive(): UseManualReceiveReturn {
 
         // Write to correct position based on authenticated chunk index
         contentData.set(decryptedChunk, writePosition)
-        receivedChunkIndices.add(chunkIndex)
+        decryptedChunkIndices.add(chunkIndex)
         totalDecryptedBytes += decryptedChunk.length
       }
 
-      if (receivedChunkIndices.size !== expectedChunks || totalDecryptedBytes !== totalBytes) {
+      if (decryptedChunkIndices.size !== expectedChunks || totalDecryptedBytes !== totalBytes) {
         throw new Error(`Incomplete transfer: got ${totalDecryptedBytes} bytes, expected ${totalBytes}`)
       }
 

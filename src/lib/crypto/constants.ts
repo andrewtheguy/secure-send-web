@@ -48,8 +48,8 @@ export const MAX_MESSAGE_SIZE = 100 * 1024 * 1024 // 100MB
 // PIN hint length.
 // 16 hex chars = 64 bits. The hint is both the Nostr `#h` filter tag and the
 // displayed PIN fingerprint. 64 bits is birthday-collision-free at any realistic
-// concurrent-transfer scale and gives the fingerprint strong second-preimage
-// resistance (combined with the PBKDF2 iteration count below).
+// concurrent-transfer scale. The published wire hint gets the PBKDF2 work factor
+// below; the local-only display fingerprint is a fast SHA-256 checksum.
 export const PIN_HINT_LENGTH = 16 // hex characters
 
 // Domain-separation salt for the PIN hint KDF.

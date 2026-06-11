@@ -10,12 +10,14 @@ import {
   ENCRYPTION_CHUNK_SIZE,
   CLOUD_CHUNK_SIZE,
   TRANSFER_EXPIRATION_MS,
+  AES_NONCE_LENGTH,
+  AES_TAG_LENGTH,
 } from '@/lib/crypto'
 import {
   createNostrClient,
   generateEphemeralKeys,
   parsePinExchangeEvent,
-  createAckEvent,
+  createAuthenticatedAckEvent,
   parseChunkNotifyEvent,
   DEFAULT_RELAYS,
   type TransferState,
@@ -204,15 +206,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       if (cancelledRef.current) return
 
-      // Generate receiver keypair
-      const { secretKey } = generateEphemeralKeys()
-
-      // Send ready ACK (seq=0)
-      const readyAck = createAckEvent(secretKey, senderPubkey, transferId, 0, matchedHint)
-      await client.publish(readyAck)
-
-      if (cancelledRef.current) return
-
       // Validate payload
       if (payload.fileSize == null || !Number.isFinite(payload.fileSize) || payload.fileSize < 0) {
         setState({ status: 'error', message: 'Invalid file size in transfer' })
@@ -222,6 +215,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       const resolvedFileName = payload.fileName || 'unknown'
       const resolvedFileSize = payload.fileSize
       const resolvedMimeType = payload.mimeType || 'application/octet-stream'
+      const expectedEncryptedCloudSize = resolvedFileSize + AES_NONCE_LENGTH + AES_TAG_LENGTH
+      const expectedCloudChunks = Math.max(1, Math.ceil(expectedEncryptedCloudSize / CLOUD_CHUNK_SIZE))
 
       if (resolvedFileSize > MAX_MESSAGE_SIZE) {
         setState({
@@ -230,6 +225,21 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         })
         return
       }
+
+      if (
+        !Number.isInteger(payload.totalChunks) ||
+        payload.totalChunks !== expectedCloudChunks
+      ) {
+        setState({ status: 'error', message: 'Invalid cloud transfer metadata' })
+        return
+      }
+
+      // Generate receiver keypair only after the decrypted metadata is accepted.
+      const { secretKey } = generateEphemeralKeys()
+
+      // Send ready ACK (seq=0), authenticated with the PIN-derived key.
+      const readyAck = await createAuthenticatedAckEvent(secretKey, senderPubkey, transferId, 0, key, matchedHint)
+      await client.publish(readyAck)
 
       if (cancelledRef.current) return
 
@@ -250,9 +260,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       // Unified listener for P2P and cloud transfer
       let webRTCSuccess = false
       const receivedCloudChunkIndices: Set<number> = new Set()
+      const pendingCloudChunkIndices: Set<number> = new Set()
       let cloudBuffer: Uint8Array | null = null
       let cloudTotalBytes = 0
-      let expectedTotalChunks = payload.totalChunks || 1
+      const expectedTotalChunks = expectedCloudChunks
 
       const transferResult = await new Promise<{ mode: 'p2p' | 'cloud' | 'inline'; data: Uint8Array }>(
         (resolve, reject) => {
@@ -359,6 +370,17 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                         throw new Error(`Chunk index out of range: ${chunkIndex}`)
                       }
 
+                      const expectedPlaintextLength =
+                        chunkIndex === expectedP2PChunks - 1
+                          ? resolvedFileSize - chunkIndex * ENCRYPTION_CHUNK_SIZE
+                          : ENCRYPTION_CHUNK_SIZE
+                      const expectedEncryptedLength = expectedPlaintextLength + AES_NONCE_LENGTH + AES_TAG_LENGTH
+                      if (encryptedData.length !== expectedEncryptedLength) {
+                        throw new Error(
+                          `Invalid encrypted chunk ${chunkIndex} length: expected ${expectedEncryptedLength}, got ${encryptedData.length}`
+                        )
+                      }
+
                       const decryptedChunk = await decryptChunk(key!, encryptedData, chunkIndex)
                       const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE
                       const requiredSize = writePosition + decryptedChunk.length
@@ -414,6 +436,20 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
           const handleChunkNotify = async (chunkPayload: ChunkNotifyPayload) => {
             if (settled) return
+            if (pendingCloudChunkIndices.has(chunkPayload.chunkIndex)) return
+
+            if (!isValidCloudChunkNotify(chunkPayload, transferId!, expectedTotalChunks, expectedEncryptedCloudSize)) {
+              settled = true
+              if (rtc) {
+                rtc.close()
+                rtc = null
+              }
+              client.unsubscribe(subId)
+              reject(new Error('Invalid cloud chunk notification'))
+              return
+            }
+
+            pendingCloudChunkIndices.add(chunkPayload.chunkIndex)
 
             if (!cloudTransferStarted) {
               cloudTransferStarted = true
@@ -421,11 +457,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 rtc.close()
                 rtc = null
               }
-              const estimatedEncryptedSize = chunkPayload.totalChunks * CLOUD_CHUNK_SIZE
-              cloudBuffer = new Uint8Array(estimatedEncryptedSize)
+              cloudBuffer = new Uint8Array(expectedEncryptedCloudSize)
             }
-
-            expectedTotalChunks = chunkPayload.totalChunks
 
             setState((s) => ({
               ...s,
@@ -444,26 +477,29 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 }))
               })
 
+              if (chunkData.length !== chunkPayload.chunkSize) {
+                throw new Error(
+                  `Invalid cloud chunk ${chunkPayload.chunkIndex} size: expected ${chunkPayload.chunkSize}, got ${chunkData.length}`
+                )
+              }
+
               const writePosition = chunkPayload.chunkIndex * CLOUD_CHUNK_SIZE
               const requiredSize = writePosition + chunkData.length
 
-              if (!cloudBuffer || cloudBuffer.length < requiredSize) {
-                const newBuffer = new Uint8Array(Math.max(requiredSize, (cloudBuffer?.length || 0) * 2))
-                if (cloudBuffer) {
-                  newBuffer.set(cloudBuffer)
-                }
-                cloudBuffer = newBuffer
+              if (!cloudBuffer || requiredSize > expectedEncryptedCloudSize) {
+                throw new Error(`Cloud chunk ${chunkPayload.chunkIndex} exceeds expected encrypted size`)
               }
 
               cloudBuffer.set(chunkData, writePosition)
               receivedCloudChunkIndices.add(chunkPayload.chunkIndex)
               cloudTotalBytes += chunkData.length
 
-              const chunkAck = createAckEvent(
+              const chunkAck = await createAuthenticatedAckEvent(
                 secretKey,
                 senderPubkey!,
                 transferId!,
-                chunkPayload.chunkIndex + 1
+                chunkPayload.chunkIndex + 1,
+                key!
               )
               await client.publish(chunkAck)
 
@@ -471,11 +507,21 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 settled = true
                 clearTimeout(overallTimeout)
                 client.unsubscribe(subId)
+                if (cloudTotalBytes !== expectedEncryptedCloudSize) {
+                  reject(
+                    new Error(
+                      `Incomplete cloud transfer: got ${cloudTotalBytes} bytes, expected ${expectedEncryptedCloudSize}`
+                    )
+                  )
+                  return
+                }
                 const result = cloudBuffer.slice(0, cloudTotalBytes)
                 resolve({ mode: 'cloud', data: result })
               }
             } catch (err) {
               console.error(`Failed to download chunk ${chunkPayload.chunkIndex}:`, err)
+            } finally {
+              pendingCloudChunkIndices.delete(chunkPayload.chunkIndex)
             }
           }
 
@@ -563,7 +609,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       if (cancelledRef.current) return
 
       // Send completion ACK
-      const completeAck = createAckEvent(secretKey, senderPubkey, transferId, -1)
+      const completeAck = await createAuthenticatedAckEvent(secretKey, senderPubkey, transferId, -1, key)
       await client.publish(completeAck)
 
       // Set received content
@@ -606,4 +652,25 @@ export function useNostrReceive(): UseNostrReceiveReturn {
   }, [])
 
   return { state, receivedContent, receive, cancel, reset }
+}
+
+function isValidCloudChunkNotify(
+  payload: ChunkNotifyPayload,
+  transferId: string,
+  expectedTotalChunks: number,
+  expectedEncryptedSize: number
+): boolean {
+  if (payload.transferId !== transferId) return false
+  if (!Number.isInteger(payload.chunkIndex) || payload.chunkIndex < 0) return false
+  if (!Number.isInteger(payload.totalChunks) || payload.totalChunks !== expectedTotalChunks) return false
+  if (payload.chunkIndex >= expectedTotalChunks) return false
+  if (!Number.isInteger(payload.chunkSize) || payload.chunkSize <= 0) return false
+  if (payload.chunkSize > CLOUD_CHUNK_SIZE) return false
+
+  const expectedChunkSize =
+    payload.chunkIndex === expectedTotalChunks - 1
+      ? expectedEncryptedSize - payload.chunkIndex * CLOUD_CHUNK_SIZE
+      : CLOUD_CHUNK_SIZE
+
+  return payload.chunkSize === expectedChunkSize
 }

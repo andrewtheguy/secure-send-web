@@ -18,6 +18,7 @@ import {
   generateEphemeralKeys,
   createPinExchangeEvent,
   parseAckEvent,
+  verifyAuthenticatedAckEvent,
   createSignalingEvent,
   parseSignalingEvent,
   createChunkNotifyEvent,
@@ -220,11 +221,16 @@ export function useNostrSend(): UseNostrSendReturn {
 
               const ack = parseAckEvent(event)
               if (ack && ack.transferId === transferId && ack.seq === 0) {
-                clearTimeout(timeout)
-                client.unsubscribe(subId)
-                resolve({
-                  receiverPubkey: event.pubkey,
-                })
+                void (async () => {
+                  const verified = await verifyAuthenticatedAckEvent(event, key, transferId, 0)
+                  if (!verified) return
+
+                  clearTimeout(timeout)
+                  client.unsubscribe(subId)
+                  resolve({
+                    receiverPubkey: event.pubkey,
+                  })
+                })()
               }
             }
           )
@@ -513,6 +519,7 @@ export function useNostrSend(): UseNostrSendReturn {
               publicKey,
               receiverPubkey,
               i + 1,
+              key,
               () => cancelledRef.current,
               60000
             )
@@ -532,6 +539,7 @@ export function useNostrSend(): UseNostrSendReturn {
           publicKey,
           receiverPubkey,
           -1,
+          key,
           () => cancelledRef.current
         )
 
@@ -591,6 +599,7 @@ function waitForAck(
   senderPubkey: string,
   receiverPubkey: string,
   expectedSeq: number,
+  key: CryptoKey,
   isCancelled: () => boolean,
   timeoutMs: number = 5 * 60 * 1000
 ): Promise<boolean> {
@@ -622,10 +631,10 @@ function waitForAck(
       }
     }, timeoutMs)
 
-    const checkEvent = (event: Event): boolean => {
+    const checkEvent = async (event: Event): Promise<boolean> => {
       const ack = parseAckEvent(event)
       if (ack && ack.transferId === transferId && ack.seq === expectedSeq) {
-        return true
+        return await verifyAuthenticatedAckEvent(event, key, transferId, expectedSeq)
       }
       return false
     }
@@ -660,9 +669,11 @@ function waitForAck(
           return
         }
 
-        if (checkEvent(event)) {
-          onFound()
-        }
+        void (async () => {
+          if (await checkEvent(event)) {
+            onFound()
+          }
+        })()
       }
     )
 
@@ -683,7 +694,7 @@ function waitForAck(
 
         for (const event of existingEvents) {
           if (resolved) return
-          if (checkEvent(event)) {
+          if (await checkEvent(event)) {
             onFound()
             return
           }
