@@ -40,7 +40,7 @@ Sender and receiver should use the same app version for transfers.
 
 - **PBKDF2-SHA256** with 600,000 iterations for key derivation (browser-compatible)
 - **AES-256-GCM** authenticated encryption
-- **PIN never transmitted (Nostr)**: Only a hash hint is visible to relays
+- **PIN never transmitted (Nostr)**: Only a one-way PBKDF2 hint (the "PIN fingerprint") is published to relays — used for event lookup and to confirm both sides derived the same PIN, but it cannot be reversed to the PIN or used to decrypt data
 - **Ephemeral identities**: New Nostr keypairs generated per transfer
 - **1-hour expiration**: PIN exchange events expire automatically
 - **Manual exchange signaling**: QR payloads are time-bucketed obfuscated; file data is encrypted with ECDH-derived AES

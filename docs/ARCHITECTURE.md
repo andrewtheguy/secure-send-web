@@ -170,6 +170,15 @@ To protect against manual entry errors, the PIN includes a custom checksum:
 - **Detection**: Effectively catches single-character errors and swaps (transpositions).
 - **Independent Validation**: Both characters and word sequences are validated against the same underlying checksum logic.
 
+#### PIN Hint / Fingerprint
+A short one-way derivation of the PIN that serves two roles without ever exposing the PIN itself (`computePinHint` in `src/lib/crypto/pin.ts`):
+
+- **Derivation**: `PBKDF2-SHA256(pin, salt = "secure-send:pin-hint:v1", iterations = 600,000)`, truncated to the first **16 hex characters (64 bits)**. The salt (`PIN_HINT_SALT`) is a fixed, public, domain-separation constant — shared so sender and receiver derive the identical hint, while still defeating generic precomputed-hash (rainbow table) attacks. It is **distinct** from the per-transfer random salt used for the content key, so the published hint is never equal to the key-derivation output.
+- **Role 1 — Nostr lookup tag**: published as the `['h', hint]` tag on the PIN exchange event (kind 24243) and used as the receiver's `#h` subscription filter to locate the transfer without revealing the PIN. 64 bits is birthday-collision-free at any realistic concurrent-transfer scale; the receiver queries up to 10 matching events and tries to decrypt each, so the rare collision is tolerated rather than fatal.
+- **Role 2 — visible fingerprint**: displayed to both parties (grouped as `XXXX-XXXX-XXXX-XXXX` by `formatPinHint`) as a one-way checksum. The receiver computes it locally after entering the PIN; matching fingerprints confirm both sides derived the same secret. It cannot be reversed to recover the PIN or used to decrypt any data.
+- **Not the security boundary**: the hint only *locates* the event and *confirms* the PIN. Confidentiality rests entirely on the PIN-derived AES key. Reversing the hint to a PIN requires brute-forcing the full PIN space (~65.6 bits, Nostr) at 600,000 iterations per guess — the same cost as attacking the ciphertext directly, so the hint grants an attacker no shortcut.
+- **Scope — PIN-exchange lookup only (do not over-engineer)**: the hint is used as the `#h` filter *solely* to locate the initial PIN exchange event (kind 24243). Everything afterward — WebRTC signaling, ACKs, and the **cloud-fallback `chunk_notify` events** — is filtered by `transferId` (`#t`), never by the hint. The cloud path does not use the PIN hint at all, and the file content is never relayed through Nostr regardless. The hint therefore gates neither content nor cloud routing; it only needs to (a) avoid lookup collisions and (b) be a non-reversible fingerprint. **A future maintainer should not harden the hint as if it were a content-confidentiality control — that would be solving a problem the hint does not own.**
+
 ### User Interface Architecture
 
 #### `PinInput` (Receiver Side)
@@ -449,6 +458,10 @@ interface PinExchangePayload {
 | Signaling Payload | Encrypted (AES-GCM) | N/A |
 | WebRTC Signals | Encrypted (AES-GCM) | N/A |
 | File Content | Encrypted (AES-GCM, 128KB chunks) | Encrypted (AES-GCM, whole file) |
+| Cloud chunk URL (`chunk_notify`) | N/A | **Plaintext** (relay sees it) |
+
+> [!NOTE]
+> The cloud `chunk_notify` event publishes the upload URL in **plaintext**, unlike the WebRTC signals (which are AES-GCM encrypted with the PIN key). This is intentional and safe on its own: the blob at that URL is itself AES-256-GCM encrypted with the PIN-derived key, so the URL is useless without the PIN, and the blob lives only briefly on a third-party host. The only consequence is that a relay observer can learn *where* a cloud blob is (and its size) without the PIN — it cannot decrypt the content. See [Leaked-PIN Exposure](#leaked-pin-exposure-including-after-expiry) for how this interacts with a later PIN leak.
 
 ### Streaming Encryption (All Methods)
 
@@ -557,12 +570,23 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 - Nostr P2P completion requires `DONE:N` (legacy `DONE` without chunk count is unsupported).
 - Multi-QR offer links require `/r#...` (raw hash payload, no `d=` prefix) and first-chunk CRC32 metadata; older URL or chunk formats are rejected.
 
+## Leaked-PIN Exposure (Including After Expiry)
+
+The session TTL is a **liveness control, not cryptographic erasure**: it stops the sender from starting/continuing a transfer past the hour and sets a NIP-40 `expiration` tag (relays *may* auto-delete), but it does not re-key or guarantee deletion of events a relay already received. So "what if the PIN leaks *after* the session expires?" reduces to "what does the PIN decrypt among events a relay chose to retain?" — and expiry does not change that answer.
+
+- **File content is never recoverable from Nostr — before or after expiry.** P2P data travels over WebRTC/DTLS and never touches a relay. A leaked PIN therefore yields *no* file ciphertext from Nostr; there is simply nothing there to decrypt.
+- **What a leaked PIN can decrypt** (from retained, PIN-encrypted events): transfer metadata (`fileName`/`fileSize`/`mimeType`, `transferId`, sender pubkey) and WebRTC signaling (SDP + ICE candidates, which reveal the peers' **IP addresses**). This is the real residual exposure — *what* and *who*, not the content.
+- **Cloud fallback is bounded by the cloud host, not the Nostr TTL.** The encrypted file blob is uploaded to a third-party host (tmpfiles/litterbox/etc.), never to a relay; only its `chunk_notify` URL is published (in clear). A leaked PIN can decrypt such a blob *only while it remains live on the cloud host* (short retention, e.g. ~1h). Once the host expires it, the PIN unlocks nothing.
+- **Single-use PIN bounds the blast radius to one transfer.** Each transfer has its own PIN, ephemeral keypair, and random key-derivation salt (the salt rides in the clear `'s'` tag, so the relay always has it — the PIN is the only missing factor). A leaked PIN compromises only that transfer's retained artifacts and gives zero leverage against any other transfer. (Per-transfer key uniqueness, not PFS — see Security Considerations.)
+
+**Takeaway:** the "data off-Nostr + single-use PIN" design means a post-expiry PIN leak cannot recover file content for P2P transfers, and only within the cloud host's short window for the fallback path. The exposure it *does* carry is per-transfer metadata and participant IPs from retained signaling, mitigated (best-effort) by NIP-40 deletion.
+
 ## Security Considerations
 
 1. **Ephemeral Keys**: New keypair generated for each transfer
 2. **Forward Secrecy**: The PIN-derived key is unique per transfer (includes random salt). Note: This provides per-transfer key uniqueness through random salts, not true Perfect Forward Secrecy (PFS).
 3. **No Server Trust**: Cloud storage and relays see only encrypted payloads and minimal routing metadata; plaintext never leaves the device
-4. **PIN Entropy**: ~67 bits (11 random chars from 69-char set + 1 checksum)
+4. **PIN Entropy**: ~65.6 bits for Nostr (`23 * 69^10`), ~61.1 bits for Manual (`69^10`). The first character is restricted (signaling-method encoding) and the trailing checksum character is deterministic, so neither contributes full entropy.
 5. **Brute-Force Resistance**: 600K PBKDF2 iterations for PIN mode
 6. **PIN Role**: Encrypts signaling (preventing unauthorized P2P connection) AND content (defense in depth)
 7. **Transport Security**: All P2P transfers (Nostr, Manual Exchange) use both AES-256-GCM encryption (128KB chunks) and WebRTC DTLS
