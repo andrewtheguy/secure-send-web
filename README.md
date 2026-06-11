@@ -40,8 +40,10 @@ Sender and receiver should use the same app version for transfers.
 
 - **PBKDF2-SHA256** with 600,000 iterations for key derivation (browser-compatible)
 - **AES-256-GCM** authenticated encryption
-- **Encrypted metadata (Nostr)**: File metadata in the PIN exchange payload, including name, size, and MIME type, is encrypted with the PIN-derived AES-GCM key
+- **Labeled PIN keys (Nostr)**: One transfer salt derives separate non-extractable AES-GCM keys for `metadata`, `signals`, `p2p-content`, and `cloud-content`
+- **Encrypted metadata (Nostr)**: File metadata in the PIN exchange payload, including name, size, and MIME type, is encrypted with the PIN-derived `metadata` key
 - **PIN never transmitted (Nostr)**: Only a one-way PBKDF2 hint is published to relays — a time-bucketed (hourly-rotating) lookup tag used to locate the PIN exchange event, never reversible to the PIN or usable to decrypt data. A separate, time-independent one-way derivation (the "PIN fingerprint") is computed locally on both ends and never published — it's only shown for humans to confirm both sides derived the same PIN
+- **Authenticated relay ACKs (Nostr)**: ACK event bodies are encrypted with the PIN-derived `signals` key, so a public transfer ID alone cannot make the sender start, continue, or complete a transfer
 - **Ephemeral identities**: New Nostr keypairs generated per transfer
 - **1-hour expiration**: Clients enforce a 1-hour transfer TTL; Nostr events include an expiration tag for relays that honor it
 - **Manual exchange signaling**: QR payloads are time-bucketed obfuscated, not cryptographically confidential; file data is encrypted with an ECDH-derived AES key after the QR/clipboard exchange
@@ -82,7 +84,7 @@ If the app is served from a subpath, scanned Multi-QR links will point to the do
 
 ## Transport Layer
 
-All signaling methods share a **unified encryption layer**: P2P transfers encrypt content in 128KB AES-256-GCM chunks before transmission, with the chunk index authenticated as AES-GCM additional data. Cloud fallback encrypts the whole file, then splits it into 10MB upload chunks.
+All signaling methods share a **unified encryption layer**: P2P transfers encrypt content in 128KB AES-256-GCM chunks before transmission, with the chunk index authenticated as AES-GCM additional data. Cloud fallback encrypts the whole file, then splits it into 10MB upload chunks; the receiver validates chunk indices, counts, and sizes against the decrypted transfer metadata before buffering.
 
 **Signaling Methods** (sender chooses):
 - **Nostr** (default): Requires internet. Decentralized relay signaling. Devices can be on different networks. Has cloud fallback.

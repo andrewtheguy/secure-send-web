@@ -1,6 +1,7 @@
 import { finalizeEvent, generateSecretKey, getPublicKey, type Event } from 'nostr-tools'
 import { EVENT_KIND_PIN_EXCHANGE, EVENT_KIND_DATA_TRANSFER, type ChunkNotifyPayload } from './types'
 import { TRANSFER_EXPIRATION_MS } from '../crypto/constants'
+import { decrypt, encrypt } from '../crypto/aes-gcm'
 
 /**
  * Generate ephemeral keypair for a transfer
@@ -78,17 +79,12 @@ export function parsePinExchangeEvent(event: Event): {
   }
 }
 
-/**
- * Create ACK event (kind 24242)
- * seq=0 for ready ACK, seq=-1 for completion ACK
- * hint is optional - used to confirm which PIN exchange event was processed
- * (event correlation/debugging); it carries no key-selection meaning in PIN-only mode
- */
-export function createAckEvent(
+function createAckEvent(
   secretKey: Uint8Array,
   senderPubkey: string,
   transferId: string,
   seq: number,
+  content: string,
   hint?: string
 ): Event {
   const tags: string[][] = [
@@ -106,7 +102,7 @@ export function createAckEvent(
   const event = finalizeEvent(
     {
       kind: EVENT_KIND_DATA_TRANSFER,
-      content: '',
+      content,
       tags,
       created_at: Math.floor(Date.now() / 1000),
     },
@@ -114,6 +110,43 @@ export function createAckEvent(
   )
 
   return event
+}
+
+/**
+ * Create ACK event (kind 24242) with PIN-authenticated encrypted content.
+ * seq=0 for ready ACK, seq=-1 for completion ACK.
+ *
+ * Tags remain plaintext so relays can filter by transfer and sequence, but the
+ * sender MUST verify that the encrypted body repeats the same transfer/sequence.
+ * This proves the ACK author knows the PIN-derived session key; a public
+ * transferId alone is not enough to advance the sender state machine.
+ *
+ * hint is optional - used to confirm which PIN exchange event was processed
+ * (event correlation/debugging); it carries no key-selection meaning in PIN-only mode.
+ */
+export async function createAuthenticatedAckEvent(
+  secretKey: Uint8Array,
+  senderPubkey: string,
+  transferId: string,
+  seq: number,
+  key: CryptoKey,
+  hint?: string
+): Promise<Event> {
+  const payload = {
+    type: 'ack',
+    transferId,
+    seq,
+  }
+  const payloadBytes = new TextEncoder().encode(JSON.stringify(payload))
+  const encryptedPayload = await encrypt(key, payloadBytes)
+  return createAckEvent(
+    secretKey,
+    senderPubkey,
+    transferId,
+    seq,
+    uint8ArrayToBase64(encryptedPayload),
+    hint
+  )
 }
 
 /**
@@ -144,6 +177,38 @@ export function parseAckEvent(event: Event): {
 
   return { senderPubkey, transferId, seq, hint }
 }
+
+/**
+ * Verify that an ACK event body is encrypted with the session key and matches
+ * its plaintext routing tags.
+ */
+export async function verifyAuthenticatedAckEvent(
+  event: Event,
+  key: CryptoKey,
+  expectedTransferId: string,
+  expectedSeq: number
+): Promise<boolean> {
+  const ack = parseAckEvent(event)
+  if (!ack) return false
+  if (ack.transferId !== expectedTransferId || ack.seq !== expectedSeq) return false
+  if (!event.content) return false
+
+  try {
+    const decrypted = await decrypt(key, base64ToUint8Array(event.content))
+    const payload = JSON.parse(new TextDecoder().decode(decrypted)) as unknown
+    if (!payload || typeof payload !== 'object') return false
+
+    const p = payload as Record<string, unknown>
+    if (p.type !== 'ack') return false
+    if (p.transferId !== ack.transferId) return false
+    if (p.seq !== ack.seq) return false
+
+    return true
+  } catch {
+    return false
+  }
+}
+
 
 /**
  * Create Signaling event (kind 24242 with type=signal)
