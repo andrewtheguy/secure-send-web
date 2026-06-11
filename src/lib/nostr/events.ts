@@ -15,7 +15,7 @@ export function generateEphemeralKeys(): { secretKey: Uint8Array; publicKey: str
  * Create PIN exchange event (kind 24243)
  * Contains encrypted payload with transfer metadata.
  *
- * @param hint - Identifier for event filtering: SHA-256 hash of user's PIN (first 8 hex chars)
+ * @param hint - Identifier for event filtering: one-way PBKDF2-SHA256 derivation of the PIN (first 16 hex chars); see computePinHint
  *
  * TTL Behavior:
  * - Events include an 'expiration' tag set to 1 hour from creation (NIP-40)
@@ -54,7 +54,7 @@ export function createPinExchangeEvent(
 
 /**
  * Parse PIN exchange event tags.
- * @returns Object with hint (PIN hash), salt, transferId, and encryptedPayload
+ * @returns Object with hint (one-way PBKDF2 PIN derivation), salt, transferId, and encryptedPayload
  */
 export function parsePinExchangeEvent(event: Event): {
   hint: string
@@ -98,7 +98,7 @@ export function createAckEvent(
     ['type', 'ack'],
   ]
 
-  // Add hint tag if provided (PIN hash, for event correlation/debugging)
+  // Add hint tag if provided (one-way PBKDF2 PIN derivation, for event correlation/debugging)
   if (hint) {
     tags.push(['h', hint])
   }

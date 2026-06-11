@@ -170,6 +170,14 @@ To protect against manual entry errors, the PIN includes a custom checksum:
 - **Detection**: Effectively catches single-character errors and swaps (transpositions).
 - **Independent Validation**: Both characters and word sequences are validated against the same underlying checksum logic.
 
+#### PIN Hint / Fingerprint
+A short one-way derivation of the PIN that serves two roles without ever exposing the PIN itself (`computePinHint` in `src/lib/crypto/pin.ts`):
+
+- **Derivation**: `PBKDF2-SHA256(pin, salt = "secure-send:pin-hint:v1", iterations = 600,000)`, truncated to the first **16 hex characters (64 bits)**. The salt (`PIN_HINT_SALT`) is a fixed, public, domain-separation constant — shared so sender and receiver derive the identical hint, while still defeating generic precomputed-hash (rainbow table) attacks. It is **distinct** from the per-transfer random salt used for the content key, so the published hint is never equal to the key-derivation output.
+- **Role 1 — Nostr lookup tag**: published as the `['h', hint]` tag on the PIN exchange event (kind 24243) and used as the receiver's `#h` subscription filter to locate the transfer without revealing the PIN. 64 bits is birthday-collision-free at any realistic concurrent-transfer scale; the receiver queries up to 10 matching events and tries to decrypt each, so the rare collision is tolerated rather than fatal.
+- **Role 2 — visible fingerprint**: displayed to both parties (grouped as `XXXX-XXXX-XXXX-XXXX` by `formatPinHint`) as a one-way checksum. The receiver computes it locally after entering the PIN; matching fingerprints confirm both sides derived the same secret. It cannot be reversed to recover the PIN or used to decrypt any data.
+- **Not the security boundary**: the hint only *locates* the event and *confirms* the PIN. Confidentiality rests entirely on the PIN-derived AES key. Reversing the hint to a PIN requires brute-forcing the full PIN space (~65.6 bits, Nostr) at 600,000 iterations per guess — the same cost as attacking the ciphertext directly, so the hint grants an attacker no shortcut.
+
 ### User Interface Architecture
 
 #### `PinInput` (Receiver Side)
@@ -562,7 +570,7 @@ Secure Send enforces a hard session TTL. Expired requests MUST NOT establish a s
 1. **Ephemeral Keys**: New keypair generated for each transfer
 2. **Forward Secrecy**: The PIN-derived key is unique per transfer (includes random salt). Note: This provides per-transfer key uniqueness through random salts, not true Perfect Forward Secrecy (PFS).
 3. **No Server Trust**: Cloud storage and relays see only encrypted payloads and minimal routing metadata; plaintext never leaves the device
-4. **PIN Entropy**: ~67 bits (11 random chars from 69-char set + 1 checksum)
+4. **PIN Entropy**: ~65.6 bits for Nostr (`23 * 69^10`), ~61.1 bits for Manual (`69^10`). The first character is restricted (signaling-method encoding) and the trailing checksum character is deterministic, so neither contributes full entropy.
 5. **Brute-Force Resistance**: 600K PBKDF2 iterations for PIN mode
 6. **PIN Role**: Encrypts signaling (preventing unauthorized P2P connection) AND content (defense in depth)
 7. **Transport Security**: All P2P transfers (Nostr, Manual Exchange) use both AES-256-GCM encryption (128KB chunks) and WebRTC DTLS
