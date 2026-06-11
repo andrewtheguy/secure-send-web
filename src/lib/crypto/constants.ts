@@ -48,6 +48,15 @@ export const MAX_MESSAGE_SIZE = 100 * 1024 * 1024 // 100MB
 // PIN hint length
 export const PIN_HINT_LENGTH = 8 // hex characters
 
+// Domain-separation salt for the PIN hint KDF.
+// Shared (public) constant so sender and receiver derive the same hint from the
+// same PIN, while defeating generic precomputed-hash (rainbow table) attacks.
+export const PIN_HINT_SALT = 'secure-send:pin-hint:v1'
+
+// PBKDF2 iteration count for the PIN hint KDF. Slows down brute-force search
+// over the PIN space. The hint is only derived once per completed PIN.
+export const PIN_HINT_ITERATIONS = 200_000
+
 // Transfer timeouts
 export const TRANSFER_EXPIRATION_MS = 60 * 60 * 1000 // 1 hour
 export const PIN_DISPLAY_TIMEOUT_MS = 5 * 60 * 1000 // Duration (ms) the PIN is displayed before it expires (5 minutes)

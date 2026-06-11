@@ -6,6 +6,8 @@ import {
   QR_FIRST_CHARSET,
   PIN_CHECKSUM_LENGTH,
   PIN_HINT_LENGTH,
+  PIN_HINT_SALT,
+  PIN_HINT_ITERATIONS,
 } from './constants'
 
 /**
@@ -173,18 +175,39 @@ export function isValidPinWord(word: string): boolean {
 }
 
 /**
- * Compute PIN hint (first PIN_HINT_LENGTH hex chars of SHA-256)
- * Used for event filtering without revealing the PIN
+ * Compute PIN hint (first PIN_HINT_LENGTH hex chars of a salted PBKDF2-SHA-256 derivation)
+ * Used for event filtering without revealing the PIN.
+ *
+ * Uses a shared, public domain-separation salt (PIN_HINT_SALT) so the sender and
+ * receiver derive an identical hint from the same PIN, while PBKDF2's iteration
+ * count makes brute-forcing the PIN from the hint expensive and defeats generic
+ * precomputed-hash (rainbow table) attacks.
  */
 export async function computePinHint(pin: string): Promise<string> {
   const encoder = new TextEncoder()
-  const data = encoder.encode(pin)
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-  const hashArray = new Uint8Array(hashBuffer)
+
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(pin),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  )
 
   // Each byte produces 2 hex chars; ceil handles odd PIN_HINT_LENGTH
   const byteCount = Math.ceil(PIN_HINT_LENGTH / 2)
-  const hex = Array.from(hashArray.slice(0, byteCount))
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: encoder.encode(PIN_HINT_SALT),
+      iterations: PIN_HINT_ITERATIONS,
+      hash: 'SHA-256',
+    },
+    keyMaterial,
+    byteCount * 8,
+  )
+
+  const hex = Array.from(new Uint8Array(derivedBits))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
 
