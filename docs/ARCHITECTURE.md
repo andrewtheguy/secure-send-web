@@ -430,6 +430,9 @@ Both signaling methods (Nostr, Manual Exchange) share the same encrypted chunk f
 - **Verification**: Application-level encryption authenticates each chunk and its write position
 
 ### PIN Exchange Payload
+
+In Nostr/PIN mode, the entire PIN exchange payload is encrypted with the PIN-derived AES-GCM key before it is published to relays. This includes the file metadata fields (`fileName`, `fileSize`, and `mimeType`).
+
 ```typescript
 interface PinExchangePayload {
   contentType: 'file'

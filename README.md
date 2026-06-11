@@ -40,6 +40,7 @@ Sender and receiver should use the same app version for transfers.
 
 - **PBKDF2-SHA256** with 600,000 iterations for key derivation (browser-compatible)
 - **AES-256-GCM** authenticated encryption
+- **Encrypted metadata (Nostr)**: File metadata in the PIN exchange payload, including name, size, and MIME type, is encrypted with the PIN-derived AES-GCM key
 - **PIN never transmitted (Nostr)**: Only a one-way PBKDF2 hint (the "PIN fingerprint") is published to relays — used for event lookup and to confirm both sides derived the same PIN, but it cannot be reversed to the PIN or used to decrypt data
 - **Ephemeral identities**: New Nostr keypairs generated per transfer
 - **1-hour expiration**: Clients enforce a 1-hour transfer TTL; Nostr events include an expiration tag for relays that honor it
