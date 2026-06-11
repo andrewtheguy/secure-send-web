@@ -58,8 +58,10 @@ export const PIN_HINT_LENGTH = 16 // hex characters
 export const PIN_HINT_SALT = 'secure-send:pin-hint:v1'
 
 // PBKDF2 iteration count for the PIN hint KDF. Slows down brute-force search
-// over the PIN space. The hint is only derived once per completed PIN.
-export const PIN_HINT_ITERATIONS = 200_000
+// over the PIN space (the only practical way to reverse a hint to its PIN).
+// The hint is derived only once per completed PIN, so we match the main key's
+// iteration count rather than using a cheaper one.
+export const PIN_HINT_ITERATIONS = 600_000
 
 // Transfer timeouts
 export const TRANSFER_EXPIRATION_MS = 60 * 60 * 1000 // 1 hour
