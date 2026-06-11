@@ -7,10 +7,10 @@ Secure Send is a browser-based encrypted file and folder transfer application. I
 ## Core Principles
 
 1. **P2P First**: Direct WebRTC connections are always preferred for data transfer.
-2. **Protocol-Agnostic Encryption**: P2P content is encrypted at the application layer using AES-256-GCM in 128KB chunks regardless of transport encryption. Cloud fallback encrypts the whole file first, then uploads in 10MB chunks.
+2. **Shared P2P Chunk Encryption**: P2P content is encrypted at the application layer using AES-256-GCM in 128KB chunks regardless of transport encryption. Cloud fallback encrypts the whole file first, then uploads in 10MB chunks.
 3. **Memory-Efficient Streaming**: P2P receive paths write decrypted chunks directly into a growing buffer. Manual Exchange receive temporarily buffers encrypted chunks before decrypting into a preallocated output buffer.
-4. **Pluggable Signaling**: Signaling (Nostr, QR) is decoupled from the transfer layer. The same encryption/chunking logic is used regardless of signaling method.
-5. **Dual PIN Representation**: A 12-character alphanumeric PIN serves as the shared secret. To improve shareability (e.g., via voice), this PIN can be bijectively mapped to a 7-word sequence from the BIP-39 wordlist.
+4. **Pluggable Signaling**: Signaling (Nostr, QR) is decoupled from the transfer layer. The same encrypted chunk framing is used for file content regardless of signaling method.
+5. **Dual PIN Representation (Nostr mode)**: A 12-character alphanumeric PIN serves as the Nostr shared secret. To improve shareability (e.g., via voice), this PIN can be bijectively mapped to a 7-word sequence from the BIP-39 wordlist.
 
 ## Signaling Methods
 
@@ -22,7 +22,7 @@ By default, Nostr is used for signaling. QR/Manual exchange is available as an a
 | STUN/TURN | Yes (Google + Cloudflare STUN; optional TURN) | Yes (same WebRTC config) |
 | Cloud Fallback | Yes (tmpfiles.org) | No |
 | Reliability | Higher (fallback available) | P2P only |
-| Privacy | Better (no central server) | Best (no signaling server) |
+| Privacy | Better (no central server) | No signaling server; QR/clipboard payload is only obfuscated |
 | Complexity | More complex | Manual exchange (QR or copy/paste) |
 | Internet Required | Yes | No (if on same local network) |
 | Network Requirement | Any (via internet) | Same local network (without internet) |
@@ -143,7 +143,7 @@ sequenceDiagram
 |-----------|-------------|
 | `pin.ts` | Alphanumeric (12-char) and Word (7-word) PIN handling, weighted checksums, signaling detection |
 | `kdf.ts` | Key derivation using PBKDF2-SHA256 (600,000 iterations) |
-| `ecdh.ts` | ECDH key exchange (non-extractable keys) used by manual exchange mode |
+| `ecdh.ts` | Unauthenticated ECDH key agreement (non-extractable keys) used by manual exchange mode |
 | `aes-gcm.ts` | AES-256-GCM encryption/decryption |
 | `stream-crypto.ts` | Streaming encryption/decryption (128KB chunks, protocol-agnostic) |
 | `constants.ts` | Crypto parameters, charsets (69 chars), BIP-39 wordlist (2048 words) |
@@ -155,8 +155,8 @@ Secure Send uses a sophisticated PIN system designed for both security and user-
 #### Alphanumeric Representation (Base-69)
 - **Length**: 12 characters.
 - **Charset**: 69 URL-safe characters (mixed case + digits + symbols).
-- **Entropy**: ~65.6 bits for Nostr (`23 * 69^10`), ~61.1 bits for Manual (`69^10`).
-- **First Character**: Encodes the signaling method (Nostr uses 23 uppercase letters excluding I/L/O; Manual uses `'2'`).
+- **Entropy**: ~65.6 bits for generated Nostr PINs (`23 * 69^10`).
+- **First Character**: Encodes the signaling method in the PIN helper layer. Nostr uses 23 uppercase letters excluding I/L/O. The `'2'` manual/QR prefix is reserved by the PIN helpers, but the current Manual Exchange flow uses QR/clipboard payloads rather than PIN authentication.
 - **Last Character**: Weighted position-based checksum character.
 
 #### Word-Based Representation (Base-2048)
@@ -238,15 +238,15 @@ Signaling method using QR codes or copy/paste for WebRTC offer/answer exchange. 
 - Payload is obfuscated using a time-bucketed seed to avoid casual inspection.
 
 > [!IMPORTANT]
-> **Real protection**: Manual signaling confidentiality comes from the 1-hour TTL plus ECDH key exchange and AES-256-GCM on the data channel. Obfuscation is only a secondary deterrent against casual inspection; expired payloads are useless even if seen.
+> **Security boundary**: Manual signaling payloads are not cryptographically confidential. The time-bucketed obfuscation deters casual inspection and the 1-hour TTL prevents stale offers from starting a session, but someone who captures the QR/clipboard payload can potentially recover metadata and SDP/ICE details. File-content confidentiality comes from the ECDH-derived AES-256-GCM key, assuming the offer and answer are exchanged over an authentic QR/clipboard path.
 
-**Binary Payload Format (SS02):**
+**Binary Payload Format (SS03):**
 
 The payload consists of two distinct layers to balance rapid identification with obfuscation of the content.
 
 | Component | Length | Status | Description |
 |-----------|--------|--------|-------------|
-| **Outer Magic** | 4 bytes | Plaintext | Fixed header: `"SS02"` (`0x53 0x53 0x30 0x32`) |
+| **Outer Magic** | 4 bytes | Plaintext | Fixed header: `"SS03"` (`0x53 0x53 0x30 0x33`) |
 | **Inner Buffer** | Variable | **Obfuscated** | Time-bucketed XOR-obfuscated content (detailed below) |
 
 **Obfuscated Inner Buffer Structure:**
@@ -259,19 +259,19 @@ The following structure is revealed *after* successful de-obfuscation using the 
 | **Payload** | Variable | Obfuscated | Deflate-compressed `SignalingPayload` JSON |
 
 **Verification Process:**
-1. **Identification**: The receiver checks the first 4 bytes for the plaintext `"SS02"` header.
+1. **Identification**: The receiver checks the first 4 bytes for the plaintext `"SS03"` header.
 2. **Seed Testing**: The receiver iterates through candidate seeds for the current and previous hour (2-hour sliding window). 
 3. **Optimized Check**: For each candidate seed, only the first 4 bytes of the inner buffer are de-obfuscated. If they match the `"mag!"` marker, the correct seed has been found.
 4. **Full Processing**: The rest of the buffer is de-obfuscated, decompressed via deflate, and parsed as JSON.
 
 **Time-Bucketed Obfuscation:**
 
-The obfuscation seed changes every hour to ensure the **ephemerality** of signaling data and to make the payload **look more random**. This provides several benefits:
+The obfuscation seed changes every hour to make the payload **look more random** and limit casual reuse. This provides several benefits:
 - **Casual Protection**: Offers a layer of deterrence against casual non-technical observers by making the raw data unreadable without the correct hourly seed.
-- **Stale Data Prevention**: Prevents the utility of stale signaling data, such as a photograph of a QR code, a screenshot, or lingering clipboard contents.
+- **Stale Session Prevention**: Combined with the explicit `createdAt` TTL checks, stale signaling data cannot start a new transfer session.
 - **Payload Randomness**: Ensures that signaling data generated at different times results in significantly different binary outputs.
 
-Primary confidentiality is provided by the 1-hour TTL and ECDH + AES-256-GCM (see note above); obfuscation is additive, not the core control.
+Primary file-content confidentiality is provided by ECDH + AES-256-GCM (see note above); obfuscation is additive and not a cryptographic control.
 
 - **Bucket Size**: 1 hour (`3600` seconds).
 - **Input (`bucketEpoch`)**: `floor(unix_timestamp_seconds / 3600)`.
@@ -288,23 +288,24 @@ To ensure cross-implementation compatibility, the seed MUST be derived using the
 
 *Note: In environments like JavaScript, `Math.imul` should be used for the multiplication steps to ensure consistent 32-bit integer behavior.*
 
-**Verification Window & Edge Cases:**
-A 2-hour sliding window (current bucket + 1 previous bucket) is used to verify incoming payloads. This design has several implications:
+**Obfuscation Parse Window & Edge Cases:**
+A 2-hour sliding window (current bucket + 1 previous bucket) is used to find the obfuscation seed. This is separate from the hard 1-hour session TTL enforced via `createdAt`.
 
--   **Validity Duration**: A payload's effective validity is between **1 and 2 hours**, aligning with the 1-hour backend TTL. If generated at the start of a bucket, it remains valid for 2 hours. If generated at the end, it remains valid for just over 1 hour.
+-   **Session Validity**: A parsed payload is still rejected once `Date.now() - createdAt > TRANSFER_EXPIRATION_MS`.
+-   **Parseability Window**: A payload may remain parseable for roughly 1-2 hours depending on bucket boundaries, but parseability does not imply transfer validity.
 -   **Clock Drift Tolerance**: The window provides inherent tolerance for clock drift (+/- 1 hour).
 -   **Boundary Transitions**: When the hour rolls over, the previous bucket is dropped, and the new hour becomes the current bucket.
 -   **Out-of-Sync Clocks**: If the sender and receiver clocks differ by more than the window's tolerance (e.g., >1 hour fast or slow), de-obfuscation will fail.
 
 > [!NOTE]
-| The obfuscation's goal is simply to avoid casual inspection. The actual security of the transfer is provided by ECDH mutual exchange and AES-256-GCM encryption of the data channel.
+> The obfuscation's goal is simply to avoid casual inspection. It should not be treated as encryption, and expiry is not cryptographic erasure of a captured QR/clipboard payload.
 
 **Encoding Pipeline:**
 1. `SignalingPayload` object → JSON string.
 2. Compress with deflate (variable length).
 3. Prepend fixed-length `"mag!"` marker (4 bytes).
 4. XOR-obfuscate this inner buffer with the current hourly seed.
-5. Prepend fixed-length plaintext `"SS02"` header (4 bytes).
+5. Prepend fixed-length plaintext `"SS03"` header (4 bytes).
 6. Result: Final binary payload.
 
 
@@ -321,7 +322,7 @@ A 2-hour sliding window (current bucket + 1 previous bucket) is used to verify i
 *Answer (Receiver → Sender):*
 | Method | Encoding | Use Case |
 |--------|----------|----------|
-| QR Code | Deflate-compressed binary (single QR) | Camera available, sender already in-app |
+| QR Code | SS03 obfuscated binary (single QR) | Camera available, sender already in-app |
 | Copy/Paste | Base64-encoded binary | No camera, text-safe for clipboard |
 
 **Key Features:**
@@ -337,7 +338,7 @@ A 2-hour sliding window (current bucket + 1 previous bucket) is used to verify i
 
 **Security Model:**
 - **Nostr**: PIN encrypts signaling metadata to prevent unauthorized connection establishment
-- **Manual**: Signaling is obfuscated and time-limited; confidentiality of content is provided by ECDH-derived AES-256-GCM over the data channel
+- **Manual**: Signaling is obfuscated and time-limited, not encrypted; content confidentiality is provided by ECDH-derived AES-256-GCM over the data channel when the QR/clipboard exchange is authentic
 - **All modes**: Once WebRTC connection is established, DTLS encrypts all data in transit
 
 ### WebRTC (`src/lib/webrtc.ts`)
@@ -420,15 +421,18 @@ Fallback storage when P2P connection cannot be established (30s timeout window).
 
 ### Unified Transfer Layer
 
-Both signaling methods (Nostr, Manual Exchange) share the same encryption middleware. This protocol-agnostic layer provides consistent security regardless of the transport mechanism.
+Both signaling methods (Nostr, Manual Exchange) share the same encrypted chunk framing for P2P file content. The key source differs: Nostr uses the PIN-derived AES key, while Manual Exchange uses an ECDH-derived AES key.
 
 **Why encrypt when WebRTC provides DTLS?**
 - **Defense in depth**: Multiple encryption layers protect against implementation bugs
-- **Consistent model**: Same encryption for P2P and cloud fallback
-- **Key control**: Encryption key derived from user's PIN, not WebRTC keys
-- **Verification**: Application-level encryption ensures end-to-end security
+- **Consistent chunk format**: P2P file data uses the same authenticated chunk layout in both modes
+- **Key control**: File encryption keys are application-managed (PIN-derived for Nostr, ECDH-derived for Manual), not WebRTC keys
+- **Verification**: Application-level encryption authenticates each chunk and its write position
 
 ### PIN Exchange Payload
+
+In Nostr/PIN mode, the entire PIN exchange payload is encrypted with the PIN-derived AES-GCM key before it is published to relays. This includes the file metadata fields (`fileName`, `fileSize`, and `mimeType`).
+
 ```typescript
 interface PinExchangePayload {
   contentType: 'file'
@@ -453,15 +457,15 @@ interface PinExchangePayload {
 
 ### What's Encrypted Where
 
-| Data | All P2P Methods | Cloud Transfer |
-|------|-----------------|----------------|
-| Signaling Payload | Encrypted (AES-GCM) | N/A |
-| WebRTC Signals | Encrypted (AES-GCM) | N/A |
-| File Content | Encrypted (AES-GCM, 128KB chunks) | Encrypted (AES-GCM, whole file) |
-| Cloud chunk URL (`chunk_notify`) | N/A | **Plaintext** (relay sees it) |
+| Data | Nostr P2P | Manual P2P | Cloud Transfer |
+|------|-----------|------------|----------------|
+| Signaling Payload | Encrypted (AES-GCM with PIN key) | Obfuscated only; metadata and SDP/ICE are not cryptographically confidential | N/A |
+| WebRTC Signals | Encrypted (AES-GCM with PIN key) | Included in obfuscated QR/clipboard offer/answer | N/A |
+| File Content | Encrypted (AES-GCM, 128KB chunks, authenticated chunk index) | Encrypted (AES-GCM, 128KB chunks, authenticated chunk index) | Encrypted (AES-GCM, whole file) |
+| Cloud chunk URL (`chunk_notify`) | N/A | N/A | **Plaintext** (relay sees it) |
 
 > [!NOTE]
-> The cloud `chunk_notify` event publishes the upload URL in **plaintext**, unlike the WebRTC signals (which are AES-GCM encrypted with the PIN key). This is intentional and safe on its own: the blob at that URL is itself AES-256-GCM encrypted with the PIN-derived key, so the URL is useless without the PIN, and the blob lives only briefly on a third-party host. The only consequence is that a relay observer can learn *where* a cloud blob is (and its size) without the PIN — it cannot decrypt the content. See [Leaked-PIN Exposure](#leaked-pin-exposure-including-after-expiry) for how this interacts with a later PIN leak.
+> The cloud `chunk_notify` event publishes the upload URL in **plaintext**, unlike the WebRTC signals in Nostr P2P mode. This is intentional and safe on its own: the blob at that URL is itself AES-256-GCM encrypted with the PIN-derived key, so the URL is useless without the PIN, and the blob lives only briefly on a third-party host. The only consequence is that a relay observer can learn *where* a cloud blob is (and its size) without the PIN — it cannot decrypt the content. See [Leaked-PIN Exposure](#leaked-pin-exposure-including-after-expiry) for how this interacts with a later PIN leak.
 
 ### Streaming Encryption (All Methods)
 
@@ -484,15 +488,17 @@ let contentData = new Uint8Array(totalBytes)
 
 // On each chunk received:
 const { chunkIndex, encryptedData } = parseChunkMessage(encryptedChunk)
-const decryptedChunk = await decryptChunk(key, encryptedData)
+const decryptedChunk = await decryptChunk(key, encryptedData, chunkIndex)
 const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE
 contentData.set(decryptedChunk, writePosition)  // Direct write, no intermediate storage
 ```
 
 **Encrypted Chunk Format:**
 ```
-[4 bytes: chunk index (big-endian)][12 bytes: nonce][ciphertext][16 bytes: auth tag]
+[2 bytes: chunk index (big-endian)][12 bytes: nonce][ciphertext][16 bytes: auth tag]
 ```
+
+The 2-byte chunk index is also passed to AES-GCM as additional authenticated data. A receiver rejects the chunk if the index prefix is changed or swapped with another chunk's ciphertext.
 
 **Benefits:**
 - **Defense in depth**: AES-GCM on top of WebRTC DTLS
@@ -502,9 +508,9 @@ contentData.set(decryptedChunk, writePosition)  // Direct write, no intermediate
 
 ```mermaid
 flowchart TD
-    PIN[PIN shared out-of-band] --> Signaling[Signaling offer/answer/ICE]
-    Signaling -->|AES-GCM| EncryptedPayload[Encrypted payload<br/>includes salt]
-    EncryptedPayload --> Decrypt[Decrypt to connect]
+    Secret[PIN or authentic manual exchange] --> Signaling[Signaling offer/answer/ICE]
+    Signaling --> Key[PIN-derived or ECDH-derived AES key]
+    Key --> Decrypt[Decrypt/authenticate chunks]
     Decrypt --> DTLS[WebRTC handshake<br/>DTLS]
     DTLS --> Channel[P2P data channel]
     Channel --> Chunks[128KB encrypted chunks]
@@ -584,16 +590,17 @@ The session TTL is a **liveness control, not cryptographic erasure**: it stops t
 ## Security Considerations
 
 1. **Ephemeral Keys**: New keypair generated for each transfer
-2. **Forward Secrecy**: The PIN-derived key is unique per transfer (includes random salt). Note: This provides per-transfer key uniqueness through random salts, not true Perfect Forward Secrecy (PFS).
-3. **No Server Trust**: Cloud storage and relays see only encrypted payloads and minimal routing metadata; plaintext never leaves the device
-4. **PIN Entropy**: ~65.6 bits for Nostr (`23 * 69^10`), ~61.1 bits for Manual (`69^10`). The first character is restricted (signaling-method encoding) and the trailing checksum character is deterministic, so neither contributes full entropy.
+2. **Per-transfer Keys**: Nostr PIN-derived keys are unique per transfer through random salts, but this is not true Perfect Forward Secrecy (PFS). Manual mode uses ephemeral ECDH keys, but peer authentication still depends on the QR/clipboard exchange path.
+3. **No Server Trust for File Content**: Cloud storage sees encrypted file payloads, while relays see signaling/routing metadata; file plaintext never leaves the device
+4. **PIN Entropy**: ~65.6 bits for Nostr (`23 * 69^10`). The first character is restricted (signaling-method encoding) and the trailing checksum character is deterministic, so neither contributes full entropy.
 5. **Brute-Force Resistance**: 600K PBKDF2 iterations for PIN mode
-6. **PIN Role**: Encrypts signaling (preventing unauthorized P2P connection) AND content (defense in depth)
+6. **PIN Role**: In Nostr mode, the PIN encrypts signaling (preventing unauthorized P2P connection) and content (defense in depth)
 7. **Transport Security**: All P2P transfers (Nostr, Manual Exchange) use both AES-256-GCM encryption (128KB chunks) and WebRTC DTLS
-8. **Protocol-Agnostic Security**: Same encryption layer used regardless of signaling method - no security difference between Nostr or Manual Exchange
-9. **XSS Protection**: Sensitive cryptographic material (shared secrets, key derivation functions) stored in closure scope, not on global `window` object
-10. **Resource Cleanup**: All error paths properly clean up timeouts and subscriptions to prevent resource leaks
-11. **Input Validation**: Cryptographic functions validate inputs before operations to provide deterministic errors
+8. **Manual Authentication Caveat**: Manual ECDH is unauthenticated by itself. An attacker who can substitute the QR/clipboard offer or answer can mount a man-in-the-middle attack. Use a direct visual/local exchange path when active tampering matters.
+9. **Shared Chunk Security**: P2P file chunks use the same AES-GCM chunk framing in both modes, including authenticated chunk indices
+10. **XSS Protection**: Sensitive cryptographic material (shared secrets, key derivation functions) stored in closure scope, not on global `window` object
+11. **Resource Cleanup**: All error paths properly clean up timeouts and subscriptions to prevent resource leaks
+12. **Input Validation**: Cryptographic functions validate inputs before operations to provide deterministic errors
 
 ## File Structure
 

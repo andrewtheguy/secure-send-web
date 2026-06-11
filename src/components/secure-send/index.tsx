@@ -108,14 +108,14 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                   <Shield className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
                   <div>
                     <p className="font-medium">End-to-End Encryption</p>
-                    <p className="text-muted-foreground">Your content is encrypted with AES-256-GCM before it ever leaves your device. Only the intended recipient can decrypt it.</p>
+                    <p className="text-muted-foreground">Your content is encrypted with AES-256-GCM before it ever leaves your device. Only someone with the PIN or completed QR exchange key can decrypt it.</p>
                   </div>
                 </div>
                 <div className="flex gap-3">
                   <Zap className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
                   <div>
                     <p className="font-medium">Direct P2P Transfer</p>
-                    <p className="text-muted-foreground">When possible, files are sent directly between devices using WebRTC for maximum speed and privacy.</p>
+                    <p className="text-muted-foreground">When possible, files are sent directly between devices using WebRTC without uploading file data to cloud storage.</p>
                   </div>
                 </div>
                 <div className="flex gap-3">
@@ -138,11 +138,11 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
             <section>
               <h3 className="font-semibold text-base mb-2">Technical Details</h3>
               <ul className="space-y-1 text-muted-foreground">
-                <li><span className="text-foreground">Encryption:</span> AES-256-GCM with PBKDF2-SHA256 key derivation (600,000 iterations)</li>
+                <li><span className="text-foreground">Encryption:</span> AES-256-GCM; PIN mode uses PBKDF2-SHA256 key derivation (600,000 iterations), QR code mode uses ECDH</li>
                 <li><span className="text-foreground">PIN format:</span> 12 characters with built-in checksum for typo detection</li>
                 <li><span className="text-foreground">Max size:</span> 100 MB per transfer</li>
                 <li><span className="text-foreground">PIN expiry:</span> 1 hour</li>
-                <li><span className="text-foreground">Signaling:</span> Auto-detected from code format (PIN mode uses relay signaling, QR code mode uses direct QR exchange)</li>
+                <li><span className="text-foreground">Signaling:</span> Receiver chooses the matching mode (PIN mode uses relay signaling, QR code mode uses direct QR exchange)</li>
               </ul>
             </section>
 
@@ -156,7 +156,7 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                   <p className="text-foreground font-medium">PIN mode</p>
                   <p className="text-sm">
                     More reliable option, but requires manual PIN input. Coordination happens through third-party relay servers.
-                    No personally identifiable information is shared, and your data remains protected with end-to-end encryption.
+                    Relays can see routing metadata, but not plaintext file contents or your decryption key.
                   </p>
                   <ul className="mt-2 space-y-1 text-sm list-disc list-inside">
                     <li>Best when sender and receiver are on different networks and you want the highest connection success rate.</li>
@@ -169,9 +169,10 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                   <p className="text-foreground font-medium">QR code mode</p>
                   <p className="text-sm">
                     Coordination happens directly through QR code exchange, with no third-party coordination servers.
+                    The QR/clipboard signaling payload is obfuscated, not encrypted, so exchange it only with the intended recipient.
                     STUN may be used when internet is available; without internet, no third-party servers are involved at all.
-                    When STUN is used, it only sees connection setup metadata (such as IP address and port), not file contents, encryption keys, or any personally identifiable information.
-                    Your data remains end-to-end encrypted throughout the transfer, regardless of internet availability and whether STUN is used.
+                    When STUN is used, it only sees connection setup metadata such as IP address and port, not file contents or encryption keys.
+                    File data remains encrypted throughout the transfer, regardless of internet availability and whether STUN is used.
                   </p>
                   <ul className="mt-2 space-y-1 text-sm list-disc list-inside">
                     <li>Best when you prefer direct device-to-device coordination using camera scan or copy/paste.</li>

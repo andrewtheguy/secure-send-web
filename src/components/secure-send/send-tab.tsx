@@ -45,9 +45,9 @@ export function SendTab() {
   const canSendFolder = folderFiles && folderFiles.length > 0 && !isFolderOverLimit
   const canSend = mode === 'file' ? canSendFiles : canSendFolder
   const pinModeDescription = 'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.'
-  const pinModeHowItWorksDescription = 'More reliable option, but requires manual PIN input. Coordination happens through third-party relay servers. No personally identifiable information is shared, and your data remains protected with end-to-end encryption.'
-  const qrModeDescription = 'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. Data stays end-to-end encrypted.'
-  const qrModeHowItWorksDescription = 'Coordination happens through QR exchange. If internet is available, STUN is used for connection setup metadata (such as IP address and port); it does not receive your file contents, encryption keys, or any personally identifiable information. It also works without internet when the devices can reach each other over a network path (for example, the same LAN/Wi-Fi). Without internet, no third-party servers are involved. Data stays end-to-end encrypted regardless of internet availability and whether STUN is used.'
+  const pinModeHowItWorksDescription = 'More reliable option, but requires manual PIN input. Relays coordinate signaling and can see routing metadata, but they do not receive plaintext file contents or your decryption key.'
+  const qrModeDescription = 'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.'
+  const qrModeHowItWorksDescription = 'Coordination happens through QR exchange. The QR/clipboard signaling payload is obfuscated, not encrypted, so exchange it only with the intended recipient. If internet is available, STUN is used for connection setup metadata such as IP address and port; it does not receive your file contents or encryption keys. It also works without internet when the devices can reach each other over a network path, such as the same LAN/Wi-Fi.'
 
   const handleSend = () => {
     // Set context with all the configuration

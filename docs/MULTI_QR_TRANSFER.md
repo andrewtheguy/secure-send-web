@@ -8,12 +8,13 @@ For protocol internals, QR payload format, and implementation details, see `docs
 Manual mode is useful when:
 - You want to transfer files between two devices on the same local network without internet
 - You prefer not to use any signaling server
-- You want the highest privacy (no server involved at all)
+- You want no signaling server involved; the QR/clipboard signaling payload is only obfuscated, while file data is encrypted after the exchange
 
 ## How It Works
 
 In Manual mode, the sender's offer is split across multiple QR codes. The receiver scans one QR code to open the app, then scans the rest in-app.
 Each QR opens the receive route using fragment format (`/r#...`), and the full payload is integrity-checked before transfer starts.
+The QR payload carries signaling metadata needed to connect the devices. Treat it as shareable only with the intended receiver.
 
 ## Step-by-Step
 

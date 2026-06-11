@@ -139,8 +139,24 @@ describe('Stream Crypto', () => {
         expect(parsed.encryptedData).toBeInstanceOf(Uint8Array)
 
         // Decrypt
-        const decryptedData = await decryptChunk(key, parsed.encryptedData)
+        const decryptedData = await decryptChunk(key, parsed.encryptedData, parsed.chunkIndex)
         expect(decryptedData).toEqual(chunkData)
+    })
+
+    it('should authenticate chunk index metadata', async () => {
+        const key = await crypto.subtle.generateKey(
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['encrypt', 'decrypt']
+        )
+        const chunkData = new Uint8Array([9, 8, 7])
+        const encryptedChunk = await encryptChunk(key, chunkData, 7)
+        const tamperedChunk = new Uint8Array(encryptedChunk)
+
+        tamperedChunk[1] = 8
+        const parsed = parseChunkMessage(tamperedChunk)
+
+        await expect(decryptChunk(key, parsed.encryptedData, parsed.chunkIndex)).rejects.toThrow()
     })
 
     it('should calculate overhead correctly', () => {

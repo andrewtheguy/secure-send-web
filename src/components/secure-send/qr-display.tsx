@@ -5,10 +5,10 @@ import { generateBinaryQRCode } from '@/lib/qr-utils'
 import { generateMutualClipboardData } from '@/lib/manual-signaling'
 
 interface QRDisplayProps {
-  data: Uint8Array  // Binary data for QR code (gzipped JSON)
+  data: Uint8Array  // Binary data for QR code (SS03 obfuscated payload)
   label?: string
   showCopyButton?: boolean
-  clipboardData?: string  // Raw JSON for copy button
+  clipboardData?: string  // Base64 payload for copy button
   showSize?: boolean
 }
 
