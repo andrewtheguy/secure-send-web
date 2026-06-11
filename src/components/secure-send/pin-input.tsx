@@ -10,14 +10,14 @@ import {
   wordsToPin,
   isValidPinWord,
   detectSignalingMethod,
-  computePinHint,
+  computePinFingerprint,
   importPinKey,
 } from '@/lib/crypto'
 import type { SignalingMethod } from '@/lib/nostr/types'
 
 export interface PinChangePayload {
   key: CryptoKey | null
-  hint: string | null
+  fingerprint: string | null
   method: SignalingMethod | null
   isValid: boolean
   length: number
@@ -55,12 +55,12 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
     const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const mountedRef = useRef(true)
     const securedKeyRef = useRef<CryptoKey | null>(null)
-    const securedHintRef = useRef<string | null>(null)
+    const securedFingerprintRef = useRef<string | null>(null)
     const securedMethodRef = useRef<SignalingMethod | null>(null)
 
     const clearSecuredData = useCallback(() => {
       securedKeyRef.current = null
-      securedHintRef.current = null
+      securedFingerprintRef.current = null
       securedMethodRef.current = null
     }, [])
 
@@ -68,7 +68,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       const resolvedMethod = method ?? securedMethodRef.current
       onPinChange({
         key: isValid ? securedKeyRef.current : null,
-        hint: isValid ? securedHintRef.current : null,
+        fingerprint: isValid ? securedFingerprintRef.current : null,
         method: resolvedMethod,
         isValid,
         length,
@@ -111,13 +111,13 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
 
       try {
         const method = detectSignalingMethod(pin)
-        const [keyMaterial, hint] = await Promise.all([
+        const [keyMaterial, fingerprint] = await Promise.all([
           importPinKey(pin),
-          computePinHint(pin),
+          computePinFingerprint(pin),
         ])
 
         securedKeyRef.current = keyMaterial
-        securedHintRef.current = hint
+        securedFingerprintRef.current = fingerprint
         securedMethodRef.current = method
 
         // Clear plaintext traces from refs/state

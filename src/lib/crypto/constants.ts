@@ -55,7 +55,19 @@ export const PIN_HINT_LENGTH = 16 // hex characters
 // Domain-separation salt for the PIN hint KDF.
 // Shared (public) constant so sender and receiver derive the same hint from the
 // same PIN, while defeating generic precomputed-hash (rainbow table) attacks.
+// At runtime the current time bucket (see PIN_HINT_BUCKET_SEC) is appended so the
+// hint rotates over time, the same way the QR signaling payload is XOR-obfuscated
+// per time bucket.
 export const PIN_HINT_SALT = 'secure-send:pin-hint:v1'
+
+// Time-bucket width (seconds) mixed into the PIN hint salt. The hint a sender
+// publishes is tied to the bucket it was created in, so the receiver must look
+// back one bucket to cover the boundary case (sender published just before a
+// bucket rollover). This is kept equal to TRANSFER_EXPIRATION_MS below: when the
+// bucket width is >= the transfer lifetime, a non-expired event's bucket is always
+// either the receiver's current bucket or the immediately previous one, so a
+// single look-back is provably sufficient.
+export const PIN_HINT_BUCKET_SEC = 3600 // 1 hour
 
 // PBKDF2 iteration count for the PIN hint KDF. Slows down brute-force search
 // over the PIN space (the only practical way to reverse a hint to its PIN).

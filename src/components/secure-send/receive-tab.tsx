@@ -187,13 +187,13 @@ export function ReceiveTab() {
   }
 
   const handlePinChange = useCallback((payload: PinChangePayload) => {
-    const { key, hint, method, isValid, length } = payload
+    const { key, fingerprint, method, isValid, length } = payload
     pinInputLengthRef.current = length
 
-    if (isValid && key && hint) {
-      pinSecretRef.current = { key, hint, method: method ?? null }
+    if (isValid && key && fingerprint) {
+      pinSecretRef.current = { key, fingerprint, method: method ?? null }
       setIsPinValid(true)
-      setPinFingerprint(formatPinHint(hint))
+      setPinFingerprint(formatPinHint(fingerprint))
     } else {
       pinSecretRef.current = null
       setIsPinValid(false)

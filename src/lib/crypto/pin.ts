@@ -7,8 +7,10 @@ import {
   PIN_CHECKSUM_LENGTH,
   PIN_HINT_LENGTH,
   PIN_HINT_SALT,
+  PIN_HINT_BUCKET_SEC,
   PIN_HINT_ITERATIONS,
 } from './constants'
+import { importPinKey } from './kdf'
 
 /**
  * Compute checksum character using weighted sum
@@ -175,31 +177,31 @@ export function isValidPinWord(word: string): boolean {
 }
 
 /**
- * Compute PIN hint (first PIN_HINT_LENGTH hex chars of a salted PBKDF2-SHA-256 derivation)
- * Used for event filtering without revealing the PIN.
+ * Salt for the PIN hint KDF, scoped to a time bucket.
  *
- * Uses a shared, public domain-separation salt (PIN_HINT_SALT) so the sender and
- * receiver derive an identical hint from the same PIN, while PBKDF2's iteration
- * count makes brute-forcing the PIN from the hint expensive and defeats generic
- * precomputed-hash (rainbow table) attacks.
+ * `bucketOffset` counts buckets backwards from the current one: 0 = the current
+ * bucket, 1 = the previous bucket, etc. The receiver derives offset 0 and offset 1
+ * so it can match a hint the sender published just before a bucket rollover (the
+ * same look-back the QR signaling parser does for its per-bucket XOR obfuscation).
  */
-export async function computePinHint(pin: string): Promise<string> {
-  const encoder = new TextEncoder()
+function pinHintSalt(bucketOffset: number): string {
+  const bucket = Math.floor(Date.now() / 1000 / PIN_HINT_BUCKET_SEC) - bucketOffset
+  return `${PIN_HINT_SALT}:${bucket}`
+}
 
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(pin),
-    'PBKDF2',
-    false,
-    ['deriveBits'],
-  )
+/**
+ * Derive PIN_HINT_LENGTH hex chars from a salted PBKDF2-SHA-256 derivation of the PIN,
+ * using already-imported PBKDF2 key material and an explicit salt string.
+ */
+async function derivePinBits(keyMaterial: CryptoKey, saltStr: string): Promise<string> {
+  const encoder = new TextEncoder()
 
   // Each byte produces 2 hex chars; ceil handles odd PIN_HINT_LENGTH
   const byteCount = Math.ceil(PIN_HINT_LENGTH / 2)
   const derivedBits = await crypto.subtle.deriveBits(
     {
       name: 'PBKDF2',
-      salt: encoder.encode(PIN_HINT_SALT),
+      salt: encoder.encode(saltStr),
       iterations: PIN_HINT_ITERATIONS,
       hash: 'SHA-256',
     },
@@ -213,6 +215,48 @@ export async function computePinHint(pin: string): Promise<string> {
 
   // Truncate to exact length (needed if PIN_HINT_LENGTH is odd)
   return hex.slice(0, PIN_HINT_LENGTH)
+}
+
+/**
+ * Compute PIN hint (first PIN_HINT_LENGTH hex chars of a salted PBKDF2-SHA-256 derivation)
+ * Used for event filtering without revealing the PIN.
+ *
+ * Uses a shared, public domain-separation salt (PIN_HINT_SALT) plus the current
+ * time bucket so the sender and receiver derive an identical hint from the same PIN
+ * within the same window, while PBKDF2's iteration count makes brute-forcing the PIN
+ * from the hint expensive and defeats generic precomputed-hash (rainbow table) attacks.
+ *
+ * `bucketOffset` selects an earlier time bucket (0 = current, 1 = previous, ...).
+ */
+export async function computePinHint(pin: string, bucketOffset = 0): Promise<string> {
+  const keyMaterial = await importPinKey(pin)
+  return derivePinBits(keyMaterial, pinHintSalt(bucketOffset))
+}
+
+/**
+ * Compute a PIN hint from previously imported PBKDF2 key material (see importPinKey).
+ * Lets the receiver derive both the current and look-back hints without re-importing
+ * the PIN (which is wiped after the key material is created).
+ *
+ * `bucketOffset` selects an earlier time bucket (0 = current, 1 = previous, ...).
+ */
+export async function computePinHintFromKey(keyMaterial: CryptoKey, bucketOffset = 0): Promise<string> {
+  return derivePinBits(keyMaterial, pinHintSalt(bucketOffset))
+}
+
+/**
+ * Compute the PIN fingerprint: a stable, time-independent PBKDF2-SHA-256 derivation of
+ * the PIN, displayed to both sender and receiver so they can visually confirm they
+ * entered the same PIN.
+ *
+ * Unlike the wire hint (computePinHint), the fingerprint is salted only with the static
+ * domain-separation salt — NOT the time bucket — because it never crosses the network
+ * and is only compared by humans. Keeping it time-independent means the two sides always
+ * display the same value, even across a time-bucket rollover.
+ */
+export async function computePinFingerprint(pin: string): Promise<string> {
+  const keyMaterial = await importPinKey(pin)
+  return derivePinBits(keyMaterial, PIN_HINT_SALT)
 }
 
 /**

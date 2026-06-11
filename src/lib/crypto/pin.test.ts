@@ -1,5 +1,6 @@
 import { expect, test, describe } from 'vitest'
-import { generatePinForMethod, pinToWords, wordsToPin, isValidPinWord, computePinHint, detectSignalingMethod } from './pin'
+import { generatePinForMethod, pinToWords, wordsToPin, isValidPinWord, computePinHint, computePinHintFromKey, computePinFingerprint, detectSignalingMethod } from './pin'
+import { importPinKey } from './kdf'
 import { PIN_HINT_LENGTH } from './constants'
 
 describe('PIN Utilities', () => {
@@ -25,6 +26,36 @@ describe('PIN Utilities', () => {
         // Different PIN should (most likely) give different hint
         const hint3 = await computePinHint('differentpin')
         expect(hint3).not.toBe(hint)
+    })
+
+    test('previous time bucket (look-back) yields a different valid hint', async () => {
+        const pin = 'A/B:C;D(E)F'
+        const current = await computePinHint(pin, 0)
+        const previous = await computePinHint(pin, 1)
+        expect(previous).toMatch(new RegExp(`^[0-9a-f]{${PIN_HINT_LENGTH}}$`))
+        // A different time bucket changes the salt, so the hint differs
+        expect(previous).not.toBe(current)
+    })
+
+    test('fingerprint is deterministic and domain-separated from the wire hint', async () => {
+        const pin = 'A/B:C;D(E)F'
+        const fp = await computePinFingerprint(pin)
+        expect(fp).toMatch(new RegExp(`^[0-9a-f]{${PIN_HINT_LENGTH}}$`))
+        // Stable across calls (no time bucket in the salt)
+        expect(await computePinFingerprint(pin)).toBe(fp)
+        // Different salt than any time-bucketed wire hint
+        expect(fp).not.toBe(await computePinHint(pin, 0))
+        expect(fp).not.toBe(await computePinHint(pin, 1))
+    })
+
+    test('computePinHintFromKey matches computePinHint for the same PIN and bucket', async () => {
+        const pin = 'A/B:C;D(E)F'
+        const keyMaterial = await importPinKey(pin)
+        for (const offset of [0, 1]) {
+            const fromKey = await computePinHintFromKey(keyMaterial, offset)
+            const fromPin = await computePinHint(pin, offset)
+            expect(fromKey).toBe(fromPin)
+        }
     })
 
 })
