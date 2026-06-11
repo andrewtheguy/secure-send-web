@@ -216,6 +216,16 @@ export async function computePinHint(pin: string): Promise<string> {
 }
 
 /**
+ * Format a PIN hint for display as the user-visible PIN fingerprint.
+ * Uppercases and groups the full hint into 4-char blocks (e.g. ABCD-EF01-2345-6789)
+ * so the sender and receiver can visually confirm they derived the same PIN.
+ */
+export function formatPinHint(hint: string): string {
+  const compact = hint.toUpperCase()
+  return compact.match(/.{1,4}/g)?.join('-') ?? compact
+}
+
+/**
  * Generate a random transfer ID (16 hex characters)
  */
 export function generateTransferId(): string {

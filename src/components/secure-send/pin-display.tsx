@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Check, Copy, AlertCircle, Eye, EyeOff, Clock, Hash, MessageSquareText, Fingerprint } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { PIN_DISPLAY_TIMEOUT_MS, pinToWords, computePinHint } from '@/lib/crypto'
+import { PIN_DISPLAY_TIMEOUT_MS, pinToWords, computePinHint, formatPinHint } from '@/lib/crypto'
 
 interface PinDisplayProps {
   pin: string
@@ -128,12 +128,7 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
       try {
         const hint = await computePinHint(pin)
         if (!cancelled) {
-          let formatted = ''
-          if (typeof hint === 'string' && hint.length >= 8) {
-            const compact = hint.slice(0, 8).toUpperCase()
-            formatted = `${compact.slice(0, 4)}-${compact.slice(4, 8)}`
-          }
-          setFingerprint(formatted)
+          setFingerprint(hint ? formatPinHint(hint) : '')
         }
       } catch {
         if (!cancelled) setFingerprint('')

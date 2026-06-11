@@ -9,18 +9,13 @@ import { QRInput } from './qr-input'
 import { useNostrReceive } from '@/hooks/use-nostr-receive'
 import { useManualReceive } from '@/hooks/use-manual-receive'
 import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
+import { formatPinHint } from '@/lib/crypto'
 import type { SignalingMethod } from '@/lib/nostr/types'
 import type { PinKeyMaterial } from '@/lib/types'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 const PIN_MODE_DESCRIPTION = 'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.'
 const QR_MODE_DESCRIPTION = 'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. Data stays end-to-end encrypted.'
-
-// Helper to format PIN hint as XXXX-XXXX
-function formatPinHint(h: string): string {
-  const compact = h.slice(0, 8).toUpperCase()
-  return `${compact.slice(0, 4)}-${compact.slice(4, 8)}`
-}
 
 type PinSecret = PinKeyMaterial & { method: SignalingMethod | null }
 

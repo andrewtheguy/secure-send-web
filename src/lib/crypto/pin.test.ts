@@ -1,5 +1,6 @@
 import { expect, test, describe } from 'vitest'
 import { generatePinForMethod, pinToWords, wordsToPin, isValidPinWord, computePinHint, detectSignalingMethod } from './pin'
+import { PIN_HINT_LENGTH } from './constants'
 
 describe('PIN Utilities', () => {
     test('detectSignalingMethod should identify method from PIN', () => {
@@ -12,10 +13,10 @@ describe('PIN Utilities', () => {
         expect(detectSignalingMethod('!1234567890b')).toBeNull()
     })
 
-    test('computePinHint should return 8 hex characters', async () => {
+    test('computePinHint should return PIN_HINT_LENGTH hex characters', async () => {
         const pin = 'A/B:C;D(E)F'
         const hint = await computePinHint(pin)
-        expect(hint).toMatch(/^[0-9a-f]{8}$/)
+        expect(hint).toMatch(new RegExp(`^[0-9a-f]{${PIN_HINT_LENGTH}}$`))
 
         // Same PIN should give same hint
         const hint2 = await computePinHint(pin)
