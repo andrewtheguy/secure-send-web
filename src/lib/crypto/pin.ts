@@ -9,9 +9,10 @@ import {
   PIN_HINT_SALT,
   PIN_HINT_BUCKET_SEC,
   PIN_HINT_ITERATIONS,
+  PIN_FINGERPRINT_SALT,
+  PIN_FINGERPRINT_ITERATIONS,
 } from './constants'
 import { importPinKey } from './kdf'
-import { wipeBufferSource } from './memory'
 
 /**
  * Compute checksum character using weighted sum
@@ -192,9 +193,11 @@ function pinHintSalt(bucketOffset: number): string {
 
 /**
  * Derive PIN_HINT_LENGTH hex chars from a salted PBKDF2-SHA-256 derivation of the PIN,
- * using already-imported PBKDF2 key material and an explicit salt string.
+ * using already-imported PBKDF2 key material, an explicit salt string, and an explicit
+ * iteration count (the published wire hint and the local-only fingerprint use different
+ * work factors — see PIN_HINT_ITERATIONS vs PIN_FINGERPRINT_ITERATIONS).
  */
-async function derivePinBits(keyMaterial: CryptoKey, saltStr: string): Promise<string> {
+async function derivePinBits(keyMaterial: CryptoKey, saltStr: string, iterations: number): Promise<string> {
   const encoder = new TextEncoder()
 
   // Each byte produces 2 hex chars; ceil handles odd PIN_HINT_LENGTH
@@ -203,7 +206,7 @@ async function derivePinBits(keyMaterial: CryptoKey, saltStr: string): Promise<s
     {
       name: 'PBKDF2',
       salt: encoder.encode(saltStr),
-      iterations: PIN_HINT_ITERATIONS,
+      iterations,
       hash: 'SHA-256',
     },
     keyMaterial,
@@ -231,7 +234,7 @@ async function derivePinBits(keyMaterial: CryptoKey, saltStr: string): Promise<s
  */
 export async function computePinHint(pin: string, bucketOffset = 0): Promise<string> {
   const keyMaterial = await importPinKey(pin)
-  return derivePinBits(keyMaterial, pinHintSalt(bucketOffset))
+  return derivePinBits(keyMaterial, pinHintSalt(bucketOffset), PIN_HINT_ITERATIONS)
 }
 
 /**
@@ -242,7 +245,7 @@ export async function computePinHint(pin: string, bucketOffset = 0): Promise<str
  * `bucketOffset` selects an earlier time bucket (0 = current, 1 = previous, ...).
  */
 export async function computePinHintFromKey(keyMaterial: CryptoKey, bucketOffset = 0): Promise<string> {
-  return derivePinBits(keyMaterial, pinHintSalt(bucketOffset))
+  return derivePinBits(keyMaterial, pinHintSalt(bucketOffset), PIN_HINT_ITERATIONS)
 }
 
 /**
@@ -250,38 +253,20 @@ export async function computePinHintFromKey(keyMaterial: CryptoKey, bucketOffset
  * displayed to both sender and receiver so they can visually confirm they entered the
  * same PIN.
  *
- * Unlike the wire hint (computePinHint), this is a single salted SHA-256 — NOT the
- * expensive 600,000-iteration PBKDF2 — because the fingerprint never crosses the network
- * and is only compared by humans on-device. There is no published value for an attacker
- * to brute-force, so the PBKDF2 work-factor (which exists to slow reversing a relayed
- * hint back to its PIN) buys nothing here; a fast hash keeps PIN entry/display snappy.
+ * Like the wire hint (computePinHint), this is a salted PBKDF2-SHA-256 derivation, but
+ * with a lighter work factor (PIN_FINGERPRINT_ITERATIONS, < PIN_HINT_ITERATIONS) because
+ * the fingerprint never crosses the network and is only compared by humans on-device.
+ * There is no relayed value for an attacker to brute-force, so the full hint work factor
+ * buys nothing here; the lighter stretch is defence in depth against an attacker who only
+ * ever sees the on-screen fingerprint, while keeping PIN entry/display snappy.
  *
- * Salted with the static PIN_HINT_SALT (no time bucket) so the two sides always display
- * the same value, even across a time-bucket rollover, and domain-separated from any
- * other PIN derivation.
+ * Salted with the static, dedicated PIN_FINGERPRINT_SALT (no time bucket) so the two
+ * sides always display the same value, even across a time-bucket rollover, and so the
+ * fingerprint is domain-separated from the wire hint and every other PIN derivation.
  */
 export async function computePinFingerprint(pin: string): Promise<string> {
-  const encoder = new TextEncoder()
-  // Encode salt and PIN separately (avoids materializing a concatenated PIN string)
-  const saltBytes = encoder.encode(`${PIN_HINT_SALT}:`)
-  const pinBytes = encoder.encode(pin)
-  const input = new Uint8Array(saltBytes.length + pinBytes.length)
-  input.set(saltBytes, 0)
-  input.set(pinBytes, saltBytes.length)
-
-  try {
-    const digest = await crypto.subtle.digest('SHA-256', input)
-    const hex = Array.from(new Uint8Array(digest))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')
-
-    // Truncate to exact length (needed if PIN_HINT_LENGTH is odd)
-    return hex.slice(0, PIN_HINT_LENGTH)
-  } finally {
-    // Best-effort: clear the PIN bytes from the temporary buffers
-    wipeBufferSource(pinBytes)
-    wipeBufferSource(input)
-  }
+  const keyMaterial = await importPinKey(pin)
+  return derivePinBits(keyMaterial, PIN_FINGERPRINT_SALT, PIN_FINGERPRINT_ITERATIONS)
 }
 
 /**
