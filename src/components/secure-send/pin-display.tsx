@@ -346,6 +346,8 @@ export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProp
                   value={isMasked ? '\u2022\u2022\u2022\u2022\u2022' : word}
                   readOnly
                   aria-label={`PIN word ${i + 1} of ${words.length}`}
+                  onFocus={(e) => e.currentTarget.select()}
+                  onClick={(e) => e.currentTarget.select()}
                   className="text-center font-mono h-10 bg-background border-green-500 bg-green-50/50 cursor-default select-all"
                 />
                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
@@ -361,6 +363,8 @@ export function PinDisplay({ pin, passkeyFingerprint, onExpire }: PinDisplayProp
             value={isMasked ? maskedPin : pin}
             readOnly
             aria-label="Alphanumeric PIN"
+            onFocus={(e) => e.currentTarget.select()}
+            onClick={(e) => e.currentTarget.select()}
             className="text-center font-mono text-xl tracking-wider h-12 bg-background cursor-default select-all border-green-500"
           />
         </div>
