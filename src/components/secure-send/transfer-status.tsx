@@ -10,11 +10,9 @@ import {
 import { useState } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
+import { OFFLINE_QR_TRANSFER_URL } from '@/lib/constants';
 import { formatFileSize } from '@/lib/file-utils';
 import type { TransferState } from '@/lib/nostr';
-
-// Offline QR transfer app, suggested when a direct P2P connection can't be made.
-const OFFLINE_QR_TRANSFER_URL = 'https://qrsecure.kuvi.app/transfer';
 
 interface TransferStatusProps {
   state: TransferState;

@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { OFFLINE_QR_TRANSFER_URL } from '@/lib/constants';
 import { generateTextQRCode } from '@/lib/qr-utils';
 import { ReceiveTab } from './receive-tab';
 import { SendTab } from './send-tab';
@@ -221,7 +222,7 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                       you can instead transfer the file offline with animated QR
                       codes using{' '}
                       <a
-                        href="https://qrsecure.kuvi.app/transfer"
+                        href={OFFLINE_QR_TRANSFER_URL}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="font-medium underline underline-offset-2"
