@@ -1,18 +1,18 @@
-import { AlertCircle, Check, Copy, Loader2 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { generateMutualClipboardData } from '@/lib/manual-signaling'
-import { generateBinaryQRCode } from '@/lib/qr-utils'
+import { AlertCircle, Check, Copy, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { generateMutualClipboardData } from '@/lib/manual-signaling';
+import { generateBinaryQRCode } from '@/lib/qr-utils';
 
 interface QRDisplayProps {
-  data: Uint8Array // Binary data for QR code (SS03 obfuscated payload)
-  label?: string
-  showCopyButton?: boolean
-  clipboardData?: string // Base64 payload for copy button
-  showSize?: boolean
+  data: Uint8Array; // Binary data for QR code (SS03 obfuscated payload)
+  label?: string;
+  showCopyButton?: boolean;
+  clipboardData?: string; // Base64 payload for copy button
+  showSize?: boolean;
 }
 
-const MIN_QR_SIZE = 150
+const MIN_QR_SIZE = 150;
 
 export function QRDisplay({
   data,
@@ -21,54 +21,54 @@ export function QRDisplay({
   clipboardData,
   showSize = true,
 }: QRDisplayProps) {
-  const [copied, setCopied] = useState(false)
-  const [qrImageUrl, setQrImageUrl] = useState<string | null>(null)
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [copied, setCopied] = useState(false);
+  const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!data || data.length === 0) {
-      setQrImageUrl(null) // eslint-disable-line react-hooks/set-state-in-effect
-      return
+      setQrImageUrl(null); // eslint-disable-line react-hooks/set-state-in-effect
+      return;
     }
 
-    const measuredWidth = containerRef.current?.clientWidth ?? 0
-    const qrWidth = Math.max(measuredWidth, MIN_QR_SIZE)
+    const measuredWidth = containerRef.current?.clientWidth ?? 0;
+    const qrWidth = Math.max(measuredWidth, MIN_QR_SIZE);
 
-    setIsGenerating(true)
-    setError(null)
+    setIsGenerating(true);
+    setError(null);
 
     generateBinaryQRCode(data, {
       width: qrWidth,
       errorCorrectionLevel: 'M',
     })
       .then((url) => {
-        setQrImageUrl(url)
+        setQrImageUrl(url);
       })
       .catch((err) => {
-        console.error('Failed to generate QR code:', err)
-        setError('Failed to generate QR code')
-        setQrImageUrl(null)
+        console.error('Failed to generate QR code:', err);
+        setError('Failed to generate QR code');
+        setQrImageUrl(null);
       })
-      .finally(() => setIsGenerating(false))
-  }, [data])
+      .finally(() => setIsGenerating(false));
+  }, [data]);
 
   // Copy signaling payload as base64 for paste flow.
   const handleCopy = useCallback(async () => {
-    if (!data || data.length === 0) return
+    if (!data || data.length === 0) return;
     try {
       const copyPayload =
         clipboardData && clipboardData.length > 0
           ? clipboardData
-          : generateMutualClipboardData(data)
-      await navigator.clipboard.writeText(copyPayload)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+          : generateMutualClipboardData(data);
+      await navigator.clipboard.writeText(copyPayload);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy:', err)
+      console.error('Failed to copy:', err);
     }
-  }, [clipboardData, data])
+  }, [clipboardData, data]);
 
   return (
     <div className="flex flex-col items-center space-y-3">
@@ -125,5 +125,5 @@ export function QRDisplay({
         </Button>
       )}
     </div>
-  )
+  );
 }

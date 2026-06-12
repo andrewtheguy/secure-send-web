@@ -6,58 +6,58 @@ import {
   QrCode,
   RotateCcw,
   X,
-} from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { useManualReceive } from '@/hooks/use-manual-receive'
-import { useNostrReceive } from '@/hooks/use-nostr-receive'
-import { formatPinHint } from '@/lib/crypto'
+} from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { useManualReceive } from '@/hooks/use-manual-receive';
+import { useNostrReceive } from '@/hooks/use-nostr-receive';
+import { formatPinHint } from '@/lib/crypto';
 import {
   downloadFile,
   formatFileSize,
   getMimeTypeDescription,
-} from '@/lib/file-utils'
-import type { SignalingMethod } from '@/lib/nostr/types'
-import type { PinKeyMaterial } from '@/lib/types'
-import { type PinChangePayload, PinInput, type PinInputRef } from './pin-input'
-import { QRDisplay } from './qr-display'
-import { QRInput } from './qr-input'
-import { TransferStatus } from './transfer-status'
+} from '@/lib/file-utils';
+import type { SignalingMethod } from '@/lib/nostr/types';
+import type { PinKeyMaterial } from '@/lib/types';
+import { type PinChangePayload, PinInput, type PinInputRef } from './pin-input';
+import { QRDisplay } from './qr-display';
+import { QRInput } from './qr-input';
+import { TransferStatus } from './transfer-status';
 
-const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const PIN_MODE_DESCRIPTION =
-  'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.'
+  'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.';
 const QR_MODE_DESCRIPTION =
-  'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.'
+  'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.';
 
-type PinSecret = PinKeyMaterial & { method: SignalingMethod | null }
+type PinSecret = PinKeyMaterial & { method: SignalingMethod | null };
 
-type ReceiveMode = 'pin' | 'scan'
+type ReceiveMode = 'pin' | 'scan';
 
 export function ReceiveTab() {
-  const [receiveMode, setReceiveMode] = useState<ReceiveMode>('pin')
+  const [receiveMode, setReceiveMode] = useState<ReceiveMode>('pin');
 
   // Store PIN in ref to avoid React DevTools exposure
-  const pinSecretRef = useRef<PinSecret | null>(null)
-  const pinInputLengthRef = useRef(0)
-  const pinInputRef = useRef<PinInputRef>(null)
-  const [isPinValid, setIsPinValid] = useState(false)
-  const [pinExpired, setPinExpired] = useState(false)
-  const [timeRemaining, setTimeRemaining] = useState(0)
-  const [, setDetectedMethod] = useState<SignalingMethod>('nostr')
-  const [pinFingerprint, setPinFingerprint] = useState<string | null>(null)
+  const pinSecretRef = useRef<PinSecret | null>(null);
+  const pinInputLengthRef = useRef(0);
+  const pinInputRef = useRef<PinInputRef>(null);
+  const [isPinValid, setIsPinValid] = useState(false);
+  const [pinExpired, setPinExpired] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState(0);
+  const [, setDetectedMethod] = useState<SignalingMethod>('nostr');
+  const [pinFingerprint, setPinFingerprint] = useState<string | null>(null);
 
   // All hooks must be called unconditionally (React rules)
-  const nostrHook = useNostrReceive()
-  const manualHook = useManualReceive()
+  const nostrHook = useNostrReceive();
+  const manualHook = useManualReceive();
 
   // Determine which hook to use based on mode
-  const isManualMode = receiveMode === 'scan'
+  const isManualMode = receiveMode === 'scan';
 
-  const activeHook = isManualMode ? manualHook : nostrHook
+  const activeHook = isManualMode ? manualHook : nostrHook;
 
-  const { state: rawState, receivedContent, cancel, reset } = activeHook
+  const { state: rawState, receivedContent, cancel, reset } = activeHook;
 
   // Get the right receive function based on mode
   // nostrHook has .receive, manualHook does not
@@ -66,59 +66,59 @@ export function ReceiveTab() {
     'receive' in activeHook &&
     typeof activeHook.receive === 'function'
       ? activeHook.receive
-      : undefined
-  const { startReceive, submitOffer } = manualHook
+      : undefined;
+  const { startReceive, submitOffer } = manualHook;
 
   // Use rawState directly for common properties
-  const state = rawState
+  const state = rawState;
 
   // Runtime normalization for manual-mode specific properties
-  const rawStateAny = rawState as unknown as Record<string, unknown>
+  const rawStateAny = rawState as unknown as Record<string, unknown>;
   const answerData: Uint8Array | undefined =
     rawStateAny.answerData instanceof Uint8Array
       ? rawStateAny.answerData
-      : undefined
+      : undefined;
   const clipboardData: string | undefined =
     typeof rawStateAny.clipboardData === 'string'
       ? rawStateAny.clipboardData
-      : undefined
+      : undefined;
 
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pinInactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pinInactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null,
-  )
-  const mountedRef = useRef(true)
+  );
+  const mountedRef = useRef(true);
 
   // Clear PIN inactivity timeout and countdown
   const clearPinInactivityTimeout = useCallback(() => {
     if (pinInactivityRef.current) {
-      clearTimeout(pinInactivityRef.current)
-      pinInactivityRef.current = null
+      clearTimeout(pinInactivityRef.current);
+      pinInactivityRef.current = null;
     }
     if (countdownIntervalRef.current) {
-      clearInterval(countdownIntervalRef.current)
-      countdownIntervalRef.current = null
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
     }
-    setTimeRemaining(0)
-  }, [])
+    setTimeRemaining(0);
+  }, []);
 
   // Reset PIN inactivity timeout (called on each PIN change)
   const resetPinInactivityTimeout = useCallback(
     (hasInput: boolean) => {
-      clearPinInactivityTimeout()
-      setPinExpired(false)
+      clearPinInactivityTimeout();
+      setPinExpired(false);
 
       // Only set timeout if there's some PIN input
       if (hasInput) {
         // Set initial countdown time
-        setTimeRemaining(Math.floor(PIN_INACTIVITY_TIMEOUT_MS / 1000))
+        setTimeRemaining(Math.floor(PIN_INACTIVITY_TIMEOUT_MS / 1000));
 
         // Start countdown interval
         countdownIntervalRef.current = setInterval(() => {
-          if (!mountedRef.current) return
-          setTimeRemaining((prev) => Math.max(0, prev - 1))
-        }, 1000)
+          if (!mountedRef.current) return;
+          setTimeRemaining((prev) => Math.max(0, prev - 1));
+        }, 1000);
 
         // Set expiration timeout
         pinInactivityRef.current = setTimeout(() => {
@@ -127,114 +127,114 @@ export function ReceiveTab() {
             (pinSecretRef.current || pinInputLengthRef.current > 0)
           ) {
             // Clear PIN due to inactivity
-            pinSecretRef.current = null
-            pinInputLengthRef.current = 0
-            setIsPinValid(false)
-            pinInputRef.current?.clear()
-            setPinExpired(true)
+            pinSecretRef.current = null;
+            pinInputLengthRef.current = 0;
+            setIsPinValid(false);
+            pinInputRef.current?.clear();
+            setPinExpired(true);
             if (countdownIntervalRef.current) {
-              clearInterval(countdownIntervalRef.current)
-              countdownIntervalRef.current = null
+              clearInterval(countdownIntervalRef.current);
+              countdownIntervalRef.current = null;
             }
-            setTimeRemaining(0)
+            setTimeRemaining(0);
           }
-        }, PIN_INACTIVITY_TIMEOUT_MS)
+        }, PIN_INACTIVITY_TIMEOUT_MS);
       }
     },
     [clearPinInactivityTimeout],
-  )
+  );
 
   useEffect(() => {
-    mountedRef.current = true
+    mountedRef.current = true;
     return () => {
-      mountedRef.current = false
+      mountedRef.current = false;
       // Clear PIN from memory on unmount
-      pinSecretRef.current = null
-      pinInputLengthRef.current = 0
-      const timeoutId = timeoutRef.current
-      const countdownId = countdownIntervalRef.current
+      pinSecretRef.current = null;
+      pinInputLengthRef.current = 0;
+      const timeoutId = timeoutRef.current;
+      const countdownId = countdownIntervalRef.current;
       if (timeoutId) {
-        clearTimeout(timeoutId)
+        clearTimeout(timeoutId);
       }
       if (countdownId) {
-        clearInterval(countdownId)
+        clearInterval(countdownId);
       }
-      timeoutRef.current = null
-      countdownIntervalRef.current = null
-      clearPinInactivityTimeout()
-    }
-  }, [clearPinInactivityTimeout])
+      timeoutRef.current = null;
+      countdownIntervalRef.current = null;
+      clearPinInactivityTimeout();
+    };
+  }, [clearPinInactivityTimeout]);
 
   // Format time remaining as MM:SS
   const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
-  const canReceivePin = isPinValid && state.status === 'idle'
-  const canReceiveScan = state.status === 'idle'
+  const canReceivePin = isPinValid && state.status === 'idle';
+  const canReceiveScan = state.status === 'idle';
 
   const handleReceivePin = async () => {
-    const secret = pinSecretRef.current
+    const secret = pinSecretRef.current;
     if (canReceivePin && secret && pinReceive) {
-      clearPinInactivityTimeout()
+      clearPinInactivityTimeout();
       // Clear stored material immediately after retrieving it
-      pinSecretRef.current = null
-      pinInputLengthRef.current = 0
-      setIsPinValid(false)
-      pinInputRef.current?.clear()
-      setPinExpired(false)
+      pinSecretRef.current = null;
+      pinInputLengthRef.current = 0;
+      setIsPinValid(false);
+      pinInputRef.current?.clear();
+      setPinExpired(false);
       try {
-        await pinReceive(secret)
+        await pinReceive(secret);
       } catch (err) {
-        console.error('Failed to start PIN receive flow:', err)
+        console.error('Failed to start PIN receive flow:', err);
       }
     }
-  }
+  };
 
   const handleReceiveScan = () => {
     if (canReceiveScan) {
-      startReceive()
+      startReceive();
     }
-  }
+  };
 
   const handleReset = () => {
-    reset()
-    clearPinInactivityTimeout()
+    reset();
+    clearPinInactivityTimeout();
     // Clear PIN from ref and input
-    pinSecretRef.current = null
-    pinInputLengthRef.current = 0
-    setIsPinValid(false)
-    pinInputRef.current?.clear()
-    setPinExpired(false)
-  }
+    pinSecretRef.current = null;
+    pinInputLengthRef.current = 0;
+    setIsPinValid(false);
+    pinInputRef.current?.clear();
+    setPinExpired(false);
+  };
 
   const handlePinChange = useCallback(
     (payload: PinChangePayload) => {
-      const { key, fingerprint, method, isValid, length } = payload
-      pinInputLengthRef.current = length
+      const { key, fingerprint, method, isValid, length } = payload;
+      pinInputLengthRef.current = length;
 
       if (isValid && key && fingerprint) {
-        pinSecretRef.current = { key, fingerprint, method: method ?? null }
-        setIsPinValid(true)
-        setPinFingerprint(formatPinHint(fingerprint))
+        pinSecretRef.current = { key, fingerprint, method: method ?? null };
+        setIsPinValid(true);
+        setPinFingerprint(formatPinHint(fingerprint));
       } else {
-        pinSecretRef.current = null
-        setIsPinValid(false)
-        setPinFingerprint(null)
+        pinSecretRef.current = null;
+        setIsPinValid(false);
+        setPinFingerprint(null);
       }
 
-      resetPinInactivityTimeout(length > 0)
+      resetPinInactivityTimeout(length > 0);
 
       if (method) {
-        setDetectedMethod(method)
+        setDetectedMethod(method);
       } else if (length === 0) {
-        setDetectedMethod('nostr')
+        setDetectedMethod('nostr');
       }
     },
     [resetPinInactivityTimeout],
-  )
+  );
 
   const handleDownload = () => {
     if (receivedContent) {
@@ -242,17 +242,17 @@ export function ReceiveTab() {
         receivedContent.data,
         receivedContent.fileName,
         receivedContent.mimeType,
-      )
+      );
     }
-  }
+  };
 
   const isActive =
     state.status !== 'idle' &&
     state.status !== 'error' &&
-    state.status !== 'complete'
-  const showQRInput = isManualMode && state.status === 'waiting_for_offer'
+    state.status !== 'complete';
+  const showQRInput = isManualMode && state.status === 'waiting_for_offer';
   const showQRDisplay =
-    isManualMode && answerData && state.status === 'showing_answer'
+    isManualMode && answerData && state.status === 'showing_answer';
 
   return (
     <div className="space-y-4 pt-4">
@@ -467,5 +467,5 @@ export function ReceiveTab() {
         </>
       )}
     </div>
-  )
+  );
 }

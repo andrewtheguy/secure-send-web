@@ -1,6 +1,6 @@
-import { AlertTriangle } from 'lucide-react'
-import { Link } from 'react-router-dom'
-import { Button } from '@/components/ui/button'
+import { AlertTriangle } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
 
 export function NotFoundPage() {
   return (
@@ -30,5 +30,5 @@ export function NotFoundPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

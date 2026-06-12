@@ -5,7 +5,7 @@ import {
   Hash,
   MessageSquareText,
   X,
-} from 'lucide-react'
+} from 'lucide-react';
 import {
   forwardRef,
   useCallback,
@@ -13,9 +13,9 @@ import {
   useImperativeHandle,
   useRef,
   useState,
-} from 'react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+} from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   computePinFingerprint,
   detectSignalingMethod,
@@ -26,391 +26,391 @@ import {
   PIN_LENGTH,
   PIN_WORDLIST,
   wordsToPin,
-} from '@/lib/crypto'
-import type { SignalingMethod } from '@/lib/nostr/types'
+} from '@/lib/crypto';
+import type { SignalingMethod } from '@/lib/nostr/types';
 
 export interface PinChangePayload {
-  key: CryptoKey | null
-  fingerprint: string | null
-  method: SignalingMethod | null
-  isValid: boolean
-  length: number
+  key: CryptoKey | null;
+  fingerprint: string | null;
+  method: SignalingMethod | null;
+  isValid: boolean;
+  length: number;
 }
 
 interface PinInputProps {
-  onPinChange: (payload: PinChangePayload) => void
-  disabled?: boolean
+  onPinChange: (payload: PinChangePayload) => void;
+  disabled?: boolean;
 }
 
 export interface PinInputRef {
-  clear: () => void
-  getValue: () => string
+  clear: () => void;
+  getValue: () => string;
 }
 
 export const PinInput = forwardRef<PinInputRef, PinInputProps>(
   ({ onPinChange, disabled }, ref) => {
-    const [useWords, setUseWords] = useState(false)
-    const [words, setWords] = useState<string[]>(Array(7).fill(''))
-    const [activeWordIndex, setActiveWordIndex] = useState<number | null>(null)
-    const [suggestions, setSuggestions] = useState<string[]>([])
-    const [selectedIndex, setSelectedIndex] = useState(0)
-    const [error, setError] = useState<string | null>(null)
-    const [charDisplayLength, setCharDisplayLength] = useState(0)
-    const [wordDisplayLength, setWordDisplayLength] = useState(0)
-    const [charIsValid, setCharIsValid] = useState(false)
-    const [wordIsValid, setWordIsValid] = useState(false)
-    const [maskWords, setMaskWords] = useState(false)
+    const [useWords, setUseWords] = useState(false);
+    const [words, setWords] = useState<string[]>(Array(7).fill(''));
+    const [activeWordIndex, setActiveWordIndex] = useState<number | null>(null);
+    const [suggestions, setSuggestions] = useState<string[]>([]);
+    const [selectedIndex, setSelectedIndex] = useState(0);
+    const [error, setError] = useState<string | null>(null);
+    const [charDisplayLength, setCharDisplayLength] = useState(0);
+    const [wordDisplayLength, setWordDisplayLength] = useState(0);
+    const [charIsValid, setCharIsValid] = useState(false);
+    const [wordIsValid, setWordIsValid] = useState(false);
+    const [maskWords, setMaskWords] = useState(false);
 
-    const inputRefs = useRef<(HTMLInputElement | null)[]>(Array(7).fill(null))
-    const charInputRef = useRef<HTMLInputElement>(null)
-    const charPinRef = useRef('')
-    const wordPinRef = useRef('')
-    const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-    const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-    const mountedRef = useRef(true)
-    const securedKeyRef = useRef<CryptoKey | null>(null)
-    const securedFingerprintRef = useRef<string | null>(null)
-    const securedMethodRef = useRef<SignalingMethod | null>(null)
+    const inputRefs = useRef<(HTMLInputElement | null)[]>(Array(7).fill(null));
+    const charInputRef = useRef<HTMLInputElement>(null);
+    const charPinRef = useRef('');
+    const wordPinRef = useRef('');
+    const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const mountedRef = useRef(true);
+    const securedKeyRef = useRef<CryptoKey | null>(null);
+    const securedFingerprintRef = useRef<string | null>(null);
+    const securedMethodRef = useRef<SignalingMethod | null>(null);
 
     const clearSecuredData = useCallback(() => {
-      securedKeyRef.current = null
-      securedFingerprintRef.current = null
-      securedMethodRef.current = null
-    }, [])
+      securedKeyRef.current = null;
+      securedFingerprintRef.current = null;
+      securedMethodRef.current = null;
+    }, []);
 
     const emitChange = useCallback(
       (isValid: boolean, length: number, method: SignalingMethod | null) => {
-        const resolvedMethod = method ?? securedMethodRef.current
+        const resolvedMethod = method ?? securedMethodRef.current;
         onPinChange({
           key: isValid ? securedKeyRef.current : null,
           fingerprint: isValid ? securedFingerprintRef.current : null,
           method: resolvedMethod,
           isValid,
           length,
-        })
+        });
       },
       [onPinChange],
-    )
+    );
 
     useImperativeHandle(ref, () => ({
       clear: () => {
-        clearSecuredData()
-        charPinRef.current = ''
-        wordPinRef.current = ''
-        setCharIsValid(false)
-        setWordIsValid(false)
-        setCharDisplayLength(0)
-        setWordDisplayLength(0)
-        setWords(Array(7).fill(''))
-        setMaskWords(false)
-        if (charInputRef.current) charInputRef.current.value = ''
-        emitChange(false, 0, null)
+        clearSecuredData();
+        charPinRef.current = '';
+        wordPinRef.current = '';
+        setCharIsValid(false);
+        setWordIsValid(false);
+        setCharDisplayLength(0);
+        setWordDisplayLength(0);
+        setWords(Array(7).fill(''));
+        setMaskWords(false);
+        if (charInputRef.current) charInputRef.current.value = '';
+        emitChange(false, 0, null);
       },
       getValue: () => {
         // Return whichever PIN is valid, prioritizing character PIN
-        if (isValidPin(charPinRef.current)) return charPinRef.current
-        if (isValidPin(wordPinRef.current)) return wordPinRef.current
-        return charPinRef.current || wordPinRef.current
+        if (isValidPin(charPinRef.current)) return charPinRef.current;
+        if (isValidPin(wordPinRef.current)) return wordPinRef.current;
+        return charPinRef.current || wordPinRef.current;
       },
-    }))
+    }));
 
     useEffect(() => {
-      mountedRef.current = true
+      mountedRef.current = true;
       return () => {
-        mountedRef.current = false
-        if (timeoutRef.current) clearTimeout(timeoutRef.current)
-        if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current)
-      }
-    }, [])
+        mountedRef.current = false;
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current);
+      };
+    }, []);
 
     const securePin = useCallback(
       async (pin: string) => {
-        if (!isValidPin(pin)) return
+        if (!isValidPin(pin)) return;
 
         try {
-          const method = detectSignalingMethod(pin)
+          const method = detectSignalingMethod(pin);
           const [keyMaterial, fingerprint] = await Promise.all([
             importPinKey(pin),
             computePinFingerprint(pin),
-          ])
+          ]);
 
-          securedKeyRef.current = keyMaterial
-          securedFingerprintRef.current = fingerprint
-          securedMethodRef.current = method
+          securedKeyRef.current = keyMaterial;
+          securedFingerprintRef.current = fingerprint;
+          securedMethodRef.current = method;
 
           // Clear plaintext traces from refs/state
-          charPinRef.current = ''
-          wordPinRef.current = ''
-          setWords(Array(7).fill(''))
-          setMaskWords(true)
+          charPinRef.current = '';
+          wordPinRef.current = '';
+          setWords(Array(7).fill(''));
+          setMaskWords(true);
 
           // Keep UX feedback without keeping the raw value
-          setCharDisplayLength(PIN_LENGTH)
-          setWordDisplayLength(7)
-          setCharIsValid(true)
-          setWordIsValid(true)
-          setError(null)
+          setCharDisplayLength(PIN_LENGTH);
+          setWordDisplayLength(7);
+          setCharIsValid(true);
+          setWordIsValid(true);
+          setError(null);
 
           if (charInputRef.current) {
             // Show a masked placeholder so users see that input was captured without revealing the PIN
-            charInputRef.current.value = '*'.repeat(PIN_LENGTH)
+            charInputRef.current.value = '*'.repeat(PIN_LENGTH);
           }
 
-          emitChange(true, PIN_LENGTH, method ?? null)
+          emitChange(true, PIN_LENGTH, method ?? null);
         } catch (err) {
-          console.error('Failed to secure PIN', err)
-          clearSecuredData()
-          emitChange(false, 0, null)
-          setError('Failed to secure PIN')
+          console.error('Failed to secure PIN', err);
+          clearSecuredData();
+          emitChange(false, 0, null);
+          setError('Failed to secure PIN');
         }
       },
       [clearSecuredData, emitChange],
-    )
+    );
 
     const updateMethod = useCallback((pinCandidate: string) => {
-      securedMethodRef.current = detectSignalingMethod(pinCandidate)
-    }, [])
+      securedMethodRef.current = detectSignalingMethod(pinCandidate);
+    }, []);
 
     const updateWordPin = useCallback(
       (updatedWords: string[]) => {
-        const pin = wordsToPin(updatedWords)
+        const pin = wordsToPin(updatedWords);
         const validWordCount = updatedWords.filter((w) =>
           isValidPinWord(w),
-        ).length
+        ).length;
 
-        setWordDisplayLength(validWordCount)
-        wordPinRef.current = pin
-        const pinIsValid = isValidPin(pin)
-        setWordIsValid(pinIsValid)
-        updateMethod(pin)
+        setWordDisplayLength(validWordCount);
+        wordPinRef.current = pin;
+        const pinIsValid = isValidPin(pin);
+        setWordIsValid(pinIsValid);
+        updateMethod(pin);
 
         if (validWordCount > 0) {
-          charPinRef.current = ''
-          setCharIsValid(false)
-          setCharDisplayLength(0)
-          if (charInputRef.current) charInputRef.current.value = ''
+          charPinRef.current = '';
+          setCharIsValid(false);
+          setCharDisplayLength(0);
+          if (charInputRef.current) charInputRef.current.value = '';
         }
 
-        setMaskWords(false)
+        setMaskWords(false);
 
         if (pinIsValid) {
-          void securePin(pin)
+          void securePin(pin);
         } else {
-          clearSecuredData()
-          emitChange(false, validWordCount, securedMethodRef.current)
+          clearSecuredData();
+          emitChange(false, validWordCount, securedMethodRef.current);
         }
       },
       [clearSecuredData, emitChange, securePin, updateMethod],
-    )
+    );
 
     // Handling character mode changes
     const handleCharChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const newValue = e.target.value
+      const newValue = e.target.value;
       const validChars = [...newValue].filter((char) =>
         PIN_CHARSET.includes(char),
-      )
+      );
 
       if (validChars.length !== newValue.length && newValue.length > 0) {
-        setError('Invalid character')
-        if (timeoutRef.current) clearTimeout(timeoutRef.current)
-        timeoutRef.current = setTimeout(() => setError(null), 1500)
+        setError('Invalid character');
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        timeoutRef.current = setTimeout(() => setError(null), 1500);
       }
 
-      const filtered = validChars.slice(0, PIN_LENGTH).join('')
-      setCharDisplayLength(filtered.length)
-      charPinRef.current = filtered
-      const filteredIsValid = isValidPin(filtered)
-      setCharIsValid(filteredIsValid)
-      if (charInputRef.current) charInputRef.current.value = filtered
-      updateMethod(filtered)
+      const filtered = validChars.slice(0, PIN_LENGTH).join('');
+      setCharDisplayLength(filtered.length);
+      charPinRef.current = filtered;
+      const filteredIsValid = isValidPin(filtered);
+      setCharIsValid(filteredIsValid);
+      if (charInputRef.current) charInputRef.current.value = filtered;
+      updateMethod(filtered);
 
       // Clear word input when character input is used
       if (filtered.length > 0) {
-        setWords(Array(7).fill(''))
-        wordPinRef.current = ''
-        setWordIsValid(false)
-        setWordDisplayLength(0)
-        setMaskWords(false)
+        setWords(Array(7).fill(''));
+        wordPinRef.current = '';
+        setWordIsValid(false);
+        setWordDisplayLength(0);
+        setMaskWords(false);
       }
 
       if (filteredIsValid) {
-        void securePin(filtered)
+        void securePin(filtered);
       } else {
-        clearSecuredData()
-        emitChange(false, filtered.length, securedMethodRef.current)
+        clearSecuredData();
+        emitChange(false, filtered.length, securedMethodRef.current);
       }
-    }
+    };
 
     // Handle focus on word input field
     const handleFocus = useCallback(
       (index: number) => {
         // Cancel any pending blur timeout to prevent it from clearing suggestions
         if (blurTimeoutRef.current) {
-          clearTimeout(blurTimeoutRef.current)
-          blurTimeoutRef.current = null
+          clearTimeout(blurTimeoutRef.current);
+          blurTimeoutRef.current = null;
         }
 
-        setActiveWordIndex(index)
-        const currentWord = words[index]
+        setActiveWordIndex(index);
+        const currentWord = words[index];
 
         if (currentWord === '') {
-          setSuggestions(PIN_WORDLIST) // Show all words
-          setSelectedIndex(0)
+          setSuggestions(PIN_WORDLIST); // Show all words
+          setSelectedIndex(0);
         } else {
-          const matches = PIN_WORDLIST.filter((w) => w.startsWith(currentWord))
-          setSuggestions(matches)
-          setSelectedIndex(0)
+          const matches = PIN_WORDLIST.filter((w) => w.startsWith(currentWord));
+          setSuggestions(matches);
+          setSelectedIndex(0);
         }
       },
       [words],
-    )
+    );
 
     // Handle blur on word input field
     const handleBlur = useCallback(() => {
       blurTimeoutRef.current = setTimeout(() => {
         if (mountedRef.current) {
-          setActiveWordIndex(null)
-          setSuggestions([])
+          setActiveWordIndex(null);
+          setSuggestions([]);
         }
-      }, 200)
-    }, [])
+      }, 200);
+    }, []);
 
     // Handling word changes
     const handleWordChange = (index: number, val: string) => {
-      setMaskWords(false)
-      const newWords = [...words]
-      newWords[index] = val.toLowerCase().replace(/[^a-z]/g, '')
-      setWords(newWords)
+      setMaskWords(false);
+      const newWords = [...words];
+      newWords[index] = val.toLowerCase().replace(/[^a-z]/g, '');
+      setWords(newWords);
 
       // Filter suggestions - now starts at 1 character
       if (newWords[index].length >= 1) {
         const matches = PIN_WORDLIST.filter((w) =>
           w.startsWith(newWords[index]),
-        )
-        setSuggestions(matches)
-        setSelectedIndex(0)
+        );
+        setSuggestions(matches);
+        setSelectedIndex(0);
       } else if (newWords[index].length === 0 && activeWordIndex === index) {
-        setSuggestions(PIN_WORDLIST) // Show all when cleared while focused
-        setSelectedIndex(0)
+        setSuggestions(PIN_WORDLIST); // Show all when cleared while focused
+        setSelectedIndex(0);
       } else {
-        setSuggestions([])
+        setSuggestions([]);
       }
 
-      updateWordPin(newWords)
-    }
+      updateWordPin(newWords);
+    };
 
     const selectSuggestion = (wordIndex: number, suggestion: string) => {
-      setMaskWords(false)
-      const newWords = [...words]
-      newWords[wordIndex] = suggestion
-      setWords(newWords)
-      setSuggestions([])
+      setMaskWords(false);
+      const newWords = [...words];
+      newWords[wordIndex] = suggestion;
+      setWords(newWords);
+      setSuggestions([]);
 
       // Focus next box
       if (wordIndex < 6) {
-        inputRefs.current[wordIndex + 1]?.focus()
+        inputRefs.current[wordIndex + 1]?.focus();
       }
 
-      updateWordPin(newWords)
-    }
+      updateWordPin(newWords);
+    };
 
     const handlePaste = useCallback(
       (e: React.ClipboardEvent<HTMLInputElement>, fieldIndex: number) => {
-        setMaskWords(false)
-        const pastedText = e.clipboardData.getData('text')
+        setMaskWords(false);
+        const pastedText = e.clipboardData.getData('text');
 
         // Split by spaces, newlines, tabs, commas
         const potentialWords = pastedText
           .toLowerCase()
           .split(/[\s,]+/)
           .map((w) => w.replace(/[^a-z]/g, ''))
-          .filter((w) => w.length > 0)
+          .filter((w) => w.length > 0);
 
         // If only one word, let default paste handle it
-        if (potentialWords.length <= 1) return
+        if (potentialWords.length <= 1) return;
 
-        e.preventDefault()
+        e.preventDefault();
 
         // Validate all words
-        const validWords = potentialWords.slice(0, 7)
-        const allValid = validWords.every((w) => isValidPinWord(w))
+        const validWords = potentialWords.slice(0, 7);
+        const allValid = validWords.every((w) => isValidPinWord(w));
 
         if (!allValid) {
-          setError('Some pasted words are invalid')
-          if (timeoutRef.current) clearTimeout(timeoutRef.current)
-          timeoutRef.current = setTimeout(() => setError(null), 3000)
-          return
+          setError('Some pasted words are invalid');
+          if (timeoutRef.current) clearTimeout(timeoutRef.current);
+          timeoutRef.current = setTimeout(() => setError(null), 3000);
+          return;
         }
 
         // Populate fields starting from current field
-        const newWords = [...words]
+        const newWords = [...words];
         validWords.forEach((word, i) => {
-          const targetIndex = fieldIndex + i
+          const targetIndex = fieldIndex + i;
           if (targetIndex < 7) {
-            newWords[targetIndex] = word
+            newWords[targetIndex] = word;
           }
-        })
+        });
 
-        setWords(newWords)
-        setSuggestions([])
+        setWords(newWords);
+        setSuggestions([]);
 
-        updateWordPin(newWords)
+        updateWordPin(newWords);
 
         // Focus field after last pasted word
-        const nextFocusIndex = Math.min(fieldIndex + validWords.length, 6)
-        inputRefs.current[nextFocusIndex]?.focus()
+        const nextFocusIndex = Math.min(fieldIndex + validWords.length, 6);
+        inputRefs.current[nextFocusIndex]?.focus();
       },
       [words, updateWordPin],
-    )
+    );
 
     const handlePasteFromClipboard = useCallback(async () => {
       try {
         if (!navigator.clipboard?.readText) {
-          setError('Clipboard API not available')
-          if (timeoutRef.current) clearTimeout(timeoutRef.current)
-          timeoutRef.current = setTimeout(() => setError(null), 3000)
-          return
+          setError('Clipboard API not available');
+          if (timeoutRef.current) clearTimeout(timeoutRef.current);
+          timeoutRef.current = setTimeout(() => setError(null), 3000);
+          return;
         }
-        setMaskWords(false)
-        const text = await navigator.clipboard.readText()
+        setMaskWords(false);
+        const text = await navigator.clipboard.readText();
         const potentialWords = text
           .toLowerCase()
           .split(/[\s,]+/)
           .map((w) => w.replace(/[^a-z]/g, ''))
           .filter((w) => w.length > 0)
-          .slice(0, 7)
+          .slice(0, 7);
 
-        const allValid = potentialWords.every((w) => isValidPinWord(w))
+        const allValid = potentialWords.every((w) => isValidPinWord(w));
 
         if (!allValid) {
-          setError('Clipboard contains invalid words')
-          if (timeoutRef.current) clearTimeout(timeoutRef.current)
-          timeoutRef.current = setTimeout(() => setError(null), 3000)
-          return
+          setError('Clipboard contains invalid words');
+          if (timeoutRef.current) clearTimeout(timeoutRef.current);
+          timeoutRef.current = setTimeout(() => setError(null), 3000);
+          return;
         }
 
-        const newWords = Array(7).fill('')
+        const newWords = Array(7).fill('');
         potentialWords.forEach((word, i) => {
-          newWords[i] = word
-        })
+          newWords[i] = word;
+        });
 
-        setWords(newWords)
-        setError(null)
+        setWords(newWords);
+        setError(null);
 
-        updateWordPin(newWords)
+        updateWordPin(newWords);
 
-        const nextIndex = potentialWords.length < 7 ? potentialWords.length : 6
-        inputRefs.current[nextIndex]?.focus()
+        const nextIndex = potentialWords.length < 7 ? potentialWords.length : 6;
+        inputRefs.current[nextIndex]?.focus();
       } catch (err) {
         const message =
           err instanceof DOMException && err.name === 'NotAllowedError'
             ? 'Clipboard access denied'
-            : 'Failed to read clipboard'
-        setError(message)
-        if (timeoutRef.current) clearTimeout(timeoutRef.current)
-        timeoutRef.current = setTimeout(() => setError(null), 3000)
+            : 'Failed to read clipboard';
+        setError(message);
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        timeoutRef.current = setTimeout(() => setError(null), 3000);
       }
-    }, [updateWordPin])
+    }, [updateWordPin]);
 
     const handleKeyDown = (
       index: number,
@@ -418,58 +418,58 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
     ) => {
       if (suggestions.length > 0) {
         if (e.key === 'ArrowDown') {
-          e.preventDefault()
-          const maxVisible = Math.min(10, suggestions.length)
-          setSelectedIndex((prev) => (prev + 1) % maxVisible)
-          return
+          e.preventDefault();
+          const maxVisible = Math.min(10, suggestions.length);
+          setSelectedIndex((prev) => (prev + 1) % maxVisible);
+          return;
         }
         if (e.key === 'ArrowUp') {
-          e.preventDefault()
-          const maxVisible = Math.min(10, suggestions.length)
-          setSelectedIndex((prev) => (prev - 1 + maxVisible) % maxVisible)
-          return
+          e.preventDefault();
+          const maxVisible = Math.min(10, suggestions.length);
+          setSelectedIndex((prev) => (prev - 1 + maxVisible) % maxVisible);
+          return;
         }
         if (e.key === 'Enter') {
-          e.preventDefault()
-          selectSuggestion(index, suggestions[selectedIndex])
-          return
+          e.preventDefault();
+          selectSuggestion(index, suggestions[selectedIndex]);
+          return;
         }
         if (e.key === 'Tab') {
           const hasActiveSuggestion =
-            suggestions.length > 0 && selectedIndex !== -1
+            suggestions.length > 0 && selectedIndex !== -1;
           if (hasActiveSuggestion && !e.shiftKey) {
-            e.preventDefault()
-            selectSuggestion(index, suggestions[selectedIndex])
-            return
+            e.preventDefault();
+            selectSuggestion(index, suggestions[selectedIndex]);
+            return;
           }
         }
         if (e.key === 'Escape') {
-          setSuggestions([])
-          return
+          setSuggestions([]);
+          return;
         }
       }
 
       if (e.key === 'Backspace' && words[index] === '' && index > 0) {
-        inputRefs.current[index - 1]?.focus()
+        inputRefs.current[index - 1]?.focus();
       } else if ((e.key === ' ' || e.key === 'Enter') && words[index] !== '') {
-        e.preventDefault()
+        e.preventDefault();
         if (isValidPinWord(words[index]) && index < 6) {
-          inputRefs.current[index + 1]?.focus()
+          inputRefs.current[index + 1]?.focus();
         }
       }
-    }
+    };
 
     const toggleMode = (e: React.MouseEvent) => {
-      e.preventDefault()
-      setUseWords((prev) => !prev)
+      e.preventDefault();
+      setUseWords((prev) => !prev);
       // Don't convert between modes - they're independent
-    }
+    };
 
-    const charIsComplete = charDisplayLength === PIN_LENGTH
+    const charIsComplete = charDisplayLength === PIN_LENGTH;
     const wordIsComplete =
-      words.length === 7 && words.every((w) => isValidPinWord(w))
-    const charHasChecksumError = charIsComplete && !charIsValid
-    const wordHasChecksumError = wordIsComplete && !wordIsValid
+      words.length === 7 && words.every((w) => isValidPinWord(w));
+    const charHasChecksumError = charIsComplete && !charIsValid;
+    const wordHasChecksumError = wordIsComplete && !wordIsValid;
 
     return (
       <div className="flex flex-col gap-4">
@@ -480,7 +480,7 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
               <div key={i} className="relative group">
                 <Input
                   ref={(el) => {
-                    inputRefs.current[i] = el
+                    inputRefs.current[i] = el;
                   }}
                   value={maskWords && word === '' ? '***' : word}
                   onChange={(e) => handleWordChange(i, e.target.value)}
@@ -643,6 +643,6 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
           </div>
         </div>
       </div>
-    )
+    );
   },
-)
+);

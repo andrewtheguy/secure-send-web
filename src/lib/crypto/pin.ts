@@ -12,35 +12,35 @@ import {
   PIN_LENGTH,
   PIN_WORDLIST,
   QR_FIRST_CHARSET,
-} from './constants'
-import { importPinKey } from './kdf'
+} from './constants';
+import { importPinKey } from './kdf';
 
 /**
  * Compute checksum character using weighted sum
  * Detects single-character errors and transpositions
  */
 function computeChecksum(data: string): string {
-  let sum = 0
+  let sum = 0;
   for (let i = 0; i < data.length; i++) {
-    const charIndex = PIN_CHARSET.indexOf(data[i])
-    sum += charIndex * (i + 1) // Weight by position
+    const charIndex = PIN_CHARSET.indexOf(data[i]);
+    sum += charIndex * (i + 1); // Weight by position
   }
-  return PIN_CHARSET[sum % PIN_CHARSET.length]
+  return PIN_CHARSET[sum % PIN_CHARSET.length];
 }
 
 /**
  * Generate random character from a charset using rejection sampling
  */
 function randomCharFromCharset(charset: string): string {
-  const n = charset.length
-  const maxMultiple = Math.floor(256 / n) * n
-  const buffer = new Uint8Array(2)
+  const n = charset.length;
+  const maxMultiple = Math.floor(256 / n) * n;
+  const buffer = new Uint8Array(2);
 
   while (true) {
-    crypto.getRandomValues(buffer)
+    crypto.getRandomValues(buffer);
     for (const byte of buffer) {
       if (byte < maxMultiple) {
-        return charset[byte % n]
+        return charset[byte % n];
       }
     }
   }
@@ -56,34 +56,34 @@ function randomCharFromCharset(charset: string): string {
  */
 export function generatePinForMethod(method: 'nostr' | 'manual'): string {
   const firstCharset =
-    method === 'nostr' ? NOSTR_FIRST_CHARSET : QR_FIRST_CHARSET
+    method === 'nostr' ? NOSTR_FIRST_CHARSET : QR_FIRST_CHARSET;
 
-  const dataLength = PIN_LENGTH - PIN_CHECKSUM_LENGTH
+  const dataLength = PIN_LENGTH - PIN_CHECKSUM_LENGTH;
 
   // Generate first character from method-specific charset
-  const firstChar = randomCharFromCharset(firstCharset)
+  const firstChar = randomCharFromCharset(firstCharset);
 
   // Generate remaining characters from full charset
-  const n = PIN_CHARSET.length
-  const maxMultiple = Math.floor(256 / n) * n
-  const remainingLength = dataLength - 1
+  const n = PIN_CHARSET.length;
+  const maxMultiple = Math.floor(256 / n) * n;
+  const remainingLength = dataLength - 1;
 
-  const result: string[] = [firstChar]
-  const buffer = new Uint8Array(remainingLength * 2)
+  const result: string[] = [firstChar];
+  const buffer = new Uint8Array(remainingLength * 2);
 
   while (result.length < dataLength) {
-    crypto.getRandomValues(buffer)
+    crypto.getRandomValues(buffer);
     for (const byte of buffer) {
       if (byte < maxMultiple) {
-        result.push(PIN_CHARSET[byte % n])
-        if (result.length === dataLength) break
+        result.push(PIN_CHARSET[byte % n]);
+        if (result.length === dataLength) break;
       }
     }
   }
 
-  const data = result.join('')
-  const checksum = computeChecksum(data)
-  return data + checksum
+  const data = result.join('');
+  const checksum = computeChecksum(data);
+  return data + checksum;
 }
 
 /**
@@ -93,89 +93,89 @@ export function generatePinForMethod(method: 'nostr' | 'manual'): string {
  * - Other = null (reserved for future protocols)
  */
 export function detectSignalingMethod(pin: string): 'nostr' | 'manual' | null {
-  if (!pin || pin.length === 0) return null
-  const firstChar = pin[0]
-  if (QR_FIRST_CHARSET.includes(firstChar)) return 'manual'
-  if (NOSTR_FIRST_CHARSET.includes(firstChar)) return 'nostr'
-  return null // Reserved for future protocols
+  if (!pin || pin.length === 0) return null;
+  const firstChar = pin[0];
+  if (QR_FIRST_CHARSET.includes(firstChar)) return 'manual';
+  if (NOSTR_FIRST_CHARSET.includes(firstChar)) return 'nostr';
+  return null; // Reserved for future protocols
 }
 
 /**
  * Validate PIN format and checksum
  */
 export function isValidPin(pin: string): boolean {
-  if (pin.length !== PIN_LENGTH) return false
-  if (![...pin].every((char) => PIN_CHARSET.includes(char))) return false
+  if (pin.length !== PIN_LENGTH) return false;
+  if (![...pin].every((char) => PIN_CHARSET.includes(char))) return false;
 
   // Verify checksum
-  const data = pin.slice(0, PIN_LENGTH - PIN_CHECKSUM_LENGTH)
-  const expectedChecksum = computeChecksum(data)
-  const actualChecksum = pin.slice(-PIN_CHECKSUM_LENGTH)
-  return expectedChecksum === actualChecksum
+  const data = pin.slice(0, PIN_LENGTH - PIN_CHECKSUM_LENGTH);
+  const expectedChecksum = computeChecksum(data);
+  const actualChecksum = pin.slice(-PIN_CHECKSUM_LENGTH);
+  return expectedChecksum === actualChecksum;
 }
 
 /**
  * Convert alphanumeric PIN to word-based PIN (7 words using BIP-39)
  */
 export function pinToWords(pin: string): string[] {
-  if (!pin) return Array(7).fill('')
+  if (!pin) return Array(7).fill('');
 
-  const charsetSize = BigInt(PIN_CHARSET.length)
-  const wordlistSize = BigInt(PIN_WORDLIST.length)
+  const charsetSize = BigInt(PIN_CHARSET.length);
+  const wordlistSize = BigInt(PIN_WORDLIST.length);
 
   // Convert PIN (base 69) to BigInt
-  let num = BigInt(0)
+  let num = BigInt(0);
   for (let i = 0; i < pin.length; i++) {
-    const charIndex = PIN_CHARSET.indexOf(pin[i])
-    if (charIndex === -1) return Array(7).fill('')
-    num = num * charsetSize + BigInt(charIndex)
+    const charIndex = PIN_CHARSET.indexOf(pin[i]);
+    if (charIndex === -1) return Array(7).fill('');
+    num = num * charsetSize + BigInt(charIndex);
   }
 
   // Convert BigInt to words (base 2048)
-  const result: string[] = []
+  const result: string[] = [];
   for (let i = 0; i < 7; i++) {
-    const wordIndex = Number(num % wordlistSize)
-    result.unshift(PIN_WORDLIST[wordIndex])
-    num = num / wordlistSize
+    const wordIndex = Number(num % wordlistSize);
+    result.unshift(PIN_WORDLIST[wordIndex]);
+    num = num / wordlistSize;
   }
 
-  return result
+  return result;
 }
 
 /**
  * Convert 7-word PIN back to 12-character alphanumeric PIN
  */
 export function wordsToPin(words: string[]): string {
-  if (words.length === 0 || words.every((w) => !w)) return ''
+  if (words.length === 0 || words.every((w) => !w)) return '';
 
-  const charsetSize = BigInt(PIN_CHARSET.length)
-  const wordlistSize = BigInt(PIN_WORDLIST.length)
+  const charsetSize = BigInt(PIN_CHARSET.length);
+  const wordlistSize = BigInt(PIN_WORDLIST.length);
 
   // Convert words (base 2048) back to BigInt
-  let num = BigInt(0)
+  let num = BigInt(0);
   for (const word of words) {
-    const wordIndex = PIN_WORDLIST.indexOf(word.toLowerCase())
-    if (wordIndex === -1) return ''
-    num = num * wordlistSize + BigInt(wordIndex)
+    const wordIndex = PIN_WORDLIST.indexOf(word.toLowerCase());
+    if (wordIndex === -1) return '';
+    num = num * wordlistSize + BigInt(wordIndex);
   }
 
   // Convert BigInt back to PIN (base 69)
-  const result: string[] = []
+  const result: string[] = [];
   for (let i = 0; i < PIN_LENGTH; i++) {
-    const charIndex = Number(num % charsetSize)
-    result.unshift(PIN_CHARSET[charIndex])
-    num = num / charsetSize
+    const charIndex = Number(num % charsetSize);
+    result.unshift(PIN_CHARSET[charIndex]);
+    num = num / charsetSize;
   }
 
-  return result.join('')
+  return result.join('');
 }
 
 /**
  * Check if a word is in the PIN wordlist
  */
 export function isValidPinWord(word: string): boolean {
-  if (!word) return false
-  return PIN_WORDLIST.includes(word.toLowerCase())
+  if (!word) return false;
+  return PIN_WORDLIST.includes(word.toLowerCase());
 }
 
 /**
@@ -188,8 +188,8 @@ export function isValidPinWord(word: string): boolean {
  */
 function pinHintSalt(bucketOffset: number): string {
   const bucket =
-    Math.floor(Date.now() / 1000 / PIN_HINT_BUCKET_SEC) - bucketOffset
-  return `${PIN_HINT_SALT}:${bucket}`
+    Math.floor(Date.now() / 1000 / PIN_HINT_BUCKET_SEC) - bucketOffset;
+  return `${PIN_HINT_SALT}:${bucket}`;
 }
 
 /**
@@ -205,10 +205,10 @@ async function derivePinBits(
   iterations: number,
   hexLength: number,
 ): Promise<string> {
-  const encoder = new TextEncoder()
+  const encoder = new TextEncoder();
 
   // Each byte produces 2 hex chars; ceil handles odd hexLength
-  const byteCount = Math.ceil(hexLength / 2)
+  const byteCount = Math.ceil(hexLength / 2);
   const derivedBits = await crypto.subtle.deriveBits(
     {
       name: 'PBKDF2',
@@ -218,14 +218,14 @@ async function derivePinBits(
     },
     keyMaterial,
     byteCount * 8,
-  )
+  );
 
   const hex = Array.from(new Uint8Array(derivedBits))
     .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
+    .join('');
 
   // Truncate to exact length (needed if hexLength is odd)
-  return hex.slice(0, hexLength)
+  return hex.slice(0, hexLength);
 }
 
 /**
@@ -243,13 +243,13 @@ export async function computePinHint(
   pin: string,
   bucketOffset = 0,
 ): Promise<string> {
-  const keyMaterial = await importPinKey(pin)
+  const keyMaterial = await importPinKey(pin);
   return derivePinBits(
     keyMaterial,
     pinHintSalt(bucketOffset),
     PIN_HINT_ITERATIONS,
     PIN_HINT_LENGTH,
-  )
+  );
 }
 
 /**
@@ -268,7 +268,7 @@ export async function computePinHintFromKey(
     pinHintSalt(bucketOffset),
     PIN_HINT_ITERATIONS,
     PIN_HINT_LENGTH,
-  )
+  );
 }
 
 /**
@@ -288,13 +288,13 @@ export async function computePinHintFromKey(
  * fingerprint is domain-separated from the wire hint and every other PIN derivation.
  */
 export async function computePinFingerprint(pin: string): Promise<string> {
-  const keyMaterial = await importPinKey(pin)
+  const keyMaterial = await importPinKey(pin);
   return derivePinBits(
     keyMaterial,
     PIN_FINGERPRINT_SALT,
     PIN_FINGERPRINT_ITERATIONS,
     PIN_FINGERPRINT_LENGTH,
-  )
+  );
 }
 
 /**
@@ -303,17 +303,17 @@ export async function computePinFingerprint(pin: string): Promise<string> {
  * so the sender and receiver can visually confirm they derived the same PIN.
  */
 export function formatPinHint(hint: string): string {
-  const compact = hint.toUpperCase()
-  return compact.match(/.{1,4}/g)?.join('-') ?? compact
+  const compact = hint.toUpperCase();
+  return compact.match(/.{1,4}/g)?.join('-') ?? compact;
 }
 
 /**
  * Generate a random transfer ID (16 hex characters)
  */
 export function generateTransferId(): string {
-  const array = new Uint8Array(8)
-  crypto.getRandomValues(array)
+  const array = new Uint8Array(8);
+  crypto.getRandomValues(array);
   return Array.from(array)
     .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
+    .join('');
 }

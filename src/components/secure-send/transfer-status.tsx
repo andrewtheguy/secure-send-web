@@ -5,25 +5,25 @@ import {
   Loader2,
   Radio,
   XCircle,
-} from 'lucide-react'
-import { useState } from 'react'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Progress } from '@/components/ui/progress'
-import { formatFileSize } from '@/lib/file-utils'
-import type { TransferState } from '@/lib/nostr'
+} from 'lucide-react';
+import { useState } from 'react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress';
+import { formatFileSize } from '@/lib/file-utils';
+import type { TransferState } from '@/lib/nostr';
 
 interface TransferStatusProps {
-  state: TransferState
-  betweenProgressAndChunks?: React.ReactNode
+  state: TransferState;
+  betweenProgressAndChunks?: React.ReactNode;
 }
 
 export function TransferStatus({
   state,
   betweenProgressAndChunks,
 }: TransferStatusProps) {
-  const [showDebug, setShowDebug] = useState(false)
+  const [showDebug, setShowDebug] = useState(false);
 
-  if (state.status === 'idle') return null
+  if (state.status === 'idle') return null;
 
   const getIcon = () => {
     switch (state.status) {
@@ -31,27 +31,27 @@ export function TransferStatus({
       case 'waiting_for_receiver':
       case 'transferring':
       case 'receiving':
-        return <Loader2 className="h-4 w-4 animate-spin" />
+        return <Loader2 className="h-4 w-4 animate-spin" />;
       case 'complete':
-        return <CheckCircle2 className="h-4 w-4 text-green-500" />
+        return <CheckCircle2 className="h-4 w-4 text-green-500" />;
       case 'error':
-        return <XCircle className="h-4 w-4 text-destructive" />
+        return <XCircle className="h-4 w-4 text-destructive" />;
       default:
-        return <Radio className="h-4 w-4" />
+        return <Radio className="h-4 w-4" />;
     }
-  }
+  };
 
   const getVariant = (): 'default' | 'destructive' => {
-    return state.status === 'error' ? 'destructive' : 'default'
-  }
+    return state.status === 'error' ? 'destructive' : 'default';
+  };
 
   const progressPercent =
     state.progress && state.progress.total > 0
       ? (state.progress.current / state.progress.total) * 100
-      : 0
+      : 0;
 
   // Show relays whenever Nostr was used (for debugging)
-  const showRelays = state.currentRelays && state.currentRelays.length > 0
+  const showRelays = state.currentRelays && state.currentRelays.length > 0;
 
   return (
     <div className="space-y-3">
@@ -113,5 +113,5 @@ export function TransferStatus({
 
       {betweenProgressAndChunks}
     </div>
-  )
+  );
 }

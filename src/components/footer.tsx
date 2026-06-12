@@ -1,14 +1,14 @@
-import { Info, Lock, Shield, Zap } from 'lucide-react'
+import { Info, Lock, Shield, Zap } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { APP_VERSION } from '@/lib/app-version'
+} from '@/components/ui/dropdown-menu';
+import { APP_VERSION } from '@/lib/app-version';
 
 interface FooterLabelProps {
-  shortLabel: string
-  fullLabel: string
+  shortLabel: string;
+  fullLabel: string;
 }
 
 function FooterLabel({ shortLabel, fullLabel }: FooterLabelProps) {
@@ -34,7 +34,7 @@ function FooterLabel({ shortLabel, fullLabel }: FooterLabelProps) {
         </DropdownMenuContent>
       </DropdownMenu>
     </>
-  )
+  );
 }
 
 export function Footer() {
@@ -78,5 +78,5 @@ export function Footer() {
         </DropdownMenu>
       </div>
     </footer>
-  )
+  );
 }

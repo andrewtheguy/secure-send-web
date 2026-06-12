@@ -3,21 +3,21 @@ import {
   finalizeEvent,
   generateSecretKey,
   getPublicKey,
-} from 'nostr-tools'
-import { decrypt, encrypt } from '../crypto/aes-gcm'
-import { TRANSFER_EXPIRATION_MS } from '../crypto/constants'
-import { EVENT_KIND_DATA_TRANSFER, EVENT_KIND_PIN_EXCHANGE } from './types'
+} from 'nostr-tools';
+import { decrypt, encrypt } from '../crypto/aes-gcm';
+import { TRANSFER_EXPIRATION_MS } from '../crypto/constants';
+import { EVENT_KIND_DATA_TRANSFER, EVENT_KIND_PIN_EXCHANGE } from './types';
 
 /**
  * Generate ephemeral keypair for a transfer
  */
 export function generateEphemeralKeys(): {
-  secretKey: Uint8Array
-  publicKey: string
+  secretKey: Uint8Array;
+  publicKey: string;
 } {
-  const secretKey = generateSecretKey()
-  const publicKey = getPublicKey(secretKey)
-  return { secretKey, publicKey }
+  const secretKey = generateSecretKey();
+  const publicKey = getPublicKey(secretKey);
+  return { secretKey, publicKey };
 }
 
 /**
@@ -40,7 +40,7 @@ export function createPinExchangeEvent(
   hint: string,
 ): Event {
   // Soft TTL: relays may auto-delete after this timestamp (NIP-40)
-  const expiration = Math.floor((Date.now() + TRANSFER_EXPIRATION_MS) / 1000)
+  const expiration = Math.floor((Date.now() + TRANSFER_EXPIRATION_MS) / 1000);
 
   const event = finalizeEvent(
     {
@@ -56,9 +56,9 @@ export function createPinExchangeEvent(
       created_at: Math.floor(Date.now() / 1000),
     },
     secretKey,
-  )
+  );
 
-  return event
+  return event;
 }
 
 /**
@@ -66,25 +66,25 @@ export function createPinExchangeEvent(
  * @returns Object with hint (one-way PBKDF2 PIN derivation), salt, transferId, and encryptedPayload
  */
 export function parsePinExchangeEvent(event: Event): {
-  hint: string
-  salt: Uint8Array
-  transferId: string
-  encryptedPayload: Uint8Array
+  hint: string;
+  salt: Uint8Array;
+  transferId: string;
+  encryptedPayload: Uint8Array;
 } | null {
-  if (event.kind !== EVENT_KIND_PIN_EXCHANGE) return null
+  if (event.kind !== EVENT_KIND_PIN_EXCHANGE) return null;
 
-  const hint = event.tags.find((t) => t[0] === 'h')?.[1]
-  const saltB64 = event.tags.find((t) => t[0] === 's')?.[1]
-  const transferId = event.tags.find((t) => t[0] === 't')?.[1]
+  const hint = event.tags.find((t) => t[0] === 'h')?.[1];
+  const saltB64 = event.tags.find((t) => t[0] === 's')?.[1];
+  const transferId = event.tags.find((t) => t[0] === 't')?.[1];
 
-  if (!hint || !saltB64 || !transferId) return null
+  if (!hint || !saltB64 || !transferId) return null;
 
   return {
     hint,
     salt: base64ToUint8Array(saltB64),
     transferId,
     encryptedPayload: base64ToUint8Array(event.content),
-  }
+  };
 }
 
 function createAckEvent(
@@ -100,11 +100,11 @@ function createAckEvent(
     ['t', transferId],
     ['seq', seq.toString()],
     ['type', 'ack'],
-  ]
+  ];
 
   // Add hint tag if provided (one-way PBKDF2 PIN derivation, for event correlation/debugging)
   if (hint) {
-    tags.push(['h', hint])
+    tags.push(['h', hint]);
   }
 
   const event = finalizeEvent(
@@ -115,9 +115,9 @@ function createAckEvent(
       created_at: Math.floor(Date.now() / 1000),
     },
     secretKey,
-  )
+  );
 
-  return event
+  return event;
 }
 
 /**
@@ -144,9 +144,9 @@ export async function createAuthenticatedAckEvent(
     type: 'ack',
     transferId,
     seq,
-  }
-  const payloadBytes = new TextEncoder().encode(JSON.stringify(payload))
-  const encryptedPayload = await encrypt(key, payloadBytes)
+  };
+  const payloadBytes = new TextEncoder().encode(JSON.stringify(payload));
+  const encryptedPayload = await encrypt(key, payloadBytes);
   return createAckEvent(
     secretKey,
     senderPubkey,
@@ -154,36 +154,36 @@ export async function createAuthenticatedAckEvent(
     seq,
     uint8ArrayToBase64(encryptedPayload),
     hint,
-  )
+  );
 }
 
 /**
  * Parse ACK event
  */
 export function parseAckEvent(event: Event): {
-  senderPubkey: string
-  transferId: string
-  seq: number
-  hint?: string
+  senderPubkey: string;
+  transferId: string;
+  seq: number;
+  hint?: string;
 } | null {
-  if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null
+  if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null;
 
-  const type = event.tags.find((t) => t[0] === 'type')?.[1]
-  if (type !== 'ack') return null
+  const type = event.tags.find((t) => t[0] === 'type')?.[1];
+  if (type !== 'ack') return null;
 
-  const senderPubkey = event.tags.find((t) => t[0] === 'p')?.[1]
-  const transferId = event.tags.find((t) => t[0] === 't')?.[1]
-  const seqStr = event.tags.find((t) => t[0] === 'seq')?.[1]
-  const hint = event.tags.find((t) => t[0] === 'h')?.[1]
+  const senderPubkey = event.tags.find((t) => t[0] === 'p')?.[1];
+  const transferId = event.tags.find((t) => t[0] === 't')?.[1];
+  const seqStr = event.tags.find((t) => t[0] === 'seq')?.[1];
+  const hint = event.tags.find((t) => t[0] === 'h')?.[1];
 
-  if (!senderPubkey || !transferId || !seqStr) return null
+  if (!senderPubkey || !transferId || !seqStr) return null;
 
-  const seq = parseInt(seqStr, 10)
+  const seq = parseInt(seqStr, 10);
 
   // Validate: seq must be integer, valid values are -1 (complete), 0 (ready), or > 0 (chunk ack)
-  if (!Number.isInteger(seq) || seq < -1) return null
+  if (!Number.isInteger(seq) || seq < -1) return null;
 
-  return { senderPubkey, transferId, seq, hint }
+  return { senderPubkey, transferId, seq, hint };
 }
 
 /**
@@ -196,25 +196,25 @@ export async function verifyAuthenticatedAckEvent(
   expectedTransferId: string,
   expectedSeq: number,
 ): Promise<boolean> {
-  const ack = parseAckEvent(event)
-  if (!ack) return false
+  const ack = parseAckEvent(event);
+  if (!ack) return false;
   if (ack.transferId !== expectedTransferId || ack.seq !== expectedSeq)
-    return false
-  if (!event.content) return false
+    return false;
+  if (!event.content) return false;
 
   try {
-    const decrypted = await decrypt(key, base64ToUint8Array(event.content))
-    const payload = JSON.parse(new TextDecoder().decode(decrypted)) as unknown
-    if (!payload || typeof payload !== 'object') return false
+    const decrypted = await decrypt(key, base64ToUint8Array(event.content));
+    const payload = JSON.parse(new TextDecoder().decode(decrypted)) as unknown;
+    if (!payload || typeof payload !== 'object') return false;
 
-    const p = payload as Record<string, unknown>
-    if (p.type !== 'ack') return false
-    if (p.transferId !== ack.transferId) return false
-    if (p.seq !== ack.seq) return false
+    const p = payload as Record<string, unknown>;
+    if (p.type !== 'ack') return false;
+    if (p.transferId !== ack.transferId) return false;
+    if (p.seq !== ack.seq) return false;
 
-    return true
+    return true;
   } catch {
-    return false
+    return false;
   }
 }
 
@@ -239,49 +239,49 @@ export function createSignalingEvent(
       created_at: Math.floor(Date.now() / 1000),
     },
     secretKey,
-  )
-  return event
+  );
+  return event;
 }
 
 /**
  * Parse Signaling event
  */
 export function parseSignalingEvent(event: Event): {
-  transferId: string
-  senderPubkey: string
-  encryptedSignal: Uint8Array
+  transferId: string;
+  senderPubkey: string;
+  encryptedSignal: Uint8Array;
 } | null {
-  if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null
+  if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null;
 
-  const type = event.tags.find((t) => t[0] === 'type')?.[1]
-  if (type !== 'signal') return null
+  const type = event.tags.find((t) => t[0] === 'type')?.[1];
+  if (type !== 'signal') return null;
 
-  const transferId = event.tags.find((t) => t[0] === 't')?.[1]
-  const senderPubkey = event.tags.find((t) => t[0] === 'p')?.[1]
+  const transferId = event.tags.find((t) => t[0] === 't')?.[1];
+  const senderPubkey = event.tags.find((t) => t[0] === 'p')?.[1];
 
-  if (!transferId || !senderPubkey) return null
+  if (!transferId || !senderPubkey) return null;
 
   try {
-    const encryptedSignal = base64ToUint8Array(event.content)
-    return { transferId, senderPubkey, encryptedSignal }
+    const encryptedSignal = base64ToUint8Array(event.content);
+    return { transferId, senderPubkey, encryptedSignal };
   } catch {
-    return null
+    return null;
   }
 }
 
 export function uint8ArrayToBase64(bytes: Uint8Array): string {
-  let binary = ''
+  let binary = '';
   for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i])
+    binary += String.fromCharCode(bytes[i]);
   }
-  return btoa(binary)
+  return btoa(binary);
 }
 
 export function base64ToUint8Array(base64: string): Uint8Array {
-  const binary = atob(base64)
-  const bytes = new Uint8Array(binary.length)
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i)
+    bytes[i] = binary.charCodeAt(i);
   }
-  return bytes
+  return bytes;
 }

@@ -1,20 +1,20 @@
-import { AlertCircle, Camera, ClipboardPaste } from 'lucide-react'
-import { useCallback, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Textarea } from '@/components/ui/textarea'
+import { AlertCircle, Camera, ClipboardPaste } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
 import {
   isValidBinaryPayload,
   parseClipboardPayload,
-} from '@/lib/manual-signaling'
-import { isMobileDevice } from '@/lib/utils'
-import { QRScanner } from './qr-scanner'
+} from '@/lib/manual-signaling';
+import { isMobileDevice } from '@/lib/utils';
+import { QRScanner } from './qr-scanner';
 
 interface QRInputProps {
-  onSubmit: (payload: Uint8Array) => void
-  expectedType: 'offer' | 'answer'
-  label?: string
-  disabled?: boolean
+  onSubmit: (payload: Uint8Array) => void;
+  expectedType: 'offer' | 'answer';
+  label?: string;
+  disabled?: boolean;
 }
 
 export function QRInput({
@@ -23,73 +23,73 @@ export function QRInput({
   label,
   disabled,
 }: QRInputProps) {
-  const [value, setValue] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [inputMode, setInputMode] = useState<'scan' | 'paste'>('scan')
-  const [scanStarted, setScanStarted] = useState(false)
-  const scanActionVerb = isMobileDevice() ? 'Tap' : 'Click'
+  const [value, setValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [inputMode, setInputMode] = useState<'scan' | 'paste'>('scan');
+  const [scanStarted, setScanStarted] = useState(false);
+  const scanActionVerb = isMobileDevice() ? 'Tap' : 'Click';
 
   const handlePaste = useCallback(async () => {
     try {
-      const text = await navigator.clipboard.readText()
-      setValue(text)
-      setError(null)
+      const text = await navigator.clipboard.readText();
+      setValue(text);
+      setError(null);
     } catch (err) {
-      console.error('Failed to paste:', err)
-      setError('Failed to read clipboard')
+      console.error('Failed to paste:', err);
+      setError('Failed to read clipboard');
     }
-  }, [])
+  }, []);
 
   // Paste tab handles base64-encoded binary payload
   const handleSubmit = useCallback(() => {
-    const trimmed = value.trim()
+    const trimmed = value.trim();
     if (!trimmed) {
-      setError('Please paste the data')
-      return
+      setError('Please paste the data');
+      return;
     }
 
     // Parse as base64 binary payload
-    const binary = parseClipboardPayload(trimmed)
+    const binary = parseClipboardPayload(trimmed);
     if (!binary) {
-      setError('Invalid format. Make sure you copied the complete text.')
-      return
+      setError('Invalid format. Make sure you copied the complete text.');
+      return;
     }
 
     if (!isValidBinaryPayload(binary)) {
-      setError('Invalid or unsupported payload format')
-      return
+      setError('Invalid or unsupported payload format');
+      return;
     }
 
-    setError(null)
-    onSubmit(binary)
-  }, [value, onSubmit])
+    setError(null);
+    onSubmit(binary);
+  }, [value, onSubmit]);
 
   const handleScanSuccess = useCallback(
     (binary: Uint8Array) => {
-      setError(null)
-      onSubmit(binary)
+      setError(null);
+      onSubmit(binary);
     },
     [onSubmit],
-  )
+  );
 
   const handleScanError = useCallback((err: string) => {
     // Only show persistent errors, not transient scan failures
     if (err.includes('denied') || err.includes('unavailable')) {
-      setError(err)
+      setError(err);
     }
-  }, [])
+  }, []);
 
   const handleStartScan = useCallback(() => {
-    setError(null)
-    setScanStarted(true)
-  }, [])
+    setError(null);
+    setScanStarted(true);
+  }, []);
 
   const handleInputModeChange = useCallback((mode: 'scan' | 'paste') => {
-    setInputMode(mode)
+    setInputMode(mode);
     if (mode !== 'scan') {
-      setScanStarted(false)
+      setScanStarted(false);
     }
-  }, [])
+  }, []);
 
   return (
     <div className="space-y-3">
@@ -139,8 +139,8 @@ export function QRInput({
             <Textarea
               value={value}
               onChange={(e) => {
-                setValue(e.target.value)
-                setError(null)
+                setValue(e.target.value);
+                setError(null);
               }}
               placeholder={`Paste the ${expectedType} data here...`}
               className="min-h-[100px] font-mono text-xs"
@@ -186,5 +186,5 @@ export function QRInput({
         </p>
       )}
     </div>
-  )
+  );
 }

@@ -1,78 +1,78 @@
-import { Download, Lock, Shield, Zap } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Download, Lock, Shield, Zap } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@/components/ui/card'
-import { generateTextQRCode } from '@/lib/qr-utils'
-import { ReceiveTab } from './receive-tab'
-import { SendTab } from './send-tab'
+} from '@/components/ui/card';
+import { generateTextQRCode } from '@/lib/qr-utils';
+import { ReceiveTab } from './receive-tab';
+import { SendTab } from './send-tab';
 
-type SecureSendView = 'send' | 'receive' | 'about'
+type SecureSendView = 'send' | 'receive' | 'about';
 
 type SecureSendProps = {
-  view?: SecureSendView
-}
+  view?: SecureSendView;
+};
 
 export function SecureSend({ view = 'send' }: SecureSendProps) {
-  const siteUrl = typeof window !== 'undefined' ? window.location.origin : ''
-  const [shareQrUrl, setShareQrUrl] = useState<string | null>(null)
-  const [shareQrError, setShareQrError] = useState<string | null>(null)
+  const siteUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const [shareQrUrl, setShareQrUrl] = useState<string | null>(null);
+  const [shareQrError, setShareQrError] = useState<string | null>(null);
 
   useEffect(() => {
-    let active = true
-    if (!siteUrl) return
+    let active = true;
+    if (!siteUrl) return;
     generateTextQRCode(siteUrl, { width: 220, errorCorrectionLevel: 'M' })
       .then((url) => {
-        if (active) setShareQrUrl(url)
+        if (active) setShareQrUrl(url);
       })
       .catch((err) => {
         if (active)
           setShareQrError(
             err instanceof Error ? err.message : 'Failed to generate QR code',
-          )
-      })
+          );
+      });
     return () => {
-      active = false
-    }
-  }, [siteUrl])
+      active = false;
+    };
+  }, [siteUrl]);
 
   const getTitle = () => {
     switch (view) {
       case 'send':
-        return 'Secure Send'
+        return 'Secure Send';
       case 'receive':
-        return 'Secure Receive'
+        return 'Secure Receive';
       case 'about':
-        return 'About Secure Transfer'
+        return 'About Secure Transfer';
       default:
-        return 'Secure Send'
+        return 'Secure Send';
     }
-  }
+  };
 
   const getCardClassName = () => {
     switch (view) {
       case 'receive':
-        return 'w-full max-w-2xl border-cyan-200 dark:border-cyan-900/50 bg-gradient-to-br from-background to-cyan-50/30 dark:to-cyan-950/10'
+        return 'w-full max-w-2xl border-cyan-200 dark:border-cyan-900/50 bg-gradient-to-br from-background to-cyan-50/30 dark:to-cyan-950/10';
       default:
-        return 'w-full max-w-2xl'
+        return 'w-full max-w-2xl';
     }
-  }
+  };
 
   const getTitleClassName = () => {
     switch (view) {
       case 'send':
-        return 'text-2xl text-primary'
+        return 'text-2xl text-primary';
       case 'receive':
-        return 'text-2xl text-cyan-700 dark:text-cyan-500'
+        return 'text-2xl text-cyan-700 dark:text-cyan-500';
       default:
-        return 'text-2xl'
+        return 'text-2xl';
     }
-  }
+  };
 
   return (
     <Card className={getCardClassName()}>
@@ -304,5 +304,5 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
         )}
       </CardContent>
     </Card>
-  )
+  );
 }

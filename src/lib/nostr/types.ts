@@ -1,11 +1,11 @@
-import type { NostrTransferKeys } from '../crypto/kdf'
+import type { NostrTransferKeys } from '../crypto/kdf';
 
 // Event kinds (matching wormhole-rs)
-export const EVENT_KIND_DATA_TRANSFER = 24242
-export const EVENT_KIND_PIN_EXCHANGE = 24243
+export const EVENT_KIND_DATA_TRANSFER = 24242;
+export const EVENT_KIND_PIN_EXCHANGE = 24243;
 
 // Content types
-export type ContentType = 'file'
+export type ContentType = 'file';
 
 // Transfer states
 export type TransferStatus =
@@ -22,60 +22,60 @@ export type TransferStatus =
   | 'waiting_for_answer'
   | 'waiting_for_offer'
   | 'generating_answer'
-  | 'showing_answer'
+  | 'showing_answer';
 
 // File metadata
 export interface FileMetadata {
-  fileName: string
-  fileSize: number
-  mimeType: string
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
 }
 
 // Base properties shared across all transfer states
 interface TransferStateBase {
   progress?: {
-    current: number // bytes transferred
-    total: number // total bytes
-  }
-  contentType?: ContentType
-  fileMetadata?: FileMetadata
-  useWebRTC?: boolean
-  currentRelays?: string[] // Connected relay URLs being used (for signaling)
-  totalRelays?: number // Total relays attempted to connect
+    current: number; // bytes transferred
+    total: number; // total bytes
+  };
+  contentType?: ContentType;
+  fileMetadata?: FileMetadata;
+  useWebRTC?: boolean;
+  currentRelays?: string[]; // Connected relay URLs being used (for signaling)
+  totalRelays?: number; // Total relays attempted to connect
 }
 
 // Error state has required message
 export interface TransferStateError extends TransferStateBase {
-  status: 'error'
-  message: string
+  status: 'error';
+  message: string;
 }
 
 // All other states have optional message
 export interface TransferStateOther extends TransferStateBase {
-  status: Exclude<TransferStatus, 'error'>
-  message?: string
+  status: Exclude<TransferStatus, 'error'>;
+  message?: string;
 }
 
 // Discriminated union: TypeScript narrows to TransferStateError when status === 'error'
-export type TransferState = TransferStateError | TransferStateOther
+export type TransferState = TransferStateError | TransferStateOther;
 
 // PIN Exchange payload (encrypted in the event)
 export interface PinExchangePayload {
-  contentType: ContentType
-  transferId: string
-  senderPubkey: string
+  contentType: ContentType;
+  transferId: string;
+  senderPubkey: string;
   // Sender's preferred relays for signaling
-  relays?: string[]
+  relays?: string[];
   // For file
-  fileName?: string
-  fileSize?: number
-  mimeType?: string
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
 }
 
 // ACK payload
 export interface AckData {
-  transferId: string
-  seq: number // -1 for final completion ACK, 0 for ready, N for chunk N ACK (1-based)
+  transferId: string;
+  seq: number; // -1 for final completion ACK, 0 for ready, N for chunk N ACK (1-based)
 }
 
 /**
@@ -84,26 +84,26 @@ export interface AckData {
  *   derivation of the PIN truncated to 16 hex chars (see computePinHint)
  */
 export interface TransferMetadata {
-  pin: string
-  hint: string
-  salt: Uint8Array
-  keys: NostrTransferKeys
-  transferId: string
-  secretKey: Uint8Array
-  publicKey: string
+  pin: string;
+  hint: string;
+  salt: Uint8Array;
+  keys: NostrTransferKeys;
+  transferId: string;
+  secretKey: Uint8Array;
+  publicKey: string;
 }
 
 // Re-export shared received-content types
-export type { ReceivedContent, ReceivedFile } from '../types'
+export type { ReceivedContent, ReceivedFile } from '../types';
 
 // WebRTC Signaling
-export type SignalingType = 'offer' | 'answer' | 'candidate'
+export type SignalingType = 'offer' | 'answer' | 'candidate';
 
 export interface SignalingPayload {
-  type: SignalingType
-  sdp?: string
-  candidate?: RTCIceCandidateInit
+  type: SignalingType;
+  sdp?: string;
+  candidate?: RTCIceCandidateInit;
 }
 
 // Signaling method for P2P connection
-export type SignalingMethod = 'nostr' | 'manual'
+export type SignalingMethod = 'nostr' | 'manual';

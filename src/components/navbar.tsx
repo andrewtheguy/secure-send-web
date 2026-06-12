@@ -1,18 +1,18 @@
-import { Download, Info, Menu, Send, X } from 'lucide-react'
-import { useState } from 'react'
-import { Link, NavLink } from 'react-router-dom'
-import { Logo } from '@/components/logo'
-import { ModeToggle } from '@/components/mode-toggle'
+import { Download, Info, Menu, Send, X } from 'lucide-react';
+import { useState } from 'react';
+import { Link, NavLink } from 'react-router-dom';
+import { Logo } from '@/components/logo';
+import { ModeToggle } from '@/components/mode-toggle';
 
 const linkBase =
-  'inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors'
+  'inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors';
 
 export function Navbar() {
-  const [mobileOpen, setMobileOpen] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const closeMobileMenu = () => {
-    setMobileOpen(false)
-  }
+    setMobileOpen(false);
+  };
 
   return (
     <header className="w-full border-b bg-background/80 backdrop-blur">
@@ -106,5 +106,5 @@ export function Navbar() {
         </div>
       )}
     </header>
-  )
+  );
 }

@@ -1,7 +1,7 @@
-import { Slot } from '@radix-ui/react-slot'
-import type * as React from 'react'
-import { cn } from '@/lib/utils'
-import { type ButtonVariants, buttonVariants } from './button-variants'
+import { Slot } from '@radix-ui/react-slot';
+import type * as React from 'react';
+import { cn } from '@/lib/utils';
+import { type ButtonVariants, buttonVariants } from './button-variants';
 
 function Button({
   className,
@@ -11,9 +11,9 @@ function Button({
   ...props
 }: React.ComponentProps<'button'> &
   ButtonVariants & {
-    asChild?: boolean
+    asChild?: boolean;
   }) {
-  const Comp = asChild ? Slot : 'button'
+  const Comp = asChild ? Slot : 'button';
 
   return (
     <Comp
@@ -23,7 +23,7 @@ function Button({
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     />
-  )
+  );
 }
 
-export { Button }
+export { Button };

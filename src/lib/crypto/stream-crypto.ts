@@ -1,5 +1,5 @@
-import { generateNonce } from './aes-gcm'
-import { AES_NONCE_LENGTH, AES_TAG_LENGTH } from './constants'
+import { generateNonce } from './aes-gcm';
+import { AES_NONCE_LENGTH, AES_TAG_LENGTH } from './constants';
 
 /**
  * Streaming encryption/decryption utilities for P2P transfers.
@@ -19,15 +19,15 @@ import { AES_NONCE_LENGTH, AES_TAG_LENGTH } from './constants'
  */
 
 // Chunk index is 2 bytes (big-endian), supporting up to 65535 chunks.
-const CHUNK_INDEX_SIZE = 2
-const OVERHEAD_PER_CHUNK = CHUNK_INDEX_SIZE + AES_NONCE_LENGTH + AES_TAG_LENGTH
+const CHUNK_INDEX_SIZE = 2;
+const OVERHEAD_PER_CHUNK = CHUNK_INDEX_SIZE + AES_NONCE_LENGTH + AES_TAG_LENGTH;
 
 function encodeChunkIndex(chunkIndex: number): Uint8Array {
   if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex > 0xffff) {
-    throw new Error(`Chunk index out of range: ${chunkIndex}`)
+    throw new Error(`Chunk index out of range: ${chunkIndex}`);
   }
 
-  return new Uint8Array([(chunkIndex >> 8) & 0xff, chunkIndex & 0xff])
+  return new Uint8Array([(chunkIndex >> 8) & 0xff, chunkIndex & 0xff]);
 }
 
 /**
@@ -43,8 +43,8 @@ export async function encryptChunk(
   plaintext: Uint8Array,
   chunkIndex: number,
 ): Promise<Uint8Array> {
-  const chunkIndexBytes = encodeChunkIndex(chunkIndex)
-  const nonce = generateNonce()
+  const chunkIndexBytes = encodeChunkIndex(chunkIndex);
+  const nonce = generateNonce();
 
   const ciphertext = await crypto.subtle.encrypt(
     {
@@ -54,23 +54,23 @@ export async function encryptChunk(
     },
     key,
     plaintext as BufferSource,
-  )
+  );
 
   // Build output: [2-byte index][nonce][ciphertext+tag]
   const result = new Uint8Array(
     CHUNK_INDEX_SIZE + nonce.length + ciphertext.byteLength,
-  )
+  );
 
   // Write chunk index as big-endian 16-bit
-  result.set(chunkIndexBytes, 0)
+  result.set(chunkIndexBytes, 0);
 
   // Write nonce
-  result.set(nonce, CHUNK_INDEX_SIZE)
+  result.set(nonce, CHUNK_INDEX_SIZE);
 
   // Write ciphertext (includes tag from Web Crypto)
-  result.set(new Uint8Array(ciphertext), CHUNK_INDEX_SIZE + nonce.length)
+  result.set(new Uint8Array(ciphertext), CHUNK_INDEX_SIZE + nonce.length);
 
-  return result
+  return result;
 }
 
 /**
@@ -80,24 +80,24 @@ export async function encryptChunk(
  * @returns Parsed chunk with index and encrypted payload
  */
 export function parseChunkMessage(data: ArrayBuffer | Uint8Array): {
-  chunkIndex: number
-  encryptedData: Uint8Array
+  chunkIndex: number;
+  encryptedData: Uint8Array;
 } {
-  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
 
   if (bytes.length < OVERHEAD_PER_CHUNK) {
     throw new Error(
       `Message too short: ${bytes.length} bytes, need at least ${OVERHEAD_PER_CHUNK}`,
-    )
+    );
   }
 
   // Read chunk index (big-endian 16-bit)
-  const chunkIndex = (bytes[0] << 8) | bytes[1]
+  const chunkIndex = (bytes[0] << 8) | bytes[1];
 
   // Rest is the encrypted data (nonce + ciphertext + tag)
-  const encryptedData = bytes.slice(CHUNK_INDEX_SIZE)
+  const encryptedData = bytes.slice(CHUNK_INDEX_SIZE);
 
-  return { chunkIndex, encryptedData }
+  return { chunkIndex, encryptedData };
 }
 
 /**
@@ -113,12 +113,12 @@ export async function decryptChunk(
   chunkIndex: number,
 ): Promise<Uint8Array> {
   if (encryptedData.length < AES_NONCE_LENGTH + AES_TAG_LENGTH) {
-    throw new Error(`Encrypted data too short: ${encryptedData.length} bytes`)
+    throw new Error(`Encrypted data too short: ${encryptedData.length} bytes`);
   }
 
-  const chunkIndexBytes = encodeChunkIndex(chunkIndex)
-  const nonce = encryptedData.slice(0, AES_NONCE_LENGTH)
-  const ciphertext = encryptedData.slice(AES_NONCE_LENGTH)
+  const chunkIndexBytes = encodeChunkIndex(chunkIndex);
+  const nonce = encryptedData.slice(0, AES_NONCE_LENGTH);
+  const ciphertext = encryptedData.slice(AES_NONCE_LENGTH);
 
   const plaintext = await crypto.subtle.decrypt(
     {
@@ -128,9 +128,9 @@ export async function decryptChunk(
     },
     key,
     ciphertext as BufferSource,
-  )
+  );
 
-  return new Uint8Array(plaintext)
+  return new Uint8Array(plaintext);
 }
 
 /**
@@ -141,10 +141,10 @@ export async function decryptChunk(
  * @returns Total overhead in bytes
  */
 export function calculateEncryptionOverhead(numChunks: number): number {
-  return numChunks * OVERHEAD_PER_CHUNK
+  return numChunks * OVERHEAD_PER_CHUNK;
 }
 
 /**
  * Encrypted chunk overhead constant (for external use).
  */
-export const ENCRYPTED_CHUNK_OVERHEAD = OVERHEAD_PER_CHUNK
+export const ENCRYPTED_CHUNK_OVERHEAD = OVERHEAD_PER_CHUNK;

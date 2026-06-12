@@ -1,34 +1,34 @@
-import { ArrowLeft, Send } from 'lucide-react'
-import { useEffect } from 'react'
-import { Outlet, useNavigate } from 'react-router-dom'
-import { Button } from '@/components/ui/button'
+import { ArrowLeft, Send } from 'lucide-react';
+import { useEffect } from 'react';
+import { Outlet, useNavigate } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@/components/ui/card'
-import { useSend } from '@/contexts/send-context'
+} from '@/components/ui/card';
+import { useSend } from '@/contexts/send-context';
 
 export function SendTransferLayout() {
-  const navigate = useNavigate()
-  const { config, clearConfig } = useSend()
+  const navigate = useNavigate();
+  const { config, clearConfig } = useSend();
 
   // Redirect to home if no config (user navigated directly to transfer page)
   useEffect(() => {
     if (!config) {
-      void navigate('/', { replace: true })
+      void navigate('/', { replace: true });
     }
-  }, [config, navigate])
+  }, [config, navigate]);
 
   const handleBack = () => {
-    void navigate('/')
-    clearConfig()
-  }
+    void navigate('/');
+    clearConfig();
+  };
 
   if (!config) {
-    return null // Will redirect
+    return null; // Will redirect
   }
 
   return (
@@ -63,5 +63,5 @@ export function SendTransferLayout() {
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react';
 import {
   AES_NONCE_LENGTH,
   AES_TAG_LENGTH,
@@ -11,16 +11,16 @@ import {
   MAX_MESSAGE_SIZE,
   parseChunkMessage,
   TRANSFER_EXPIRATION_MS,
-} from '@/lib/crypto'
+} from '@/lib/crypto';
 import {
   generateMutualAnswerBinary,
   parseMutualPayload,
   type SignalingPayload,
-} from '@/lib/manual-signaling'
-import type { TransferState } from '@/lib/nostr'
-import type { ReceivedContent } from '@/lib/types'
-import { WebRTCConnection } from '@/lib/webrtc'
-import { getWebRTCConfig } from '@/lib/webrtc-config'
+} from '@/lib/manual-signaling';
+import type { TransferState } from '@/lib/nostr';
+import type { ReceivedContent } from '@/lib/types';
+import { WebRTCConnection } from '@/lib/webrtc';
+import { getWebRTCConfig } from '@/lib/webrtc-config';
 
 // Extended transfer status for Manual Exchange receive mode
 export type ManualReceiveStatus =
@@ -31,106 +31,106 @@ export type ManualReceiveStatus =
   | 'connecting'
   | 'receiving'
   | 'complete'
-  | 'error'
+  | 'error';
 
 // Typed manual receive state for UI consumers.
 export interface ManualReceiveState {
-  status: ManualReceiveStatus
-  message?: string
+  status: ManualReceiveStatus;
+  message?: string;
   progress?: {
-    current: number
-    total: number
-  }
-  contentType?: 'file'
+    current: number;
+    total: number;
+  };
+  contentType?: 'file';
   fileMetadata?: {
-    fileName: string
-    fileSize: number
-    mimeType: string
-  }
-  useWebRTC?: boolean
-  currentRelays?: string[]
-  totalRelays?: number
-  answerData?: Uint8Array // Binary data for QR code
-  clipboardData?: string // Base64 for copy button
+    fileName: string;
+    fileSize: number;
+    mimeType: string;
+  };
+  useWebRTC?: boolean;
+  currentRelays?: string[];
+  totalRelays?: number;
+  answerData?: Uint8Array; // Binary data for QR code
+  clipboardData?: string; // Base64 for copy button
 }
 
 export interface UseManualReceiveReturn {
-  state: TransferState & ManualReceiveState
-  receivedContent: ReceivedContent | null
-  startReceive: () => void
-  submitOffer: (offerData: Uint8Array) => void
-  cancel: () => void
-  reset: () => void
+  state: TransferState & ManualReceiveState;
+  receivedContent: ReceivedContent | null;
+  startReceive: () => void;
+  submitOffer: (offerData: Uint8Array) => void;
+  cancel: () => void;
+  reset: () => void;
 }
 
-const ICE_GATHER_TIMEOUT_MS = 5000
-const MANUAL_CONNECTION_TIMEOUT_MS = 120000
+const ICE_GATHER_TIMEOUT_MS = 5000;
+const MANUAL_CONNECTION_TIMEOUT_MS = 120000;
 
 export function useManualReceive(): UseManualReceiveReturn {
   const [state, setState] = useState<TransferState & ManualReceiveState>({
     status: 'idle',
-  })
+  });
   const [receivedContent, setReceivedContent] =
-    useState<ReceivedContent | null>(null)
+    useState<ReceivedContent | null>(null);
 
-  const rtcRef = useRef<WebRTCConnection | null>(null)
-  const cancelledRef = useRef(false)
-  const receivingRef = useRef(false)
+  const rtcRef = useRef<WebRTCConnection | null>(null);
+  const cancelledRef = useRef(false);
+  const receivingRef = useRef(false);
 
   // Resolve function for offer submission
   const offerResolverRef = useRef<((payload: SignalingPayload) => void) | null>(
     null,
-  )
-  const offerRejectRef = useRef<((error: Error) => void) | null>(null)
+  );
+  const offerRejectRef = useRef<((error: Error) => void) | null>(null);
 
   const cancel = useCallback(() => {
-    cancelledRef.current = true
-    receivingRef.current = false
-    offerResolverRef.current = null
-    offerRejectRef.current = null
+    cancelledRef.current = true;
+    receivingRef.current = false;
+    offerResolverRef.current = null;
+    offerRejectRef.current = null;
     if (rtcRef.current) {
-      rtcRef.current.close()
-      rtcRef.current = null
+      rtcRef.current.close();
+      rtcRef.current = null;
     }
-    setState({ status: 'idle' })
-  }, [])
+    setState({ status: 'idle' });
+  }, []);
 
   const reset = useCallback(() => {
-    cancel()
-    setReceivedContent(null)
-  }, [cancel])
+    cancel();
+    setReceivedContent(null);
+  }, [cancel]);
 
   const submitOffer = useCallback(async (offerData: Uint8Array) => {
-    if (!offerResolverRef.current) return
+    if (!offerResolverRef.current) return;
 
     // Parse mutual payload (no decryption needed)
-    const parsed = await parseMutualPayload(offerData)
+    const parsed = await parseMutualPayload(offerData);
     if (!parsed) {
-      offerRejectRef.current?.(new Error('Invalid offer format'))
-      offerRejectRef.current = null
-      offerResolverRef.current = null
-      return
+      offerRejectRef.current?.(new Error('Invalid offer format'));
+      offerRejectRef.current = null;
+      offerResolverRef.current = null;
+      return;
     }
     if (parsed.type !== 'offer') {
-      offerRejectRef.current?.(new Error('Expected offer, got answer'))
-      offerRejectRef.current = null
-      offerResolverRef.current = null
-      return
+      offerRejectRef.current?.(new Error('Expected offer, got answer'));
+      offerRejectRef.current = null;
+      offerResolverRef.current = null;
+      return;
     }
-    offerResolverRef.current?.(parsed)
-  }, [])
+    offerResolverRef.current?.(parsed);
+  }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: doReceive is defined below and only invoked at call time; references stable refs/setState
   const startReceive = useCallback(() => {
     // Guard against concurrent invocations
-    if (receivingRef.current) return
-    receivingRef.current = true
-    cancelledRef.current = false
-    setReceivedContent(null)
+    if (receivingRef.current) return;
+    receivingRef.current = true;
+    cancelledRef.current = false;
+    setReceivedContent(null);
 
     // Start the receive flow
-    void doReceive()
-  }, [])
+    void doReceive();
+  }, []);
 
   const doReceive = async () => {
     try {
@@ -138,25 +138,25 @@ export function useManualReceive(): UseManualReceiveReturn {
       setState({
         status: 'waiting_for_offer',
         message: "Scan or paste the sender's code",
-      })
+      });
 
       // Wait for offer to be submitted
       const offerPayload = await new Promise<SignalingPayload>(
         (resolve, reject) => {
-          offerResolverRef.current = resolve
-          offerRejectRef.current = reject
+          offerResolverRef.current = resolve;
+          offerRejectRef.current = reject;
 
           // Check periodically if cancelled
           const checkInterval = setInterval(() => {
             if (cancelledRef.current) {
-              clearInterval(checkInterval)
-              reject(new Error('Cancelled'))
+              clearInterval(checkInterval);
+              reject(new Error('Cancelled'));
             }
-          }, 500)
+          }, 500);
         },
-      )
+      );
 
-      if (cancelledRef.current) return
+      if (cancelledRef.current) return;
 
       // Enforce TTL
       if (
@@ -166,15 +166,15 @@ export function useManualReceive(): UseManualReceiveReturn {
         setState({
           status: 'error',
           message: 'Offer missing timestamp. Ask sender to create a new one.',
-        })
-        return
+        });
+        return;
       }
       if (Date.now() - offerPayload.createdAt > TRANSFER_EXPIRATION_MS) {
         setState({
           status: 'error',
           message: 'Offer expired. Ask sender to create a new one.',
-        })
-        return
+        });
+        return;
       }
 
       // Extract metadata from offer
@@ -185,15 +185,15 @@ export function useManualReceive(): UseManualReceiveReturn {
         mimeType,
         salt: saltArray,
         publicKey: senderPublicKeyArray,
-      } = offerPayload
+      } = offerPayload;
 
       // Validate required fields
       if (!saltArray) {
         setState({
           status: 'error',
           message: 'Invalid offer: missing encryption salt',
-        })
-        return
+        });
+        return;
       }
 
       // Validate required metadata
@@ -210,8 +210,8 @@ export function useManualReceive(): UseManualReceiveReturn {
         setState({
           status: 'error',
           message: 'Invalid offer: missing or invalid file metadata',
-        })
-        return
+        });
+        return;
       }
 
       // Security check: Enforce MAX_MESSAGE_SIZE
@@ -219,64 +219,64 @@ export function useManualReceive(): UseManualReceiveReturn {
         setState({
           status: 'error',
           message: `Transfer rejected: Size (${Math.round(totalBytes / 1024 / 1024)}MB) exceeds limit (${MAX_MESSAGE_SIZE / 1024 / 1024}MB)`,
-        })
-        return
+        });
+        return;
       }
 
-      if (cancelledRef.current) return
+      if (cancelledRef.current) return;
 
       // Generate our ECDH keypair and derive shared secret
-      setState({ status: 'generating_answer', message: 'Generating keys...' })
+      setState({ status: 'generating_answer', message: 'Generating keys...' });
 
-      const ecdhKeyPair = await generateECDHKeyPair()
-      const senderPublicKey = new Uint8Array(senderPublicKeyArray)
-      const salt = new Uint8Array(saltArray)
+      const ecdhKeyPair = await generateECDHKeyPair();
+      const senderPublicKey = new Uint8Array(senderPublicKeyArray);
+      const salt = new Uint8Array(saltArray);
 
       // Derive shared secret as non-extractable CryptoKey
       const sharedSecretKey = await deriveSharedSecretKey(
         ecdhKeyPair.privateKey,
         senderPublicKey,
-      )
-      const key = await deriveAESKeyFromSecretKey(sharedSecretKey, salt)
+      );
+      const key = await deriveAESKeyFromSecretKey(sharedSecretKey, salt);
 
-      if (cancelledRef.current) return
+      if (cancelledRef.current) return;
 
       // Create WebRTC connection and handle offer
       setState({
         status: 'generating_answer',
         message: 'Creating P2P answer...',
-      })
+      });
 
-      const iceCandidates: RTCIceCandidate[] = []
-      let answerSDP: RTCSessionDescriptionInit | null = null
+      const iceCandidates: RTCIceCandidate[] = [];
+      let answerSDP: RTCSessionDescriptionInit | null = null;
 
       // Track received data
-      const receivedChunks: Uint8Array[] = []
-      const receivedEncryptedChunkIndices = new Set<number>()
-      let receivedBytes = 0
-      let transferComplete = false
-      let dataChannelResolver: (() => void) | null = null
-      let transferResolver: (() => void) | null = null
-      let transferRejecter: ((err: Error) => void) | null = null
-      let answerSDPResolver: (() => void) | null = null
+      const receivedChunks: Uint8Array[] = [];
+      const receivedEncryptedChunkIndices = new Set<number>();
+      let receivedBytes = 0;
+      let transferComplete = false;
+      let dataChannelResolver: (() => void) | null = null;
+      let transferResolver: (() => void) | null = null;
+      let transferRejecter: ((err: Error) => void) | null = null;
+      let answerSDPResolver: (() => void) | null = null;
 
       const rtc = new WebRTCConnection(
         getWebRTCConfig(),
         (signal) => {
           // Collect signals (answer + candidates)
           if (signal.type === 'answer') {
-            answerSDP = { type: 'answer', sdp: signal.sdp }
+            answerSDP = { type: 'answer', sdp: signal.sdp };
             if (answerSDPResolver) {
-              answerSDPResolver()
+              answerSDPResolver();
             }
           } else if (signal.type === 'candidate' && signal.candidate) {
-            iceCandidates.push(new RTCIceCandidate(signal.candidate))
+            iceCandidates.push(new RTCIceCandidate(signal.candidate));
           }
         },
         () => {
           // Data channel opened
           if (dataChannelResolver) {
-            dataChannelResolver()
+            dataChannelResolver();
           }
         },
         (data) => {
@@ -285,74 +285,74 @@ export function useManualReceive(): UseManualReceiveReturn {
             if (data.startsWith('DONE:')) {
               const expectedChunks = Math.ceil(
                 totalBytes! / ENCRYPTION_CHUNK_SIZE,
-              )
-              const receivedChunkCount = parseInt(data.split(':')[1], 10)
+              );
+              const receivedChunkCount = parseInt(data.split(':')[1], 10);
               if (
                 !Number.isFinite(receivedChunkCount) ||
                 receivedChunkCount <= 0
               ) {
                 transferRejecter?.(
                   new Error('Invalid DONE message: missing chunk count'),
-                )
-                return
+                );
+                return;
               }
               if (receivedChunkCount !== expectedChunks) {
                 transferRejecter?.(
                   new Error(
                     `Invalid DONE message: expected ${expectedChunks} chunks, got ${receivedChunkCount}`,
                   ),
-                )
-                return
+                );
+                return;
               }
-              transferComplete = true
+              transferComplete = true;
               if (transferResolver) {
-                transferResolver()
+                transferResolver();
               }
             } else if (data === 'DONE') {
               transferRejecter?.(
                 new Error(
                   'Unsupported sender: missing chunk count. Ask sender to update and retry.',
                 ),
-              )
+              );
             }
           } else if (data instanceof ArrayBuffer) {
             // Store encrypted chunk for later decryption
-            const encryptedChunk = new Uint8Array(data)
+            const encryptedChunk = new Uint8Array(data);
             const expectedChunks = Math.ceil(
               totalBytes! / ENCRYPTION_CHUNK_SIZE,
-            )
+            );
             const expectedEncryptedBytes =
-              totalBytes! + expectedChunks * ENCRYPTED_CHUNK_OVERHEAD
+              totalBytes! + expectedChunks * ENCRYPTED_CHUNK_OVERHEAD;
 
             try {
               const { chunkIndex, encryptedData } =
-                parseChunkMessage(encryptedChunk)
+                parseChunkMessage(encryptedChunk);
               if (receivedEncryptedChunkIndices.has(chunkIndex)) {
                 transferRejecter?.(
                   new Error(`Duplicate chunk index: ${chunkIndex}`),
-                )
-                return
+                );
+                return;
               }
               if (chunkIndex >= expectedChunks) {
                 transferRejecter?.(
                   new Error(`Chunk index out of range: ${chunkIndex}`),
-                )
-                return
+                );
+                return;
               }
 
               const expectedPlaintextLength =
                 chunkIndex === expectedChunks - 1
                   ? totalBytes! - chunkIndex * ENCRYPTION_CHUNK_SIZE
-                  : ENCRYPTION_CHUNK_SIZE
+                  : ENCRYPTION_CHUNK_SIZE;
               const expectedEncryptedLength =
-                expectedPlaintextLength + AES_NONCE_LENGTH + AES_TAG_LENGTH
+                expectedPlaintextLength + AES_NONCE_LENGTH + AES_TAG_LENGTH;
               if (encryptedData.length !== expectedEncryptedLength) {
                 transferRejecter?.(
                   new Error(
                     `Invalid encrypted chunk ${chunkIndex} length: expected ${expectedEncryptedLength}, got ${encryptedData.length}`,
                   ),
-                )
-                return
+                );
+                return;
               }
               if (
                 receivedBytes + encryptedChunk.length >
@@ -360,22 +360,22 @@ export function useManualReceive(): UseManualReceiveReturn {
               ) {
                 transferRejecter?.(
                   new Error('Transfer exceeds advertised size'),
-                )
-                return
+                );
+                return;
               }
 
-              receivedEncryptedChunkIndices.add(chunkIndex)
+              receivedEncryptedChunkIndices.add(chunkIndex);
             } catch (err) {
               transferRejecter?.(
                 err instanceof Error
                   ? err
                   : new Error('Invalid encrypted chunk'),
-              )
-              return
+              );
+              return;
             }
 
-            receivedChunks.push(encryptedChunk)
-            receivedBytes += encryptedChunk.length
+            receivedChunks.push(encryptedChunk);
+            receivedBytes += encryptedChunk.length;
 
             setState((s) => ({
               ...s,
@@ -383,68 +383,71 @@ export function useManualReceive(): UseManualReceiveReturn {
                 current: receivedBytes,
                 total: totalBytes!,
               },
-            }))
+            }));
           }
         },
-      )
+      );
 
-      rtcRef.current = rtc
+      rtcRef.current = rtc;
 
       // Handle offer signal
-      await rtc.handleSignal({ type: 'offer', sdp: offerPayload.sdp })
+      await rtc.handleSignal({ type: 'offer', sdp: offerPayload.sdp });
 
       // Add ICE candidates from offer
       for (const candidateStr of offerPayload.candidates) {
         await rtc.handleSignal({
           type: 'candidate',
           candidate: { candidate: candidateStr, sdpMid: '0', sdpMLineIndex: 0 },
-        })
+        });
       }
 
-      if (cancelledRef.current) return
+      if (cancelledRef.current) return;
 
       // Wait for answer SDP to be generated
-      setState({ status: 'generating_answer', message: 'Generating answer...' })
+      setState({
+        status: 'generating_answer',
+        message: 'Generating answer...',
+      });
 
       await new Promise<void>((resolve) => {
         if (answerSDP) {
-          resolve()
+          resolve();
         } else {
-          answerSDPResolver = resolve
+          answerSDPResolver = resolve;
           // Timeout after 10 seconds
-          setTimeout(resolve, 10000)
+          setTimeout(resolve, 10000);
         }
-      })
+      });
 
-      if (cancelledRef.current) return
+      if (cancelledRef.current) return;
 
       // Wait for ICE gathering to complete
       setState({
         status: 'generating_answer',
         message: 'Gathering network info...',
-      })
+      });
       const iceGatheringComplete = await rtc.waitForIceGatheringComplete(
         ICE_GATHER_TIMEOUT_MS,
-      )
+      );
       if (!iceGatheringComplete) {
         console.warn(
           'ICE gathering timed out while generating answer; continuing with available candidates',
-        )
+        );
       }
       setState({
         status: 'generating_answer',
         message: iceGatheringComplete
           ? 'Preparing response code...'
           : 'Network probe timed out. Preparing response code with available routes...',
-      })
+      });
 
-      if (cancelledRef.current) return
+      if (cancelledRef.current) return;
 
       // Validate answerSDP is available
       if (!answerSDP) {
         throw new Error(
           'Failed to generate answer SDP: Answer was not created by WebRTC connection',
-        )
+        );
       }
 
       // Generate answer with our public key
@@ -452,7 +455,7 @@ export function useManualReceive(): UseManualReceiveReturn {
         answerSDP,
         iceCandidates,
         ecdhKeyPair.publicKeyBytes,
-      )
+      );
 
       // Show answer and wait for connection
       setState({
@@ -465,28 +468,28 @@ export function useManualReceive(): UseManualReceiveReturn {
           fileSize: fileSize!,
           mimeType: mimeType!,
         },
-      })
+      });
 
       // Wait for data channel to open
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
-          reject(new Error('Connection timeout'))
-        }, MANUAL_CONNECTION_TIMEOUT_MS)
+          reject(new Error('Connection timeout'));
+        }, MANUAL_CONNECTION_TIMEOUT_MS);
 
         dataChannelResolver = () => {
-          clearTimeout(timeout)
-          resolve()
-        }
+          clearTimeout(timeout);
+          resolve();
+        };
 
         // Check if already open
-        const dc = rtc.getDataChannel()
+        const dc = rtc.getDataChannel();
         if (dc && dc.readyState === 'open') {
-          clearTimeout(timeout)
-          resolve()
+          clearTimeout(timeout);
+          resolve();
         }
-      })
+      });
 
-      if (cancelledRef.current) return
+      if (cancelledRef.current) return;
 
       setState({
         status: 'receiving',
@@ -499,95 +502,95 @@ export function useManualReceive(): UseManualReceiveReturn {
         },
         useWebRTC: true,
         progress: { current: 0, total: totalBytes! },
-      })
+      });
 
       // Wait for transfer to complete
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(
           () => {
-            reject(new Error('Transfer timeout'))
+            reject(new Error('Transfer timeout'));
           },
           10 * 60 * 1000,
-        ) // 10 minutes
+        ); // 10 minutes
         const checkInterval = setInterval(() => {
           if (cancelledRef.current) {
-            clearInterval(checkInterval)
-            clearTimeout(timeout)
-            reject(new Error('Cancelled'))
+            clearInterval(checkInterval);
+            clearTimeout(timeout);
+            reject(new Error('Cancelled'));
           }
-        }, 500)
+        }, 500);
 
         transferResolver = () => {
-          clearTimeout(timeout)
-          clearInterval(checkInterval)
-          resolve()
-        }
+          clearTimeout(timeout);
+          clearInterval(checkInterval);
+          resolve();
+        };
         transferRejecter = (err) => {
-          clearTimeout(timeout)
-          clearInterval(checkInterval)
-          reject(err)
-        }
+          clearTimeout(timeout);
+          clearInterval(checkInterval);
+          reject(err);
+        };
 
         // Check if already complete
         if (transferComplete) {
-          clearTimeout(timeout)
-          clearInterval(checkInterval)
-          resolve()
+          clearTimeout(timeout);
+          clearInterval(checkInterval);
+          resolve();
         }
-      })
+      });
 
-      if (cancelledRef.current) return
+      if (cancelledRef.current) return;
 
       // Decrypt and reassemble chunks
-      const contentData = new Uint8Array(totalBytes!)
-      const expectedChunks = Math.ceil(totalBytes! / ENCRYPTION_CHUNK_SIZE)
-      const decryptedChunkIndices = new Set<number>()
-      let totalDecryptedBytes = 0
+      const contentData = new Uint8Array(totalBytes!);
+      const expectedChunks = Math.ceil(totalBytes! / ENCRYPTION_CHUNK_SIZE);
+      const decryptedChunkIndices = new Set<number>();
+      let totalDecryptedBytes = 0;
 
       if (receivedChunks.length !== expectedChunks) {
         throw new Error(
           `Missing chunks: got ${receivedChunks.length}, expected ${expectedChunks}`,
-        )
+        );
       }
 
       for (const encryptedChunk of receivedChunks) {
         // Parse chunk to get index and encrypted data
-        const { chunkIndex, encryptedData } = parseChunkMessage(encryptedChunk)
+        const { chunkIndex, encryptedData } = parseChunkMessage(encryptedChunk);
         if (decryptedChunkIndices.has(chunkIndex)) {
-          throw new Error(`Duplicate chunk index: ${chunkIndex}`)
+          throw new Error(`Duplicate chunk index: ${chunkIndex}`);
         }
         if (chunkIndex >= expectedChunks) {
-          throw new Error(`Chunk index out of range: ${chunkIndex}`)
+          throw new Error(`Chunk index out of range: ${chunkIndex}`);
         }
 
         const decryptedChunk = await decryptChunk(
           key,
           encryptedData,
           chunkIndex,
-        )
+        );
 
         // Calculate write position based on chunk index
-        const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE
+        const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE;
         const expectedChunkLength =
           chunkIndex === expectedChunks - 1
             ? totalBytes! - writePosition
-            : ENCRYPTION_CHUNK_SIZE
+            : ENCRYPTION_CHUNK_SIZE;
 
         if (decryptedChunk.length !== expectedChunkLength) {
           throw new Error(
             `Invalid chunk ${chunkIndex} length: expected ${expectedChunkLength}, got ${decryptedChunk.length}`,
-          )
+          );
         }
 
-        const requiredSize = writePosition + decryptedChunk.length
+        const requiredSize = writePosition + decryptedChunk.length;
         if (requiredSize > contentData.length) {
-          throw new Error(`Chunk ${chunkIndex} exceeds expected file size`)
+          throw new Error(`Chunk ${chunkIndex} exceeds expected file size`);
         }
 
         // Write to correct position based on authenticated chunk index
-        contentData.set(decryptedChunk, writePosition)
-        decryptedChunkIndices.add(chunkIndex)
-        totalDecryptedBytes += decryptedChunk.length
+        contentData.set(decryptedChunk, writePosition);
+        decryptedChunkIndices.add(chunkIndex);
+        totalDecryptedBytes += decryptedChunk.length;
       }
 
       if (
@@ -596,14 +599,14 @@ export function useManualReceive(): UseManualReceiveReturn {
       ) {
         throw new Error(
           `Incomplete transfer: got ${totalDecryptedBytes} bytes, expected ${totalBytes}`,
-        )
+        );
       }
 
       // Send acknowledgment only after all encrypted chunks authenticate and reassemble.
-      rtc.send('ACK')
+      rtc.send('ACK');
 
       // Trim buffer to actual content size
-      const receivedData = contentData.slice(0, totalDecryptedBytes)
+      const receivedData = contentData.slice(0, totalDecryptedBytes);
 
       // Set received content
       setReceivedContent({
@@ -612,7 +615,7 @@ export function useManualReceive(): UseManualReceiveReturn {
         fileName: fileName!,
         fileSize: fileSize!,
         mimeType: mimeType!,
-      })
+      });
       setState({
         status: 'complete',
         message: 'File received (P2P)!',
@@ -622,25 +625,25 @@ export function useManualReceive(): UseManualReceiveReturn {
           fileSize: fileSize!,
           mimeType: mimeType!,
         },
-      })
+      });
     } catch (error) {
       if (!cancelledRef.current) {
         setState((prevState) => ({
           ...prevState,
           status: 'error',
           message: error instanceof Error ? error.message : 'Failed to receive',
-        }))
+        }));
       }
     } finally {
-      receivingRef.current = false
-      offerResolverRef.current = null
-      offerRejectRef.current = null
+      receivingRef.current = false;
+      offerResolverRef.current = null;
+      offerRejectRef.current = null;
       if (rtcRef.current) {
-        rtcRef.current.close()
-        rtcRef.current = null
+        rtcRef.current.close();
+        rtcRef.current = null;
       }
     }
-  }
+  };
 
-  return { state, receivedContent, startReceive, submitOffer, cancel, reset }
+  return { state, receivedContent, startReceive, submitOffer, cancel, reset };
 }

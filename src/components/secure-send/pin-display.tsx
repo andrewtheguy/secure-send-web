@@ -8,154 +8,154 @@ import {
   Fingerprint,
   Hash,
   MessageSquareText,
-} from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   computePinFingerprint,
   formatPinHint,
   PIN_DISPLAY_TIMEOUT_MS,
   pinToWords,
-} from '@/lib/crypto'
+} from '@/lib/crypto';
 
 interface PinDisplayProps {
-  pin: string
-  onExpire: () => void
+  pin: string;
+  onExpire: () => void;
 }
 
 export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
-  const [copied, setCopied] = useState(false)
-  const [error, setError] = useState(false)
-  const [isMasked, setIsMasked] = useState(false)
-  const [useWords, setUseWords] = useState(false)
-  const [hasCopied, setHasCopied] = useState(false)
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState(false);
+  const [isMasked, setIsMasked] = useState(false);
+  const [useWords, setUseWords] = useState(false);
+  const [hasCopied, setHasCopied] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(
     Math.ceil(PIN_DISPLAY_TIMEOUT_MS / 1000),
-  )
-  const [progressPercentage, setProgressPercentage] = useState(100)
-  const [fingerprint, setFingerprint] = useState<string>('')
+  );
+  const [progressPercentage, setProgressPercentage] = useState(100);
+  const [fingerprint, setFingerprint] = useState<string>('');
 
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const animationFrameRef = useRef<number | null>(null)
-  const mountedRef = useRef(true)
-  const onExpireRef = useRef(onExpire)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
+  const onExpireRef = useRef(onExpire);
 
   // Keep onExpire ref up to date
   useEffect(() => {
-    onExpireRef.current = onExpire
-  }, [onExpire])
+    onExpireRef.current = onExpire;
+  }, [onExpire]);
 
   useEffect(() => {
-    mountedRef.current = true
+    mountedRef.current = true;
 
     // Start high-resolution countdown timer
-    const durationMs = PIN_DISPLAY_TIMEOUT_MS
-    const startTime = performance.now()
+    const durationMs = PIN_DISPLAY_TIMEOUT_MS;
+    const startTime = performance.now();
 
     const tick = () => {
-      if (!mountedRef.current) return
+      if (!mountedRef.current) return;
 
-      const now = performance.now()
-      const elapsed = now - startTime
-      const remainingMs = Math.max(0, durationMs - elapsed)
+      const now = performance.now();
+      const elapsed = now - startTime;
+      const remainingMs = Math.max(0, durationMs - elapsed);
 
-      setTimeRemaining(Math.ceil(remainingMs / 1000))
-      setProgressPercentage((remainingMs / durationMs) * 100)
+      setTimeRemaining(Math.ceil(remainingMs / 1000));
+      setProgressPercentage((remainingMs / durationMs) * 100);
 
       if (remainingMs <= 0) {
-        onExpireRef.current()
-        return
+        onExpireRef.current();
+        return;
       }
 
-      animationFrameRef.current = requestAnimationFrame(tick)
-    }
+      animationFrameRef.current = requestAnimationFrame(tick);
+    };
 
-    animationFrameRef.current = requestAnimationFrame(tick)
+    animationFrameRef.current = requestAnimationFrame(tick);
 
     return () => {
-      mountedRef.current = false
+      mountedRef.current = false;
       if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current)
+        clearTimeout(timeoutRef.current);
       }
       if (animationFrameRef.current !== null) {
-        cancelAnimationFrame(animationFrameRef.current)
+        cancelAnimationFrame(animationFrameRef.current);
       }
-    }
-  }, [])
-  const words = useMemo(() => pinToWords(pin), [pin])
-  const wordsDisplay = useMemo(() => words.join(' '), [words])
+    };
+  }, []);
+  const words = useMemo(() => pinToWords(pin), [pin]);
+  const wordsDisplay = useMemo(() => words.join(' '), [words]);
 
   const handleCopy = useCallback(async () => {
     // Clear any existing timeout
     if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current)
-      timeoutRef.current = null
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
     }
 
     try {
-      const textToCopy = useWords ? wordsDisplay : pin
-      await navigator.clipboard.writeText(textToCopy)
-      if (!mountedRef.current) return
+      const textToCopy = useWords ? wordsDisplay : pin;
+      await navigator.clipboard.writeText(textToCopy);
+      if (!mountedRef.current) return;
 
-      setError(false)
-      setCopied(true)
+      setError(false);
+      setCopied(true);
       // Mask PIN after copying
-      setHasCopied(true)
-      setIsMasked(true)
+      setHasCopied(true);
+      setIsMasked(true);
       timeoutRef.current = setTimeout(() => {
         if (mountedRef.current) {
-          setCopied(false)
+          setCopied(false);
         }
-      }, 2000)
+      }, 2000);
     } catch {
-      if (!mountedRef.current) return
+      if (!mountedRef.current) return;
 
-      setError(true)
-      setCopied(false)
+      setError(true);
+      setCopied(false);
       timeoutRef.current = setTimeout(() => {
         if (mountedRef.current) {
-          setError(false)
+          setError(false);
         }
-      }, 2000)
+      }, 2000);
     }
-  }, [pin, useWords, wordsDisplay])
+  }, [pin, useWords, wordsDisplay]);
 
   const toggleMask = useCallback(() => {
-    setIsMasked((prev) => !prev)
-  }, [])
+    setIsMasked((prev) => !prev);
+  }, []);
 
   // Format time remaining as MM:SS
   const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   const toggleMode = useCallback(() => {
-    setUseWords((prev) => !prev)
-  }, [])
+    setUseWords((prev) => !prev);
+  }, []);
 
   // Mask PIN with bullet characters
-  const maskedPin = pin.replace(/./g, '\u2022')
+  const maskedPin = pin.replace(/./g, '\u2022');
 
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false;
     const loadHint = async () => {
       try {
-        const fp = await computePinFingerprint(pin)
+        const fp = await computePinFingerprint(pin);
         if (!cancelled) {
-          setFingerprint(fp ? formatPinHint(fp) : '')
+          setFingerprint(fp ? formatPinHint(fp) : '');
         }
       } catch {
-        if (!cancelled) setFingerprint('')
+        if (!cancelled) setFingerprint('');
       }
-    }
-    void loadHint()
+    };
+    void loadHint();
     return () => {
-      cancelled = true
-    }
-  }, [pin])
+      cancelled = true;
+    };
+  }, [pin]);
 
   return (
     <div className="flex flex-col gap-4 p-6 rounded-lg bg-muted/50 border">
@@ -320,5 +320,5 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
         </div>
       )}
     </div>
-  )
+  );
 }

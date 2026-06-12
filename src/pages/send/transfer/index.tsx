@@ -4,22 +4,22 @@ import {
   Loader2,
   QrCode,
   RotateCcw,
-} from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { MultiQRDisplay } from '@/components/secure-send/multi-qr-display'
-import { PinDisplay } from '@/components/secure-send/pin-display'
-import { QRInput } from '@/components/secure-send/qr-input'
-import { TransferStatus } from '@/components/secure-send/transfer-status'
-import { Button } from '@/components/ui/button'
-import { useSend } from '@/contexts/send-context'
+} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { MultiQRDisplay } from '@/components/secure-send/multi-qr-display';
+import { PinDisplay } from '@/components/secure-send/pin-display';
+import { QRInput } from '@/components/secure-send/qr-input';
+import { TransferStatus } from '@/components/secure-send/transfer-status';
+import { Button } from '@/components/ui/button';
+import { useSend } from '@/contexts/send-context';
 import {
   type UseManualSendReturn,
   useManualSend,
-} from '@/hooks/use-manual-send'
-import { type UseNostrSendReturn, useNostrSend } from '@/hooks/use-nostr-send'
-import { compressFilesToZip, getFolderName } from '@/lib/folder-utils'
-import { testRelayAvailability } from '@/lib/nostr'
+} from '@/hooks/use-manual-send';
+import { type UseNostrSendReturn, useNostrSend } from '@/hooks/use-nostr-send';
+import { compressFilesToZip, getFolderName } from '@/lib/folder-utils';
+import { testRelayAvailability } from '@/lib/nostr';
 
 type TransferStep =
   | 'checking'
@@ -28,206 +28,208 @@ type TransferStep =
   | 'active'
   | 'complete'
   | 'error'
-  | 'nostr_unavailable'
+  | 'nostr_unavailable';
 
 // Discriminated union for type-safe hook access
 type ActiveHook =
   | { type: 'online'; hook: UseNostrSendReturn }
-  | { type: 'offline'; hook: UseManualSendReturn }
+  | { type: 'offline'; hook: UseManualSendReturn };
 
 // Helper to build FileList from array of Files
 function buildFileListFromFiles(files: File[]): FileList {
-  const dt = new DataTransfer()
+  const dt = new DataTransfer();
   for (const file of files) {
-    dt.items.add(file)
+    dt.items.add(file);
   }
-  return dt.files
+  return dt.files;
 }
 
 export function SendTransferPage() {
-  const navigate = useNavigate()
-  const { config, setConfig, clearConfig } = useSend()
+  const navigate = useNavigate();
+  const { config, setConfig, clearConfig } = useSend();
 
-  const [step, setStep] = useState<TransferStep>('checking')
-  const [compressedFile, setCompressedFile] = useState<File | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [step, setStep] = useState<TransferStep>('checking');
+  const [compressedFile, setCompressedFile] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Hooks for transfer
-  const nostrHook = useNostrSend()
-  const manualHook = useManualSend()
+  const nostrHook = useNostrSend();
+  const manualHook = useManualSend();
 
-  const startedRef = useRef(false)
+  const startedRef = useRef(false);
 
   // Determine which hook to use based on config with discriminated union
-  const isOnline = config?.methodChoice === 'online'
+  const isOnline = config?.methodChoice === 'online';
   const activeHook: ActiveHook = useMemo(
     () =>
       isOnline
         ? { type: 'online', hook: nostrHook }
         : { type: 'offline', hook: manualHook },
     [isOnline, nostrHook, manualHook],
-  )
+  );
 
   // Extract common state from active hook
-  const state = activeHook.hook.state
-  const cancel = activeHook.hook.cancel
+  const state = activeHook.hook.state;
+  const cancel = activeHook.hook.cancel;
 
   // Online-specific properties (type-safe access)
-  const pin = activeHook.type === 'online' ? activeHook.hook.pin : null
+  const pin = activeHook.type === 'online' ? activeHook.hook.pin : null;
 
   // Offline-specific properties (type-safe access via discriminated union)
   const manualState =
-    activeHook.type === 'offline' ? activeHook.hook.state : null
-  const offerData = manualState?.offerData
+    activeHook.type === 'offline' ? activeHook.hook.state : null;
+  const offerData = manualState?.offerData;
   const submitAnswer =
-    activeHook.type === 'offline' ? activeHook.hook.submitAnswer : undefined
+    activeHook.type === 'offline' ? activeHook.hook.submitAnswer : undefined;
 
   // Redirect if no config
   useEffect(() => {
     if (!config) {
-      void navigate('/', { replace: true })
+      void navigate('/', { replace: true });
     }
-  }, [config, navigate])
+  }, [config, navigate]);
 
   // Prepare file (compress if needed)
   useEffect(() => {
-    if (!config || startedRef.current) return
+    if (!config || startedRef.current) return;
 
-    let cancelled = false
+    let cancelled = false;
 
     const prepareFile = async () => {
       try {
         // Check Nostr availability first if needed
         if (config.methodChoice === 'online') {
-          if (cancelled) return
-          setStep('checking')
-          const result = await testRelayAvailability()
-          if (cancelled) return
-          const available = result.available
+          if (cancelled) return;
+          setStep('checking');
+          const result = await testRelayAvailability();
+          if (cancelled) return;
+          const available = result.available;
           if (!available) {
-            setStep('nostr_unavailable')
-            return
+            setStep('nostr_unavailable');
+            return;
           }
         }
 
         // Prepare file
         const files = config.folderFiles
           ? Array.from(config.folderFiles)
-          : config.selectedFiles
+          : config.selectedFiles;
 
         if (files.length === 0) {
-          if (cancelled) return
-          setError('No files selected')
-          setStep('error')
-          return
+          if (cancelled) return;
+          setError('No files selected');
+          setStep('error');
+          return;
         }
 
         if (files.length === 1 && !config.folderFiles) {
           // Single file, no compression needed
-          if (cancelled) return
-          setCompressedFile(files[0])
-          setStep('ready')
+          if (cancelled) return;
+          setCompressedFile(files[0]);
+          setStep('ready');
         } else {
           // Multiple files or folder, compress
-          if (cancelled) return
-          setStep('compressing')
+          if (cancelled) return;
+          setStep('compressing');
           const archiveName = config.folderFiles
             ? getFolderName(config.folderFiles)
-            : 'files'
+            : 'files';
           const fileList =
-            config.folderFiles ?? buildFileListFromFiles(config.selectedFiles)
-          const zipFile = await compressFilesToZip(fileList, archiveName)
-          if (cancelled) return
-          setCompressedFile(zipFile)
-          setStep('ready')
+            config.folderFiles ?? buildFileListFromFiles(config.selectedFiles);
+          const zipFile = await compressFilesToZip(fileList, archiveName);
+          if (cancelled) return;
+          setCompressedFile(zipFile);
+          setStep('ready');
         }
       } catch (err) {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Failed to prepare files')
-        setStep('error')
+        if (cancelled) return;
+        setError(
+          err instanceof Error ? err.message : 'Failed to prepare files',
+        );
+        setStep('error');
       }
-    }
+    };
 
-    void prepareFile()
+    void prepareFile();
 
     return () => {
-      cancelled = true
-    }
-  }, [config])
+      cancelled = true;
+    };
+  }, [config]);
 
   // Start transfer when file is ready
   useEffect(() => {
     if (step !== 'ready' || !compressedFile || !config || startedRef.current)
-      return
+      return;
 
-    startedRef.current = true
+    startedRef.current = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: sync step state when starting transfer
-    setStep('active')
+    setStep('active');
 
-    void activeHook.hook.send(compressedFile)
-  }, [step, compressedFile, config, activeHook])
+    void activeHook.hook.send(compressedFile);
+  }, [step, compressedFile, config, activeHook]);
 
   // Track completion - sync local step with hook state
   // Only apply state changes when transfer is active to avoid race conditions
   // after cancellation (handleSwitchToOffline, handleRetry set startedRef to false)
   useEffect(() => {
-    if (!startedRef.current) return
+    if (!startedRef.current) return;
 
     if (state.status === 'complete') {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: sync step with hook completion
-      setStep('complete')
+      setStep('complete');
     } else if (state.status === 'error') {
       // TypeScript narrows state to TransferStateError, so message is required
-      setError(state.message)
-      setStep('error')
+      setError(state.message);
+      setStep('error');
     }
-  }, [state])
+  }, [state]);
 
   const handleCancel = useCallback(() => {
-    cancel()
-    clearConfig()
-    void navigate('/')
-  }, [cancel, clearConfig, navigate])
+    cancel();
+    clearConfig();
+    void navigate('/');
+  }, [cancel, clearConfig, navigate]);
 
   const handleSwitchToOffline = useCallback(() => {
-    if (!config) return
+    if (!config) return;
     // Cancel any active Nostr transfer before switching modes
     if (startedRef.current) {
       try {
-        cancel()
+        cancel();
       } catch (err) {
-        console.error('Failed to cancel transfer:', err)
+        console.error('Failed to cancel transfer:', err);
       }
     }
     // Update config to manual mode and restart the transfer flow
-    startedRef.current = false
-    setConfig({ ...config, methodChoice: 'offline' })
-    setStep('checking')
-    setError(null)
-  }, [config, setConfig, cancel])
+    startedRef.current = false;
+    setConfig({ ...config, methodChoice: 'offline' });
+    setStep('checking');
+    setError(null);
+  }, [config, setConfig, cancel]);
 
   const handleRetry = useCallback(() => {
     // Cancel any in-flight transfer before retrying
     if (startedRef.current) {
       try {
-        cancel()
+        cancel();
       } catch (err) {
-        console.error('Failed to cancel transfer:', err)
+        console.error('Failed to cancel transfer:', err);
       }
     }
-    startedRef.current = false
-    setStep('checking')
-    setError(null)
-  }, [cancel])
+    startedRef.current = false;
+    setStep('checking');
+    setError(null);
+  }, [cancel]);
 
   const handleSendAnother = useCallback(() => {
-    cancel()
-    clearConfig()
-    void navigate('/')
-  }, [cancel, clearConfig, navigate])
+    cancel();
+    clearConfig();
+    void navigate('/');
+  }, [cancel, clearConfig, navigate]);
 
   if (!config) {
-    return null
+    return null;
   }
 
   // Render based on step
@@ -400,5 +402,5 @@ export function SendTransferPage() {
         </div>
       )}
     </div>
-  )
+  );
 }

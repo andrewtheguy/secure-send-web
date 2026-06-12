@@ -8,7 +8,7 @@ declare global {
     captureStackTrace?(
       targetObject: object,
       constructorOpt?: NewableFunction,
-    ): void
+    ): void;
   }
 }
 
@@ -18,13 +18,13 @@ declare global {
  */
 export class ValidationError extends Error {
   constructor(message: string) {
-    super(message)
+    super(message);
     // Fix prototype chain for instanceof to work reliably (esp. ES5 targets)
-    Object.setPrototypeOf(this, ValidationError.prototype)
-    this.name = 'ValidationError'
+    Object.setPrototypeOf(this, ValidationError.prototype);
+    this.name = 'ValidationError';
     // Capture stack trace if available (V8 environments)
     if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, ValidationError)
+      Error.captureStackTrace(this, ValidationError);
     }
   }
 }

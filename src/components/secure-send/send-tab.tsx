@@ -8,62 +8,62 @@ import {
   Send,
   Upload,
   X,
-} from 'lucide-react'
-import { useCallback, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Button } from '@/components/ui/button'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useSend } from '@/contexts/send-context'
-import { MAX_MESSAGE_SIZE } from '@/lib/crypto'
-import { formatFileSize } from '@/lib/file-utils'
+} from 'lucide-react';
+import { useCallback, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useSend } from '@/contexts/send-context';
+import { MAX_MESSAGE_SIZE } from '@/lib/crypto';
+import { formatFileSize } from '@/lib/file-utils';
 import {
   getFolderName,
   getTotalSize,
   supportsFolderSelection,
-} from '@/lib/folder-utils'
+} from '@/lib/folder-utils';
 
-type ContentMode = 'file' | 'folder'
-type MethodChoice = 'online' | 'offline'
+type ContentMode = 'file' | 'folder';
+type MethodChoice = 'online' | 'offline';
 
 // Extend input element to include webkitdirectory attribute
 declare module 'react' {
   interface InputHTMLAttributes<T = HTMLInputElement> {
-    webkitdirectory?: T extends HTMLInputElement ? string : never
-    directory?: T extends HTMLInputElement ? string : never
+    webkitdirectory?: T extends HTMLInputElement ? string : never;
+    directory?: T extends HTMLInputElement ? string : never;
   }
 }
 
 export function SendTab() {
-  const navigate = useNavigate()
-  const { setConfig } = useSend()
+  const navigate = useNavigate();
+  const { setConfig } = useSend();
 
-  const [mode, setMode] = useState<ContentMode>('file')
-  const [methodChoice, setMethodChoice] = useState<MethodChoice>('online')
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
-  const [folderFiles, setFolderFiles] = useState<FileList | null>(null) // Keep FileList for folder to preserve paths
-  const [isDragging, setIsDragging] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const folderInputRef = useRef<HTMLInputElement>(null)
-  const dragCounterRef = useRef(0)
+  const [mode, setMode] = useState<ContentMode>('file');
+  const [methodChoice, setMethodChoice] = useState<MethodChoice>('online');
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [folderFiles, setFolderFiles] = useState<FileList | null>(null); // Keep FileList for folder to preserve paths
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const dragCounterRef = useRef(0);
 
-  const filesTotalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0)
-  const folderTotalSize = folderFiles ? getTotalSize(folderFiles) : 0
-  const isFilesOverLimit = filesTotalSize > MAX_MESSAGE_SIZE
-  const isFolderOverLimit = folderTotalSize > MAX_MESSAGE_SIZE
+  const filesTotalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0);
+  const folderTotalSize = folderFiles ? getTotalSize(folderFiles) : 0;
+  const isFilesOverLimit = filesTotalSize > MAX_MESSAGE_SIZE;
+  const isFolderOverLimit = folderTotalSize > MAX_MESSAGE_SIZE;
 
-  const canSendFiles = selectedFiles.length > 0 && !isFilesOverLimit
+  const canSendFiles = selectedFiles.length > 0 && !isFilesOverLimit;
   const canSendFolder =
-    folderFiles && folderFiles.length > 0 && !isFolderOverLimit
-  const canSend = mode === 'file' ? canSendFiles : canSendFolder
+    folderFiles && folderFiles.length > 0 && !isFolderOverLimit;
+  const canSend = mode === 'file' ? canSendFiles : canSendFolder;
   const pinModeDescription =
-    'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.'
+    'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.';
   const pinModeHowItWorksDescription =
-    'More reliable option, but requires manual PIN input. Relays coordinate signaling and can see routing metadata, but they do not receive plaintext file contents or your decryption key.'
+    'More reliable option, but requires manual PIN input. Relays coordinate signaling and can see routing metadata, but they do not receive plaintext file contents or your decryption key.';
   const qrModeDescription =
-    'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.'
+    'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.';
   const qrModeHowItWorksDescription =
-    'Coordination happens through QR exchange. The QR/clipboard signaling payload is obfuscated, not encrypted, so exchange it only with the intended recipient. If internet is available, STUN is used for connection setup metadata such as IP address and port; it does not receive your file contents or encryption keys. It also works without internet when the devices can reach each other over a network path, such as the same LAN/Wi-Fi.'
+    'Coordination happens through QR exchange. The QR/clipboard signaling payload is obfuscated, not encrypted, so exchange it only with the intended recipient. If internet is available, STUN is used for connection setup metadata such as IP address and port; it does not receive your file contents or encryption keys. It also works without internet when the devices can reach each other over a network path, such as the same LAN/Wi-Fi.';
 
   const handleSend = () => {
     // Set context with all the configuration
@@ -71,75 +71,75 @@ export function SendTab() {
       selectedFiles,
       folderFiles,
       methodChoice,
-    })
+    });
     // Navigate to transfer page
-    void navigate('/send/transfer')
-  }
+    void navigate('/send/transfer');
+  };
 
   const addFiles = useCallback((files: File[]) => {
     if (files.length > 0) {
       // Add to existing files, avoiding duplicates by name+size
       setSelectedFiles((prev) => {
-        const existingKeys = new Set(prev.map((f) => `${f.name}-${f.size}`))
+        const existingKeys = new Set(prev.map((f) => `${f.name}-${f.size}`));
         const uniqueNew = files.filter(
           (f) => !existingKeys.has(`${f.name}-${f.size}`),
-        )
-        return [...prev, ...uniqueNew]
-      })
+        );
+        return [...prev, ...uniqueNew];
+      });
     }
-  }, [])
+  }, []);
 
   const removeFile = useCallback((index: number) => {
-    setSelectedFiles((prev) => prev.filter((_, i) => i !== index))
-  }, [])
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     // Convert FileList to array BEFORE resetting input (FileList is a live reference)
-    const files = e.target.files ? Array.from(e.target.files) : []
-    addFiles(files)
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    addFiles(files);
     // Reset input so same file can be added again if removed
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   const handleFolderInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      setFolderFiles(e.target.files)
+      setFolderFiles(e.target.files);
     }
-  }
+  };
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      dragCounterRef.current = 0
-      setIsDragging(false)
-      addFiles(Array.from(e.dataTransfer.files))
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounterRef.current = 0;
+      setIsDragging(false);
+      addFiles(Array.from(e.dataTransfer.files));
     },
     [addFiles],
-  )
+  );
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragCounterRef.current++
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
     if (dragCounterRef.current === 1) {
-      setIsDragging(true)
+      setIsDragging(true);
     }
-  }, [])
+  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }, [])
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragCounterRef.current--
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
     if (dragCounterRef.current === 0) {
-      setIsDragging(false)
+      setIsDragging(false);
     }
-  }, [])
+  }, []);
 
   return (
     <div className="space-y-4 pt-4">
@@ -252,8 +252,8 @@ export function SendTab() {
             onClick={() => folderInputRef.current?.click()}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault()
-                folderInputRef.current?.click()
+                e.preventDefault();
+                folderInputRef.current?.click();
               }
             }}
             className={`
@@ -281,10 +281,10 @@ export function SendTab() {
                   variant="ghost"
                   size="sm"
                   onClick={(e) => {
-                    e.stopPropagation()
-                    setFolderFiles(null)
+                    e.stopPropagation();
+                    setFolderFiles(null);
                     if (folderInputRef.current)
-                      folderInputRef.current.value = ''
+                      folderInputRef.current.value = '';
                   }}
                 >
                   <X className="h-4 w-4 mr-1" />
@@ -415,5 +415,5 @@ export function SendTab() {
         <ChevronRight className="ml-1 h-3 w-3" />
       </Button>
     </div>
-  )
+  );
 }

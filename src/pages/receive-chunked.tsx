@@ -7,35 +7,35 @@ import {
   RefreshCw,
   RotateCcw,
   X,
-} from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { QRDisplay } from '@/components/secure-send/qr-display'
-import { TransferStatus } from '@/components/secure-send/transfer-status'
-import { Button } from '@/components/ui/button'
-import { useChunkCollector } from '@/hooks/use-chunk-collector'
-import { useManualReceive } from '@/hooks/use-manual-receive'
-import { useQRScanner } from '@/hooks/useQRScanner'
-import { extractChunkParam } from '@/lib/chunk-utils'
+} from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { QRDisplay } from '@/components/secure-send/qr-display';
+import { TransferStatus } from '@/components/secure-send/transfer-status';
+import { Button } from '@/components/ui/button';
+import { useChunkCollector } from '@/hooks/use-chunk-collector';
+import { useManualReceive } from '@/hooks/use-manual-receive';
+import { useQRScanner } from '@/hooks/useQRScanner';
+import { extractChunkParam } from '@/lib/chunk-utils';
 import {
   downloadFile,
   formatFileSize,
   getMimeTypeDescription,
-} from '@/lib/file-utils'
-import { isMobileDevice } from '@/lib/utils'
+} from '@/lib/file-utils';
+import { isMobileDevice } from '@/lib/utils';
 
-type PageStep = 'collecting' | 'transferring'
+type PageStep = 'collecting' | 'transferring';
 
 export function ReceiveChunkedPage() {
-  const navigate = useNavigate()
-  const [step, setStep] = useState<PageStep>('collecting')
-  const [scanError, setScanError] = useState<string | null>(null)
-  const [cameraReady, setCameraReady] = useState(false)
+  const navigate = useNavigate();
+  const [step, setStep] = useState<PageStep>('collecting');
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [cameraReady, setCameraReady] = useState(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>(
     isMobileDevice() ? 'environment' : 'user',
-  )
+  );
 
-  const { state: chunkState, addChunk } = useChunkCollector()
+  const { state: chunkState, addChunk } = useChunkCollector();
   const {
     state: receiveState,
     receivedContent,
@@ -43,19 +43,19 @@ export function ReceiveChunkedPage() {
     submitOffer,
     cancel,
     reset,
-  } = useManualReceive()
+  } = useManualReceive();
 
-  const initialChunkFed = useRef(false)
+  const initialChunkFed = useRef(false);
 
   // Feed the initial chunk from URL fragment on mount
   useEffect(() => {
-    if (initialChunkFed.current) return
-    initialChunkFed.current = true
-    const d = extractChunkParam(window.location.href)
+    if (initialChunkFed.current) return;
+    initialChunkFed.current = true;
+    const d = extractChunkParam(window.location.href);
     if (d) {
-      addChunk(d)
+      addChunk(d);
     }
-  }, [addChunk])
+  }, [addChunk]);
 
   // When all chunks collected, start the receive flow
   useEffect(() => {
@@ -65,10 +65,10 @@ export function ReceiveChunkedPage() {
       step === 'collecting'
     ) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: transition page step when chunk collection completes
-      setStep('transferring')
-      startReceive()
+      setStep('transferring');
+      startReceive();
     }
-  }, [chunkState.isComplete, chunkState.assembledPayload, step, startReceive])
+  }, [chunkState.isComplete, chunkState.assembledPayload, step, startReceive]);
 
   // Submit the assembled offer once the hook is waiting for it
   useEffect(() => {
@@ -77,38 +77,38 @@ export function ReceiveChunkedPage() {
       receiveState.status === 'waiting_for_offer' &&
       chunkState.assembledPayload
     ) {
-      submitOffer(chunkState.assembledPayload)
+      submitOffer(chunkState.assembledPayload);
     }
-  }, [step, receiveState.status, chunkState.assembledPayload, submitOffer])
+  }, [step, receiveState.status, chunkState.assembledPayload, submitOffer]);
 
   // Handle scanned QR data — scanner returns raw bytes, URL QRs decode to ASCII
   const handleScan = useCallback(
     (binaryData: Uint8Array) => {
-      const text = new TextDecoder().decode(binaryData)
+      const text = new TextDecoder().decode(binaryData);
       // Try to extract chunk param from URL
-      const param = extractChunkParam(text)
+      const param = extractChunkParam(text);
       if (param) {
-        setScanError(null)
-        addChunk(param)
+        setScanError(null);
+        addChunk(param);
       }
       // If not a valid chunk URL, silently ignore (could be unrelated QR)
     },
     [addChunk],
-  )
+  );
 
   const handleScanError = useCallback((err: string) => {
     if (err.includes('denied') || err.includes('unavailable')) {
-      setScanError(err)
+      setScanError(err);
     }
-  }, [])
+  }, []);
 
   const handleCameraReady = useCallback(() => {
-    setCameraReady(true)
-    setScanError(null)
-  }, [])
+    setCameraReady(true);
+    setScanError(null);
+  }, []);
 
   // Only scan while collecting remaining chunks
-  const needsMoreChunks = step === 'collecting' && !chunkState.isComplete
+  const needsMoreChunks = step === 'collecting' && !chunkState.isComplete;
   const { videoRef, canvasRef, availableCameras } = useQRScanner({
     onScan: handleScan,
     onError: handleScanError,
@@ -116,11 +116,11 @@ export function ReceiveChunkedPage() {
     isScanning: needsMoreChunks,
     facingMode,
     debounceMs: 300,
-  })
+  });
 
   const handleSwitchCamera = useCallback(() => {
-    setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
-  }, [])
+    setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'));
+  }, []);
 
   const handleDownload = useCallback(() => {
     if (receivedContent) {
@@ -128,26 +128,26 @@ export function ReceiveChunkedPage() {
         receivedContent.data,
         receivedContent.fileName,
         receivedContent.mimeType,
-      )
+      );
     }
-  }, [receivedContent])
+  }, [receivedContent]);
 
   const handleCancel = useCallback(() => {
-    cancel()
-    void navigate('/receive')
-  }, [cancel, navigate])
+    cancel();
+    void navigate('/receive');
+  }, [cancel, navigate]);
 
   const handleReset = useCallback(() => {
-    reset()
-    void navigate('/receive')
-  }, [reset, navigate])
+    reset();
+    void navigate('/receive');
+  }, [reset, navigate]);
 
   // --- Collecting chunks ---
   if (step === 'collecting') {
-    const total = chunkState.totalChunks
-    const collected = chunkState.collectedCount
+    const total = chunkState.totalChunks;
+    const collected = chunkState.collectedCount;
     const collectedPercent =
-      total !== null && total > 0 ? Math.round((collected / total) * 100) : 0
+      total !== null && total > 0 ? Math.round((collected / total) * 100) : 0;
 
     return (
       <div className="flex w-full justify-center">
@@ -164,7 +164,7 @@ export function ReceiveChunkedPage() {
                 <>
                   <div className="flex flex-wrap justify-center gap-1.5">
                     {Array.from({ length: total }, (_, i) => {
-                      const received = chunkState.collectedIndices.has(i)
+                      const received = chunkState.collectedIndices.has(i);
                       return (
                         <div
                           // biome-ignore lint/suspicious/noArrayIndexKey: fixed-position chunk grid; index IS the identity
@@ -178,7 +178,7 @@ export function ReceiveChunkedPage() {
                         >
                           {i + 1}
                         </div>
-                      )
+                      );
                     })}
                   </div>
                   <p className="text-xs text-muted-foreground text-center">
@@ -286,14 +286,15 @@ export function ReceiveChunkedPage() {
           )}
         </div>
       </div>
-    )
+    );
   }
 
   // --- Transferring ---
-  const answerData = receiveState.answerData
-  const clipboardData = receiveState.clipboardData
+  const answerData = receiveState.answerData;
+  const clipboardData = receiveState.clipboardData;
   const showQRDisplay =
-    receiveState.status === 'showing_answer' && answerData instanceof Uint8Array
+    receiveState.status === 'showing_answer' &&
+    answerData instanceof Uint8Array;
 
   return (
     <div className="flex w-full justify-center">
@@ -365,5 +366,5 @@ export function ReceiveChunkedPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

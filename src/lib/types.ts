@@ -1,12 +1,12 @@
 export interface ReceivedFile {
-  contentType: 'file'
-  data: Uint8Array
-  fileName: string
-  fileSize: number
-  mimeType: string
+  contentType: 'file';
+  data: Uint8Array;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
 }
 
-export type ReceivedContent = ReceivedFile
+export type ReceivedContent = ReceivedFile;
 
 /**
  * Key material derived from PIN authentication.
@@ -18,6 +18,6 @@ export type ReceivedContent = ReceivedFile
  *   shown for human visual comparison only; never sent across the wire.
  */
 export interface PinKeyMaterial {
-  key: CryptoKey
-  fingerprint: string
+  key: CryptoKey;
+  fingerprint: string;
 }

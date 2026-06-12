@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest';
 import {
   estimatePayloadSize,
   generateMutualAnswerBinary,
@@ -9,23 +9,23 @@ import {
   parseClipboardPayload,
   parseMutualPayload,
   type SignalingPayload,
-} from './manual-signaling'
+} from './manual-signaling';
 
 describe('Manual Signaling Utils', () => {
   const mockOffer: RTCSessionDescriptionInit = {
     type: 'offer',
     sdp: 'v=0\r\no=- 123 456 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 1 RTP/AVP 111\r\nc=IN IP4 127.0.0.1',
-  }
+  };
   const mockCandidates: RTCIceCandidate[] = [
     {
       candidate: 'candidate:1 1 UDP 123 127.0.0.1 12345 typ host',
       sdpMid: '0',
       sdpMLineIndex: 0,
     } as RTCIceCandidate,
-  ]
-  const mockPublicKey = new Uint8Array(65).fill(1)
-  mockPublicKey[0] = 4 // Uncompressed point prefix
-  const mockSalt = new Uint8Array(16).fill(2)
+  ];
+  const mockPublicKey = new Uint8Array(65).fill(1);
+  mockPublicKey[0] = 4; // Uncompressed point prefix
+  const mockSalt = new Uint8Array(16).fill(2);
 
   it('should generate and parse mutual offer binary correctly', async () => {
     const metadata = {
@@ -36,45 +36,45 @@ describe('Manual Signaling Utils', () => {
       mimeType: 'text/plain',
       publicKey: mockPublicKey,
       salt: mockSalt,
-    }
+    };
 
     const binary = await generateMutualOfferBinary(
       mockOffer,
       mockCandidates,
       metadata,
-    )
+    );
 
-    expect(isMutualPayload(binary)).toBe(true)
-    expect(binary.length).toBeGreaterThan(8) // Header + something
+    expect(isMutualPayload(binary)).toBe(true);
+    expect(binary.length).toBeGreaterThan(8); // Header + something
 
-    const parsed = await parseMutualPayload(binary)
+    const parsed = await parseMutualPayload(binary);
 
-    expect(parsed).toBeDefined()
-    expect(parsed?.type).toBe('offer')
-    expect(parsed?.sdp).toBe(mockOffer.sdp)
-    expect(parsed?.candidates).toHaveLength(1)
-    expect(parsed?.candidates[0]).toBe(mockCandidates[0].candidate)
-    expect(parsed?.fileName).toBe(metadata.fileName)
-    expect(parsed?.publicKey).toEqual(Array.from(mockPublicKey))
-  })
+    expect(parsed).toBeDefined();
+    expect(parsed?.type).toBe('offer');
+    expect(parsed?.sdp).toBe(mockOffer.sdp);
+    expect(parsed?.candidates).toHaveLength(1);
+    expect(parsed?.candidates[0]).toBe(mockCandidates[0].candidate);
+    expect(parsed?.fileName).toBe(metadata.fileName);
+    expect(parsed?.publicKey).toEqual(Array.from(mockPublicKey));
+  });
 
   it('should generate and parse mutual answer binary correctly', async () => {
-    const createdAt = Date.now()
+    const createdAt = Date.now();
     const binary = await generateMutualAnswerBinary(
       { type: 'answer', sdp: mockOffer.sdp },
       mockCandidates,
       mockPublicKey,
       createdAt,
-    )
+    );
 
-    expect(isMutualPayload(binary)).toBe(true)
+    expect(isMutualPayload(binary)).toBe(true);
 
-    const parsed = await parseMutualPayload(binary)
-    expect(parsed).toBeDefined()
-    expect(parsed?.type).toBe('answer')
-    expect(parsed?.sdp).toBe(mockOffer.sdp)
-    expect(parsed?.publicKey).toEqual(Array.from(mockPublicKey))
-  })
+    const parsed = await parseMutualPayload(binary);
+    expect(parsed).toBeDefined();
+    expect(parsed?.type).toBe('answer');
+    expect(parsed?.sdp).toBe(mockOffer.sdp);
+    expect(parsed?.publicKey).toEqual(Array.from(mockPublicKey));
+  });
 
   it('should obfuscate data (output should not contain cleartext JSON)', async () => {
     const metadata = {
@@ -83,15 +83,15 @@ describe('Manual Signaling Utils', () => {
       publicKey: mockPublicKey,
       salt: mockSalt,
       fileName: 'secret-file-name.txt',
-    }
+    };
 
-    const binary = await generateMutualOfferBinary(mockOffer, [], metadata)
-    const decoder = new TextDecoder()
-    const binaryString = decoder.decode(binary)
+    const binary = await generateMutualOfferBinary(mockOffer, [], metadata);
+    const decoder = new TextDecoder();
+    const binaryString = decoder.decode(binary);
 
     // The filename should NOT be visible in the binary string because of compression + obfuscation
-    expect(binaryString).not.toContain('secret-file-name.txt')
-  })
+    expect(binaryString).not.toContain('secret-file-name.txt');
+  });
 
   it('should validate signaling payload structure', () => {
     const validPayload = {
@@ -100,37 +100,37 @@ describe('Manual Signaling Utils', () => {
       candidates: ['cand1'],
       createdAt: 123456,
       publicKey: Array.from(mockPublicKey), // array of numbers
-    }
-    expect(isValidSignalingPayload(validPayload)).toBe(true)
+    };
+    expect(isValidSignalingPayload(validPayload)).toBe(true);
 
-    const invalidPayload = { ...validPayload, type: 'invalid' }
-    expect(isValidSignalingPayload(invalidPayload)).toBe(false)
+    const invalidPayload = { ...validPayload, type: 'invalid' };
+    expect(isValidSignalingPayload(invalidPayload)).toBe(false);
 
-    const missingKey = { ...validPayload, publicKey: undefined }
-    expect(isValidSignalingPayload(missingKey)).toBe(false)
+    const missingKey = { ...validPayload, publicKey: undefined };
+    expect(isValidSignalingPayload(missingKey)).toBe(false);
 
     const nonFiniteCreatedAt = {
       ...validPayload,
       createdAt: Number.POSITIVE_INFINITY,
-    }
-    expect(isValidSignalingPayload(nonFiniteCreatedAt)).toBe(false)
-  })
+    };
+    expect(isValidSignalingPayload(nonFiniteCreatedAt)).toBe(false);
+  });
 
   it('should handle clipboard base64 conversions', () => {
-    const binary = new Uint8Array([1, 2, 3, 4, 5])
-    const base64 = generateMutualClipboardData(binary)
+    const binary = new Uint8Array([1, 2, 3, 4, 5]);
+    const base64 = generateMutualClipboardData(binary);
 
-    expect(typeof base64).toBe('string')
+    expect(typeof base64).toBe('string');
 
-    const parsed = parseClipboardPayload(base64)
-    expect(parsed).toEqual(binary)
-  })
+    const parsed = parseClipboardPayload(base64);
+    expect(parsed).toEqual(binary);
+  });
 
   it('should return null for invalid binary payload', async () => {
-    const invalidBinary = new Uint8Array([0, 0, 0, 0, 1, 2, 3])
-    expect(isMutualPayload(invalidBinary)).toBe(false)
-    expect(await parseMutualPayload(invalidBinary)).toBeNull()
-  })
+    const invalidBinary = new Uint8Array([0, 0, 0, 0, 1, 2, 3]);
+    expect(isMutualPayload(invalidBinary)).toBe(false);
+    expect(await parseMutualPayload(invalidBinary)).toBeNull();
+  });
 
   it('should estimate payload size', async () => {
     const payload: SignalingPayload = {
@@ -139,8 +139,8 @@ describe('Manual Signaling Utils', () => {
       candidates: [],
       createdAt: Date.now(),
       publicKey: Array.from(mockPublicKey),
-    }
-    const size = await estimatePayloadSize(payload)
-    expect(size).toBeGreaterThan(0)
-  })
-})
+    };
+    const size = await estimatePayloadSize(payload);
+    expect(size).toBeGreaterThan(0);
+  });
+});
