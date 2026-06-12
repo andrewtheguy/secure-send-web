@@ -6,6 +6,7 @@ import {
   QR_FIRST_CHARSET,
   PIN_CHECKSUM_LENGTH,
   PIN_HINT_LENGTH,
+  PIN_FINGERPRINT_LENGTH,
   PIN_HINT_SALT,
   PIN_HINT_BUCKET_SEC,
   PIN_HINT_ITERATIONS,
@@ -192,16 +193,22 @@ function pinHintSalt(bucketOffset: number): string {
 }
 
 /**
- * Derive PIN_HINT_LENGTH hex chars from a salted PBKDF2-SHA-256 derivation of the PIN,
- * using already-imported PBKDF2 key material, an explicit salt string, and an explicit
- * iteration count (the published wire hint and the local-only fingerprint use different
- * work factors — see PIN_HINT_ITERATIONS vs PIN_FINGERPRINT_ITERATIONS).
+ * Derive `hexLength` hex chars from a salted PBKDF2-SHA-256 derivation of the PIN,
+ * using already-imported PBKDF2 key material, an explicit salt string, an explicit
+ * iteration count, and an explicit output length (the published wire hint and the
+ * local-only fingerprint use different work factors and widths — see
+ * PIN_HINT_LENGTH/PIN_HINT_ITERATIONS vs PIN_FINGERPRINT_LENGTH/PIN_FINGERPRINT_ITERATIONS).
  */
-async function derivePinBits(keyMaterial: CryptoKey, saltStr: string, iterations: number): Promise<string> {
+async function derivePinBits(
+  keyMaterial: CryptoKey,
+  saltStr: string,
+  iterations: number,
+  hexLength: number,
+): Promise<string> {
   const encoder = new TextEncoder()
 
-  // Each byte produces 2 hex chars; ceil handles odd PIN_HINT_LENGTH
-  const byteCount = Math.ceil(PIN_HINT_LENGTH / 2)
+  // Each byte produces 2 hex chars; ceil handles odd hexLength
+  const byteCount = Math.ceil(hexLength / 2)
   const derivedBits = await crypto.subtle.deriveBits(
     {
       name: 'PBKDF2',
@@ -217,8 +224,8 @@ async function derivePinBits(keyMaterial: CryptoKey, saltStr: string, iterations
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
 
-  // Truncate to exact length (needed if PIN_HINT_LENGTH is odd)
-  return hex.slice(0, PIN_HINT_LENGTH)
+  // Truncate to exact length (needed if hexLength is odd)
+  return hex.slice(0, hexLength)
 }
 
 /**
@@ -234,7 +241,7 @@ async function derivePinBits(keyMaterial: CryptoKey, saltStr: string, iterations
  */
 export async function computePinHint(pin: string, bucketOffset = 0): Promise<string> {
   const keyMaterial = await importPinKey(pin)
-  return derivePinBits(keyMaterial, pinHintSalt(bucketOffset), PIN_HINT_ITERATIONS)
+  return derivePinBits(keyMaterial, pinHintSalt(bucketOffset), PIN_HINT_ITERATIONS, PIN_HINT_LENGTH)
 }
 
 /**
@@ -245,7 +252,7 @@ export async function computePinHint(pin: string, bucketOffset = 0): Promise<str
  * `bucketOffset` selects an earlier time bucket (0 = current, 1 = previous, ...).
  */
 export async function computePinHintFromKey(keyMaterial: CryptoKey, bucketOffset = 0): Promise<string> {
-  return derivePinBits(keyMaterial, pinHintSalt(bucketOffset), PIN_HINT_ITERATIONS)
+  return derivePinBits(keyMaterial, pinHintSalt(bucketOffset), PIN_HINT_ITERATIONS, PIN_HINT_LENGTH)
 }
 
 /**
@@ -266,7 +273,7 @@ export async function computePinHintFromKey(keyMaterial: CryptoKey, bucketOffset
  */
 export async function computePinFingerprint(pin: string): Promise<string> {
   const keyMaterial = await importPinKey(pin)
-  return derivePinBits(keyMaterial, PIN_FINGERPRINT_SALT, PIN_FINGERPRINT_ITERATIONS)
+  return derivePinBits(keyMaterial, PIN_FINGERPRINT_SALT, PIN_FINGERPRINT_ITERATIONS, PIN_FINGERPRINT_LENGTH)
 }
 
 /**
