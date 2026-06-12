@@ -14,6 +14,7 @@ import {
   parseChunkMessage,
   TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto';
+import { P2PConnectionError } from '@/lib/errors';
 import {
   createAuthenticatedAckEvent,
   createNostrClient,
@@ -303,7 +304,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 settled = true;
                 if (rtc) rtc.close();
                 client.unsubscribe(subId);
-                reject(new Error('Transfer timeout'));
+                reject(new P2PConnectionError('Transfer timeout'));
               }
             },
             10 * 60 * 1000,
@@ -610,6 +611,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           ...prevState,
           status: 'error',
           message: error instanceof Error ? error.message : 'Failed to receive',
+          connectionFailed: error instanceof P2PConnectionError,
         }));
       }
     } finally {
