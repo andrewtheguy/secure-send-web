@@ -1,17 +1,31 @@
-import { useState, useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react'
-import { X, CheckCircle2, AlertCircle, Hash, MessageSquareText, ClipboardPaste } from 'lucide-react'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
 import {
-  PIN_LENGTH,
-  PIN_CHARSET,
-  PIN_WORDLIST,
-  isValidPin,
-  wordsToPin,
-  isValidPinWord,
-  detectSignalingMethod,
+  AlertCircle,
+  CheckCircle2,
+  ClipboardPaste,
+  Hash,
+  MessageSquareText,
+  X,
+} from 'lucide-react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from 'react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
   computePinFingerprint,
+  detectSignalingMethod,
   importPinKey,
+  isValidPin,
+  isValidPinWord,
+  PIN_CHARSET,
+  PIN_LENGTH,
+  PIN_WORDLIST,
+  wordsToPin,
 } from '@/lib/crypto'
 import type { SignalingMethod } from '@/lib/nostr/types'
 
@@ -64,16 +78,19 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       securedMethodRef.current = null
     }, [])
 
-    const emitChange = useCallback((isValid: boolean, length: number, method: SignalingMethod | null) => {
-      const resolvedMethod = method ?? securedMethodRef.current
-      onPinChange({
-        key: isValid ? securedKeyRef.current : null,
-        fingerprint: isValid ? securedFingerprintRef.current : null,
-        method: resolvedMethod,
-        isValid,
-        length,
-      })
-    }, [onPinChange])
+    const emitChange = useCallback(
+      (isValid: boolean, length: number, method: SignalingMethod | null) => {
+        const resolvedMethod = method ?? securedMethodRef.current
+        onPinChange({
+          key: isValid ? securedKeyRef.current : null,
+          fingerprint: isValid ? securedFingerprintRef.current : null,
+          method: resolvedMethod,
+          isValid,
+          length,
+        })
+      },
+      [onPinChange],
+    )
 
     useImperativeHandle(ref, () => ({
       clear: () => {
@@ -106,82 +123,92 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       }
     }, [])
 
-    const securePin = useCallback(async (pin: string) => {
-      if (!isValidPin(pin)) return
+    const securePin = useCallback(
+      async (pin: string) => {
+        if (!isValidPin(pin)) return
 
-      try {
-        const method = detectSignalingMethod(pin)
-        const [keyMaterial, fingerprint] = await Promise.all([
-          importPinKey(pin),
-          computePinFingerprint(pin),
-        ])
+        try {
+          const method = detectSignalingMethod(pin)
+          const [keyMaterial, fingerprint] = await Promise.all([
+            importPinKey(pin),
+            computePinFingerprint(pin),
+          ])
 
-        securedKeyRef.current = keyMaterial
-        securedFingerprintRef.current = fingerprint
-        securedMethodRef.current = method
+          securedKeyRef.current = keyMaterial
+          securedFingerprintRef.current = fingerprint
+          securedMethodRef.current = method
 
-        // Clear plaintext traces from refs/state
-        charPinRef.current = ''
-        wordPinRef.current = ''
-        setWords(Array(7).fill(''))
-        setMaskWords(true)
+          // Clear plaintext traces from refs/state
+          charPinRef.current = ''
+          wordPinRef.current = ''
+          setWords(Array(7).fill(''))
+          setMaskWords(true)
 
-        // Keep UX feedback without keeping the raw value
-        setCharDisplayLength(PIN_LENGTH)
-        setWordDisplayLength(7)
-        setCharIsValid(true)
-        setWordIsValid(true)
-        setError(null)
+          // Keep UX feedback without keeping the raw value
+          setCharDisplayLength(PIN_LENGTH)
+          setWordDisplayLength(7)
+          setCharIsValid(true)
+          setWordIsValid(true)
+          setError(null)
 
-        if (charInputRef.current) {
-          // Show a masked placeholder so users see that input was captured without revealing the PIN
-          charInputRef.current.value = '*'.repeat(PIN_LENGTH)
+          if (charInputRef.current) {
+            // Show a masked placeholder so users see that input was captured without revealing the PIN
+            charInputRef.current.value = '*'.repeat(PIN_LENGTH)
+          }
+
+          emitChange(true, PIN_LENGTH, method ?? null)
+        } catch (err) {
+          console.error('Failed to secure PIN', err)
+          clearSecuredData()
+          emitChange(false, 0, null)
+          setError('Failed to secure PIN')
         }
-
-        emitChange(true, PIN_LENGTH, method ?? null)
-      } catch (err) {
-        console.error('Failed to secure PIN', err)
-        clearSecuredData()
-        emitChange(false, 0, null)
-        setError('Failed to secure PIN')
-      }
-    }, [clearSecuredData, emitChange])
+      },
+      [clearSecuredData, emitChange],
+    )
 
     const updateMethod = useCallback((pinCandidate: string) => {
       securedMethodRef.current = detectSignalingMethod(pinCandidate)
     }, [])
 
-    const updateWordPin = useCallback((updatedWords: string[]) => {
-      const pin = wordsToPin(updatedWords)
-      const validWordCount = updatedWords.filter(w => isValidPinWord(w)).length
+    const updateWordPin = useCallback(
+      (updatedWords: string[]) => {
+        const pin = wordsToPin(updatedWords)
+        const validWordCount = updatedWords.filter((w) =>
+          isValidPinWord(w),
+        ).length
 
-      setWordDisplayLength(validWordCount)
-      wordPinRef.current = pin
-      const pinIsValid = isValidPin(pin)
-      setWordIsValid(pinIsValid)
-      updateMethod(pin)
+        setWordDisplayLength(validWordCount)
+        wordPinRef.current = pin
+        const pinIsValid = isValidPin(pin)
+        setWordIsValid(pinIsValid)
+        updateMethod(pin)
 
-      if (validWordCount > 0) {
-        charPinRef.current = ''
-        setCharIsValid(false)
-        setCharDisplayLength(0)
-        if (charInputRef.current) charInputRef.current.value = ''
-      }
+        if (validWordCount > 0) {
+          charPinRef.current = ''
+          setCharIsValid(false)
+          setCharDisplayLength(0)
+          if (charInputRef.current) charInputRef.current.value = ''
+        }
 
-      setMaskWords(false)
+        setMaskWords(false)
 
-      if (pinIsValid) {
-        void securePin(pin)
-      } else {
-        clearSecuredData()
-        emitChange(false, validWordCount, securedMethodRef.current)
-      }
-    }, [clearSecuredData, emitChange, securePin, updateMethod])
+        if (pinIsValid) {
+          void securePin(pin)
+        } else {
+          clearSecuredData()
+          emitChange(false, validWordCount, securedMethodRef.current)
+        }
+      },
+      [clearSecuredData, emitChange, securePin, updateMethod],
+    )
 
     // Handling character mode changes
     const handleCharChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newValue = e.target.value
-      const validChars = [...newValue].filter((char) => PIN_CHARSET.includes(char))
+      const validChars = [...newValue].filter((char) =>
+        PIN_CHARSET.includes(char),
+      )
 
       if (validChars.length !== newValue.length && newValue.length > 0) {
         setError('Invalid character')
@@ -215,25 +242,28 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
     }
 
     // Handle focus on word input field
-    const handleFocus = useCallback((index: number) => {
-      // Cancel any pending blur timeout to prevent it from clearing suggestions
-      if (blurTimeoutRef.current) {
-        clearTimeout(blurTimeoutRef.current)
-        blurTimeoutRef.current = null
-      }
+    const handleFocus = useCallback(
+      (index: number) => {
+        // Cancel any pending blur timeout to prevent it from clearing suggestions
+        if (blurTimeoutRef.current) {
+          clearTimeout(blurTimeoutRef.current)
+          blurTimeoutRef.current = null
+        }
 
-      setActiveWordIndex(index)
-      const currentWord = words[index]
+        setActiveWordIndex(index)
+        const currentWord = words[index]
 
-      if (currentWord === '') {
-        setSuggestions(PIN_WORDLIST)  // Show all words
-        setSelectedIndex(0)
-      } else {
-        const matches = PIN_WORDLIST.filter(w => w.startsWith(currentWord))
-        setSuggestions(matches)
-        setSelectedIndex(0)
-      }
-    }, [words])
+        if (currentWord === '') {
+          setSuggestions(PIN_WORDLIST) // Show all words
+          setSelectedIndex(0)
+        } else {
+          const matches = PIN_WORDLIST.filter((w) => w.startsWith(currentWord))
+          setSuggestions(matches)
+          setSelectedIndex(0)
+        }
+      },
+      [words],
+    )
 
     // Handle blur on word input field
     const handleBlur = useCallback(() => {
@@ -254,11 +284,13 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
 
       // Filter suggestions - now starts at 1 character
       if (newWords[index].length >= 1) {
-        const matches = PIN_WORDLIST.filter(w => w.startsWith(newWords[index]))
+        const matches = PIN_WORDLIST.filter((w) =>
+          w.startsWith(newWords[index]),
+        )
         setSuggestions(matches)
         setSelectedIndex(0)
       } else if (newWords[index].length === 0 && activeWordIndex === index) {
-        setSuggestions(PIN_WORDLIST)  // Show all when cleared while focused
+        setSuggestions(PIN_WORDLIST) // Show all when cleared while focused
         setSelectedIndex(0)
       } else {
         setSuggestions([])
@@ -282,51 +314,54 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
       updateWordPin(newWords)
     }
 
-    const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>, fieldIndex: number) => {
-      setMaskWords(false)
-      const pastedText = e.clipboardData.getData('text')
+    const handlePaste = useCallback(
+      (e: React.ClipboardEvent<HTMLInputElement>, fieldIndex: number) => {
+        setMaskWords(false)
+        const pastedText = e.clipboardData.getData('text')
 
-      // Split by spaces, newlines, tabs, commas
-      const potentialWords = pastedText
-        .toLowerCase()
-        .split(/[\s,]+/)
-        .map(w => w.replace(/[^a-z]/g, ''))
-        .filter(w => w.length > 0)
+        // Split by spaces, newlines, tabs, commas
+        const potentialWords = pastedText
+          .toLowerCase()
+          .split(/[\s,]+/)
+          .map((w) => w.replace(/[^a-z]/g, ''))
+          .filter((w) => w.length > 0)
 
-      // If only one word, let default paste handle it
-      if (potentialWords.length <= 1) return
+        // If only one word, let default paste handle it
+        if (potentialWords.length <= 1) return
 
-      e.preventDefault()
+        e.preventDefault()
 
-      // Validate all words
-      const validWords = potentialWords.slice(0, 7)
-      const allValid = validWords.every(w => isValidPinWord(w))
+        // Validate all words
+        const validWords = potentialWords.slice(0, 7)
+        const allValid = validWords.every((w) => isValidPinWord(w))
 
-      if (!allValid) {
-        setError('Some pasted words are invalid')
-        if (timeoutRef.current) clearTimeout(timeoutRef.current)
-        timeoutRef.current = setTimeout(() => setError(null), 3000)
-        return
-      }
-
-      // Populate fields starting from current field
-      const newWords = [...words]
-      validWords.forEach((word, i) => {
-        const targetIndex = fieldIndex + i
-        if (targetIndex < 7) {
-          newWords[targetIndex] = word
+        if (!allValid) {
+          setError('Some pasted words are invalid')
+          if (timeoutRef.current) clearTimeout(timeoutRef.current)
+          timeoutRef.current = setTimeout(() => setError(null), 3000)
+          return
         }
-      })
 
-      setWords(newWords)
-      setSuggestions([])
+        // Populate fields starting from current field
+        const newWords = [...words]
+        validWords.forEach((word, i) => {
+          const targetIndex = fieldIndex + i
+          if (targetIndex < 7) {
+            newWords[targetIndex] = word
+          }
+        })
 
-      updateWordPin(newWords)
+        setWords(newWords)
+        setSuggestions([])
 
-      // Focus field after last pasted word
-      const nextFocusIndex = Math.min(fieldIndex + validWords.length, 6)
-      inputRefs.current[nextFocusIndex]?.focus()
-    }, [words, updateWordPin])
+        updateWordPin(newWords)
+
+        // Focus field after last pasted word
+        const nextFocusIndex = Math.min(fieldIndex + validWords.length, 6)
+        inputRefs.current[nextFocusIndex]?.focus()
+      },
+      [words, updateWordPin],
+    )
 
     const handlePasteFromClipboard = useCallback(async () => {
       try {
@@ -341,11 +376,11 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         const potentialWords = text
           .toLowerCase()
           .split(/[\s,]+/)
-          .map(w => w.replace(/[^a-z]/g, ''))
-          .filter(w => w.length > 0)
+          .map((w) => w.replace(/[^a-z]/g, ''))
+          .filter((w) => w.length > 0)
           .slice(0, 7)
 
-        const allValid = potentialWords.every(w => isValidPinWord(w))
+        const allValid = potentialWords.every((w) => isValidPinWord(w))
 
         if (!allValid) {
           setError('Clipboard contains invalid words')
@@ -367,27 +402,31 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         const nextIndex = potentialWords.length < 7 ? potentialWords.length : 6
         inputRefs.current[nextIndex]?.focus()
       } catch (err) {
-        const message = err instanceof DOMException && err.name === 'NotAllowedError'
-          ? 'Clipboard access denied'
-          : 'Failed to read clipboard'
+        const message =
+          err instanceof DOMException && err.name === 'NotAllowedError'
+            ? 'Clipboard access denied'
+            : 'Failed to read clipboard'
         setError(message)
         if (timeoutRef.current) clearTimeout(timeoutRef.current)
         timeoutRef.current = setTimeout(() => setError(null), 3000)
       }
     }, [updateWordPin])
 
-    const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    const handleKeyDown = (
+      index: number,
+      e: React.KeyboardEvent<HTMLInputElement>,
+    ) => {
       if (suggestions.length > 0) {
         if (e.key === 'ArrowDown') {
           e.preventDefault()
           const maxVisible = Math.min(10, suggestions.length)
-          setSelectedIndex(prev => (prev + 1) % maxVisible)
+          setSelectedIndex((prev) => (prev + 1) % maxVisible)
           return
         }
         if (e.key === 'ArrowUp') {
           e.preventDefault()
           const maxVisible = Math.min(10, suggestions.length)
-          setSelectedIndex(prev => (prev - 1 + maxVisible) % maxVisible)
+          setSelectedIndex((prev) => (prev - 1 + maxVisible) % maxVisible)
           return
         }
         if (e.key === 'Enter') {
@@ -396,7 +435,8 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
           return
         }
         if (e.key === 'Tab') {
-          const hasActiveSuggestion = suggestions.length > 0 && selectedIndex !== -1
+          const hasActiveSuggestion =
+            suggestions.length > 0 && selectedIndex !== -1
           if (hasActiveSuggestion && !e.shiftKey) {
             e.preventDefault()
             selectSuggestion(index, suggestions[selectedIndex])
@@ -421,12 +461,13 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
 
     const toggleMode = (e: React.MouseEvent) => {
       e.preventDefault()
-      setUseWords(prev => !prev)
+      setUseWords((prev) => !prev)
       // Don't convert between modes - they're independent
     }
 
     const charIsComplete = charDisplayLength === PIN_LENGTH
-    const wordIsComplete = words.length === 7 && words.every(w => isValidPinWord(w))
+    const wordIsComplete =
+      words.length === 7 && words.every((w) => isValidPinWord(w))
     const charHasChecksumError = charIsComplete && !charIsValid
     const wordHasChecksumError = wordIsComplete && !wordIsValid
 
@@ -438,24 +479,33 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
               // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length word slots; index IS the position
               <div key={i} className="relative group">
                 <Input
-                  ref={el => { inputRefs.current[i] = el }}
+                  ref={(el) => {
+                    inputRefs.current[i] = el
+                  }}
                   value={maskWords && word === '' ? '***' : word}
-                  onChange={e => handleWordChange(i, e.target.value)}
-                  onKeyDown={e => handleKeyDown(i, e)}
-                  onPaste={e => handlePaste(e, i)}
+                  onChange={(e) => handleWordChange(i, e.target.value)}
+                  onKeyDown={(e) => handleKeyDown(i, e)}
+                  onPaste={(e) => handlePaste(e, i)}
                   onFocus={() => handleFocus(i)}
                   onBlur={() => handleBlur()}
                   placeholder={`Word ${i + 1}`}
                   aria-expanded={suggestions.length > 0}
                   aria-haspopup="listbox"
-                  aria-controls={suggestions.length > 0 ? `suggestions-${i}` : undefined}
-                  aria-activedescendant={suggestions.length > 0 ? `suggestion-${i}-${selectedIndex}` : undefined}
-                  className={`pr-7 text-center font-mono h-10 ${word === ''
-                    ? ''
-                    : isValidPinWord(word)
-                      ? 'border-green-500 bg-green-50/50'
-                      : 'border-destructive bg-destructive/5'
-                    }`}
+                  aria-controls={
+                    suggestions.length > 0 ? `suggestions-${i}` : undefined
+                  }
+                  aria-activedescendant={
+                    suggestions.length > 0
+                      ? `suggestion-${i}-${selectedIndex}`
+                      : undefined
+                  }
+                  className={`pr-7 text-center font-mono h-10 ${
+                    word === ''
+                      ? ''
+                      : isValidPinWord(word)
+                        ? 'border-green-500 bg-green-50/50'
+                        : 'border-destructive bg-destructive/5'
+                  }`}
                   autoComplete="off"
                   disabled={disabled}
                 />
@@ -479,10 +529,11 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
                         key={s}
                         type="button"
                         id={`suggestion-${i}-${si}`}
-                        className={`w-full text-left px-3 py-1.5 text-sm font-mono transition-colors ${si === selectedIndex
-                          ? 'bg-primary text-primary-foreground'
-                          : 'hover:bg-muted'
-                          }`}
+                        className={`w-full text-left px-3 py-1.5 text-sm font-mono transition-colors ${
+                          si === selectedIndex
+                            ? 'bg-primary text-primary-foreground'
+                            : 'hover:bg-muted'
+                        }`}
                         role="option"
                         aria-selected={si === selectedIndex}
                         onMouseEnter={() => setSelectedIndex(si)}
@@ -521,12 +572,13 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
             type="text"
             onChange={handleCharChange}
             placeholder={`Enter ${PIN_LENGTH}-character PIN`}
-            className={`font-mono text-xl text-center tracking-wider ${error || charHasChecksumError
-              ? 'border-destructive'
-              : charIsComplete
-                ? 'border-green-500'
-                : ''
-              }`}
+            className={`font-mono text-xl text-center tracking-wider ${
+              error || charHasChecksumError
+                ? 'border-destructive'
+                : charIsComplete
+                  ? 'border-green-500'
+                  : ''
+            }`}
             maxLength={PIN_LENGTH}
             autoComplete="off"
             spellCheck={false}
@@ -539,32 +591,30 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
             <div className="flex items-center gap-1.5">
               {useWords ? (
                 wordIsComplete && !wordHasChecksumError ? (
-                    <span className="text-green-600 flex items-center gap-1">
-                      <CheckCircle2 className="h-3 w-3" /> PIN Valid
-                    </span>
-                  ) : wordHasChecksumError ? (
-                    <span className="text-destructive flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" /> Invalid PIN
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">
-                      {wordDisplayLength}/7 words validated
-                    </span>
-                  )
+                  <span className="text-green-600 flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" /> PIN Valid
+                  </span>
+                ) : wordHasChecksumError ? (
+                  <span className="text-destructive flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" /> Invalid PIN
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">
+                    {wordDisplayLength}/7 words validated
+                  </span>
+                )
+              ) : charIsComplete && !charHasChecksumError ? (
+                <span className="text-green-600 flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" /> PIN Valid
+                </span>
+              ) : charHasChecksumError ? (
+                <span className="text-destructive flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" /> Invalid PIN
+                </span>
               ) : (
-                charIsComplete && !charHasChecksumError ? (
-                    <span className="text-green-600 flex items-center gap-1">
-                      <CheckCircle2 className="h-3 w-3" /> PIN Valid
-                    </span>
-                  ) : charHasChecksumError ? (
-                    <span className="text-destructive flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" /> Invalid PIN
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">
-                      {charDisplayLength}/{PIN_LENGTH} characters
-                    </span>
-                  )
+                <span className="text-muted-foreground">
+                  {charDisplayLength}/{PIN_LENGTH} characters
+                </span>
               )}
               {error && <span className="text-destructive">• {error}</span>}
             </div>
@@ -594,5 +644,5 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         </div>
       </div>
     )
-  }
+  },
 )

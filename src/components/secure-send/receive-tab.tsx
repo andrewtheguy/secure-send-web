@@ -1,21 +1,35 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { Download, X, RotateCcw, FileDown, QrCode, KeyRound, Fingerprint } from 'lucide-react'
+import {
+  Download,
+  FileDown,
+  Fingerprint,
+  KeyRound,
+  QrCode,
+  RotateCcw,
+  X,
+} from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { PinInput, type PinInputRef, type PinChangePayload } from './pin-input'
-import { TransferStatus } from './transfer-status'
-import { QRDisplay } from './qr-display'
-import { QRInput } from './qr-input'
-import { useNostrReceive } from '@/hooks/use-nostr-receive'
 import { useManualReceive } from '@/hooks/use-manual-receive'
-import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
+import { useNostrReceive } from '@/hooks/use-nostr-receive'
 import { formatPinHint } from '@/lib/crypto'
+import {
+  downloadFile,
+  formatFileSize,
+  getMimeTypeDescription,
+} from '@/lib/file-utils'
 import type { SignalingMethod } from '@/lib/nostr/types'
 import type { PinKeyMaterial } from '@/lib/types'
+import { type PinChangePayload, PinInput, type PinInputRef } from './pin-input'
+import { QRDisplay } from './qr-display'
+import { QRInput } from './qr-input'
+import { TransferStatus } from './transfer-status'
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
-const PIN_MODE_DESCRIPTION = 'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.'
-const QR_MODE_DESCRIPTION = 'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.'
+const PIN_MODE_DESCRIPTION =
+  'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.'
+const QR_MODE_DESCRIPTION =
+  'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.'
 
 type PinSecret = PinKeyMaterial & { method: SignalingMethod | null }
 
@@ -48,7 +62,9 @@ export function ReceiveTab() {
   // Get the right receive function based on mode
   // nostrHook has .receive, manualHook does not
   const pinReceive: ((secret: PinSecret) => Promise<void>) | undefined =
-    !isManualMode && 'receive' in activeHook && typeof activeHook.receive === 'function'
+    !isManualMode &&
+    'receive' in activeHook &&
+    typeof activeHook.receive === 'function'
       ? activeHook.receive
       : undefined
   const { startReceive, submitOffer } = manualHook
@@ -69,7 +85,9 @@ export function ReceiveTab() {
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pinInactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  )
   const mountedRef = useRef(true)
 
   // Clear PIN inactivity timeout and countdown
@@ -86,39 +104,45 @@ export function ReceiveTab() {
   }, [])
 
   // Reset PIN inactivity timeout (called on each PIN change)
-  const resetPinInactivityTimeout = useCallback((hasInput: boolean) => {
-    clearPinInactivityTimeout()
-    setPinExpired(false)
+  const resetPinInactivityTimeout = useCallback(
+    (hasInput: boolean) => {
+      clearPinInactivityTimeout()
+      setPinExpired(false)
 
-    // Only set timeout if there's some PIN input
-    if (hasInput) {
-      // Set initial countdown time
-      setTimeRemaining(Math.floor(PIN_INACTIVITY_TIMEOUT_MS / 1000))
+      // Only set timeout if there's some PIN input
+      if (hasInput) {
+        // Set initial countdown time
+        setTimeRemaining(Math.floor(PIN_INACTIVITY_TIMEOUT_MS / 1000))
 
-      // Start countdown interval
-      countdownIntervalRef.current = setInterval(() => {
-        if (!mountedRef.current) return
-        setTimeRemaining(prev => Math.max(0, prev - 1))
-      }, 1000)
+        // Start countdown interval
+        countdownIntervalRef.current = setInterval(() => {
+          if (!mountedRef.current) return
+          setTimeRemaining((prev) => Math.max(0, prev - 1))
+        }, 1000)
 
-      // Set expiration timeout
-      pinInactivityRef.current = setTimeout(() => {
-        if (mountedRef.current && (pinSecretRef.current || pinInputLengthRef.current > 0)) {
-          // Clear PIN due to inactivity
-          pinSecretRef.current = null
-          pinInputLengthRef.current = 0
-          setIsPinValid(false)
-          pinInputRef.current?.clear()
-          setPinExpired(true)
-          if (countdownIntervalRef.current) {
-            clearInterval(countdownIntervalRef.current)
-            countdownIntervalRef.current = null
+        // Set expiration timeout
+        pinInactivityRef.current = setTimeout(() => {
+          if (
+            mountedRef.current &&
+            (pinSecretRef.current || pinInputLengthRef.current > 0)
+          ) {
+            // Clear PIN due to inactivity
+            pinSecretRef.current = null
+            pinInputLengthRef.current = 0
+            setIsPinValid(false)
+            pinInputRef.current?.clear()
+            setPinExpired(true)
+            if (countdownIntervalRef.current) {
+              clearInterval(countdownIntervalRef.current)
+              countdownIntervalRef.current = null
+            }
+            setTimeRemaining(0)
           }
-          setTimeRemaining(0)
-        }
-      }, PIN_INACTIVITY_TIMEOUT_MS)
-    }
-  }, [clearPinInactivityTimeout])
+        }, PIN_INACTIVITY_TIMEOUT_MS)
+      }
+    },
+    [clearPinInactivityTimeout],
+  )
 
   useEffect(() => {
     mountedRef.current = true
@@ -186,38 +210,49 @@ export function ReceiveTab() {
     setPinExpired(false)
   }
 
-  const handlePinChange = useCallback((payload: PinChangePayload) => {
-    const { key, fingerprint, method, isValid, length } = payload
-    pinInputLengthRef.current = length
+  const handlePinChange = useCallback(
+    (payload: PinChangePayload) => {
+      const { key, fingerprint, method, isValid, length } = payload
+      pinInputLengthRef.current = length
 
-    if (isValid && key && fingerprint) {
-      pinSecretRef.current = { key, fingerprint, method: method ?? null }
-      setIsPinValid(true)
-      setPinFingerprint(formatPinHint(fingerprint))
-    } else {
-      pinSecretRef.current = null
-      setIsPinValid(false)
-      setPinFingerprint(null)
-    }
+      if (isValid && key && fingerprint) {
+        pinSecretRef.current = { key, fingerprint, method: method ?? null }
+        setIsPinValid(true)
+        setPinFingerprint(formatPinHint(fingerprint))
+      } else {
+        pinSecretRef.current = null
+        setIsPinValid(false)
+        setPinFingerprint(null)
+      }
 
-    resetPinInactivityTimeout(length > 0)
+      resetPinInactivityTimeout(length > 0)
 
-    if (method) {
-      setDetectedMethod(method)
-    } else if (length === 0) {
-      setDetectedMethod('nostr')
-    }
-  }, [resetPinInactivityTimeout])
+      if (method) {
+        setDetectedMethod(method)
+      } else if (length === 0) {
+        setDetectedMethod('nostr')
+      }
+    },
+    [resetPinInactivityTimeout],
+  )
 
   const handleDownload = () => {
     if (receivedContent) {
-      downloadFile(receivedContent.data, receivedContent.fileName, receivedContent.mimeType)
+      downloadFile(
+        receivedContent.data,
+        receivedContent.fileName,
+        receivedContent.mimeType,
+      )
     }
   }
 
-  const isActive = state.status !== 'idle' && state.status !== 'error' && state.status !== 'complete'
+  const isActive =
+    state.status !== 'idle' &&
+    state.status !== 'error' &&
+    state.status !== 'complete'
   const showQRInput = isManualMode && state.status === 'waiting_for_offer'
-  const showQRDisplay = isManualMode && answerData && state.status === 'showing_answer'
+  const showQRDisplay =
+    isManualMode && answerData && state.status === 'showing_answer'
 
   return (
     <div className="space-y-4 pt-4">
@@ -225,7 +260,11 @@ export function ReceiveTab() {
         <>
           <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
             <p className="text-sm font-medium">Transfer mode</p>
-            <RadioGroup value={receiveMode} onValueChange={(value) => setReceiveMode(value as ReceiveMode)} className="gap-2">
+            <RadioGroup
+              value={receiveMode}
+              onValueChange={(value) => setReceiveMode(value as ReceiveMode)}
+              className="gap-2"
+            >
               <label
                 htmlFor="receive-mode-pin"
                 className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ${
@@ -234,13 +273,19 @@ export function ReceiveTab() {
                     : 'border-border hover:bg-muted/60'
                 }`}
               >
-                <RadioGroupItem id="receive-mode-pin" value="pin" className="mt-0.5" />
+                <RadioGroupItem
+                  id="receive-mode-pin"
+                  value="pin"
+                  className="mt-0.5"
+                />
                 <div className="space-y-1">
                   <span className="flex items-center gap-2 text-sm font-medium">
                     <KeyRound className="h-4 w-4" />
                     PIN mode
                   </span>
-                  <p className="text-xs text-muted-foreground">{PIN_MODE_DESCRIPTION}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {PIN_MODE_DESCRIPTION}
+                  </p>
                 </div>
               </label>
 
@@ -252,13 +297,19 @@ export function ReceiveTab() {
                     : 'border-border hover:bg-muted/60'
                 }`}
               >
-                <RadioGroupItem id="receive-mode-qr" value="scan" className="mt-0.5" />
+                <RadioGroupItem
+                  id="receive-mode-qr"
+                  value="scan"
+                  className="mt-0.5"
+                />
                 <div className="space-y-1">
                   <span className="flex items-center gap-2 text-sm font-medium">
                     <QrCode className="h-4 w-4" />
                     QR code mode
                   </span>
-                  <p className="text-xs text-muted-foreground">{QR_MODE_DESCRIPTION}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {QR_MODE_DESCRIPTION}
+                  </p>
                 </div>
               </label>
             </RadioGroup>
@@ -269,7 +320,11 @@ export function ReceiveTab() {
               {/* PIN mode */}
               <div className="space-y-2">
                 <div className="text-sm font-medium">Enter PIN from sender</div>
-                <PinInput ref={pinInputRef} onPinChange={handlePinChange} disabled={isActive} />
+                <PinInput
+                  ref={pinInputRef}
+                  onPinChange={handlePinChange}
+                  disabled={isActive}
+                />
                 {timeRemaining > 0 && (
                   <p className="text-xs text-amber-600 font-medium">
                     PIN will be cleared in {formatTime(timeRemaining)}
@@ -288,16 +343,30 @@ export function ReceiveTab() {
                     <Fingerprint className="h-3 w-3" />
                     PIN Fingerprint: {pinFingerprint}
                   </div>
-                  <p>- It should match the sender's PIN fingerprint if you entered the same words/PIN.</p>
-                  <p>- After you enter the correct PIN the app locks it into a key that cannot be read back out; this fingerprint is the one-way checksum you can compare to confirm both sides derived the same secret, and it cannot be reversed to recover the PIN or decrypt any data.</p>
+                  <p>
+                    - It should match the sender's PIN fingerprint if you
+                    entered the same words/PIN.
+                  </p>
+                  <p>
+                    - After you enter the correct PIN the app locks it into a
+                    key that cannot be read back out; this fingerprint is the
+                    one-way checksum you can compare to confirm both sides
+                    derived the same secret, and it cannot be reversed to
+                    recover the PIN or decrypt any data.
+                  </p>
                 </div>
               )}
 
               <div className="text-xs text-muted-foreground text-center pb-2">
-                File data is encrypted before transfer. Relays or STUN may still see routing metadata.
+                File data is encrypted before transfer. Relays or STUN may still
+                see routing metadata.
               </div>
 
-              <Button onClick={handleReceivePin} disabled={!canReceivePin} className="w-full bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700">
+              <Button
+                onClick={handleReceivePin}
+                disabled={!canReceivePin}
+                className="w-full bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700"
+              >
                 <Download className="mr-2 h-4 w-4" />
                 Receive
               </Button>
@@ -306,12 +375,20 @@ export function ReceiveTab() {
             <>
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">
-                  For <span className="font-medium text-foreground">QR code mode</span> transfers only.
-                  Scan or paste the intended sender's QR code to receive their content.
+                  For{' '}
+                  <span className="font-medium text-foreground">
+                    QR code mode
+                  </span>{' '}
+                  transfers only. Scan or paste the intended sender's QR code to
+                  receive their content.
                 </p>
               </div>
 
-              <Button onClick={handleReceiveScan} disabled={!canReceiveScan} className="w-full bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700">
+              <Button
+                onClick={handleReceiveScan}
+                disabled={!canReceiveScan}
+                className="w-full bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700"
+              >
                 <Download className="mr-2 h-4 w-4" />
                 Start Receive
               </Button>
@@ -357,7 +434,10 @@ export function ReceiveTab() {
                     {getMimeTypeDescription(receivedContent.mimeType)}
                   </p>
                 </div>
-                <Button onClick={handleDownload} className="w-full max-w-[200px] bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700">
+                <Button
+                  onClick={handleDownload}
+                  className="w-full max-w-[200px] bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700"
+                >
                   <Download className="mr-2 h-4 w-4" />
                   Download File
                 </Button>
@@ -374,7 +454,11 @@ export function ReceiveTab() {
             )}
 
             {(state.status === 'complete' || state.status === 'error') && (
-              <Button variant="outline" onClick={handleReset} className="flex-1">
+              <Button
+                variant="outline"
+                onClick={handleReset}
+                className="flex-1"
+              >
                 <RotateCcw className="mr-2 h-4 w-4" />
                 Receive Another
               </Button>

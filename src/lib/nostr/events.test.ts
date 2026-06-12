@@ -7,11 +7,10 @@ import {
 } from './events'
 
 async function generateAesKey(): Promise<CryptoKey> {
-  return crypto.subtle.generateKey(
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
-  )
+  return crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+    'encrypt',
+    'decrypt',
+  ])
 }
 
 describe('Nostr events', () => {
@@ -25,7 +24,7 @@ describe('Nostr events', () => {
       'transfer-id',
       0,
       key,
-      'hint'
+      'hint',
     )
 
     expect(parseAckEvent(event)).toMatchObject({
@@ -34,7 +33,9 @@ describe('Nostr events', () => {
       seq: 0,
       hint: 'hint',
     })
-    await expect(verifyAuthenticatedAckEvent(event, key, 'transfer-id', 0)).resolves.toBe(true)
+    await expect(
+      verifyAuthenticatedAckEvent(event, key, 'transfer-id', 0),
+    ).resolves.toBe(true)
   })
 
   it('rejects ACKs whose encrypted body does not match the routing tags', async () => {
@@ -46,14 +47,16 @@ describe('Nostr events', () => {
       'sender-pubkey',
       'transfer-id',
       1,
-      key
+      key,
     )
     const tampered = {
       ...event,
-      tags: event.tags.map((tag) => tag[0] === 'seq' ? ['seq', '2'] : tag),
+      tags: event.tags.map((tag) => (tag[0] === 'seq' ? ['seq', '2'] : tag)),
     }
 
-    await expect(verifyAuthenticatedAckEvent(tampered, key, 'transfer-id', 2)).resolves.toBe(false)
+    await expect(
+      verifyAuthenticatedAckEvent(tampered, key, 'transfer-id', 2),
+    ).resolves.toBe(false)
   })
 
   it('rejects plaintext legacy-style ACKs', async () => {
@@ -64,11 +67,13 @@ describe('Nostr events', () => {
       'sender-pubkey',
       'transfer-id',
       -1,
-      key
+      key,
     )
 
     const plaintextAck = { ...event, content: '' }
 
-    await expect(verifyAuthenticatedAckEvent(plaintextAck, key, 'transfer-id', -1)).resolves.toBe(false)
+    await expect(
+      verifyAuthenticatedAckEvent(plaintextAck, key, 'transfer-id', -1),
+    ).resolves.toBe(false)
   })
 })

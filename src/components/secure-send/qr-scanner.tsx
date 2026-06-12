@@ -1,15 +1,15 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
-import { RefreshCw, AlertCircle, Loader2, Camera } from 'lucide-react'
+import { AlertCircle, Camera, Loader2, RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useQRScanner } from '@/hooks/useQRScanner'
-import { isValidBinaryPayload } from '@/lib/manual-signaling'
 import {
   computeCrc32,
   extractChunkParam,
+  isValidPayloadChecksum,
   parseChunk,
   reassembleChunks,
-  isValidPayloadChecksum,
 } from '@/lib/chunk-utils'
+import { isValidBinaryPayload } from '@/lib/manual-signaling'
 import { isMobileDevice } from '@/lib/utils'
 
 interface QRScannerProps {
@@ -19,14 +19,21 @@ interface QRScannerProps {
   disabled?: boolean
 }
 
-export function QRScanner({ onScan, expectedType, onError, disabled }: QRScannerProps) {
+export function QRScanner({
+  onScan,
+  expectedType,
+  onError,
+  disabled,
+}: QRScannerProps) {
   const [error, setError] = useState<string | null>(null)
   const [cameraReady, setCameraReady] = useState(false)
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>(
-    isMobileDevice() ? 'environment' : 'user'
+    isMobileDevice() ? 'environment' : 'user',
   )
   const [collectedCount, setCollectedCount] = useState(0)
-  const [collectedIndices, setCollectedIndices] = useState<Set<number>>(new Set())
+  const [collectedIndices, setCollectedIndices] = useState<Set<number>>(
+    new Set(),
+  )
   const [totalChunks, setTotalChunks] = useState<number | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
   const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -60,12 +67,15 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
     setTotalChunks(null)
   }, [])
 
-  const handleInvalidPayload = useCallback((msg: string) => {
-    setError(msg)
-    onError?.(msg)
-    clearChunkRefs()
-    clearChunkProgressState()
-  }, [clearChunkRefs, onError, clearChunkProgressState])
+  const handleInvalidPayload = useCallback(
+    (msg: string) => {
+      setError(msg)
+      onError?.(msg)
+      clearChunkRefs()
+      clearChunkProgressState()
+    },
+    [clearChunkRefs, onError, clearChunkProgressState],
+  )
 
   // Clear chunk state on unmount
   useEffect(() => {
@@ -79,103 +89,126 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
     }
   }, [disabled, clearChunkRefs])
 
-  const handleScan = useCallback((binaryData: Uint8Array) => {
-    if (expectedType === 'offer') {
-      // URL-based QR codes from MultiQRDisplay
-      const text = new TextDecoder().decode(binaryData)
-      const param = extractChunkParam(text)
-      if (!param) {
-        console.debug('QRScanner: no chunk param found in QR text', text)
-        showWarning('Unrecognized QR code, keep scanning...')
-        return
-      }
+  const handleScan = useCallback(
+    (binaryData: Uint8Array) => {
+      if (expectedType === 'offer') {
+        // URL-based QR codes from MultiQRDisplay
+        const text = new TextDecoder().decode(binaryData)
+        const param = extractChunkParam(text)
+        if (!param) {
+          console.debug('QRScanner: no chunk param found in QR text', text)
+          showWarning('Unrecognized QR code, keep scanning...')
+          return
+        }
 
-      const chunk = parseChunk(param)
-      if (!chunk) {
-        console.debug('QRScanner: failed to parse chunk param', param)
-        setError('Could not parse QR code data')
-        onError?.('Could not parse QR code data')
-        return
-      }
+        const chunk = parseChunk(param)
+        if (!chunk) {
+          console.debug('QRScanner: failed to parse chunk param', param)
+          setError('Could not parse QR code data')
+          onError?.('Could not parse QR code data')
+          return
+        }
 
-      // Reset if total changed (different transfer)
-      if (totalChunksRef.current !== null && totalChunksRef.current !== chunk.total) {
-        clearChunkRefs()
-        clearChunkProgressState()
-      }
+        // Reset if total changed (different transfer)
+        if (
+          totalChunksRef.current !== null &&
+          totalChunksRef.current !== chunk.total
+        ) {
+          clearChunkRefs()
+          clearChunkProgressState()
+        }
 
-      if (chunk.index === 0) {
-        if (typeof chunk.checksum !== 'number') {
+        if (chunk.index === 0) {
+          if (typeof chunk.checksum !== 'number') {
+            const msg = 'Invalid QR payload. Please start scanning again.'
+            handleInvalidPayload(msg)
+            return
+          }
+          if (
+            checksumRef.current !== null &&
+            checksumRef.current !== chunk.checksum
+          ) {
+            const msg = 'Invalid QR payload. Please start scanning again.'
+            handleInvalidPayload(msg)
+            return
+          }
+          checksumRef.current = chunk.checksum
+        } else if (chunk.checksum !== undefined) {
           const msg = 'Invalid QR payload. Please start scanning again.'
           handleInvalidPayload(msg)
           return
         }
-        if (checksumRef.current !== null && checksumRef.current !== chunk.checksum) {
-          const msg = 'Invalid QR payload. Please start scanning again.'
-          handleInvalidPayload(msg)
+
+        totalChunksRef.current = chunk.total
+        chunksRef.current.set(chunk.index, chunk.data)
+        setTotalChunks(chunk.total)
+        setCollectedCount(chunksRef.current.size)
+        setCollectedIndices(new Set(chunksRef.current.keys()))
+        setError(null)
+        setWarning(null)
+
+        if (chunksRef.current.size === chunk.total) {
+          const assembled = reassembleChunks(chunksRef.current, chunk.total)
+          const expectedChecksum = checksumRef.current
+          clearChunkRefs()
+          clearChunkProgressState()
+          if (assembled === null) {
+            console.error('QRScanner: reassembly failed')
+            const msg = 'Invalid QR payload. Please start scanning again.'
+            setError(msg)
+            onError?.(msg)
+            return
+          }
+          if (expectedChecksum === null) {
+            console.error('QRScanner: missing checksum')
+            const msg = 'Invalid QR payload. Please start scanning again.'
+            setError(msg)
+            onError?.(msg)
+            return
+          }
+          if (!isValidPayloadChecksum(assembled, expectedChecksum)) {
+            const actualChecksum = computeCrc32(assembled)
+            console.error('QRScanner: checksum mismatch', {
+              expectedChecksum,
+              actualChecksum,
+            })
+            const msg = 'Invalid QR payload. Please start scanning again.'
+            setError(msg)
+            onError?.(msg)
+            return
+          }
+          onScan(assembled)
+        }
+      } else {
+        // Binary SS03 payload from QRDisplay
+        if (!isValidBinaryPayload(binaryData)) {
+          setError('Invalid or unsupported QR payload format')
+          onError?.('Invalid or unsupported QR payload format')
           return
         }
-        checksumRef.current = chunk.checksum
-      } else if (chunk.checksum !== undefined) {
-        const msg = 'Invalid QR payload. Please start scanning again.'
-        handleInvalidPayload(msg)
-        return
+
+        setError(null)
+        onScan(binaryData)
       }
+    },
+    [
+      onScan,
+      onError,
+      expectedType,
+      clearChunkRefs,
+      clearChunkProgressState,
+      showWarning,
+      handleInvalidPayload,
+    ],
+  )
 
-      totalChunksRef.current = chunk.total
-      chunksRef.current.set(chunk.index, chunk.data)
-      setTotalChunks(chunk.total)
-      setCollectedCount(chunksRef.current.size)
-      setCollectedIndices(new Set(chunksRef.current.keys()))
-      setError(null)
-      setWarning(null)
-
-      if (chunksRef.current.size === chunk.total) {
-        const assembled = reassembleChunks(chunksRef.current, chunk.total)
-        const expectedChecksum = checksumRef.current
-        clearChunkRefs()
-        clearChunkProgressState()
-        if (assembled === null) {
-          console.error('QRScanner: reassembly failed')
-          const msg = 'Invalid QR payload. Please start scanning again.'
-          setError(msg)
-          onError?.(msg)
-          return
-        }
-        if (expectedChecksum === null) {
-          console.error('QRScanner: missing checksum')
-          const msg = 'Invalid QR payload. Please start scanning again.'
-          setError(msg)
-          onError?.(msg)
-          return
-        }
-        if (!isValidPayloadChecksum(assembled, expectedChecksum)) {
-          const actualChecksum = computeCrc32(assembled)
-          console.error('QRScanner: checksum mismatch', { expectedChecksum, actualChecksum })
-          const msg = 'Invalid QR payload. Please start scanning again.'
-          setError(msg)
-          onError?.(msg)
-          return
-        }
-        onScan(assembled)
-      }
-    } else {
-      // Binary SS03 payload from QRDisplay
-      if (!isValidBinaryPayload(binaryData)) {
-        setError('Invalid or unsupported QR payload format')
-        onError?.('Invalid or unsupported QR payload format')
-        return
-      }
-
-      setError(null)
-      onScan(binaryData)
-    }
-  }, [onScan, onError, expectedType, clearChunkRefs, clearChunkProgressState, showWarning, handleInvalidPayload])
-
-  const handleError = useCallback((err: string) => {
-    setError(err)
-    onError?.(err)
-  }, [onError])
+  const handleError = useCallback(
+    (err: string) => {
+      setError(err)
+      onError?.(err)
+    },
+    [onError],
+  )
 
   const handleCameraReady = useCallback(() => {
     setCameraReady(true)
@@ -191,10 +224,14 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
   })
 
   const handleSwitchCamera = useCallback(() => {
-    setFacingMode((prev) => prev === 'environment' ? 'user' : 'environment')
+    setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
   }, [])
 
-  const needsMoreChunks = !disabled && totalChunks !== null && totalChunks > 1 && collectedCount < totalChunks
+  const needsMoreChunks =
+    !disabled &&
+    totalChunks !== null &&
+    totalChunks > 1 &&
+    collectedCount < totalChunks
 
   return (
     <div className="space-y-3">
@@ -225,7 +262,8 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
             })}
           </div>
           <p className="text-xs text-muted-foreground text-center">
-            QR codes can be scanned in any order, but all QR codes must be scanned.
+            QR codes can be scanned in any order, but all QR codes must be
+            scanned.
           </p>
         </div>
       )}
@@ -235,7 +273,9 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
           <div className="absolute inset-0 flex items-center justify-center bg-muted">
             <div className="text-center">
               <Loader2 className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
-              <p className="text-sm text-muted-foreground mt-2">Starting camera...</p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Starting camera...
+              </p>
             </div>
           </div>
         )}
@@ -279,7 +319,8 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
 
       {error?.includes('denied') && (
         <p className="text-xs text-muted-foreground text-center">
-          Please allow camera access in your browser settings and reload the page.
+          Please allow camera access in your browser settings and reload the
+          page.
         </p>
       )}
 
@@ -299,7 +340,8 @@ export function QRScanner({ onScan, expectedType, onError, disabled }: QRScanner
       )}
 
       <p className="text-xs text-muted-foreground text-center">
-        Point your camera at the {expectedType} QR code{needsMoreChunks ? 's' : ''}
+        Point your camera at the {expectedType} QR code
+        {needsMoreChunks ? 's' : ''}
       </p>
     </div>
   )

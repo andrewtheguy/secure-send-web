@@ -1,12 +1,20 @@
-import { finalizeEvent, generateSecretKey, getPublicKey, type Event } from 'nostr-tools'
-import { EVENT_KIND_PIN_EXCHANGE, EVENT_KIND_DATA_TRANSFER, type ChunkNotifyPayload } from './types'
-import { TRANSFER_EXPIRATION_MS } from '../crypto/constants'
+import {
+  type Event,
+  finalizeEvent,
+  generateSecretKey,
+  getPublicKey,
+} from 'nostr-tools'
 import { decrypt, encrypt } from '../crypto/aes-gcm'
+import { TRANSFER_EXPIRATION_MS } from '../crypto/constants'
+import { EVENT_KIND_DATA_TRANSFER, EVENT_KIND_PIN_EXCHANGE } from './types'
 
 /**
  * Generate ephemeral keypair for a transfer
  */
-export function generateEphemeralKeys(): { secretKey: Uint8Array; publicKey: string } {
+export function generateEphemeralKeys(): {
+  secretKey: Uint8Array
+  publicKey: string
+} {
   const secretKey = generateSecretKey()
   const publicKey = getPublicKey(secretKey)
   return { secretKey, publicKey }
@@ -29,7 +37,7 @@ export function createPinExchangeEvent(
   encryptedPayload: Uint8Array,
   salt: Uint8Array,
   transferId: string,
-  hint: string
+  hint: string,
 ): Event {
   // Soft TTL: relays may auto-delete after this timestamp (NIP-40)
   const expiration = Math.floor((Date.now() + TRANSFER_EXPIRATION_MS) / 1000)
@@ -47,7 +55,7 @@ export function createPinExchangeEvent(
       ],
       created_at: Math.floor(Date.now() / 1000),
     },
-    secretKey
+    secretKey,
   )
 
   return event
@@ -85,7 +93,7 @@ function createAckEvent(
   transferId: string,
   seq: number,
   content: string,
-  hint?: string
+  hint?: string,
 ): Event {
   const tags: string[][] = [
     ['p', senderPubkey],
@@ -106,7 +114,7 @@ function createAckEvent(
       tags,
       created_at: Math.floor(Date.now() / 1000),
     },
-    secretKey
+    secretKey,
   )
 
   return event
@@ -130,7 +138,7 @@ export async function createAuthenticatedAckEvent(
   transferId: string,
   seq: number,
   key: CryptoKey,
-  hint?: string
+  hint?: string,
 ): Promise<Event> {
   const payload = {
     type: 'ack',
@@ -145,7 +153,7 @@ export async function createAuthenticatedAckEvent(
     transferId,
     seq,
     uint8ArrayToBase64(encryptedPayload),
-    hint
+    hint,
   )
 }
 
@@ -186,11 +194,12 @@ export async function verifyAuthenticatedAckEvent(
   event: Event,
   key: CryptoKey,
   expectedTransferId: string,
-  expectedSeq: number
+  expectedSeq: number,
 ): Promise<boolean> {
   const ack = parseAckEvent(event)
   if (!ack) return false
-  if (ack.transferId !== expectedTransferId || ack.seq !== expectedSeq) return false
+  if (ack.transferId !== expectedTransferId || ack.seq !== expectedSeq)
+    return false
   if (!event.content) return false
 
   try {
@@ -209,7 +218,6 @@ export async function verifyAuthenticatedAckEvent(
   }
 }
 
-
 /**
  * Create Signaling event (kind 24242 with type=signal)
  */
@@ -217,7 +225,7 @@ export function createSignalingEvent(
   secretKey: Uint8Array,
   senderPubkey: string,
   transferId: string,
-  encryptedSignal: Uint8Array
+  encryptedSignal: Uint8Array,
 ): Event {
   const event = finalizeEvent(
     {
@@ -230,7 +238,7 @@ export function createSignalingEvent(
       ],
       created_at: Math.floor(Date.now() / 1000),
     },
-    secretKey
+    secretKey,
   )
   return event
 }
@@ -256,72 +264,6 @@ export function parseSignalingEvent(event: Event): {
   try {
     const encryptedSignal = base64ToUint8Array(event.content)
     return { transferId, senderPubkey, encryptedSignal }
-  } catch {
-    return null
-  }
-}
-
-/**
- * Create Chunk Notification event (kind 24242 with type=chunk_notify)
- * Sent by sender to notify receiver of an uploaded chunk URL (cloud fallback)
- */
-export function createChunkNotifyEvent(
-  secretKey: Uint8Array,
-  receiverPubkey: string,
-  transferId: string,
-  chunkIndex: number,
-  totalChunks: number,
-  chunkUrl: string,
-  chunkSize: number
-): Event {
-  const payload: ChunkNotifyPayload = {
-    transferId,
-    chunkIndex,
-    totalChunks,
-    chunkUrl,
-    chunkSize,
-  }
-
-  const event = finalizeEvent(
-    {
-      kind: EVENT_KIND_DATA_TRANSFER,
-      content: JSON.stringify(payload),
-      tags: [
-        ['p', receiverPubkey],
-        ['t', transferId],
-        ['type', 'chunk_notify'],
-        ['chunk', chunkIndex.toString()],
-        ['total', totalChunks.toString()],
-      ],
-      created_at: Math.floor(Date.now() / 1000),
-    },
-    secretKey
-  )
-  return event
-}
-
-/**
- * Parse Chunk Notification event
- */
-export function parseChunkNotifyEvent(event: Event): ChunkNotifyPayload | null {
-  if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null
-
-  const type = event.tags.find((t) => t[0] === 'type')?.[1]
-  if (type !== 'chunk_notify') return null
-
-  try {
-    const payload = JSON.parse(event.content) as ChunkNotifyPayload
-    // Validate required fields
-    if (
-      typeof payload.transferId !== 'string' ||
-      typeof payload.chunkIndex !== 'number' ||
-      typeof payload.totalChunks !== 'number' ||
-      typeof payload.chunkUrl !== 'string' ||
-      typeof payload.chunkSize !== 'number'
-    ) {
-      return null
-    }
-    return payload
   } catch {
     return null
   }

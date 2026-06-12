@@ -1,9 +1,12 @@
-import { useState, useCallback } from 'react'
-import { ClipboardPaste, AlertCircle, Camera } from 'lucide-react'
+import { AlertCircle, Camera, ClipboardPaste } from 'lucide-react'
+import { useCallback, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { parseClipboardPayload, isValidBinaryPayload } from '@/lib/manual-signaling'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  isValidBinaryPayload,
+  parseClipboardPayload,
+} from '@/lib/manual-signaling'
 import { isMobileDevice } from '@/lib/utils'
 import { QRScanner } from './qr-scanner'
 
@@ -14,7 +17,12 @@ interface QRInputProps {
   disabled?: boolean
 }
 
-export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProps) {
+export function QRInput({
+  onSubmit,
+  expectedType,
+  label,
+  disabled,
+}: QRInputProps) {
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [inputMode, setInputMode] = useState<'scan' | 'paste'>('scan')
@@ -56,10 +64,13 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
     onSubmit(binary)
   }, [value, onSubmit])
 
-  const handleScanSuccess = useCallback((binary: Uint8Array) => {
-    setError(null)
-    onSubmit(binary)
-  }, [onSubmit])
+  const handleScanSuccess = useCallback(
+    (binary: Uint8Array) => {
+      setError(null)
+      onSubmit(binary)
+    },
+    [onSubmit],
+  )
 
   const handleScanError = useCallback((err: string) => {
     // Only show persistent errors, not transient scan failures
@@ -82,11 +93,12 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
 
   return (
     <div className="space-y-3">
-      {label && (
-        <p className="text-sm font-medium">{label}</p>
-      )}
+      {label && <p className="text-sm font-medium">{label}</p>}
 
-      <Tabs value={inputMode} onValueChange={(v) => handleInputModeChange(v as 'scan' | 'paste')}>
+      <Tabs
+        value={inputMode}
+        onValueChange={(v) => handleInputModeChange(v as 'scan' | 'paste')}
+      >
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="scan" disabled={disabled}>
             <Camera className="h-4 w-4 mr-2" />
@@ -107,12 +119,12 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
               disabled={disabled}
             />
           ) : (
-              <button
-                type="button"
-                onClick={handleStartScan}
-                disabled={disabled}
-                className="w-full rounded-lg border border-dashed p-6 text-center cursor-pointer transition-colors hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
+            <button
+              type="button"
+              onClick={handleStartScan}
+              disabled={disabled}
+              className="w-full rounded-lg border border-dashed p-6 text-center cursor-pointer transition-colors hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               <Camera className="h-6 w-6 mx-auto mb-2" />
               <p className="text-base font-medium">Start scanning</p>
               <p className="text-sm text-muted-foreground mt-1">

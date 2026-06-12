@@ -1,5 +1,9 @@
 import { Info, Lock, Shield, Zap } from 'lucide-react'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { APP_VERSION } from '@/lib/app-version'
 
 interface FooterLabelProps {
@@ -21,7 +25,11 @@ function FooterLabel({ shortLabel, fullLabel }: FooterLabelProps) {
             {shortLabel}
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="center" className="sm:hidden max-w-[220px] p-2 text-xs leading-relaxed">
+        <DropdownMenuContent
+          side="top"
+          align="center"
+          className="sm:hidden max-w-[220px] p-2 text-xs leading-relaxed"
+        >
           {fullLabel}
         </DropdownMenuContent>
       </DropdownMenu>
@@ -43,7 +51,10 @@ export function Footer() {
         </div>
         <div className="flex items-center gap-1.5">
           <Shield className="h-3.5 w-3.5 text-primary" />
-          <FooterLabel shortLabel="No sign-up" fullLabel="No sign-up required" />
+          <FooterLabel
+            shortLabel="No sign-up"
+            fullLabel="No sign-up required"
+          />
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -56,8 +67,13 @@ export function Footer() {
               <Info className="h-3.5 w-3.5" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="center" className="max-w-[280px] p-2 text-xs leading-relaxed">
-            Compatibility is not expected between v0.0.x versions. Sender and receiver should use the same app version.
+          <DropdownMenuContent
+            side="top"
+            align="center"
+            className="max-w-[280px] p-2 text-xs leading-relaxed"
+          >
+            Compatibility is not expected between v0.0.x versions. Sender and
+            receiver should use the same app version.
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

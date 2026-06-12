@@ -1,18 +1,34 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Loader2,
+  QrCode,
+  RotateCcw,
+} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, AlertTriangle, QrCode, CheckCircle2, RotateCcw } from 'lucide-react'
+import { MultiQRDisplay } from '@/components/secure-send/multi-qr-display'
+import { PinDisplay } from '@/components/secure-send/pin-display'
+import { QRInput } from '@/components/secure-send/qr-input'
+import { TransferStatus } from '@/components/secure-send/transfer-status'
 import { Button } from '@/components/ui/button'
 import { useSend } from '@/contexts/send-context'
-import { useNostrSend, type UseNostrSendReturn } from '@/hooks/use-nostr-send'
-import { useManualSend, type UseManualSendReturn } from '@/hooks/use-manual-send'
-import { PinDisplay } from '@/components/secure-send/pin-display'
-import { TransferStatus } from '@/components/secure-send/transfer-status'
-import { MultiQRDisplay } from '@/components/secure-send/multi-qr-display'
-import { QRInput } from '@/components/secure-send/qr-input'
+import {
+  type UseManualSendReturn,
+  useManualSend,
+} from '@/hooks/use-manual-send'
+import { type UseNostrSendReturn, useNostrSend } from '@/hooks/use-nostr-send'
 import { compressFilesToZip, getFolderName } from '@/lib/folder-utils'
 import { testRelayAvailability } from '@/lib/nostr'
 
-type TransferStep = 'checking' | 'compressing' | 'ready' | 'active' | 'complete' | 'error' | 'nostr_unavailable'
+type TransferStep =
+  | 'checking'
+  | 'compressing'
+  | 'ready'
+  | 'active'
+  | 'complete'
+  | 'error'
+  | 'nostr_unavailable'
 
 // Discriminated union for type-safe hook access
 type ActiveHook =
@@ -45,10 +61,11 @@ export function SendTransferPage() {
   // Determine which hook to use based on config with discriminated union
   const isOnline = config?.methodChoice === 'online'
   const activeHook: ActiveHook = useMemo(
-    () => isOnline
-      ? { type: 'online', hook: nostrHook }
-      : { type: 'offline', hook: manualHook },
-    [isOnline, nostrHook, manualHook]
+    () =>
+      isOnline
+        ? { type: 'online', hook: nostrHook }
+        : { type: 'offline', hook: manualHook },
+    [isOnline, nostrHook, manualHook],
   )
 
   // Extract common state from active hook
@@ -59,9 +76,11 @@ export function SendTransferPage() {
   const pin = activeHook.type === 'online' ? activeHook.hook.pin : null
 
   // Offline-specific properties (type-safe access via discriminated union)
-  const manualState = activeHook.type === 'offline' ? activeHook.hook.state : null
+  const manualState =
+    activeHook.type === 'offline' ? activeHook.hook.state : null
   const offerData = manualState?.offerData
-  const submitAnswer = activeHook.type === 'offline' ? activeHook.hook.submitAnswer : undefined
+  const submitAnswer =
+    activeHook.type === 'offline' ? activeHook.hook.submitAnswer : undefined
 
   // Redirect if no config
   useEffect(() => {
@@ -115,7 +134,8 @@ export function SendTransferPage() {
           const archiveName = config.folderFiles
             ? getFolderName(config.folderFiles)
             : 'files'
-          const fileList = config.folderFiles ?? buildFileListFromFiles(config.selectedFiles)
+          const fileList =
+            config.folderFiles ?? buildFileListFromFiles(config.selectedFiles)
           const zipFile = await compressFilesToZip(fileList, archiveName)
           if (cancelled) return
           setCompressedFile(zipFile)
@@ -137,17 +157,14 @@ export function SendTransferPage() {
 
   // Start transfer when file is ready
   useEffect(() => {
-    if (step !== 'ready' || !compressedFile || !config || startedRef.current) return
+    if (step !== 'ready' || !compressedFile || !config || startedRef.current)
+      return
 
     startedRef.current = true
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: sync step state when starting transfer
     setStep('active')
 
-    if (activeHook.type === 'online') {
-      void activeHook.hook.send(compressedFile, { relayOnly: config.relayOnly })
-    } else {
-      void activeHook.hook.send(compressedFile)
-    }
+    void activeHook.hook.send(compressedFile)
   }, [step, compressedFile, config, activeHook])
 
   // Track completion - sync local step with hook state
@@ -242,12 +259,17 @@ export function SendTransferPage() {
                 Unable to connect to relay servers
               </p>
               <p className="text-sm text-amber-700 dark:text-amber-300">
-                PIN mode is temporarily unavailable. Switch to QR code mode or retry the connection.
+                PIN mode is temporarily unavailable. Switch to QR code mode or
+                retry the connection.
               </p>
             </div>
           </div>
           <div className="flex gap-2">
-            <Button onClick={handleSwitchToOffline} className="flex-1" size="sm">
+            <Button
+              onClick={handleSwitchToOffline}
+              className="flex-1"
+              size="sm"
+            >
               <QrCode className="mr-2 h-4 w-4" />
               Switch to QR Mode
             </Button>
@@ -262,40 +284,56 @@ export function SendTransferPage() {
       {step === 'active' && (
         <>
           {/* QR code mode: showing offer */}
-          {!isOnline && offerData && submitAnswer && state.status === 'showing_offer' && (
-            <div className="space-y-4">
-              {/* Instructions at top */}
-              <div className="rounded-lg bg-muted/50 border p-4 space-y-3">
-                <div className="space-y-2">
-                  <p className="font-medium">Show these QR codes to the receiver</p>
-                  <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
-                    <li>Receiver scans <strong>any</strong> QR code with their phone camera to get started</li>
-                    <li>App opens and guides scanning remaining codes</li>
-                    <li>QR codes do not need to be scanned in order, but all QR codes must be scanned</li>
-                    <li>Receiver shows you their response QR code</li>
-                    <li>You scan/paste their response below</li>
-                  </ol>
+          {!isOnline &&
+            offerData &&
+            submitAnswer &&
+            state.status === 'showing_offer' && (
+              <div className="space-y-4">
+                {/* Instructions at top */}
+                <div className="rounded-lg bg-muted/50 border p-4 space-y-3">
+                  <div className="space-y-2">
+                    <p className="font-medium">
+                      Show these QR codes to the receiver
+                    </p>
+                    <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
+                      <li>
+                        Receiver scans <strong>any</strong> QR code with their
+                        phone camera to get started
+                      </li>
+                      <li>App opens and guides scanning remaining codes</li>
+                      <li>
+                        QR codes do not need to be scanned in order, but all QR
+                        codes must be scanned
+                      </li>
+                      <li>Receiver shows you their response QR code</li>
+                      <li>You scan/paste their response below</li>
+                    </ol>
+                  </div>
+                  <div className="rounded-md bg-background/70 border border-dashed p-3 text-sm">
+                    <p className="font-medium">
+                      Camera not working? Use copy &amp; paste instead
+                    </p>
+                    <p className="text-muted-foreground mt-1">
+                      Tap <strong>Copy Data</strong> below the QR codes to copy
+                      the offer, send it to the receiver over any channel (chat,
+                      email, AirDrop), then use the <strong>Paste</strong> tab
+                      below to submit their response.
+                    </p>
+                  </div>
                 </div>
-                <div className="rounded-md bg-background/70 border border-dashed p-3 text-sm">
-                  <p className="font-medium">Camera not working? Use copy &amp; paste instead</p>
-                  <p className="text-muted-foreground mt-1">
-                    Tap <strong>Copy Data</strong> below the QR codes to copy the offer, send it to the receiver
-                    over any channel (chat, email, AirDrop), then use the <strong>Paste</strong> tab below to
-                    submit their response.
+
+                {/* QR codes */}
+                <MultiQRDisplay data={offerData} />
+
+                {/* Input for receiver's response */}
+                <div className="pt-2 border-t">
+                  <p className="text-sm font-medium mb-3">
+                    Scan or paste receiver's response
                   </p>
+                  <QRInput onSubmit={submitAnswer} expectedType="answer" />
                 </div>
               </div>
-
-              {/* QR codes */}
-              <MultiQRDisplay data={offerData} />
-
-              {/* Input for receiver's response */}
-              <div className="pt-2 border-t">
-                <p className="text-sm font-medium mb-3">Scan or paste receiver's response</p>
-                <QRInput onSubmit={submitAnswer} expectedType="answer" />
-              </div>
-            </div>
-          )}
+            )}
 
           {/* QR code mode: other states (connecting, transferring, etc.) */}
           {!isOnline && state.status !== 'showing_offer' && (
@@ -307,9 +345,9 @@ export function SendTransferPage() {
             <TransferStatus
               state={state}
               betweenProgressAndChunks={
-                pin && state.status === 'waiting_for_receiver'
-                  ? <PinDisplay pin={pin} onExpire={handleCancel} />
-                  : undefined
+                pin && state.status === 'waiting_for_receiver' ? (
+                  <PinDisplay pin={pin} onExpire={handleCancel} />
+                ) : undefined
               }
             />
           )}
@@ -329,7 +367,9 @@ export function SendTransferPage() {
             </div>
             <div className="text-center">
               <p className="font-medium text-lg">Transfer Complete!</p>
-              <p className="text-muted-foreground text-sm">Your files have been sent successfully.</p>
+              <p className="text-muted-foreground text-sm">
+                Your files have been sent successfully.
+              </p>
             </div>
           </div>
           <Button onClick={handleSendAnother} className="w-full">

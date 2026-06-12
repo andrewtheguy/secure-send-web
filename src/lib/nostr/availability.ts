@@ -47,10 +47,10 @@ function probeRelay(url: string): Promise<string | null> {
  * @param relays - Relay URLs to test (defaults to DEFAULT_RELAYS)
  */
 export async function testRelayAvailability(
-  relays: string[] = [...DEFAULT_RELAYS]
+  relays: string[] = [...DEFAULT_RELAYS],
 ): Promise<RelayAvailabilityResult> {
   try {
-    const results = await Promise.all(relays.map(url => probeRelay(url)))
+    const results = await Promise.all(relays.map((url) => probeRelay(url)))
     const connectedRelays = results.filter((r): r is string => r !== null)
 
     return {

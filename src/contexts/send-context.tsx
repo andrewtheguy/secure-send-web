@@ -1,11 +1,11 @@
 /* eslint-disable react-refresh/only-export-components */
 import {
   createContext,
-  useContext,
-  useState,
-  useMemo,
-  useCallback,
   type ReactNode,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
 } from 'react'
 
 export type MethodChoice = 'online' | 'offline'
@@ -17,7 +17,6 @@ interface SendConfig {
 
   // Configuration
   methodChoice: MethodChoice
-  relayOnly: boolean
 }
 
 interface SendContextState {

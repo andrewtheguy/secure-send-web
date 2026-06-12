@@ -1,45 +1,41 @@
-import { useState, useCallback, useRef, useMemo } from 'react'
+import type { Event } from 'nostr-tools'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
-  generatePinForMethod,
   computePinHint,
-  generateTransferId,
-  generateSalt,
-  deriveNostrTransferKeysFromPin,
-  encrypt,
   decrypt,
+  deriveNostrTransferKeysFromPin,
+  ENCRYPTION_CHUNK_SIZE,
+  encrypt,
   encryptChunk,
+  generatePinForMethod,
+  generateSalt,
+  generateTransferId,
   MAX_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
-  CLOUD_CHUNK_SIZE,
-  ENCRYPTION_CHUNK_SIZE,
 } from '@/lib/crypto'
-import {
-  createNostrClient,
-  generateEphemeralKeys,
-  createPinExchangeEvent,
-  parseAckEvent,
-  verifyAuthenticatedAckEvent,
-  createSignalingEvent,
-  parseSignalingEvent,
-  createChunkNotifyEvent,
-  DEFAULT_RELAYS,
-  type TransferState,
-  type PinExchangePayload,
-  type ContentType,
-  EVENT_KIND_DATA_TRANSFER,
-  type NostrClient,
-  type WebRTCOptions,
-} from '@/lib/nostr'
-import { uploadToCloud, splitIntoChunks } from '@/lib/cloud-storage'
-import type { Event } from 'nostr-tools'
 import { readFileAsBytes } from '@/lib/file-utils'
+import {
+  type ContentType,
+  createNostrClient,
+  createPinExchangeEvent,
+  createSignalingEvent,
+  DEFAULT_RELAYS,
+  EVENT_KIND_DATA_TRANSFER,
+  generateEphemeralKeys,
+  type NostrClient,
+  type PinExchangePayload,
+  parseAckEvent,
+  parseSignalingEvent,
+  type TransferState,
+  verifyAuthenticatedAckEvent,
+} from '@/lib/nostr'
 import { WebRTCConnection } from '@/lib/webrtc'
 import { getWebRTCConfig } from '@/lib/webrtc-config'
 
 export interface UseNostrSendReturn {
   state: TransferState
   pin: string | null
-  send: (content: File, options?: WebRTCOptions) => Promise<void>
+  send: (content: File) => Promise<void>
   cancel: () => void
 }
 
@@ -50,7 +46,9 @@ export function useNostrSend(): UseNostrSendReturn {
   const clientRef = useRef<NostrClient | null>(null)
   const cancelledRef = useRef(false)
   const sendingRef = useRef(false)
-  const expirationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const expirationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  )
 
   const clearExpirationTimeout = useCallback(() => {
     if (expirationTimeoutRef.current) {
@@ -72,7 +70,7 @@ export function useNostrSend(): UseNostrSendReturn {
   }, [clearExpirationTimeout])
 
   const send = useCallback(
-    async (content: File, options?: WebRTCOptions) => {
+    async (content: File) => {
       // Guard against concurrent invocations
       if (sendingRef.current) return
       sendingRef.current = true
@@ -109,7 +107,10 @@ export function useNostrSend(): UseNostrSendReturn {
 
         if (fileSize > MAX_MESSAGE_SIZE) {
           const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
-          setState({ status: 'error', message: `File exceeds ${limitMB}MB limit` })
+          setState({
+            status: 'error',
+            message: `File exceeds ${limitMB}MB limit`,
+          })
           sendingRef.current = false
           return
         }
@@ -133,7 +134,10 @@ export function useNostrSend(): UseNostrSendReturn {
         expirationTimeoutRef.current = setTimeout(() => {
           if (!cancelledRef.current && sendingRef.current) {
             setPin(null)
-            setState({ status: 'error', message: 'Session expired. Please try again.' })
+            setState({
+              status: 'error',
+              message: 'Session expired. Please try again.',
+            })
             sendingRef.current = false
             if (clientRef.current) {
               clientRef.current.close()
@@ -156,12 +160,10 @@ export function useNostrSend(): UseNostrSendReturn {
         clientRef.current = client
 
         // Create payload
-        const estimatedEncryptedSize = contentBytes.length + 28
         const payload: PinExchangePayload = {
           contentType,
           transferId,
           senderPubkey: publicKey,
-          totalChunks: Math.ceil(estimatedEncryptedSize / CLOUD_CHUNK_SIZE),
           relays: [...DEFAULT_RELAYS],
           fileName,
           fileSize,
@@ -178,12 +180,18 @@ export function useNostrSend(): UseNostrSendReturn {
           message: 'Waiting for receiver...',
           contentType,
           fileMetadata: { fileName, fileSize, mimeType },
-          useWebRTC: !options?.relayOnly,
+          useWebRTC: true,
           currentRelays: client.getRelays(),
           totalRelays: DEFAULT_RELAYS.length,
         })
 
-        const exchangeEvent = createPinExchangeEvent(secretKey, encryptedPayload, salt, transferId, hint)
+        const exchangeEvent = createPinExchangeEvent(
+          secretKey,
+          encryptedPayload,
+          salt,
+          transferId,
+          hint,
+        )
 
         await client.publish(exchangeEvent)
 
@@ -196,12 +204,15 @@ export function useNostrSend(): UseNostrSendReturn {
         const { receiverPubkey } = await new Promise<{
           receiverPubkey: string
         }>((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            client.unsubscribe(subId)
-            if (!cancelledRef.current) {
-              reject(new Error('Timeout waiting for receiver'))
-            }
-          }, 60 * 60 * 1000) // 1 hour timeout
+          const timeout = setTimeout(
+            () => {
+              client.unsubscribe(subId)
+              if (!cancelledRef.current) {
+                reject(new Error('Timeout waiting for receiver'))
+              }
+            },
+            60 * 60 * 1000,
+          ) // 1 hour timeout
 
           const subId = client.subscribe(
             [
@@ -222,7 +233,12 @@ export function useNostrSend(): UseNostrSendReturn {
               const ack = parseAckEvent(event)
               if (ack && ack.transferId === transferId && ack.seq === 0) {
                 void (async () => {
-                  const verified = await verifyAuthenticatedAckEvent(event, keys.signals, transferId, 0)
+                  const verified = await verifyAuthenticatedAckEvent(
+                    event,
+                    keys.signals,
+                    transferId,
+                    0,
+                  )
                   if (!verified) return
 
                   clearTimeout(timeout)
@@ -232,7 +248,7 @@ export function useNostrSend(): UseNostrSendReturn {
                   })
                 })()
               }
-            }
+            },
           )
         })
 
@@ -246,290 +262,226 @@ export function useNostrSend(): UseNostrSendReturn {
           throw new Error('Session expired. Please start a new transfer.')
         }
 
-        // WebRTC Transfer Logic
+        // WebRTC Transfer Logic (P2P only — no cloud fallback)
         let webRTCSuccess = false
-        let p2pConnectionEstablished = false
 
-        if (!options?.relayOnly) {
-          try {
-            setState((prevState) => ({
-              ...prevState,
-              status: 'connecting',
-              message: 'Attempting P2P connection...',
-            }))
+        try {
+          setState((prevState) => ({
+            ...prevState,
+            status: 'connecting',
+            message: 'Attempting P2P connection...',
+          }))
 
-            await new Promise<void>((resolve, reject) => {
-              let connectionTimeout: ReturnType<typeof setTimeout> | null = null
-              let offerRetryInterval: ReturnType<typeof setInterval> | null = null
-              let signalSubId: string | null = null
-              let answerReceived = false
-              const processedEventIds = new Set<string>()
+          await new Promise<void>((resolve, reject) => {
+            let connectionTimeout: ReturnType<typeof setTimeout> | null = null
+            let offerRetryInterval: ReturnType<typeof setInterval> | null = null
+            let signalSubId: string | null = null
+            let answerReceived = false
+            const processedEventIds = new Set<string>()
 
-              const processSignalEvent = async (event: Event) => {
-                if (processedEventIds.has(event.id)) return
-                processedEventIds.add(event.id)
+            const processSignalEvent = async (event: Event) => {
+              if (processedEventIds.has(event.id)) return
+              processedEventIds.add(event.id)
 
-                const signalData = parseSignalingEvent(event)
-                if (signalData && signalData.transferId === transferId) {
-                  try {
-                    const decrypted = await decrypt(keys.signals, signalData.encryptedSignal)
-                    const signalPayload = JSON.parse(new TextDecoder().decode(decrypted))
-                    if (signalPayload.type === 'signal' && signalPayload.signal) {
-                      if (signalPayload.signal.type === 'answer') {
-                        answerReceived = true
-                        if (offerRetryInterval) {
-                          clearInterval(offerRetryInterval)
-                          offerRetryInterval = null
-                        }
-                      }
-                      await rtc.handleSignal(signalPayload.signal)
-                    }
-                  } catch (err) {
-                    console.error('Failed to process signaling event:', err)
-                  }
-                }
-              }
-
-              const cleanup = () => {
-                if (connectionTimeout) {
-                  clearTimeout(connectionTimeout)
-                  connectionTimeout = null
-                }
-                if (offerRetryInterval) {
-                  clearInterval(offerRetryInterval)
-                  offerRetryInterval = null
-                }
-                if (signalSubId) {
-                  client.unsubscribe(signalSubId)
-                  signalSubId = null
-                }
-              }
-
-              const rtc = new WebRTCConnection(
-                getWebRTCConfig(),
-                async (signal) => {
-                  if (cancelledRef.current) return
-                  const signalPayload = { type: 'signal', signal }
-                  const signalJson = JSON.stringify(signalPayload)
-                  const encryptedSignal = await encrypt(keys.signals, new TextEncoder().encode(signalJson))
-                  const event = createSignalingEvent(
-                    secretKey,
-                    publicKey,
-                    transferId,
-                    encryptedSignal
+              const signalData = parseSignalingEvent(event)
+              if (signalData && signalData.transferId === transferId) {
+                try {
+                  const decrypted = await decrypt(
+                    keys.signals,
+                    signalData.encryptedSignal,
                   )
-                  await client.publish(event)
-                },
-                async () => {
-                  if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
-                    try {
-                      rtc.close()
-                    } catch {
-                      // ignore
+                  const signalPayload = JSON.parse(
+                    new TextDecoder().decode(decrypted),
+                  )
+                  if (signalPayload.type === 'signal' && signalPayload.signal) {
+                    if (signalPayload.signal.type === 'answer') {
+                      answerReceived = true
+                      if (offerRetryInterval) {
+                        clearInterval(offerRetryInterval)
+                        offerRetryInterval = null
+                      }
                     }
-                    cleanup()
-                    reject(new Error('Session expired. Please start a new transfer.'))
-                    return
+                    await rtc.handleSignal(signalPayload.signal)
                   }
-
-                  cleanup()
-                  p2pConnectionEstablished = true
-
-                  setState((prevState) => ({
-                    status: 'transferring',
-                    message: 'Sending via P2P...',
-                    progress: { current: 0, total: contentBytes.length },
-                    contentType,
-                    fileMetadata: { fileName, fileSize, mimeType },
-                    currentRelays: prevState.currentRelays,
-                    totalRelays: prevState.totalRelays,
-                    useWebRTC: true,
-                  }))
-
-                  try {
-                    let chunkIndex = 0
-                    const totalChunks = Math.ceil(contentBytes.length / ENCRYPTION_CHUNK_SIZE)
-
-                    for (let i = 0; i < contentBytes.length; i += ENCRYPTION_CHUNK_SIZE) {
-                      if (cancelledRef.current) throw new Error('Cancelled')
-
-                      const end = Math.min(i + ENCRYPTION_CHUNK_SIZE, contentBytes.length)
-                      const plainChunk = contentBytes.slice(i, end)
-                      const encryptedChunk = await encryptChunk(keys.p2pContent, plainChunk, chunkIndex)
-                      await rtc.sendWithBackpressure(encryptedChunk)
-                      chunkIndex++
-
-                      setState((s) => ({
-                        ...s,
-                        progress: { current: end, total: contentBytes.length },
-                      }))
-                    }
-
-                    rtc.send(`DONE:${totalChunks}`)
-                    webRTCSuccess = true
-                    resolve()
-                  } catch (err) {
-                    reject(err)
-                  }
-                },
-                (data) => {
-                  if (data === 'DONE_ACK') {
-                    console.debug('WebRTC: Remote confirmed receipt (DONE_ACK)')
-                  }
+                } catch (err) {
+                  console.error('Failed to process signaling event:', err)
                 }
-              )
+              }
+            }
 
-              signalSubId = client.subscribe(
-                [
+            const cleanup = () => {
+              if (connectionTimeout) {
+                clearTimeout(connectionTimeout)
+                connectionTimeout = null
+              }
+              if (offerRetryInterval) {
+                clearInterval(offerRetryInterval)
+                offerRetryInterval = null
+              }
+              if (signalSubId) {
+                client.unsubscribe(signalSubId)
+                signalSubId = null
+              }
+            }
+
+            const rtc = new WebRTCConnection(
+              getWebRTCConfig(),
+              async (signal) => {
+                if (cancelledRef.current) return
+                const signalPayload = { type: 'signal', signal }
+                const signalJson = JSON.stringify(signalPayload)
+                const encryptedSignal = await encrypt(
+                  keys.signals,
+                  new TextEncoder().encode(signalJson),
+                )
+                const event = createSignalingEvent(
+                  secretKey,
+                  publicKey,
+                  transferId,
+                  encryptedSignal,
+                )
+                await client.publish(event)
+              },
+              async () => {
+                if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
+                  try {
+                    rtc.close()
+                  } catch {
+                    // ignore
+                  }
+                  cleanup()
+                  reject(
+                    new Error('Session expired. Please start a new transfer.'),
+                  )
+                  return
+                }
+
+                cleanup()
+
+                setState((prevState) => ({
+                  status: 'transferring',
+                  message: 'Sending via P2P...',
+                  progress: { current: 0, total: contentBytes.length },
+                  contentType,
+                  fileMetadata: { fileName, fileSize, mimeType },
+                  currentRelays: prevState.currentRelays,
+                  totalRelays: prevState.totalRelays,
+                  useWebRTC: true,
+                }))
+
+                try {
+                  let chunkIndex = 0
+                  const totalChunks = Math.ceil(
+                    contentBytes.length / ENCRYPTION_CHUNK_SIZE,
+                  )
+
+                  for (
+                    let i = 0;
+                    i < contentBytes.length;
+                    i += ENCRYPTION_CHUNK_SIZE
+                  ) {
+                    if (cancelledRef.current) throw new Error('Cancelled')
+
+                    const end = Math.min(
+                      i + ENCRYPTION_CHUNK_SIZE,
+                      contentBytes.length,
+                    )
+                    const plainChunk = contentBytes.slice(i, end)
+                    const encryptedChunk = await encryptChunk(
+                      keys.p2pContent,
+                      plainChunk,
+                      chunkIndex,
+                    )
+                    await rtc.sendWithBackpressure(encryptedChunk)
+                    chunkIndex++
+
+                    setState((s) => ({
+                      ...s,
+                      progress: { current: end, total: contentBytes.length },
+                    }))
+                  }
+
+                  rtc.send(`DONE:${totalChunks}`)
+                  webRTCSuccess = true
+                  resolve()
+                } catch (err) {
+                  reject(err)
+                }
+              },
+              (data) => {
+                if (data === 'DONE_ACK') {
+                  console.debug('WebRTC: Remote confirmed receipt (DONE_ACK)')
+                }
+              },
+            )
+
+            signalSubId = client.subscribe(
+              [
+                {
+                  kinds: [EVENT_KIND_DATA_TRANSFER],
+                  '#t': [transferId],
+                  '#p': [publicKey],
+                  authors: [receiverPubkey],
+                },
+              ],
+              processSignalEvent,
+            )
+
+            const queryForExistingSignals = async () => {
+              try {
+                const existingEvents = await client.query([
                   {
                     kinds: [EVENT_KIND_DATA_TRANSFER],
                     '#t': [transferId],
                     '#p': [publicKey],
                     authors: [receiverPubkey],
+                    limit: 50,
                   },
-                ],
-                processSignalEvent
-              )
-
-              const queryForExistingSignals = async () => {
-                try {
-                  const existingEvents = await client.query([
-                    {
-                      kinds: [EVENT_KIND_DATA_TRANSFER],
-                      '#t': [transferId],
-                      '#p': [publicKey],
-                      authors: [receiverPubkey],
-                      limit: 50,
-                    },
-                  ])
-                  for (const event of existingEvents) {
-                    await processSignalEvent(event)
-                  }
-                } catch (err) {
-                  console.error('Failed to query existing signal events:', err)
+                ])
+                for (const event of existingEvents) {
+                  await processSignalEvent(event)
                 }
+              } catch (err) {
+                console.error('Failed to query existing signal events:', err)
+              }
+            }
+
+            rtc.createDataChannel('file-transfer')
+            void rtc.createOffer()
+            void queryForExistingSignals()
+
+            let retryCount = 0
+            offerRetryInterval = setInterval(async () => {
+              if (answerReceived || webRTCSuccess || cancelledRef.current) {
+                if (offerRetryInterval) {
+                  clearInterval(offerRetryInterval)
+                  offerRetryInterval = null
+                }
+                return
               }
 
-              rtc.createDataChannel('file-transfer')
-              void rtc.createOffer()
-              void queryForExistingSignals()
-
-              let retryCount = 0
-              offerRetryInterval = setInterval(async () => {
-                if (answerReceived || webRTCSuccess || cancelledRef.current) {
-                  if (offerRetryInterval) {
-                    clearInterval(offerRetryInterval)
-                    offerRetryInterval = null
-                  }
-                  return
-                }
-
-                retryCount++
-                console.log(`Retrying WebRTC offer (attempt ${retryCount + 1})...`)
-                await queryForExistingSignals()
-                if (!answerReceived && !webRTCSuccess) {
-                  void rtc.createOffer()
-                }
-              }, 5000)
-
-              connectionTimeout = setTimeout(() => {
-                if (!webRTCSuccess) {
-                  cleanup()
-                  rtc.close()
-                  reject(new Error('WebRTC connection timeout'))
-                }
-              }, 30000)
-            })
-          } catch (err) {
-            if (p2pConnectionEstablished) {
-              throw new Error(
-                `P2P transfer failed: ${err instanceof Error ? err.message : 'Unknown error'}`
+              retryCount++
+              console.log(
+                `Retrying WebRTC offer (attempt ${retryCount + 1})...`,
               )
-            }
-            console.log('P2P connection failed, falling back to cloud upload:', err)
-          }
-        }
+              await queryForExistingSignals()
+              if (!answerReceived && !webRTCSuccess) {
+                void rtc.createOffer()
+              }
+            }, 5000)
 
-        // Cloud fallback
-        if (!webRTCSuccess && !p2pConnectionEstablished) {
-          if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
-            throw new Error('Session expired. Please start a new transfer.')
-          }
-
-          setState({
-            status: 'transferring',
-            message: 'Encrypting content for cloud upload...',
-            contentType,
-            fileMetadata: { fileName, fileSize, mimeType },
-            currentRelays: client.getRelays(),
-            totalRelays: DEFAULT_RELAYS.length,
+            connectionTimeout = setTimeout(() => {
+              if (!webRTCSuccess) {
+                cleanup()
+                rtc.close()
+                reject(new Error('WebRTC connection timeout'))
+              }
+            }, 30000)
           })
-
-          const encryptedContent = await encrypt(keys.cloudContent, contentBytes)
-
-          if (cancelledRef.current) return
-
-          setState((s) => ({
-            ...s,
-            message: 'Uploading to cloud...',
-            progress: { current: 0, total: encryptedContent.length },
-          }))
-
-          const chunks = splitIntoChunks(encryptedContent, CLOUD_CHUNK_SIZE)
-          const totalChunks = chunks.length
-          let uploadedBytes = 0
-
-          for (let i = 0; i < chunks.length; i++) {
-            if (cancelledRef.current) return
-
-            const chunk = chunks[i]
-            setState((s) => ({
-              ...s,
-              message: `Uploading chunk ${i + 1}/${totalChunks}...`,
-              progress: { current: uploadedBytes, total: encryptedContent.length },
-            }))
-
-            const uploadResult = await uploadToCloud(chunk, `encrypted.chunk${i}.bin`, (progress: number) => {
-              const chunkUploaded = Math.round((progress / 100) * chunk.length)
-              setState((s) => ({
-                ...s,
-                progress: { current: uploadedBytes + chunkUploaded, total: encryptedContent.length },
-              }))
-            })
-
-            const notifyEvent = createChunkNotifyEvent(
-              secretKey,
-              receiverPubkey,
-              transferId,
-              i,
-              totalChunks,
-              uploadResult.url,
-              chunk.length
-            )
-            await client.publish(notifyEvent)
-
-            setState((s) => ({
-              ...s,
-              message: `Waiting for chunk ${i + 1}/${totalChunks} confirmation...`,
-            }))
-
-            const chunkAckReceived = await waitForAck(
-              client,
-              transferId,
-              publicKey,
-              receiverPubkey,
-              i + 1,
-              keys.signals,
-              () => cancelledRef.current,
-              60000
-            )
-
-            if (!chunkAckReceived) {
-              throw new Error(`Timeout waiting for chunk ${i + 1} confirmation`)
-            }
-
-            uploadedBytes += chunk.length
-          }
+        } catch (err) {
+          throw new Error(
+            `P2P transfer failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          )
         }
 
         // Wait for completion ACK (seq=-1)
@@ -540,18 +492,16 @@ export function useNostrSend(): UseNostrSendReturn {
           receiverPubkey,
           -1,
           keys.signals,
-          () => cancelledRef.current
+          () => cancelledRef.current,
         )
 
         if (!completionReceived) {
           throw new Error('Failed to receive completion confirmation')
         }
 
-        const successMsg = webRTCSuccess ? 'File sent via P2P!' : 'File sent successfully!'
-
         setState((prevState) => ({
           status: 'complete',
-          message: successMsg,
+          message: 'File sent via P2P!',
           contentType,
           currentRelays: prevState.currentRelays,
           totalRelays: prevState.totalRelays,
@@ -575,13 +525,13 @@ export function useNostrSend(): UseNostrSendReturn {
         }
       }
     },
-    [clearExpirationTimeout]
+    [clearExpirationTimeout],
   )
 
   // Memoize return object to prevent unnecessary re-renders in consumers
   return useMemo(
     () => ({ state, pin, send, cancel }),
-    [state, pin, send, cancel]
+    [state, pin, send, cancel],
   )
 }
 
@@ -601,7 +551,7 @@ function waitForAck(
   expectedSeq: number,
   key: CryptoKey,
   isCancelled: () => boolean,
-  timeoutMs: number = 5 * 60 * 1000
+  timeoutMs: number = 5 * 60 * 1000,
 ): Promise<boolean> {
   if (isCancelled()) {
     return Promise.resolve(false)
@@ -634,7 +584,12 @@ function waitForAck(
     const checkEvent = async (event: Event): Promise<boolean> => {
       const ack = parseAckEvent(event)
       if (ack && ack.transferId === transferId && ack.seq === expectedSeq) {
-        return await verifyAuthenticatedAckEvent(event, key, transferId, expectedSeq)
+        return await verifyAuthenticatedAckEvent(
+          event,
+          key,
+          transferId,
+          expectedSeq,
+        )
       }
       return false
     }
@@ -674,7 +629,7 @@ function waitForAck(
             onFound()
           }
         })()
-      }
+      },
     )
 
     // 2. THEN query for existing events (catches events that existed before subscribe)

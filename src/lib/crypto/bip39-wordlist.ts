@@ -2051,4 +2051,3 @@ export const BIP39_ENGLISH_WORDLIST: string[] = [
   'zone',
   'zoo',
 ]
-

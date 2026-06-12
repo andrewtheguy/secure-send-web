@@ -23,13 +23,20 @@ let wasmInitPromise: Promise<void> | null = null
 
 function normalizeMargin(margin?: number): number {
   const normalizedMargin = Number(margin ?? 1)
-  if (!Number.isFinite(normalizedMargin) || !Number.isInteger(normalizedMargin) || normalizedMargin < 0) {
+  if (
+    !Number.isFinite(normalizedMargin) ||
+    !Number.isInteger(normalizedMargin) ||
+    normalizedMargin < 0
+  ) {
     throw new TypeError('Invalid margin: expected a finite integer >= 0')
   }
   return normalizedMargin
 }
 
-function normalizeOptionalDimension(value: number | undefined, name: string): number | undefined {
+function normalizeOptionalDimension(
+  value: number | undefined,
+  name: string,
+): number | undefined {
   if (value === undefined) return undefined
   const n = Number(value)
   if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
@@ -56,7 +63,7 @@ export async function ensureFastQrWasmInit(): Promise<void> {
 
 export async function generateFastQrSvgString(
   payload: Uint8Array,
-  options: FastQrSvgGenerateOptions = {}
+  options: FastQrSvgGenerateOptions = {},
 ): Promise<string> {
   await ensureFastQrWasmInit()
 
@@ -72,6 +79,6 @@ export async function generateFastQrSvgString(
     errorCorrectionLevel,
     mode,
     svgWidth,
-    svgHeight
+    svgHeight,
   )
 }

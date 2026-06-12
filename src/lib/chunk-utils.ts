@@ -12,7 +12,7 @@ const CRC32_TABLE = (() => {
   for (let i = 0; i < 256; i++) {
     let crc = i
     for (let j = 0; j < 8; j++) {
-      crc = (crc & 1) !== 0 ? (crc >>> 1) ^ 0xEDB88320 : crc >>> 1
+      crc = (crc & 1) !== 0 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1
     }
     table[i] = crc >>> 0
   }
@@ -20,15 +20,18 @@ const CRC32_TABLE = (() => {
 })()
 
 export function computeCrc32(data: Uint8Array): number {
-  let crc = 0xFFFFFFFF
+  let crc = 0xffffffff
   for (let i = 0; i < data.length; i++) {
-    crc = CRC32_TABLE[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8)
+    crc = CRC32_TABLE[(crc ^ data[i]) & 0xff] ^ (crc >>> 8)
   }
-  return (crc ^ 0xFFFFFFFF) >>> 0
+  return (crc ^ 0xffffffff) >>> 0
 }
 
-export function isValidPayloadChecksum(payload: Uint8Array, expectedChecksum: number): boolean {
-  return computeCrc32(payload) === (expectedChecksum >>> 0)
+export function isValidPayloadChecksum(
+  payload: Uint8Array,
+  expectedChecksum: number,
+): boolean {
+  return computeCrc32(payload) === expectedChecksum >>> 0
 }
 
 export function base64urlEncode(data: Uint8Array): string {
@@ -36,10 +39,7 @@ export function base64urlEncode(data: Uint8Array): string {
   for (let i = 0; i < data.length; i++) {
     binary += String.fromCharCode(data[i])
   }
-  return btoa(binary)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '')
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
 export function base64urlDecode(encoded: string): Uint8Array {
@@ -63,14 +63,19 @@ export function base64urlDecode(encoded: string): Uint8Array {
  * Distributes data evenly across chunks so all QR codes are similar size.
  * Returns an array of Uint8Array chunks ready for base64url encoding.
  */
-export function chunkPayload(binary: Uint8Array, maxDataBytes = 400): Uint8Array[] {
+export function chunkPayload(
+  binary: Uint8Array,
+  maxDataBytes = 400,
+): Uint8Array[] {
   if (binary.length === 0) {
     throw new Error('Payload cannot be empty')
   }
 
   const totalChunks = Math.max(1, Math.ceil(binary.length / maxDataBytes))
   if (totalChunks > 255) {
-    throw new Error(`Payload too large: would need ${totalChunks} chunks (max 255)`)
+    throw new Error(
+      `Payload too large: would need ${totalChunks} chunks (max 255)`,
+    )
   }
 
   // Distribute evenly: each chunk gets floor or ceil of (total / chunks)
@@ -91,10 +96,10 @@ export function chunkPayload(binary: Uint8Array, maxDataBytes = 400): Uint8Array
     chunk[0] = i // chunk_index
     chunk[1] = totalChunks // total_chunks
     if (i === 0) {
-      chunk[2] = (payloadChecksum >>> 24) & 0xFF
-      chunk[3] = (payloadChecksum >>> 16) & 0xFF
-      chunk[4] = (payloadChecksum >>> 8) & 0xFF
-      chunk[5] = payloadChecksum & 0xFF
+      chunk[2] = (payloadChecksum >>> 24) & 0xff
+      chunk[3] = (payloadChecksum >>> 16) & 0xff
+      chunk[4] = (payloadChecksum >>> 8) & 0xff
+      chunk[5] = payloadChecksum & 0xff
       chunk.set(dataSlice, 6)
     } else {
       chunk.set(dataSlice, 2)
@@ -119,9 +124,12 @@ export function buildChunkUrl(baseUrl: string, chunk: Uint8Array): string {
  * Parse a base64url-encoded chunk string into its components.
  * Returns null if the chunk is invalid.
  */
-export function parseChunk(
-  encoded: string
-): { index: number; total: number; data: Uint8Array; checksum?: number } | null {
+export function parseChunk(encoded: string): {
+  index: number
+  total: number
+  data: Uint8Array
+  checksum?: number
+} | null {
   try {
     const bytes = base64urlDecode(encoded)
     if (bytes.length < 3) return null // Need at least index + total + 1 byte data
@@ -132,12 +140,12 @@ export function parseChunk(
 
     if (index === 0) {
       if (bytes.length < 7) return null // Need index + total + checksum(4) + 1 byte data
-      const checksum = (
-        (bytes[2] * 0x1000000) +
-        (bytes[3] << 16) +
-        (bytes[4] << 8) +
-        bytes[5]
-      ) >>> 0
+      const checksum =
+        (bytes[2] * 0x1000000 +
+          (bytes[3] << 16) +
+          (bytes[4] << 8) +
+          bytes[5]) >>>
+        0
       const data = bytes.slice(6)
       return { index, total, data, checksum }
     }
@@ -153,7 +161,10 @@ export function parseChunk(
  * Reassemble chunks into the original binary payload.
  * Returns null if any chunk is missing.
  */
-export function reassembleChunks(chunks: Map<number, Uint8Array>, total: number): Uint8Array | null {
+export function reassembleChunks(
+  chunks: Map<number, Uint8Array>,
+  total: number,
+): Uint8Array | null {
   if (chunks.size !== total) return null
 
   // Verify all indices present

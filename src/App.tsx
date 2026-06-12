@@ -1,14 +1,14 @@
-import { Routes, Route } from 'react-router-dom'
-import { Navbar } from '@/components/navbar'
+import { Route, Routes } from 'react-router-dom'
 import { Footer } from '@/components/footer'
+import { Navbar } from '@/components/navbar'
+import { AboutPage } from '@/pages/about'
+import { NotFoundPage } from '@/pages/not-found'
+import { ReceivePage } from '@/pages/receive'
+import { ReceiveChunkedPage } from '@/pages/receive-chunked'
 import { SendPage } from '@/pages/send'
 import { SendLayout } from '@/pages/send/layout'
-import { ReceivePage } from '@/pages/receive'
-import { AboutPage } from '@/pages/about'
-import { SendTransferLayout } from '@/pages/send/transfer/layout'
 import { SendTransferPage } from '@/pages/send/transfer'
-import { ReceiveChunkedPage } from '@/pages/receive-chunked'
-import { NotFoundPage } from '@/pages/not-found'
+import { SendTransferLayout } from '@/pages/send/transfer/layout'
 
 function App() {
   return (

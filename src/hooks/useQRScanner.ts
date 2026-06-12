@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { isMobileDevice } from '@/lib/utils'
 import RxingScannerWorker from '@/workers/rxing-qr-scanner.worker?worker'
 
@@ -76,7 +76,9 @@ interface UseQRScannerOptions {
 
 function isBenignPlayInterruptionError(err: unknown): boolean {
   if (!(err instanceof Error)) return false
-  return err.message.includes('play() request was interrupted by a new load request')
+  return err.message.includes(
+    'play() request was interrupted by a new load request',
+  )
 }
 
 export function useQRScanner(options: UseQRScannerOptions) {
@@ -100,12 +102,16 @@ export function useQRScanner(options: UseQRScannerOptions) {
   const startAttemptRef = useRef(0)
   const cameraStreamRef = useRef<MediaStream | null>(null)
   const workerRef = useRef<Worker>(scannerWorker)
-  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
+  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>(
+    [],
+  )
 
   const enumerateCameras = useCallback(async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices()
-      const videoDevices = devices.filter((device) => device.kind === 'videoinput')
+      const videoDevices = devices.filter(
+        (device) => device.kind === 'videoinput',
+      )
       setAvailableCameras(videoDevices)
     } catch (err) {
       console.error('Failed to enumerate cameras:', err)
@@ -147,7 +153,7 @@ export function useQRScanner(options: UseQRScannerOptions) {
           type: 'scan',
           imageData,
         },
-        [imageData.data.buffer]
+        [imageData.data.buffer],
       )
     } catch (err) {
       console.error('Error scanning frame:', err)
@@ -202,7 +208,8 @@ export function useQRScanner(options: UseQRScannerOptions) {
 
   const startCameraScanning = useCallback(async () => {
     const attemptId = ++startAttemptRef.current
-    const shouldAbortStart = () => attemptId !== startAttemptRef.current || !isScanningRequestedRef.current
+    const shouldAbortStart = () =>
+      attemptId !== startAttemptRef.current || !isScanningRequestedRef.current
 
     try {
       await new Promise((resolve) => setTimeout(resolve, 100))
@@ -260,13 +267,21 @@ export function useQRScanner(options: UseQRScannerOptions) {
       if (isBenignPlayInterruptionError(err) || shouldAbortStart()) {
         return
       }
-      const errorMessage = err instanceof Error ? err.message : 'Failed to access camera'
+      const errorMessage =
+        err instanceof Error ? err.message : 'Failed to access camera'
       if (onError) {
         onError(`Camera access denied or unavailable. ${errorMessage}`)
       }
       isScanningRef.current = false
     }
-  }, [facingMode, preferLowRes, enumerateCameras, onCameraReady, onError, startScanLoop])
+  }, [
+    facingMode,
+    preferLowRes,
+    enumerateCameras,
+    onCameraReady,
+    onError,
+    startScanLoop,
+  ])
 
   const switchCamera = useCallback(async () => {
     startAttemptRef.current += 1 // Cancel current async start attempt before switching.
@@ -311,7 +326,10 @@ export function useQRScanner(options: UseQRScannerOptions) {
     const facingModeChanged = facingModeRef.current !== facingMode
     const preferLowResChanged = preferLowResRef.current !== preferLowRes
 
-    if ((facingModeChanged || preferLowResChanged) && isScanningRequestedRef.current) {
+    if (
+      (facingModeChanged || preferLowResChanged) &&
+      isScanningRequestedRef.current
+    ) {
       void switchCamera()
     }
 

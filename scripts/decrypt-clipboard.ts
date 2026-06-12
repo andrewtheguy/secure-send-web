@@ -6,8 +6,8 @@
  */
 
 import crypto from 'node:crypto'
-import zlib from 'node:zlib'
 import { createInterface } from 'node:readline'
+import zlib from 'node:zlib'
 
 async function readStdin(): Promise<string> {
   const rl = createInterface({ input: process.stdin })
@@ -38,7 +38,10 @@ function decrypt(key: Buffer, encrypted: Buffer): Buffer {
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonce)
   decipher.setAuthTag(tag)
 
-  const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()])
+  const decrypted = Buffer.concat([
+    decipher.update(ciphertext),
+    decipher.final(),
+  ])
 
   return decrypted
 }
@@ -47,8 +50,12 @@ async function main(): Promise<void> {
   const [, , pin, base64Arg] = process.argv
 
   if (!pin) {
-    console.error('Usage: npx tsx scripts/decrypt-clipboard.ts <pin> [base64-data]')
-    console.error('   or: echo "<base64-data>" | npx tsx scripts/decrypt-clipboard.ts <pin>')
+    console.error(
+      'Usage: npx tsx scripts/decrypt-clipboard.ts <pin> [base64-data]',
+    )
+    console.error(
+      '   or: echo "<base64-data>" | npx tsx scripts/decrypt-clipboard.ts <pin>',
+    )
     process.exit(1)
   }
 
@@ -93,7 +100,10 @@ async function main(): Promise<void> {
     // Decompress (deflate was used before encryption)
     const jsonBytes = zlib.inflateSync(compressed)
     console.log('Decompressed JSON:', jsonBytes.length, 'bytes')
-    console.log('Compression ratio:', `${((compressed.length / jsonBytes.length) * 100).toFixed(1)}%`)
+    console.log(
+      'Compression ratio:',
+      `${((compressed.length / jsonBytes.length) * 100).toFixed(1)}%`,
+    )
 
     const json = jsonBytes.toString('utf8')
 
@@ -105,7 +115,10 @@ async function main(): Promise<void> {
     console.log('\n=== Decrypted Payload Prettified ===')
     console.log(JSON.stringify(payload, null, 2))
   } catch (err) {
-    console.error('\nDecryption failed:', err instanceof Error ? err.message : String(err))
+    console.error(
+      '\nDecryption failed:',
+      err instanceof Error ? err.message : String(err),
+    )
     console.error('(Wrong PIN or corrupted data)')
     process.exit(1)
   }

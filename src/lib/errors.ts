@@ -5,7 +5,10 @@
 // V8-specific captureStackTrace (available in Node.js and Chrome)
 declare global {
   interface ErrorConstructor {
-    captureStackTrace?(targetObject: object, constructorOpt?: NewableFunction): void
+    captureStackTrace?(
+      targetObject: object,
+      constructorOpt?: NewableFunction,
+    ): void
   }
 }
 

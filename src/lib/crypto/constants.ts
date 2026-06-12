@@ -5,7 +5,8 @@ export const PIN_LENGTH = 12
 export const PIN_CHECKSUM_LENGTH = 1 // Last character is checksum
 // Charset excludes ambiguous chars (0, 1, I, O, i, l, o) and uses iOS "123" keyboard symbols
 // Symbols from iOS 123 layout: - / : ; ( ) $ & @ ? ! . , "
-export const PIN_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789-/:;()$&@?!.,"'
+export const PIN_CHARSET =
+  'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789-/:;()$&@?!.,"'
 
 // BIP-39 English wordlist (2048 words)
 // Used for compact 7-word representation of the PIN
@@ -39,10 +40,7 @@ export const CHUNK_SIZE = 16 * 1024 // 16KB
 // WebRTC data channel has ~256KB message limit, so 128KB + encryption overhead stays safe
 export const ENCRYPTION_CHUNK_SIZE = 128 * 1024 // 128KB
 
-// Cloud chunk size for chunked uploads (when P2P fails)
-export const CLOUD_CHUNK_SIZE = 10 * 1024 * 1024 // 10MB per cloud chunk
-
-// Max message size (100MB - P2P handles full size, cloud falls back to chunked)
+// Max message size (100MB - transferred directly P2P over WebRTC)
 export const MAX_MESSAGE_SIZE = 100 * 1024 * 1024 // 100MB
 
 // PIN hint length.

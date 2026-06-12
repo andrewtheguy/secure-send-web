@@ -1,4 +1,7 @@
-import { readQrCodesFromImageData, type RxingReaderOptions } from '@/lib/wasm/rxingWasm'
+import {
+  type RxingReaderOptions,
+  readQrCodesFromImageData,
+} from '@/lib/wasm/rxingWasm'
 
 interface ScanMessage {
   type: 'scan'

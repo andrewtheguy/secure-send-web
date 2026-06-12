@@ -16,7 +16,11 @@ export function readFileAsBytes(file: File): Promise<Uint8Array> {
 /**
  * Trigger a file download in the browser
  */
-export function downloadFile(data: Uint8Array, fileName: string, mimeType: string): void {
+export function downloadFile(
+  data: Uint8Array,
+  fileName: string,
+  mimeType: string,
+): void {
   // Blob constructor accepts Uint8Array directly and respects the view's byte range
   const blob = new Blob([data as BlobPart], { type: mimeType })
   const url = URL.createObjectURL(blob)
@@ -35,7 +39,11 @@ export function downloadFile(data: Uint8Array, fileName: string, mimeType: strin
  * @param fileName - The name of the file to download
  * @param mimeType - The MIME type of the file
  */
-export function downloadTextFile(content: string, fileName: string, mimeType: string): void {
+export function downloadTextFile(
+  content: string,
+  fileName: string,
+  mimeType: string,
+): void {
   const bytes = new TextEncoder().encode(content)
   downloadFile(bytes, fileName, mimeType)
 }
@@ -51,7 +59,7 @@ export function formatFileSize(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB']
   const i = Math.min(
     Math.floor(Math.log(bytes) / Math.log(k)),
-    sizes.length - 1
+    sizes.length - 1,
   )
 
   return `${parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`

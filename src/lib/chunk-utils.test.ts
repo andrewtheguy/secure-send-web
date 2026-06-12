@@ -1,13 +1,13 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
-  base64urlEncode,
   base64urlDecode,
-  chunkPayload,
-  parseChunk,
-  reassembleChunks,
+  base64urlEncode,
   buildChunkUrl,
+  chunkPayload,
   extractChunkParam,
   isValidPayloadChecksum,
+  parseChunk,
+  reassembleChunks,
 } from './chunk-utils'
 
 describe('base64url', () => {
@@ -104,8 +104,8 @@ describe('chunkPayload / reassembleChunks', () => {
     const chunks = chunkPayload(original, 400)
 
     expect(chunks.length).toBe(1)
-    expect(chunks[0][0]).toBe(0)  // index
-    expect(chunks[0][1]).toBe(1)  // total
+    expect(chunks[0][0]).toBe(0) // index
+    expect(chunks[0][1]).toBe(1) // total
 
     const parsed = parseChunk(base64urlEncode(chunks[0]))
     expect(parsed).not.toBeNull()
@@ -219,7 +219,7 @@ describe('payload checksum', () => {
     expect(isValidPayloadChecksum(reassembled!, checksum!)).toBe(true)
 
     const tampered = reassembled!.slice()
-    tampered[0] ^= 0xFF
+    tampered[0] ^= 0xff
     expect(isValidPayloadChecksum(tampered, checksum!)).toBe(false)
   })
 })

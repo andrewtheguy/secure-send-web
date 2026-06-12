@@ -4,7 +4,8 @@ import { zipSync } from 'fflate'
  * Check if folder selection is supported by the browser
  */
 export const supportsFolderSelection =
-  typeof HTMLInputElement !== 'undefined' && 'webkitdirectory' in HTMLInputElement.prototype
+  typeof HTMLInputElement !== 'undefined' &&
+  'webkitdirectory' in HTMLInputElement.prototype
 
 /**
  * Read files and compress to ZIP
@@ -17,7 +18,7 @@ export const supportsFolderSelection =
 export async function compressFilesToZip(
   files: FileList,
   archiveName: string,
-  onProgress?: (progress: number) => void
+  onProgress?: (progress: number) => void,
 ): Promise<File> {
   const fileData: Record<string, Uint8Array> = {}
   const total = files.length

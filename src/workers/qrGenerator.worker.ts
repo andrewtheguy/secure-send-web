@@ -1,7 +1,7 @@
 // QR Generation Worker
 // Offloads expensive QR encoding from the main thread.
 
-import { generateFastQrSvgString, type FastQrMode } from '@/lib/wasm/fastQrWasm'
+import { type FastQrMode, generateFastQrSvgString } from '@/lib/wasm/fastQrWasm'
 
 interface WorkerRequest {
   type: 'generate'

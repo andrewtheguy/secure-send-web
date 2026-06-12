@@ -1,4 +1,4 @@
-import { SimplePool, mergeFilters, type Event, type Filter } from 'nostr-tools'
+import { type Event, type Filter, mergeFilters, SimplePool } from 'nostr-tools'
 import { DEFAULT_RELAYS } from './relays'
 
 /** Normalize relay URL by removing trailing slashes */
@@ -40,13 +40,17 @@ export class NostrClient {
       const timeout = setTimeout(() => resolve(), 3000) // Max 3s wait
 
       // Subscribe to a filter that won't match anything, just to trigger connection
-      const sub = this.pool.subscribeMany(this.relays, { kinds: [99999], limit: 1 }, {
-        oneose: () => {
-          clearTimeout(timeout)
-          sub.close()
-          resolve()
+      const sub = this.pool.subscribeMany(
+        this.relays,
+        { kinds: [99999], limit: 1 },
+        {
+          oneose: () => {
+            clearTimeout(timeout)
+            sub.close()
+            resolve()
+          },
         },
-      })
+      )
     })
   }
 
@@ -67,17 +71,22 @@ export class NostrClient {
         lastError = err as Error
         if (attempt < maxRetries - 1) {
           // Wait before retry (exponential backoff: 500ms, 1000ms, 2000ms)
-          await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt))
+          await new Promise((resolve) =>
+            setTimeout(resolve, 500 * 2 ** attempt),
+          )
         }
       }
     }
 
     // All retries failed
-    console.error(`Failed to publish to any relay after ${maxRetries} attempts:`, {
-      relays: this.relays,
-      eventKind: event.kind,
-      error: lastError?.message,
-    })
+    console.error(
+      `Failed to publish to any relay after ${maxRetries} attempts:`,
+      {
+        relays: this.relays,
+        eventKind: event.kind,
+        error: lastError?.message,
+      },
+    )
     throw lastError
   }
 
@@ -88,14 +97,13 @@ export class NostrClient {
   subscribe(
     filters: Filter[],
     onEvent: (event: Event) => void,
-    onEose?: () => void
+    onEose?: () => void,
   ): string {
     const subId = crypto.randomUUID()
     if (filters.length === 0) {
       throw new Error('subscribe requires at least one filter')
     }
-    const filter =
-      filters.length === 1 ? filters[0] : mergeFilters(...filters)
+    const filter = filters.length === 1 ? filters[0] : mergeFilters(...filters)
 
     const sub = this.pool.subscribeMany(this.relays, filter, {
       onevent: onEvent,
@@ -163,7 +171,7 @@ export class NostrClient {
    */
   async addRelays(newRelays: string[]): Promise<void> {
     const normalized = newRelays.map(normalizeRelayUrl)
-    const toAdd = normalized.filter(url => !this.relays.includes(url))
+    const toAdd = normalized.filter((url) => !this.relays.includes(url))
 
     if (toAdd.length === 0) return
 

@@ -1,26 +1,26 @@
-import { useState, useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
-  generateECDHKeyPair,
-  deriveSharedSecretKey,
-  deriveAESKeyFromSecretKey,
-  parseChunkMessage,
-  decryptChunk,
-  MAX_MESSAGE_SIZE,
-  ENCRYPTION_CHUNK_SIZE,
-  TRANSFER_EXPIRATION_MS,
   AES_NONCE_LENGTH,
   AES_TAG_LENGTH,
+  decryptChunk,
+  deriveAESKeyFromSecretKey,
+  deriveSharedSecretKey,
   ENCRYPTED_CHUNK_OVERHEAD,
+  ENCRYPTION_CHUNK_SIZE,
+  generateECDHKeyPair,
+  MAX_MESSAGE_SIZE,
+  parseChunkMessage,
+  TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto'
-import { WebRTCConnection } from '@/lib/webrtc'
-import { getWebRTCConfig } from '@/lib/webrtc-config'
 import {
-  parseMutualPayload,
   generateMutualAnswerBinary,
+  parseMutualPayload,
   type SignalingPayload,
 } from '@/lib/manual-signaling'
 import type { TransferState } from '@/lib/nostr'
 import type { ReceivedContent } from '@/lib/types'
+import { WebRTCConnection } from '@/lib/webrtc'
+import { getWebRTCConfig } from '@/lib/webrtc-config'
 
 // Extended transfer status for Manual Exchange receive mode
 export type ManualReceiveStatus =
@@ -66,17 +66,21 @@ export interface UseManualReceiveReturn {
 const ICE_GATHER_TIMEOUT_MS = 5000
 const MANUAL_CONNECTION_TIMEOUT_MS = 120000
 
-
 export function useManualReceive(): UseManualReceiveReturn {
-  const [state, setState] = useState<TransferState & ManualReceiveState>({ status: 'idle' })
-  const [receivedContent, setReceivedContent] = useState<ReceivedContent | null>(null)
+  const [state, setState] = useState<TransferState & ManualReceiveState>({
+    status: 'idle',
+  })
+  const [receivedContent, setReceivedContent] =
+    useState<ReceivedContent | null>(null)
 
   const rtcRef = useRef<WebRTCConnection | null>(null)
   const cancelledRef = useRef(false)
   const receivingRef = useRef(false)
 
   // Resolve function for offer submission
-  const offerResolverRef = useRef<((payload: SignalingPayload) => void) | null>(null)
+  const offerResolverRef = useRef<((payload: SignalingPayload) => void) | null>(
+    null,
+  )
   const offerRejectRef = useRef<((error: Error) => void) | null>(null)
 
   const cancel = useCallback(() => {
@@ -133,41 +137,62 @@ export function useManualReceive(): UseManualReceiveReturn {
       // Show input for scanning/pasting offer
       setState({
         status: 'waiting_for_offer',
-        message: 'Scan or paste the sender\'s code',
+        message: "Scan or paste the sender's code",
       })
 
       // Wait for offer to be submitted
-      const offerPayload = await new Promise<SignalingPayload>((resolve, reject) => {
-        offerResolverRef.current = resolve
-        offerRejectRef.current = reject
+      const offerPayload = await new Promise<SignalingPayload>(
+        (resolve, reject) => {
+          offerResolverRef.current = resolve
+          offerRejectRef.current = reject
 
-        // Check periodically if cancelled
-        const checkInterval = setInterval(() => {
-          if (cancelledRef.current) {
-            clearInterval(checkInterval)
-            reject(new Error('Cancelled'))
-          }
-        }, 500)
-      })
+          // Check periodically if cancelled
+          const checkInterval = setInterval(() => {
+            if (cancelledRef.current) {
+              clearInterval(checkInterval)
+              reject(new Error('Cancelled'))
+            }
+          }, 500)
+        },
+      )
 
       if (cancelledRef.current) return
 
       // Enforce TTL
-      if (typeof offerPayload.createdAt !== 'number' || !Number.isFinite(offerPayload.createdAt)) {
-        setState({ status: 'error', message: 'Offer missing timestamp. Ask sender to create a new one.' })
+      if (
+        typeof offerPayload.createdAt !== 'number' ||
+        !Number.isFinite(offerPayload.createdAt)
+      ) {
+        setState({
+          status: 'error',
+          message: 'Offer missing timestamp. Ask sender to create a new one.',
+        })
         return
       }
       if (Date.now() - offerPayload.createdAt > TRANSFER_EXPIRATION_MS) {
-        setState({ status: 'error', message: 'Offer expired. Ask sender to create a new one.' })
+        setState({
+          status: 'error',
+          message: 'Offer expired. Ask sender to create a new one.',
+        })
         return
       }
 
       // Extract metadata from offer
-      const { totalBytes, fileName, fileSize, mimeType, salt: saltArray, publicKey: senderPublicKeyArray } = offerPayload
+      const {
+        totalBytes,
+        fileName,
+        fileSize,
+        mimeType,
+        salt: saltArray,
+        publicKey: senderPublicKeyArray,
+      } = offerPayload
 
       // Validate required fields
       if (!saltArray) {
-        setState({ status: 'error', message: 'Invalid offer: missing encryption salt' })
+        setState({
+          status: 'error',
+          message: 'Invalid offer: missing encryption salt',
+        })
         return
       }
 
@@ -182,7 +207,10 @@ export function useManualReceive(): UseManualReceiveReturn {
         !Number.isFinite(totalBytes) ||
         totalBytes < 0
       ) {
-        setState({ status: 'error', message: 'Invalid offer: missing or invalid file metadata' })
+        setState({
+          status: 'error',
+          message: 'Invalid offer: missing or invalid file metadata',
+        })
         return
       }
 
@@ -190,7 +218,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       if (totalBytes > MAX_MESSAGE_SIZE) {
         setState({
           status: 'error',
-          message: `Transfer rejected: Size (${Math.round(totalBytes / 1024 / 1024)}MB) exceeds limit (${MAX_MESSAGE_SIZE / 1024 / 1024}MB)`
+          message: `Transfer rejected: Size (${Math.round(totalBytes / 1024 / 1024)}MB) exceeds limit (${MAX_MESSAGE_SIZE / 1024 / 1024}MB)`,
         })
         return
       }
@@ -205,13 +233,19 @@ export function useManualReceive(): UseManualReceiveReturn {
       const salt = new Uint8Array(saltArray)
 
       // Derive shared secret as non-extractable CryptoKey
-      const sharedSecretKey = await deriveSharedSecretKey(ecdhKeyPair.privateKey, senderPublicKey)
+      const sharedSecretKey = await deriveSharedSecretKey(
+        ecdhKeyPair.privateKey,
+        senderPublicKey,
+      )
       const key = await deriveAESKeyFromSecretKey(sharedSecretKey, salt)
 
       if (cancelledRef.current) return
 
       // Create WebRTC connection and handle offer
-      setState({ status: 'generating_answer', message: 'Creating P2P answer...' })
+      setState({
+        status: 'generating_answer',
+        message: 'Creating P2P answer...',
+      })
 
       const iceCandidates: RTCIceCandidate[] = []
       let answerSDP: RTCSessionDescriptionInit | null = null
@@ -249,17 +283,24 @@ export function useManualReceive(): UseManualReceiveReturn {
           // Message received
           if (typeof data === 'string') {
             if (data.startsWith('DONE:')) {
-              const expectedChunks = Math.ceil(totalBytes! / ENCRYPTION_CHUNK_SIZE)
+              const expectedChunks = Math.ceil(
+                totalBytes! / ENCRYPTION_CHUNK_SIZE,
+              )
               const receivedChunkCount = parseInt(data.split(':')[1], 10)
-              if (!Number.isFinite(receivedChunkCount) || receivedChunkCount <= 0) {
-                transferRejecter?.(new Error('Invalid DONE message: missing chunk count'))
+              if (
+                !Number.isFinite(receivedChunkCount) ||
+                receivedChunkCount <= 0
+              ) {
+                transferRejecter?.(
+                  new Error('Invalid DONE message: missing chunk count'),
+                )
                 return
               }
               if (receivedChunkCount !== expectedChunks) {
                 transferRejecter?.(
                   new Error(
-                    `Invalid DONE message: expected ${expectedChunks} chunks, got ${receivedChunkCount}`
-                  )
+                    `Invalid DONE message: expected ${expectedChunks} chunks, got ${receivedChunkCount}`,
+                  ),
                 )
                 return
               }
@@ -269,23 +310,33 @@ export function useManualReceive(): UseManualReceiveReturn {
               }
             } else if (data === 'DONE') {
               transferRejecter?.(
-                new Error('Unsupported sender: missing chunk count. Ask sender to update and retry.')
+                new Error(
+                  'Unsupported sender: missing chunk count. Ask sender to update and retry.',
+                ),
               )
             }
           } else if (data instanceof ArrayBuffer) {
             // Store encrypted chunk for later decryption
             const encryptedChunk = new Uint8Array(data)
-            const expectedChunks = Math.ceil(totalBytes! / ENCRYPTION_CHUNK_SIZE)
-            const expectedEncryptedBytes = totalBytes! + expectedChunks * ENCRYPTED_CHUNK_OVERHEAD
+            const expectedChunks = Math.ceil(
+              totalBytes! / ENCRYPTION_CHUNK_SIZE,
+            )
+            const expectedEncryptedBytes =
+              totalBytes! + expectedChunks * ENCRYPTED_CHUNK_OVERHEAD
 
             try {
-              const { chunkIndex, encryptedData } = parseChunkMessage(encryptedChunk)
+              const { chunkIndex, encryptedData } =
+                parseChunkMessage(encryptedChunk)
               if (receivedEncryptedChunkIndices.has(chunkIndex)) {
-                transferRejecter?.(new Error(`Duplicate chunk index: ${chunkIndex}`))
+                transferRejecter?.(
+                  new Error(`Duplicate chunk index: ${chunkIndex}`),
+                )
                 return
               }
               if (chunkIndex >= expectedChunks) {
-                transferRejecter?.(new Error(`Chunk index out of range: ${chunkIndex}`))
+                transferRejecter?.(
+                  new Error(`Chunk index out of range: ${chunkIndex}`),
+                )
                 return
               }
 
@@ -293,30 +344,40 @@ export function useManualReceive(): UseManualReceiveReturn {
                 chunkIndex === expectedChunks - 1
                   ? totalBytes! - chunkIndex * ENCRYPTION_CHUNK_SIZE
                   : ENCRYPTION_CHUNK_SIZE
-              const expectedEncryptedLength = expectedPlaintextLength + AES_NONCE_LENGTH + AES_TAG_LENGTH
+              const expectedEncryptedLength =
+                expectedPlaintextLength + AES_NONCE_LENGTH + AES_TAG_LENGTH
               if (encryptedData.length !== expectedEncryptedLength) {
                 transferRejecter?.(
                   new Error(
-                    `Invalid encrypted chunk ${chunkIndex} length: expected ${expectedEncryptedLength}, got ${encryptedData.length}`
-                  )
+                    `Invalid encrypted chunk ${chunkIndex} length: expected ${expectedEncryptedLength}, got ${encryptedData.length}`,
+                  ),
                 )
                 return
               }
-              if (receivedBytes + encryptedChunk.length > expectedEncryptedBytes) {
-                transferRejecter?.(new Error('Transfer exceeds advertised size'))
+              if (
+                receivedBytes + encryptedChunk.length >
+                expectedEncryptedBytes
+              ) {
+                transferRejecter?.(
+                  new Error('Transfer exceeds advertised size'),
+                )
                 return
               }
 
               receivedEncryptedChunkIndices.add(chunkIndex)
             } catch (err) {
-              transferRejecter?.(err instanceof Error ? err : new Error('Invalid encrypted chunk'))
+              transferRejecter?.(
+                err instanceof Error
+                  ? err
+                  : new Error('Invalid encrypted chunk'),
+              )
               return
             }
 
             receivedChunks.push(encryptedChunk)
             receivedBytes += encryptedChunk.length
 
-            setState(s => ({
+            setState((s) => ({
               ...s,
               progress: {
                 current: receivedBytes,
@@ -324,7 +385,7 @@ export function useManualReceive(): UseManualReceiveReturn {
               },
             }))
           }
-        }
+        },
       )
 
       rtcRef.current = rtc
@@ -358,10 +419,17 @@ export function useManualReceive(): UseManualReceiveReturn {
       if (cancelledRef.current) return
 
       // Wait for ICE gathering to complete
-      setState({ status: 'generating_answer', message: 'Gathering network info...' })
-      const iceGatheringComplete = await rtc.waitForIceGatheringComplete(ICE_GATHER_TIMEOUT_MS)
+      setState({
+        status: 'generating_answer',
+        message: 'Gathering network info...',
+      })
+      const iceGatheringComplete = await rtc.waitForIceGatheringComplete(
+        ICE_GATHER_TIMEOUT_MS,
+      )
       if (!iceGatheringComplete) {
-        console.warn('ICE gathering timed out while generating answer; continuing with available candidates')
+        console.warn(
+          'ICE gathering timed out while generating answer; continuing with available candidates',
+        )
       }
       setState({
         status: 'generating_answer',
@@ -374,11 +442,17 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       // Validate answerSDP is available
       if (!answerSDP) {
-        throw new Error('Failed to generate answer SDP: Answer was not created by WebRTC connection')
+        throw new Error(
+          'Failed to generate answer SDP: Answer was not created by WebRTC connection',
+        )
       }
 
       // Generate answer with our public key
-      const answerBinary = await generateMutualAnswerBinary(answerSDP, iceCandidates, ecdhKeyPair.publicKeyBytes)
+      const answerBinary = await generateMutualAnswerBinary(
+        answerSDP,
+        iceCandidates,
+        ecdhKeyPair.publicKeyBytes,
+      )
 
       // Show answer and wait for connection
       setState({
@@ -386,7 +460,11 @@ export function useManualReceive(): UseManualReceiveReturn {
         message: 'Show this to sender and wait for connection',
         answerData: answerBinary,
         contentType: 'file',
-        fileMetadata: { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! },
+        fileMetadata: {
+          fileName: fileName!,
+          fileSize: fileSize!,
+          mimeType: mimeType!,
+        },
       })
 
       // Wait for data channel to open
@@ -414,16 +492,23 @@ export function useManualReceive(): UseManualReceiveReturn {
         status: 'receiving',
         message: 'Receiving file...',
         contentType: 'file',
-        fileMetadata: { fileName: fileName!, fileSize: fileSize!, mimeType: mimeType! },
+        fileMetadata: {
+          fileName: fileName!,
+          fileSize: fileSize!,
+          mimeType: mimeType!,
+        },
         useWebRTC: true,
         progress: { current: 0, total: totalBytes! },
       })
 
       // Wait for transfer to complete
       await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Transfer timeout'))
-        }, 10 * 60 * 1000) // 10 minutes
+        const timeout = setTimeout(
+          () => {
+            reject(new Error('Transfer timeout'))
+          },
+          10 * 60 * 1000,
+        ) // 10 minutes
         const checkInterval = setInterval(() => {
           if (cancelledRef.current) {
             clearInterval(checkInterval)
@@ -460,7 +545,9 @@ export function useManualReceive(): UseManualReceiveReturn {
       let totalDecryptedBytes = 0
 
       if (receivedChunks.length !== expectedChunks) {
-        throw new Error(`Missing chunks: got ${receivedChunks.length}, expected ${expectedChunks}`)
+        throw new Error(
+          `Missing chunks: got ${receivedChunks.length}, expected ${expectedChunks}`,
+        )
       }
 
       for (const encryptedChunk of receivedChunks) {
@@ -473,7 +560,11 @@ export function useManualReceive(): UseManualReceiveReturn {
           throw new Error(`Chunk index out of range: ${chunkIndex}`)
         }
 
-        const decryptedChunk = await decryptChunk(key, encryptedData, chunkIndex)
+        const decryptedChunk = await decryptChunk(
+          key,
+          encryptedData,
+          chunkIndex,
+        )
 
         // Calculate write position based on chunk index
         const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE
@@ -484,7 +575,7 @@ export function useManualReceive(): UseManualReceiveReturn {
 
         if (decryptedChunk.length !== expectedChunkLength) {
           throw new Error(
-            `Invalid chunk ${chunkIndex} length: expected ${expectedChunkLength}, got ${decryptedChunk.length}`
+            `Invalid chunk ${chunkIndex} length: expected ${expectedChunkLength}, got ${decryptedChunk.length}`,
           )
         }
 
@@ -499,8 +590,13 @@ export function useManualReceive(): UseManualReceiveReturn {
         totalDecryptedBytes += decryptedChunk.length
       }
 
-      if (decryptedChunkIndices.size !== expectedChunks || totalDecryptedBytes !== totalBytes) {
-        throw new Error(`Incomplete transfer: got ${totalDecryptedBytes} bytes, expected ${totalBytes}`)
+      if (
+        decryptedChunkIndices.size !== expectedChunks ||
+        totalDecryptedBytes !== totalBytes
+      ) {
+        throw new Error(
+          `Incomplete transfer: got ${totalDecryptedBytes} bytes, expected ${totalBytes}`,
+        )
       }
 
       // Send acknowledgment only after all encrypted chunks authenticate and reassemble.
@@ -527,10 +623,9 @@ export function useManualReceive(): UseManualReceiveReturn {
           mimeType: mimeType!,
         },
       })
-
     } catch (error) {
       if (!cancelledRef.current) {
-        setState(prevState => ({
+        setState((prevState) => ({
           ...prevState,
           status: 'error',
           message: error instanceof Error ? error.message : 'Failed to receive',

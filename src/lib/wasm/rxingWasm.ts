@@ -40,7 +40,7 @@ export async function readQrCodesFromRgba(
   rgba: Uint8Array | Uint8ClampedArray,
   width: number,
   height: number,
-  options: RxingReaderOptions = {}
+  options: RxingReaderOptions = {},
 ): Promise<Uint8Array[]> {
   await ensureRxingWasmInit()
 
@@ -59,7 +59,7 @@ export async function readQrCodesFromRgba(
     tryInvert,
     binarizer === 'hybrid',
     binarizerFallback,
-    MAX_NUMBER_OF_SYMBOLS
+    MAX_NUMBER_OF_SYMBOLS,
   ) as Uint8Array[]
 
   return results
@@ -67,7 +67,12 @@ export async function readQrCodesFromRgba(
 
 export async function readQrCodesFromImageData(
   imageData: ImageData,
-  options: RxingReaderOptions = {}
+  options: RxingReaderOptions = {},
 ): Promise<Uint8Array[]> {
-  return readQrCodesFromRgba(imageData.data, imageData.width, imageData.height, options)
+  return readQrCodesFromRgba(
+    imageData.data,
+    imageData.width,
+    imageData.height,
+    options,
+  )
 }

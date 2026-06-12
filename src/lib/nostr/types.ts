@@ -34,14 +34,14 @@ export interface FileMetadata {
 // Base properties shared across all transfer states
 interface TransferStateBase {
   progress?: {
-    current: number  // bytes transferred
-    total: number    // total bytes
+    current: number // bytes transferred
+    total: number // total bytes
   }
   contentType?: ContentType
   fileMetadata?: FileMetadata
   useWebRTC?: boolean
   currentRelays?: string[] // Connected relay URLs being used (for signaling)
-  totalRelays?: number     // Total relays attempted to connect
+  totalRelays?: number // Total relays attempted to connect
 }
 
 // Error state has required message
@@ -64,11 +64,8 @@ export interface PinExchangePayload {
   contentType: ContentType
   transferId: string
   senderPubkey: string
-  totalChunks: number
   // Sender's preferred relays for signaling
   relays?: string[]
-  // tmpfiles.org download URL for encrypted data
-  tmpfilesUrl?: string
   // For file
   fileName?: string
   fileSize?: number
@@ -79,15 +76,6 @@ export interface PinExchangePayload {
 export interface AckData {
   transferId: string
   seq: number // -1 for final completion ACK, 0 for ready, N for chunk N ACK (1-based)
-}
-
-// Chunk notification payload (sender -> receiver when cloud fallback)
-export interface ChunkNotifyPayload {
-  transferId: string
-  chunkIndex: number    // 0-based chunk index
-  totalChunks: number   // Total number of chunks
-  chunkUrl: string      // Download URL for this chunk
-  chunkSize: number     // Size of this chunk in bytes
 }
 
 /**
@@ -106,7 +94,7 @@ export interface TransferMetadata {
 }
 
 // Re-export shared received-content types
-export type { ReceivedFile, ReceivedContent } from '../types'
+export type { ReceivedContent, ReceivedFile } from '../types'
 
 // WebRTC Signaling
 export type SignalingType = 'offer' | 'answer' | 'candidate'
@@ -115,10 +103,6 @@ export interface SignalingPayload {
   type: SignalingType
   sdp?: string
   candidate?: RTCIceCandidateInit
-}
-
-export interface WebRTCOptions {
-  relayOnly?: boolean
 }
 
 // Signaling method for P2P connection

@@ -1,9 +1,9 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import { Copy, Check, Loader2, AlertCircle } from 'lucide-react'
+import { AlertCircle, Check, Copy, Loader2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { generateTextQRCode } from '@/lib/qr-utils'
-import { chunkPayload, buildChunkUrl } from '@/lib/chunk-utils'
+import { buildChunkUrl, chunkPayload } from '@/lib/chunk-utils'
 import { generateMutualClipboardData } from '@/lib/manual-signaling'
+import { generateTextQRCode } from '@/lib/qr-utils'
 
 interface MultiQRDisplayProps {
   data: Uint8Array
@@ -19,7 +19,11 @@ interface ChunkInfo {
 
 const MIN_QR_SIZE = 150
 
-export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: MultiQRDisplayProps) {
+export function MultiQRDisplay({
+  data,
+  clipboardData,
+  showCopyButton = true,
+}: MultiQRDisplayProps) {
   const [copied, setCopied] = useState(false)
   const [qrImageUrls, setQrImageUrls] = useState<Map<number, string>>(new Map())
   const [error, setError] = useState<string | null>(null)
@@ -58,7 +62,7 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
           errorCorrectionLevel: 'M',
         })
         return { index: info.index, imageUrl }
-      })
+      }),
     )
       .then((results) => {
         if (!active) return
@@ -121,10 +125,13 @@ export function MultiQRDisplay({ data, clipboardData, showCopyButton = true }: M
   return (
     <div className="flex flex-col items-center space-y-4">
       <div className="text-xs text-muted-foreground">
-        {data.length.toLocaleString()} bytes &bull; {chunkInfos.length} QR code{chunkInfos.length !== 1 ? 's' : ''}
+        {data.length.toLocaleString()} bytes &bull; {chunkInfos.length} QR code
+        {chunkInfos.length !== 1 ? 's' : ''}
       </div>
 
-      <div className={`grid gap-4 ${chunkInfos.length === 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'} w-full max-w-[600px]`}>
+      <div
+        className={`grid gap-4 ${chunkInfos.length === 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'} w-full max-w-[600px]`}
+      >
         {chunkInfos.map((info, i) => (
           <div key={info.index} className="flex flex-col items-center gap-1">
             <div className="p-2 bg-white rounded-lg w-full">

@@ -1,9 +1,15 @@
-import { Outlet, useNavigate } from 'react-router-dom'
-import { Send, ArrowLeft } from 'lucide-react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { useSend } from '@/contexts/send-context'
+import { ArrowLeft, Send } from 'lucide-react'
 import { useEffect } from 'react'
+import { Outlet, useNavigate } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { useSend } from '@/contexts/send-context'
 
 export function SendTransferLayout() {
   const navigate = useNavigate()
@@ -45,7 +51,9 @@ export function SendTransferLayout() {
                 Secure Send
               </CardTitle>
               <CardDescription>
-                Transferring {config.selectedFiles.length || config.folderFiles?.length || 0} file(s)
+                Transferring{' '}
+                {config.selectedFiles.length || config.folderFiles?.length || 0}{' '}
+                file(s)
               </CardDescription>
             </div>
           </div>

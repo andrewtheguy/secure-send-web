@@ -11,7 +11,7 @@ export function wipeBufferSource(bufferSource: BufferSource): void {
       new Uint8Array(
         bufferSource.buffer,
         bufferSource.byteOffset,
-        bufferSource.byteLength
+        bufferSource.byteLength,
       ).fill(0)
       return
     }

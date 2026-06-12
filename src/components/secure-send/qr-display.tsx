@@ -1,20 +1,26 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { Copy, Check, AlertCircle, Loader2 } from 'lucide-react'
+import { AlertCircle, Check, Copy, Loader2 } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { generateBinaryQRCode } from '@/lib/qr-utils'
 import { generateMutualClipboardData } from '@/lib/manual-signaling'
+import { generateBinaryQRCode } from '@/lib/qr-utils'
 
 interface QRDisplayProps {
-  data: Uint8Array  // Binary data for QR code (SS03 obfuscated payload)
+  data: Uint8Array // Binary data for QR code (SS03 obfuscated payload)
   label?: string
   showCopyButton?: boolean
-  clipboardData?: string  // Base64 payload for copy button
+  clipboardData?: string // Base64 payload for copy button
   showSize?: boolean
 }
 
 const MIN_QR_SIZE = 150
 
-export function QRDisplay({ data, label, showCopyButton = true, clipboardData, showSize = true }: QRDisplayProps) {
+export function QRDisplay({
+  data,
+  label,
+  showCopyButton = true,
+  clipboardData,
+  showSize = true,
+}: QRDisplayProps) {
   const [copied, setCopied] = useState(false)
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
@@ -35,7 +41,7 @@ export function QRDisplay({ data, label, showCopyButton = true, clipboardData, s
 
     generateBinaryQRCode(data, {
       width: qrWidth,
-      errorCorrectionLevel: 'M'
+      errorCorrectionLevel: 'M',
     })
       .then((url) => {
         setQrImageUrl(url)
@@ -52,9 +58,10 @@ export function QRDisplay({ data, label, showCopyButton = true, clipboardData, s
   const handleCopy = useCallback(async () => {
     if (!data || data.length === 0) return
     try {
-      const copyPayload = (clipboardData && clipboardData.length > 0)
-        ? clipboardData
-        : generateMutualClipboardData(data)
+      const copyPayload =
+        clipboardData && clipboardData.length > 0
+          ? clipboardData
+          : generateMutualClipboardData(data)
       await navigator.clipboard.writeText(copyPayload)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
@@ -70,7 +77,10 @@ export function QRDisplay({ data, label, showCopyButton = true, clipboardData, s
       )}
 
       <div className="p-4 bg-white rounded-lg w-full">
-        <div ref={containerRef} className="flex items-center justify-center w-full">
+        <div
+          ref={containerRef}
+          className="flex items-center justify-center w-full"
+        >
           {isGenerating ? (
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           ) : error ? (

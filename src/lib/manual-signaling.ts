@@ -95,13 +95,16 @@ export function parseClipboardPayload(base64: string): Uint8Array | null {
 /**
  * Validate SignalingPayload structure
  */
-export function isValidSignalingPayload(payload: unknown): payload is SignalingPayload {
+export function isValidSignalingPayload(
+  payload: unknown,
+): payload is SignalingPayload {
   if (!payload || typeof payload !== 'object') return false
   const p = payload as Record<string, unknown>
   if (p.type !== 'offer' && p.type !== 'answer') return false
   if (typeof p.sdp !== 'string') return false
   if (!Array.isArray(p.candidates)) return false
-  if (!(p.candidates as unknown[]).every((c) => typeof c === 'string')) return false
+  if (!(p.candidates as unknown[]).every((c) => typeof c === 'string'))
+    return false
   if (!Number.isFinite(p.createdAt)) return false
   if (!isValidPublicKeyArray(p.publicKey)) return false
   return true
@@ -139,7 +142,7 @@ export function generateMutualOfferBinary(
     mimeType?: string
     publicKey: Uint8Array // ECDH public key (65 bytes)
     salt: Uint8Array // Salt for AES key derivation
-  }
+  },
 ): Uint8Array {
   const payload: SignalingPayload = {
     type: 'offer',
@@ -182,7 +185,7 @@ export function generateMutualAnswerBinary(
   answer: RTCSessionDescriptionInit,
   candidates: RTCIceCandidate[],
   publicKey: Uint8Array, // ECDH public key (65 bytes)
-  createdAt: number = Date.now()
+  createdAt: number = Date.now(),
 ): Uint8Array {
   const payload: SignalingPayload = {
     type: 'answer',
@@ -217,14 +220,18 @@ export function generateMutualAnswerBinary(
  */
 export function isValidPublicKeyArray(arr: unknown): arr is number[] {
   if (!Array.isArray(arr) || arr.length !== 65) return false
-  return arr.every((b) => typeof b === 'number' && Number.isInteger(b) && b >= 0 && b <= 255)
+  return arr.every(
+    (b) => typeof b === 'number' && Number.isInteger(b) && b >= 0 && b <= 255,
+  )
 }
 
 /**
  * Parse mutual exchange binary payload (offer or answer)
  * Returns null if invalid format or version
  */
-export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null {
+export function parseMutualPayload(
+  binary: Uint8Array,
+): SignalingPayload | null {
   try {
     if (!isMutualPayload(binary)) {
       return null
@@ -258,8 +265,7 @@ export function parseMutualPayload(binary: Uint8Array): SignalingPayload | null 
         if (isValidSignalingPayload(payload)) {
           return payload
         }
-      } catch {
-      }
+      } catch {}
     }
 
     return null

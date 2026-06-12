@@ -1,5 +1,5 @@
-import QRWorker from '@/workers/qrGenerator.worker?worker'
 import type { FastQrMode } from '@/lib/wasm/fastQrWasm'
+import QRWorker from '@/workers/qrGenerator.worker?worker'
 
 // Eager-load worker on module import for offline support
 const worker = new QRWorker()
@@ -34,7 +34,7 @@ function rejectAllPendingRequests(reason: string): void {
 
 function registerPendingRequest(
   resolve: (url: string) => void,
-  reject: (error: Error) => void
+  reject: (error: Error) => void,
 ): number {
   const id = requestId++
   const timeoutId = setTimeout(() => {
@@ -42,7 +42,9 @@ function registerPendingRequest(
     if (!request) {
       return
     }
-    request.reject(new Error(`QR generation timed out after ${REQUEST_TIMEOUT_MS}ms`))
+    request.reject(
+      new Error(`QR generation timed out after ${REQUEST_TIMEOUT_MS}ms`),
+    )
   }, REQUEST_TIMEOUT_MS)
   pending.set(id, { resolve, reject, timeoutId })
   return id
@@ -67,7 +69,9 @@ worker.onmessage = (e: MessageEvent) => {
   }
 
   if (data.type === 'success' && typeof data.svg === 'string') {
-    request.resolve(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(data.svg)}`)
+    request.resolve(
+      `data:image/svg+xml;charset=utf-8,${encodeURIComponent(data.svg)}`,
+    )
   } else {
     const errorMessage =
       typeof data.error === 'string' && data.error.length > 0
@@ -94,14 +98,20 @@ interface QRCodeOptions {
 function postGenerateRequest(
   buffer: ArrayBuffer,
   mode: FastQrMode,
-  options: QRCodeOptions | undefined
+  options: QRCodeOptions | undefined,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const id = registerPendingRequest(resolve, reject)
     try {
       worker.postMessage(
-        { type: 'generate', id, binaryBuffer: buffer, mode, options: options || {} },
-        [buffer]
+        {
+          type: 'generate',
+          id,
+          binaryBuffer: buffer,
+          mode,
+          options: options || {},
+        },
+        [buffer],
       )
     } catch (error) {
       const request = takePendingRequest(id)
@@ -109,7 +119,9 @@ function postGenerateRequest(
         return
       }
       request.reject(
-        error instanceof Error ? error : new Error('Failed to post QR generation request')
+        error instanceof Error
+          ? error
+          : new Error('Failed to post QR generation request'),
       )
     }
   })
@@ -120,12 +132,15 @@ function postGenerateRequest(
  * Returns a data URI (SVG image)
  * Uses 8-bit byte mode for binary data
  */
-export function generateBinaryQRCode(data: Uint8Array, options?: QRCodeOptions): Promise<string> {
+export function generateBinaryQRCode(
+  data: Uint8Array,
+  options?: QRCodeOptions,
+): Promise<string> {
   // Copy out of the source view's underlying buffer so the worker gets an
   // exclusively-owned ArrayBuffer it can transfer without disturbing the caller.
   const buffer = data.buffer.slice(
     data.byteOffset,
-    data.byteOffset + data.byteLength
+    data.byteOffset + data.byteLength,
   ) as ArrayBuffer
   return postGenerateRequest(buffer, 'byte', options)
 }
@@ -136,7 +151,10 @@ export function generateBinaryQRCode(data: Uint8Array, options?: QRCodeOptions):
  * Encoded as UTF-8 bytes; byte mode is left off so fast-qr can pick numeric/alphanumeric
  * mode for compatible payloads (shorter URLs).
  */
-export function generateTextQRCode(text: string, options?: QRCodeOptions): Promise<string> {
+export function generateTextQRCode(
+  text: string,
+  options?: QRCodeOptions,
+): Promise<string> {
   const bytes = new TextEncoder().encode(text)
   return postGenerateRequest(bytes.buffer as ArrayBuffer, 'auto', options)
 }

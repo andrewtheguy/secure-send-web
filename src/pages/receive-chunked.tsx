@@ -1,14 +1,27 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import {
+  AlertCircle,
+  Camera,
+  Download,
+  FileDown,
+  Loader2,
+  RefreshCw,
+  RotateCcw,
+  X,
+} from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Download, X, RotateCcw, FileDown, RefreshCw, Loader2, Camera, AlertCircle } from 'lucide-react'
+import { QRDisplay } from '@/components/secure-send/qr-display'
+import { TransferStatus } from '@/components/secure-send/transfer-status'
 import { Button } from '@/components/ui/button'
 import { useChunkCollector } from '@/hooks/use-chunk-collector'
 import { useManualReceive } from '@/hooks/use-manual-receive'
 import { useQRScanner } from '@/hooks/useQRScanner'
-import { QRDisplay } from '@/components/secure-send/qr-display'
-import { TransferStatus } from '@/components/secure-send/transfer-status'
-import { downloadFile, formatFileSize, getMimeTypeDescription } from '@/lib/file-utils'
 import { extractChunkParam } from '@/lib/chunk-utils'
+import {
+  downloadFile,
+  formatFileSize,
+  getMimeTypeDescription,
+} from '@/lib/file-utils'
 import { isMobileDevice } from '@/lib/utils'
 
 type PageStep = 'collecting' | 'transferring'
@@ -19,11 +32,18 @@ export function ReceiveChunkedPage() {
   const [scanError, setScanError] = useState<string | null>(null)
   const [cameraReady, setCameraReady] = useState(false)
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>(
-    isMobileDevice() ? 'environment' : 'user'
+    isMobileDevice() ? 'environment' : 'user',
   )
 
   const { state: chunkState, addChunk } = useChunkCollector()
-  const { state: receiveState, receivedContent, startReceive, submitOffer, cancel, reset } = useManualReceive()
+  const {
+    state: receiveState,
+    receivedContent,
+    startReceive,
+    submitOffer,
+    cancel,
+    reset,
+  } = useManualReceive()
 
   const initialChunkFed = useRef(false)
 
@@ -39,7 +59,11 @@ export function ReceiveChunkedPage() {
 
   // When all chunks collected, start the receive flow
   useEffect(() => {
-    if (chunkState.isComplete && chunkState.assembledPayload && step === 'collecting') {
+    if (
+      chunkState.isComplete &&
+      chunkState.assembledPayload &&
+      step === 'collecting'
+    ) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: transition page step when chunk collection completes
       setStep('transferring')
       startReceive()
@@ -58,16 +82,19 @@ export function ReceiveChunkedPage() {
   }, [step, receiveState.status, chunkState.assembledPayload, submitOffer])
 
   // Handle scanned QR data — scanner returns raw bytes, URL QRs decode to ASCII
-  const handleScan = useCallback((binaryData: Uint8Array) => {
-    const text = new TextDecoder().decode(binaryData)
-    // Try to extract chunk param from URL
-    const param = extractChunkParam(text)
-    if (param) {
-      setScanError(null)
-      addChunk(param)
-    }
-    // If not a valid chunk URL, silently ignore (could be unrelated QR)
-  }, [addChunk])
+  const handleScan = useCallback(
+    (binaryData: Uint8Array) => {
+      const text = new TextDecoder().decode(binaryData)
+      // Try to extract chunk param from URL
+      const param = extractChunkParam(text)
+      if (param) {
+        setScanError(null)
+        addChunk(param)
+      }
+      // If not a valid chunk URL, silently ignore (could be unrelated QR)
+    },
+    [addChunk],
+  )
 
   const handleScanError = useCallback((err: string) => {
     if (err.includes('denied') || err.includes('unavailable')) {
@@ -92,12 +119,16 @@ export function ReceiveChunkedPage() {
   })
 
   const handleSwitchCamera = useCallback(() => {
-    setFacingMode(prev => prev === 'environment' ? 'user' : 'environment')
+    setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
   }, [])
 
   const handleDownload = useCallback(() => {
     if (receivedContent) {
-      downloadFile(receivedContent.data, receivedContent.fileName, receivedContent.mimeType)
+      downloadFile(
+        receivedContent.data,
+        receivedContent.fileName,
+        receivedContent.mimeType,
+      )
     }
   }, [receivedContent])
 
@@ -115,9 +146,8 @@ export function ReceiveChunkedPage() {
   if (step === 'collecting') {
     const total = chunkState.totalChunks
     const collected = chunkState.collectedCount
-    const collectedPercent = total !== null && total > 0
-      ? Math.round((collected / total) * 100)
-      : 0
+    const collectedPercent =
+      total !== null && total > 0 ? Math.round((collected / total) * 100) : 0
 
     return (
       <div className="flex w-full justify-center">
@@ -127,8 +157,8 @@ export function ReceiveChunkedPage() {
           {total !== null ? (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground text-center">
-                Collected {collected} of {total} QR code{total !== 1 ? 's' : ''} (
-                {collectedPercent}%)
+                Collected {collected} of {total} QR code{total !== 1 ? 's' : ''}{' '}
+                ({collectedPercent}%)
               </p>
               {total > 1 && (
                 <>
@@ -152,7 +182,8 @@ export function ReceiveChunkedPage() {
                     })}
                   </div>
                   <p className="text-xs text-muted-foreground text-center">
-                    QR codes can be scanned in any order, but all QR codes must be scanned.
+                    QR codes can be scanned in any order, but all QR codes must
+                    be scanned.
                   </p>
                 </>
               )}
@@ -182,7 +213,9 @@ export function ReceiveChunkedPage() {
                   <div className="absolute inset-0 flex items-center justify-center bg-muted">
                     <div className="text-center">
                       <Loader2 className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
-                      <p className="text-sm text-muted-foreground mt-2">Starting camera...</p>
+                      <p className="text-sm text-muted-foreground mt-2">
+                        Starting camera...
+                      </p>
                     </div>
                   </div>
                 )}
@@ -217,7 +250,8 @@ export function ReceiveChunkedPage() {
 
               {scanError?.includes('denied') && (
                 <p className="text-xs text-muted-foreground text-center">
-                  Please allow camera access in your browser settings and reload the page.
+                  Please allow camera access in your browser settings and reload
+                  the page.
                 </p>
               )}
 
@@ -245,7 +279,9 @@ export function ReceiveChunkedPage() {
           {chunkState.isComplete && (
             <div className="flex items-center justify-center gap-2 py-4">
               <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              <p className="text-sm text-muted-foreground">All chunks received, starting transfer...</p>
+              <p className="text-sm text-muted-foreground">
+                All chunks received, starting transfer...
+              </p>
             </div>
           )}
         </div>
@@ -256,7 +292,8 @@ export function ReceiveChunkedPage() {
   // --- Transferring ---
   const answerData = receiveState.answerData
   const clipboardData = receiveState.clipboardData
-  const showQRDisplay = receiveState.status === 'showing_answer' && answerData instanceof Uint8Array
+  const showQRDisplay =
+    receiveState.status === 'showing_answer' && answerData instanceof Uint8Array
 
   return (
     <div className="flex w-full justify-center">
@@ -293,7 +330,10 @@ export function ReceiveChunkedPage() {
                   {getMimeTypeDescription(receivedContent.mimeType)}
                 </p>
               </div>
-              <Button onClick={handleDownload} className="w-full max-w-[200px] bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700">
+              <Button
+                onClick={handleDownload}
+                className="w-full max-w-[200px] bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-600 dark:hover:bg-cyan-700"
+              >
                 <Download className="mr-2 h-4 w-4" />
                 Download File
               </Button>
@@ -303,14 +343,20 @@ export function ReceiveChunkedPage() {
 
         {/* Action buttons */}
         <div className="flex gap-2">
-          {receiveState.status !== 'complete' && receiveState.status !== 'error' && (
-            <Button variant="outline" onClick={handleCancel} className="flex-1">
-              <X className="mr-2 h-4 w-4" />
-              Cancel
-            </Button>
-          )}
+          {receiveState.status !== 'complete' &&
+            receiveState.status !== 'error' && (
+              <Button
+                variant="outline"
+                onClick={handleCancel}
+                className="flex-1"
+              >
+                <X className="mr-2 h-4 w-4" />
+                Cancel
+              </Button>
+            )}
 
-          {(receiveState.status === 'complete' || receiveState.status === 'error') && (
+          {(receiveState.status === 'complete' ||
+            receiveState.status === 'error') && (
             <Button variant="outline" onClick={handleReset} className="flex-1">
               <RotateCcw className="mr-2 h-4 w-4" />
               Receive Another

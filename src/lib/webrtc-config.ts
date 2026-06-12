@@ -42,7 +42,7 @@ function getTurnServer(): RTCIceServer | undefined {
   if (!turnUsername || !turnCredential) {
     console.warn(
       'TURN server URL provided but credentials missing. ' +
-      'Set VITE_TURN_USERNAME and VITE_TURN_CREDENTIAL.'
+        'Set VITE_TURN_USERNAME and VITE_TURN_CREDENTIAL.',
     )
     return undefined
   }

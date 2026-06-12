@@ -1,17 +1,17 @@
 import {
-  PIN_LENGTH,
-  PIN_CHARSET,
-  PIN_WORDLIST,
   NOSTR_FIRST_CHARSET,
-  QR_FIRST_CHARSET,
+  PIN_CHARSET,
   PIN_CHECKSUM_LENGTH,
-  PIN_HINT_LENGTH,
+  PIN_FINGERPRINT_ITERATIONS,
   PIN_FINGERPRINT_LENGTH,
-  PIN_HINT_SALT,
+  PIN_FINGERPRINT_SALT,
   PIN_HINT_BUCKET_SEC,
   PIN_HINT_ITERATIONS,
-  PIN_FINGERPRINT_SALT,
-  PIN_FINGERPRINT_ITERATIONS,
+  PIN_HINT_LENGTH,
+  PIN_HINT_SALT,
+  PIN_LENGTH,
+  PIN_WORDLIST,
+  QR_FIRST_CHARSET,
 } from './constants'
 import { importPinKey } from './kdf'
 
@@ -27,7 +27,6 @@ function computeChecksum(data: string): string {
   }
   return PIN_CHARSET[sum % PIN_CHARSET.length]
 }
-
 
 /**
  * Generate random character from a charset using rejection sampling
@@ -47,7 +46,6 @@ function randomCharFromCharset(charset: string): string {
   }
 }
 
-
 /**
  * Generate random PIN with checksum with signaling method encoded in first character
  * Charset excludes confusing characters: I, O, i, l, o, 0, 1
@@ -57,7 +55,8 @@ function randomCharFromCharset(charset: string): string {
  * - '2' first char = QR/Manual
  */
 export function generatePinForMethod(method: 'nostr' | 'manual'): string {
-  const firstCharset = method === 'nostr' ? NOSTR_FIRST_CHARSET : QR_FIRST_CHARSET
+  const firstCharset =
+    method === 'nostr' ? NOSTR_FIRST_CHARSET : QR_FIRST_CHARSET
 
   const dataLength = PIN_LENGTH - PIN_CHECKSUM_LENGTH
 
@@ -147,7 +146,7 @@ export function pinToWords(pin: string): string[] {
  * Convert 7-word PIN back to 12-character alphanumeric PIN
  */
 export function wordsToPin(words: string[]): string {
-  if (words.length === 0 || words.every(w => !w)) return ''
+  if (words.length === 0 || words.every((w) => !w)) return ''
 
   const charsetSize = BigInt(PIN_CHARSET.length)
   const wordlistSize = BigInt(PIN_WORDLIST.length)
@@ -188,7 +187,8 @@ export function isValidPinWord(word: string): boolean {
  * same look-back the QR signaling parser does for its per-bucket XOR obfuscation).
  */
 function pinHintSalt(bucketOffset: number): string {
-  const bucket = Math.floor(Date.now() / 1000 / PIN_HINT_BUCKET_SEC) - bucketOffset
+  const bucket =
+    Math.floor(Date.now() / 1000 / PIN_HINT_BUCKET_SEC) - bucketOffset
   return `${PIN_HINT_SALT}:${bucket}`
 }
 
@@ -239,9 +239,17 @@ async function derivePinBits(
  *
  * `bucketOffset` selects an earlier time bucket (0 = current, 1 = previous, ...).
  */
-export async function computePinHint(pin: string, bucketOffset = 0): Promise<string> {
+export async function computePinHint(
+  pin: string,
+  bucketOffset = 0,
+): Promise<string> {
   const keyMaterial = await importPinKey(pin)
-  return derivePinBits(keyMaterial, pinHintSalt(bucketOffset), PIN_HINT_ITERATIONS, PIN_HINT_LENGTH)
+  return derivePinBits(
+    keyMaterial,
+    pinHintSalt(bucketOffset),
+    PIN_HINT_ITERATIONS,
+    PIN_HINT_LENGTH,
+  )
 }
 
 /**
@@ -251,8 +259,16 @@ export async function computePinHint(pin: string, bucketOffset = 0): Promise<str
  *
  * `bucketOffset` selects an earlier time bucket (0 = current, 1 = previous, ...).
  */
-export async function computePinHintFromKey(keyMaterial: CryptoKey, bucketOffset = 0): Promise<string> {
-  return derivePinBits(keyMaterial, pinHintSalt(bucketOffset), PIN_HINT_ITERATIONS, PIN_HINT_LENGTH)
+export async function computePinHintFromKey(
+  keyMaterial: CryptoKey,
+  bucketOffset = 0,
+): Promise<string> {
+  return derivePinBits(
+    keyMaterial,
+    pinHintSalt(bucketOffset),
+    PIN_HINT_ITERATIONS,
+    PIN_HINT_LENGTH,
+  )
 }
 
 /**
@@ -273,7 +289,12 @@ export async function computePinHintFromKey(keyMaterial: CryptoKey, bucketOffset
  */
 export async function computePinFingerprint(pin: string): Promise<string> {
   const keyMaterial = await importPinKey(pin)
-  return derivePinBits(keyMaterial, PIN_FINGERPRINT_SALT, PIN_FINGERPRINT_ITERATIONS, PIN_FINGERPRINT_LENGTH)
+  return derivePinBits(
+    keyMaterial,
+    PIN_FINGERPRINT_SALT,
+    PIN_FINGERPRINT_ITERATIONS,
+    PIN_FINGERPRINT_LENGTH,
+  )
 }
 
 /**

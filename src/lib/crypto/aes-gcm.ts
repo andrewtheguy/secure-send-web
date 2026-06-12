@@ -20,14 +20,14 @@ export function generateNonce(): Uint8Array {
 export async function encrypt(
   key: CryptoKey,
   plaintext: Uint8Array,
-  nonce?: Uint8Array
+  nonce?: Uint8Array,
 ): Promise<Uint8Array> {
   const iv = nonce ?? generateNonce()
 
   const ciphertext = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv: iv as BufferSource },
     key,
-    plaintext as BufferSource
+    plaintext as BufferSource,
   )
 
   // Combine nonce + ciphertext (tag is appended automatically by Web Crypto)
@@ -42,9 +42,14 @@ export async function encrypt(
  * Decrypt data with AES-256-GCM
  * Input: nonce (12 bytes) || ciphertext || tag (16 bytes)
  */
-export async function decrypt(key: CryptoKey, encrypted: Uint8Array): Promise<Uint8Array> {
+export async function decrypt(
+  key: CryptoKey,
+  encrypted: Uint8Array,
+): Promise<Uint8Array> {
   if (encrypted.length < MIN_ENCRYPTED_LENGTH) {
-    throw new Error(`Encrypted data too short: expected at least ${MIN_ENCRYPTED_LENGTH} bytes (nonce + tag)`)
+    throw new Error(
+      `Encrypted data too short: expected at least ${MIN_ENCRYPTED_LENGTH} bytes (nonce + tag)`,
+    )
   }
 
   const nonce = encrypted.slice(0, AES_NONCE_LENGTH)
@@ -53,7 +58,7 @@ export async function decrypt(key: CryptoKey, encrypted: Uint8Array): Promise<Ui
   const plaintext = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: nonce as BufferSource },
     key,
-    ciphertext as BufferSource
+    ciphertext as BufferSource,
   )
 
   return new Uint8Array(plaintext)
@@ -62,7 +67,10 @@ export async function decrypt(key: CryptoKey, encrypted: Uint8Array): Promise<Ui
 /**
  * Encrypt a string message
  */
-export function encryptMessage(key: CryptoKey, message: string): Promise<Uint8Array> {
+export function encryptMessage(
+  key: CryptoKey,
+  message: string,
+): Promise<Uint8Array> {
   const encoder = new TextEncoder()
   const plaintext = encoder.encode(message)
   return encrypt(key, plaintext)
@@ -71,7 +79,10 @@ export function encryptMessage(key: CryptoKey, message: string): Promise<Uint8Ar
 /**
  * Decrypt to a string message
  */
-export async function decryptMessage(key: CryptoKey, encrypted: Uint8Array): Promise<string> {
+export async function decryptMessage(
+  key: CryptoKey,
+  encrypted: Uint8Array,
+): Promise<string> {
   const plaintext = await decrypt(key, encrypted)
   const decoder = new TextDecoder()
   return decoder.decode(plaintext)

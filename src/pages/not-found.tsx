@@ -1,5 +1,5 @@
-import { Link } from 'react-router-dom'
 import { AlertTriangle } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 
 export function NotFoundPage() {
@@ -11,7 +11,9 @@ export function NotFoundPage() {
             <AlertTriangle className="h-5 w-5 text-muted-foreground" />
           </div>
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Page not found</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Page not found
+            </h1>
             <p className="text-sm text-muted-foreground">
               The page you tried to reach doesn’t exist or was moved.
             </p>
@@ -19,9 +21,7 @@ export function NotFoundPage() {
         </div>
 
         <div className="mt-6 space-y-4 text-sm text-muted-foreground">
-          <p>
-            Check the URL or head back to Secure Send to start a transfer.
-          </p>
+          <p>Check the URL or head back to Secure Send to start a transfer.</p>
           <div>
             <Button asChild>
               <Link to="/">Go to Send</Link>
