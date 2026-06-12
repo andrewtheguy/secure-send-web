@@ -90,7 +90,7 @@ All signaling methods share a **unified encryption layer**: P2P transfers encryp
 - **Nostr** (default): Requires internet. Decentralized relay signaling. Devices can be on different networks.
 - **Manual Exchange**: No internet required. Exchange signaling via QR scan or copy/paste (camera optional). With internet, works across different networks. Without internet, devices must be on same local network.
 
-**Data Transfer**: WebRTC P2P only. If a direct P2P connection cannot be established, the transfer does not complete.
+**Data Transfer**: WebRTC P2P only. If a direct P2P connection cannot be established, the transfer does not complete — there is no automatic in-app fallback. When this happens, the UI suggests transferring offline via animated QR codes with [Secure QR Transfer](https://qrsecure.kuvi.app/transfer), a separate tool for side-by-side devices.
 
 See [Architecture](./docs/ARCHITECTURE.md) for detailed transfer flows and encryption specifics.
 

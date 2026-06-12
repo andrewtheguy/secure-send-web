@@ -51,7 +51,7 @@ sequenceDiagram
     Sender->>Receiver: PIN Exchange (via Nostr)
     Receiver-->>Sender: Authenticated Ready ACK (seq=0)
     Note over Sender,Receiver: P2P connection timeout (30s)
-    Note over Sender,Receiver: Transfer fails (no fallback)
+    Note over Sender,Receiver: Transfer fails — UI suggests offline-QR app
 ```
 
 ### Manual Exchange Mode (No Internet Required)
@@ -353,7 +353,7 @@ Handles direct peer-to-peer connections using WebRTC data channels.
 3. Wait for receiver ready ACK authenticated with the PIN-derived `signals` key
 4. Attempt P2P connection (30s timeout for connection only)
 5. If P2P connects: transfer via data channel
-6. If P2P connection fails: transfer fails (no fallback)
+6. If P2P connection fails: transfer fails — no automatic fallback; a `P2PConnectionError` is surfaced so the UI can suggest the offline-QR app ([src/lib/errors.ts](src/lib/errors.ts))
 7. Wait for authenticated completion ACK
 
 **`use-nostr-receive.ts`** - Receiver logic (Nostr):
