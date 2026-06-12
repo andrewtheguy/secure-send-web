@@ -146,7 +146,9 @@ export function useManualSend(): UseManualSendReturn {
       !Number.isFinite(parsed.createdAt)
     ) {
       answerRejectRef.current?.(
-        new Error('Invalid response: missing timestamp'),
+        new Error(
+          `Invalid response: missing or invalid timestamp (got ${String(parsed.createdAt)})`,
+        ),
       );
       answerResolverRef.current = null;
       return;
