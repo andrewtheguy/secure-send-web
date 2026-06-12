@@ -9,6 +9,7 @@ import {
   MAX_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto';
+import { P2PConnectionError } from '@/lib/errors';
 import { readFileAsBytes } from '@/lib/file-utils';
 import {
   generateMutualOfferBinary,
@@ -45,6 +46,9 @@ interface ManualTransferStateBase {
   currentRelays?: string[];
   totalRelays?: number;
   offerData?: Uint8Array; // Binary data for QR code
+  // Set on an error state when a direct P2P connection could not be established;
+  // drives the offline-QR fallback suggestion in the UI.
+  connectionFailed?: boolean;
 }
 
 // Error state has required message
@@ -391,7 +395,7 @@ export function useManualSend(): UseManualSendReturn {
           const dc = rtc.getDataChannel();
           const timeout = setTimeout(() => {
             cleanup();
-            reject(new Error('Connection timeout'));
+            reject(new P2PConnectionError('Connection timeout'));
           }, MANUAL_CONNECTION_TIMEOUT_MS);
 
           const cleanup = () => {
@@ -414,7 +418,7 @@ export function useManualSend(): UseManualSendReturn {
               pc.connectionState === 'disconnected'
             ) {
               cleanup();
-              reject(new Error('Connection failed'));
+              reject(new P2PConnectionError('Connection failed'));
             }
           };
 
@@ -508,6 +512,7 @@ export function useManualSend(): UseManualSendReturn {
           setState({
             status: 'error',
             message: error instanceof Error ? error.message : 'Failed to send',
+            connectionFailed: error instanceof P2PConnectionError,
           });
         }
       } finally {

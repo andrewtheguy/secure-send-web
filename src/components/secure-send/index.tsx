@@ -217,7 +217,18 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
                     <li>
                       File data is transferred directly peer-to-peer over
                       WebRTC; if a direct connection cannot be established, the
-                      transfer does not complete.
+                      transfer does not complete. When devices are side by side,
+                      you can instead transfer the file offline with animated QR
+                      codes using{' '}
+                      <a
+                        href="https://qrsecure.kuvi.app/transfer"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium underline underline-offset-2"
+                      >
+                        Secure QR Transfer
+                      </a>
+                      .
                     </li>
                   </ul>
                 </div>

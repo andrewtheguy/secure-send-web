@@ -42,6 +42,9 @@ interface TransferStateBase {
   useWebRTC?: boolean;
   currentRelays?: string[]; // Connected relay URLs being used (for signaling)
   totalRelays?: number; // Total relays attempted to connect
+  // Set on an error state when a direct P2P connection could not be established;
+  // drives the offline-QR fallback suggestion in the UI.
+  connectionFailed?: boolean;
 }
 
 // Error state has required message

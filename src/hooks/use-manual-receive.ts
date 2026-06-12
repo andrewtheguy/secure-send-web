@@ -12,6 +12,7 @@ import {
   parseChunkMessage,
   TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto';
+import { P2PConnectionError } from '@/lib/errors';
 import {
   generateMutualAnswerBinary,
   parseMutualPayload,
@@ -473,7 +474,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       // Wait for data channel to open
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
-          reject(new Error('Connection timeout'));
+          reject(new P2PConnectionError('Connection timeout'));
         }, MANUAL_CONNECTION_TIMEOUT_MS);
 
         dataChannelResolver = () => {
@@ -632,6 +633,7 @@ export function useManualReceive(): UseManualReceiveReturn {
           ...prevState,
           status: 'error',
           message: error instanceof Error ? error.message : 'Failed to receive',
+          connectionFailed: error instanceof P2PConnectionError,
         }));
       }
     } finally {

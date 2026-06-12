@@ -13,6 +13,7 @@ import {
   MAX_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto';
+import { P2PConnectionError } from '@/lib/errors';
 import { readFileAsBytes } from '@/lib/file-utils';
 import {
   type ContentType,
@@ -475,14 +476,17 @@ export function useNostrSend(): UseNostrSendReturn {
               if (!webRTCSuccess) {
                 cleanup();
                 rtc.close();
-                reject(new Error('WebRTC connection timeout'));
+                reject(new P2PConnectionError('WebRTC connection timeout'));
               }
             }, 30000);
           });
         } catch (err) {
-          throw new Error(
-            `P2P transfer failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
-          );
+          const message = `P2P transfer failed: ${err instanceof Error ? err.message : 'Unknown error'}`;
+          // Preserve the connection-failure distinction so the UI can suggest
+          // the offline-QR fallback only when P2P could not be established.
+          throw err instanceof P2PConnectionError
+            ? new P2PConnectionError(message)
+            : new Error(message);
         }
 
         // Wait for completion ACK (seq=-1)
@@ -515,6 +519,7 @@ export function useNostrSend(): UseNostrSendReturn {
             ...prevState,
             status: 'error',
             message: error instanceof Error ? error.message : 'Failed to send',
+            connectionFailed: error instanceof P2PConnectionError,
           }));
         }
       } finally {

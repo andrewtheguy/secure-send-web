@@ -2,6 +2,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ExternalLink,
   Loader2,
   Radio,
   XCircle,
@@ -11,6 +12,9 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
 import { formatFileSize } from '@/lib/file-utils';
 import type { TransferState } from '@/lib/nostr';
+
+// Offline QR transfer app, suggested when a direct P2P connection can't be made.
+const OFFLINE_QR_TRANSFER_URL = 'https://qrsecure.kuvi.app/transfer';
 
 interface TransferStatusProps {
   state: TransferState;
@@ -53,6 +57,10 @@ export function TransferStatus({
   // Show relays whenever Nostr was used (for debugging)
   const showRelays = state.currentRelays && state.currentRelays.length > 0;
 
+  // Suggest the offline QR transfer app when a direct P2P connection failed.
+  const showOfflineQrSuggestion =
+    state.status === 'error' && state.connectionFailed === true;
+
   return (
     <div className="space-y-3">
       <Alert variant={getVariant()}>
@@ -64,6 +72,28 @@ export function TransferStatus({
           )}
         </AlertDescription>
       </Alert>
+
+      {showOfflineQrSuggestion && (
+        <Alert>
+          <ExternalLink className="h-4 w-4" />
+          <AlertDescription>
+            <span>
+              A direct peer-to-peer connection couldn't be established. If both
+              devices are side by side, you can transfer the file offline with
+              animated QR codes using{' '}
+              <a
+                href={OFFLINE_QR_TRANSFER_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium underline underline-offset-2"
+              >
+                Secure QR Transfer
+              </a>
+              .
+            </span>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {showRelays && (
         <div className="text-xs space-y-1">
