@@ -1,5 +1,5 @@
-no backward compatibility or legacy code path
+No backward compatibility or legacy code path
 
-always use extractable: false for Web Crypto API keys even for asymmetric keys because public keys can always be exported
+Always use extractable: false for Web Crypto API keys even for asymmetric keys because public keys can always be exported
 
-Always run npm run lint and then npx tsc -b to check and fix any issues after javscript related changes before committing code
+Always run npm run lint and then npx tsc -b to check and fix any issues after javascript related changes before committing code
