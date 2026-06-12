@@ -1,22 +1,22 @@
-import { useState, useCallback, useRef, useMemo } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  generateSalt,
-  generateECDHKeyPair,
-  deriveSharedSecretKey,
   deriveAESKeyFromSecretKey,
+  deriveSharedSecretKey,
+  ENCRYPTION_CHUNK_SIZE,
   encryptChunk,
+  generateECDHKeyPair,
+  generateSalt,
   MAX_MESSAGE_SIZE,
   TRANSFER_EXPIRATION_MS,
-  ENCRYPTION_CHUNK_SIZE,
-} from '@/lib/crypto'
-import { WebRTCConnection } from '@/lib/webrtc'
-import { getWebRTCConfig } from '@/lib/webrtc-config'
+} from '@/lib/crypto';
+import { readFileAsBytes } from '@/lib/file-utils';
 import {
   generateMutualOfferBinary,
   parseMutualPayload,
   type SignalingPayload,
-} from '@/lib/manual-signaling'
-import { readFileAsBytes } from '@/lib/file-utils'
+} from '@/lib/manual-signaling';
+import { WebRTCConnection } from '@/lib/webrtc';
+import { getWebRTCConfig } from '@/lib/webrtc-config';
 
 // Extended transfer status for Manual Exchange mode
 export type ManualTransferStatus =
@@ -27,452 +27,509 @@ export type ManualTransferStatus =
   | 'connecting'
   | 'transferring'
   | 'complete'
-  | 'error'
+  | 'error';
 
 // Base properties for manual transfer state
 interface ManualTransferStateBase {
   progress?: {
-    current: number
-    total: number
-  }
-  contentType?: 'file'
+    current: number;
+    total: number;
+  };
+  contentType?: 'file';
   fileMetadata?: {
-    fileName: string
-    fileSize: number
-    mimeType: string
-  }
-  useWebRTC?: boolean
-  currentRelays?: string[]
-  totalRelays?: number
-  offerData?: Uint8Array // Binary data for QR code
+    fileName: string;
+    fileSize: number;
+    mimeType: string;
+  };
+  useWebRTC?: boolean;
+  currentRelays?: string[];
+  totalRelays?: number;
+  offerData?: Uint8Array; // Binary data for QR code
 }
 
 // Error state has required message
 interface ManualTransferStateError extends ManualTransferStateBase {
-  status: 'error'
-  message: string
+  status: 'error';
+  message: string;
 }
 
 // All other states have optional message
 interface ManualTransferStateOther extends ManualTransferStateBase {
-  status: Exclude<ManualTransferStatus, 'error'>
-  message?: string
+  status: Exclude<ManualTransferStatus, 'error'>;
+  message?: string;
 }
 
 // Discriminated union for manual transfer state
-export type ManualTransferState = ManualTransferStateError | ManualTransferStateOther
+export type ManualTransferState =
+  | ManualTransferStateError
+  | ManualTransferStateOther;
 
 export interface UseManualSendReturn {
-  state: ManualTransferState
-  send: (content: File) => Promise<void>
-  submitAnswer: (answerData: Uint8Array) => void
-  cancel: () => void
+  state: ManualTransferState;
+  send: (content: File) => Promise<void>;
+  submitAnswer: (answerData: Uint8Array) => void;
+  cancel: () => void;
 }
 
-const ICE_GATHER_TIMEOUT_MS = 5000
-const MANUAL_CONNECTION_TIMEOUT_MS = 120000
-const ACK_TIMEOUT_MS = 30000
-
+const ICE_GATHER_TIMEOUT_MS = 5000;
+const MANUAL_CONNECTION_TIMEOUT_MS = 120000;
+const ACK_TIMEOUT_MS = 30000;
 
 export function useManualSend(): UseManualSendReturn {
-  const [state, setState] = useState<ManualTransferState>({ status: 'idle' })
+  const [state, setState] = useState<ManualTransferState>({ status: 'idle' });
 
-  const rtcRef = useRef<WebRTCConnection | null>(null)
-  const cancelledRef = useRef(false)
-  const sendingRef = useRef(false)
-  const expirationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const rtcRef = useRef<WebRTCConnection | null>(null);
+  const cancelledRef = useRef(false);
+  const sendingRef = useRef(false);
+  const expirationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // Store ECDH private key for computing shared secret when answer arrives
-  const ecdhPrivateKeyRef = useRef<CryptoKey | null>(null)
-  const saltRef = useRef<Uint8Array | null>(null)
+  const ecdhPrivateKeyRef = useRef<CryptoKey | null>(null);
+  const saltRef = useRef<Uint8Array | null>(null);
 
   // Store data needed for answer processing
   const pendingTransferRef = useRef<{
-    contentBytes: Uint8Array
-    fileName: string
-    fileSize: number
-    mimeType: string
-  } | null>(null)
+    contentBytes: Uint8Array;
+    fileName: string;
+    fileSize: number;
+    mimeType: string;
+  } | null>(null);
 
   // Resolve function for answer submission
-  const answerResolverRef = useRef<((payload: SignalingPayload) => void) | null>(null)
-  const answerRejectRef = useRef<((error: Error) => void) | null>(null)
+  const answerResolverRef = useRef<
+    ((payload: SignalingPayload) => void) | null
+  >(null);
+  const answerRejectRef = useRef<((error: Error) => void) | null>(null);
 
   const clearExpirationTimeout = useCallback(() => {
     if (expirationTimeoutRef.current) {
-      clearTimeout(expirationTimeoutRef.current)
-      expirationTimeoutRef.current = null
+      clearTimeout(expirationTimeoutRef.current);
+      expirationTimeoutRef.current = null;
     }
-  }, [])
+  }, []);
 
   const cancel = useCallback(() => {
-    cancelledRef.current = true
-    sendingRef.current = false
-    clearExpirationTimeout()
-    answerResolverRef.current = null
-    answerRejectRef.current = null
-    pendingTransferRef.current = null
-    ecdhPrivateKeyRef.current = null
-    saltRef.current = null
+    cancelledRef.current = true;
+    sendingRef.current = false;
+    clearExpirationTimeout();
+    answerResolverRef.current = null;
+    answerRejectRef.current = null;
+    pendingTransferRef.current = null;
+    ecdhPrivateKeyRef.current = null;
+    saltRef.current = null;
     if (rtcRef.current) {
-      rtcRef.current.close()
-      rtcRef.current = null
+      rtcRef.current.close();
+      rtcRef.current = null;
     }
-    setState({ status: 'idle' })
-  }, [clearExpirationTimeout])
+    setState({ status: 'idle' });
+  }, [clearExpirationTimeout]);
 
   const submitAnswer = useCallback(async (answerBinary: Uint8Array) => {
-    if (!answerResolverRef.current) return
+    if (!answerResolverRef.current) return;
 
     // Parse mutual payload (no decryption needed)
-    const parsed = await parseMutualPayload(answerBinary)
+    const parsed = await parseMutualPayload(answerBinary);
     if (!parsed) {
-      answerRejectRef.current?.(new Error('Invalid response format'))
-      answerResolverRef.current = null
-      return
+      answerRejectRef.current?.(new Error('Invalid response format'));
+      answerResolverRef.current = null;
+      return;
     }
     if (parsed.type !== 'answer') {
-      answerRejectRef.current?.(new Error('Expected answer, got offer'))
-      answerResolverRef.current = null
-      return
+      answerRejectRef.current?.(new Error('Expected answer, got offer'));
+      answerResolverRef.current = null;
+      return;
     }
-    if (typeof parsed.createdAt !== 'number' || !Number.isFinite(parsed.createdAt)) {
-      answerRejectRef.current?.(new Error('Invalid response: missing timestamp'))
-      answerResolverRef.current = null
-      return
+    if (
+      typeof parsed.createdAt !== 'number' ||
+      !Number.isFinite(parsed.createdAt)
+    ) {
+      answerRejectRef.current?.(
+        new Error(
+          `Invalid response: missing or invalid timestamp (got ${String(parsed.createdAt)})`,
+        ),
+      );
+      answerResolverRef.current = null;
+      return;
     }
-    answerResolverRef.current?.(parsed)
-  }, [])
+    answerResolverRef.current?.(parsed);
+  }, []);
 
-  const send = useCallback(async (content: File) => {
-    // Guard against concurrent invocations
-    if (sendingRef.current) return
-    sendingRef.current = true
-    cancelledRef.current = false
+  const send = useCallback(
+    async (content: File) => {
+      // Guard against concurrent invocations
+      if (sendingRef.current) return;
+      sendingRef.current = true;
+      cancelledRef.current = false;
 
+      try {
+        // Validate and sanitize metadata
+        const rawFileName = content.name || '';
+        const sanitizedFileName = rawFileName.trim();
 
-    try {
-      // Validate and sanitize metadata
-      const rawFileName = content.name || ''
-      const sanitizedFileName = rawFileName.trim()
-
-      if (!sanitizedFileName) {
-        setState({ status: 'error', message: 'Missing file name' })
-        sendingRef.current = false
-        return
-      }
-
-      const fileName = sanitizedFileName
-      const fileSize = content.size
-      const mimeType = content.type || 'application/octet-stream'
-
-      if (typeof fileSize !== 'number' || !Number.isFinite(fileSize)) {
-        setState({ status: 'error', message: 'Invalid file size' })
-        sendingRef.current = false
-        return
-      }
-
-      if (fileSize <= 0) {
-        setState({ status: 'error', message: 'File is empty' })
-        sendingRef.current = false
-        return
-      }
-
-      if (fileSize > MAX_MESSAGE_SIZE) {
-        const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024
-        setState({ status: 'error', message: `File exceeds ${limitMB}MB limit` })
-        sendingRef.current = false
-        return
-      }
-
-      setState({ status: 'generating_offer', message: 'Reading file...' })
-      const contentBytes = await readFileAsBytes(content)
-
-      // Generate ECDH keypair and salt
-      setState({ status: 'generating_offer', message: 'Generating keys...' })
-      const sessionStartTime = Date.now()
-
-      const ecdhKeyPair = await generateECDHKeyPair()
-      ecdhPrivateKeyRef.current = ecdhKeyPair.privateKey
-      const salt = generateSalt()
-      saltRef.current = salt
-
-      // Set expiration timeout
-      clearExpirationTimeout()
-      expirationTimeoutRef.current = setTimeout(() => {
-        if (!cancelledRef.current && sendingRef.current) {
-          setState({ status: 'error', message: 'Session expired. Please try again.' })
-          sendingRef.current = false
-          answerResolverRef.current = null
-          pendingTransferRef.current = null
-          ecdhPrivateKeyRef.current = null
-          saltRef.current = null
-          if (rtcRef.current) {
-            rtcRef.current.close()
-            rtcRef.current = null
-          }
+        if (!sanitizedFileName) {
+          setState({ status: 'error', message: 'Missing file name' });
+          sendingRef.current = false;
+          return;
         }
-      }, TRANSFER_EXPIRATION_MS)
 
-      if (cancelledRef.current) return
+        const fileName = sanitizedFileName;
+        const fileSize = content.size;
+        const mimeType = content.type || 'application/octet-stream';
 
-      // Store for later use when answer is received
-      pendingTransferRef.current = {
-        contentBytes,
-        fileName,
-        fileSize,
-        mimeType,
-      }
-
-      // Create WebRTC connection and offer
-      setState({ status: 'generating_offer', message: 'Creating P2P offer...' })
-
-      const iceCandidates: RTCIceCandidate[] = []
-      let offerSDP: RTCSessionDescriptionInit | null = null
-
-      const rtc = new WebRTCConnection(
-        getWebRTCConfig(),
-        (signal) => {
-          // Collect signals (offer + candidates)
-          if (signal.type === 'offer') {
-            offerSDP = { type: 'offer', sdp: signal.sdp }
-          } else if (signal.type === 'candidate' && signal.candidate) {
-            iceCandidates.push(new RTCIceCandidate(signal.candidate))
-          }
-        },
-        () => {
-          // Data channel opened - will be handled later
-        },
-        () => {
-          // Message received - will be handled later
+        if (typeof fileSize !== 'number' || !Number.isFinite(fileSize)) {
+          setState({ status: 'error', message: 'Invalid file size' });
+          sendingRef.current = false;
+          return;
         }
-      )
 
-      rtcRef.current = rtc
-      rtc.createDataChannel('file-transfer')
+        if (fileSize <= 0) {
+          setState({ status: 'error', message: 'File is empty' });
+          sendingRef.current = false;
+          return;
+        }
 
-      // Create offer
-      await rtc.createOffer()
+        if (fileSize > MAX_MESSAGE_SIZE) {
+          const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024;
+          setState({
+            status: 'error',
+            message: `File exceeds ${limitMB}MB limit`,
+          });
+          sendingRef.current = false;
+          return;
+        }
 
-      if (cancelledRef.current) return
+        setState({ status: 'generating_offer', message: 'Reading file...' });
+        const contentBytes = await readFileAsBytes(content);
 
-      // Wait for ICE gathering to complete
-      setState({ status: 'generating_offer', message: 'Gathering network info...' })
-      const iceGatheringComplete = await rtc.waitForIceGatheringComplete(ICE_GATHER_TIMEOUT_MS)
-      if (!iceGatheringComplete) {
-        console.warn('ICE gathering timed out while generating offer; continuing with available candidates')
-      }
-      setState({
-        status: 'generating_offer',
-        message: iceGatheringComplete
-          ? 'Preparing exchange code...'
-          : 'Network probe timed out. Preparing exchange code with available routes...',
-      })
+        // Generate ECDH keypair and salt
+        setState({ status: 'generating_offer', message: 'Generating keys...' });
+        const sessionStartTime = Date.now();
 
-      if (cancelledRef.current) return
+        const ecdhKeyPair = await generateECDHKeyPair();
+        ecdhPrivateKeyRef.current = ecdhKeyPair.privateKey;
+        const salt = generateSalt();
+        saltRef.current = salt;
 
-      // Generate binary offer data with ECDH public key
-      const offerBinary = await generateMutualOfferBinary(
-        offerSDP!,
-        iceCandidates,
-        {
-          createdAt: sessionStartTime,
-          totalBytes: contentBytes.length,
+        // Set expiration timeout
+        clearExpirationTimeout();
+        expirationTimeoutRef.current = setTimeout(() => {
+          if (!cancelledRef.current && sendingRef.current) {
+            setState({
+              status: 'error',
+              message: 'Session expired. Please try again.',
+            });
+            sendingRef.current = false;
+            answerResolverRef.current = null;
+            pendingTransferRef.current = null;
+            ecdhPrivateKeyRef.current = null;
+            saltRef.current = null;
+            if (rtcRef.current) {
+              rtcRef.current.close();
+              rtcRef.current = null;
+            }
+          }
+        }, TRANSFER_EXPIRATION_MS);
+
+        if (cancelledRef.current) return;
+
+        // Store for later use when answer is received
+        pendingTransferRef.current = {
+          contentBytes,
           fileName,
           fileSize,
           mimeType,
-          publicKey: ecdhKeyPair.publicKeyBytes,
-          salt,
-        }
-      )
+        };
 
-      // Show offer and wait for answer
-      setState({
-        status: 'showing_offer',
-        message: 'Show this to receiver, then scan/paste their response',
-        offerData: offerBinary,
-        contentType: 'file',
-        fileMetadata: { fileName, fileSize, mimeType },
-      })
+        // Create WebRTC connection and offer
+        setState({
+          status: 'generating_offer',
+          message: 'Creating P2P offer...',
+        });
 
-      // Wait for answer to be submitted
-      const answerPayload = await new Promise<SignalingPayload>((resolve, reject) => {
-        answerResolverRef.current = resolve
-        answerRejectRef.current = reject
+        const iceCandidates: RTCIceCandidate[] = [];
+        let offerSDP: RTCSessionDescriptionInit | null = null;
 
-        // Check periodically if cancelled
-        const checkInterval = setInterval(() => {
-          if (cancelledRef.current) {
-            clearInterval(checkInterval)
-            reject(new Error('Cancelled'))
-          }
-        }, 500)
-      })
-
-      if (cancelledRef.current) return
-
-      // Enforce TTL: refuse to proceed with old answers/offers
-      if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
-        throw new Error('Session expired. Please start a new transfer.')
-      }
-
-      // Derive shared secret from receiver's public key
-      setState({ status: 'connecting', message: 'Establishing secure connection...' })
-
-      if (!ecdhPrivateKeyRef.current || !saltRef.current) {
-        throw new Error('Cryptographic state missing. Please try again.')
-      }
-
-      const receiverPublicKey = new Uint8Array(answerPayload.publicKey!)
-      // Derive shared secret as non-extractable CryptoKey
-      const sharedSecretKey = await deriveSharedSecretKey(ecdhPrivateKeyRef.current, receiverPublicKey)
-      const key = await deriveAESKeyFromSecretKey(sharedSecretKey, saltRef.current)
-
-      // Clear ECDH private key - no longer needed
-      ecdhPrivateKeyRef.current = null
-
-      // Handle answer signal
-      await rtc.handleSignal({ type: 'answer', sdp: answerPayload.sdp })
-
-      // Add ICE candidates from answer
-      for (const candidateStr of answerPayload.candidates) {
-        await rtc.handleSignal({
-          type: 'candidate',
-          candidate: { candidate: candidateStr, sdpMid: '0', sdpMLineIndex: 0 },
-        })
-      }
-
-      // Wait for data channel to open
-      await new Promise<void>((resolve, reject) => {
-        const pc = rtc.getPeerConnection()
-        const dc = rtc.getDataChannel()
-        const timeout = setTimeout(() => {
-          cleanup()
-          reject(new Error('Connection timeout'))
-        }, MANUAL_CONNECTION_TIMEOUT_MS)
-
-        const cleanup = () => {
-          clearTimeout(timeout)
-          pc.onconnectionstatechange = null
-          if (dc) {
-            dc.onopen = null
-          }
-        }
-
-        const checkConnection = () => {
-          if (pc.connectionState === 'connected') {
-            const currentDc = rtc.getDataChannel()
-            if (currentDc && currentDc.readyState === 'open') {
-              cleanup()
-              resolve()
+        const rtc = new WebRTCConnection(
+          getWebRTCConfig(),
+          (signal) => {
+            // Collect signals (offer + candidates)
+            if (signal.type === 'offer') {
+              offerSDP = { type: 'offer', sdp: signal.sdp };
+            } else if (signal.type === 'candidate' && signal.candidate) {
+              iceCandidates.push(new RTCIceCandidate(signal.candidate));
             }
-          } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-            cleanup()
-            reject(new Error('Connection failed'))
-          }
+          },
+          () => {
+            // Data channel opened - will be handled later
+          },
+          () => {
+            // Message received - will be handled later
+          },
+        );
+
+        rtcRef.current = rtc;
+        rtc.createDataChannel('file-transfer');
+
+        // Create offer
+        await rtc.createOffer();
+
+        if (cancelledRef.current) return;
+
+        // Wait for ICE gathering to complete
+        setState({
+          status: 'generating_offer',
+          message: 'Gathering network info...',
+        });
+        const iceGatheringComplete = await rtc.waitForIceGatheringComplete(
+          ICE_GATHER_TIMEOUT_MS,
+        );
+        if (!iceGatheringComplete) {
+          console.warn(
+            'ICE gathering timed out while generating offer; continuing with available candidates',
+          );
+        }
+        setState({
+          status: 'generating_offer',
+          message: iceGatheringComplete
+            ? 'Preparing exchange code...'
+            : 'Network probe timed out. Preparing exchange code with available routes...',
+        });
+
+        if (cancelledRef.current) return;
+
+        // Generate binary offer data with ECDH public key
+        const offerBinary = await generateMutualOfferBinary(
+          offerSDP!,
+          iceCandidates,
+          {
+            createdAt: sessionStartTime,
+            totalBytes: contentBytes.length,
+            fileName,
+            fileSize,
+            mimeType,
+            publicKey: ecdhKeyPair.publicKeyBytes,
+            salt,
+          },
+        );
+
+        // Show offer and wait for answer
+        setState({
+          status: 'showing_offer',
+          message: 'Show this to receiver, then scan/paste their response',
+          offerData: offerBinary,
+          contentType: 'file',
+          fileMetadata: { fileName, fileSize, mimeType },
+        });
+
+        // Wait for answer to be submitted
+        const answerPayload = await new Promise<SignalingPayload>(
+          (resolve, reject) => {
+            answerResolverRef.current = resolve;
+            answerRejectRef.current = reject;
+
+            // Check periodically if cancelled
+            const checkInterval = setInterval(() => {
+              if (cancelledRef.current) {
+                clearInterval(checkInterval);
+                reject(new Error('Cancelled'));
+              }
+            }, 500);
+          },
+        );
+
+        if (cancelledRef.current) return;
+
+        // Enforce TTL: refuse to proceed with old answers/offers
+        if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
+          throw new Error('Session expired. Please start a new transfer.');
         }
 
-        pc.onconnectionstatechange = checkConnection
-        if (dc) {
-          dc.onopen = () => {
-            cleanup()
-            resolve()
-          }
+        // Derive shared secret from receiver's public key
+        setState({
+          status: 'connecting',
+          message: 'Establishing secure connection...',
+        });
+
+        if (!ecdhPrivateKeyRef.current || !saltRef.current) {
+          throw new Error('Cryptographic state missing. Please try again.');
         }
-        checkConnection()
-      })
 
-      if (cancelledRef.current) return
+        const receiverPublicKey = new Uint8Array(answerPayload.publicKey!);
+        // Derive shared secret as non-extractable CryptoKey
+        const sharedSecretKey = await deriveSharedSecretKey(
+          ecdhPrivateKeyRef.current,
+          receiverPublicKey,
+        );
+        const key = await deriveAESKeyFromSecretKey(
+          sharedSecretKey,
+          saltRef.current,
+        );
 
-      // Enforce TTL again right before data transfer begins
-      if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
-        throw new Error('Session expired. Please start a new transfer.')
-      }
+        // Clear ECDH private key - no longer needed
+        ecdhPrivateKeyRef.current = null;
 
-      // Send data via P2P (WebRTC DTLS provides transport encryption)
-      setState({
-        status: 'transferring',
-        message: 'Sending via P2P...',
-        progress: { current: 0, total: contentBytes.length },
-        contentType: 'file',
-        fileMetadata: { fileName, fileSize, mimeType },
-      })
+        // Handle answer signal
+        await rtc.handleSignal({ type: 'answer', sdp: answerPayload.sdp });
 
-      // Send data in encrypted chunks
-      let chunkIndex = 0
-      for (let i = 0; i < contentBytes.length; i += ENCRYPTION_CHUNK_SIZE) {
-        if (cancelledRef.current) throw new Error('Cancelled')
+        // Add ICE candidates from answer
+        for (const candidateStr of answerPayload.candidates) {
+          await rtc.handleSignal({
+            type: 'candidate',
+            candidate: {
+              candidate: candidateStr,
+              sdpMid: '0',
+              sdpMLineIndex: 0,
+            },
+          });
+        }
 
-        const end = Math.min(i + ENCRYPTION_CHUNK_SIZE, contentBytes.length)
-        const plainChunk = contentBytes.slice(i, end)
+        // Wait for data channel to open
+        await new Promise<void>((resolve, reject) => {
+          const pc = rtc.getPeerConnection();
+          const dc = rtc.getDataChannel();
+          const timeout = setTimeout(() => {
+            cleanup();
+            reject(new Error('Connection timeout'));
+          }, MANUAL_CONNECTION_TIMEOUT_MS);
 
-        // Encrypt this chunk with chunk index prefix
-        const encryptedChunk = await encryptChunk(key, plainChunk, chunkIndex)
+          const cleanup = () => {
+            clearTimeout(timeout);
+            pc.onconnectionstatechange = null;
+            if (dc) {
+              dc.onopen = null;
+            }
+          };
 
-        await rtc.sendWithBackpressure(encryptedChunk)
+          const checkConnection = () => {
+            if (pc.connectionState === 'connected') {
+              const currentDc = rtc.getDataChannel();
+              if (currentDc && currentDc.readyState === 'open') {
+                cleanup();
+                resolve();
+              }
+            } else if (
+              pc.connectionState === 'failed' ||
+              pc.connectionState === 'disconnected'
+            ) {
+              cleanup();
+              reject(new Error('Connection failed'));
+            }
+          };
 
-        chunkIndex++
+          pc.onconnectionstatechange = checkConnection;
+          if (dc) {
+            dc.onopen = () => {
+              cleanup();
+              resolve();
+            };
+          }
+          checkConnection();
+        });
 
+        if (cancelledRef.current) return;
+
+        // Enforce TTL again right before data transfer begins
+        if (Date.now() - sessionStartTime > TRANSFER_EXPIRATION_MS) {
+          throw new Error('Session expired. Please start a new transfer.');
+        }
+
+        // Send data via P2P (WebRTC DTLS provides transport encryption)
         setState({
           status: 'transferring',
           message: 'Sending via P2P...',
-          progress: { current: end, total: contentBytes.length },
+          progress: { current: 0, total: contentBytes.length },
           contentType: 'file',
           fileMetadata: { fileName, fileSize, mimeType },
-        })
-      }
+        });
 
-      // Send done signal with chunk count
-      const totalChunks = Math.ceil(contentBytes.length / ENCRYPTION_CHUNK_SIZE)
-      rtc.send(`DONE:${totalChunks}`)
+        // Send data in encrypted chunks
+        let chunkIndex = 0;
+        for (let i = 0; i < contentBytes.length; i += ENCRYPTION_CHUNK_SIZE) {
+          if (cancelledRef.current) throw new Error('Cancelled');
 
-      // Wait for acknowledgment
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Timeout waiting for acknowledgment'))
-        }, ACK_TIMEOUT_MS)
+          const end = Math.min(i + ENCRYPTION_CHUNK_SIZE, contentBytes.length);
+          const plainChunk = contentBytes.slice(i, end);
 
-        const dc = rtc.getDataChannel()
-        if (!dc) {
-          clearTimeout(timeout)
-          reject(new Error('Data channel unavailable'))
-          return
+          // Encrypt this chunk with chunk index prefix
+          const encryptedChunk = await encryptChunk(
+            key,
+            plainChunk,
+            chunkIndex,
+          );
+
+          await rtc.sendWithBackpressure(encryptedChunk);
+
+          chunkIndex++;
+
+          setState({
+            status: 'transferring',
+            message: 'Sending via P2P...',
+            progress: { current: end, total: contentBytes.length },
+            contentType: 'file',
+            fileMetadata: { fileName, fileSize, mimeType },
+          });
         }
-        dc.onmessage = (event) => {
-          if (event.data === 'ACK') {
-            clearTimeout(timeout)
-            resolve()
+
+        // Send done signal with chunk count
+        const totalChunks = Math.ceil(
+          contentBytes.length / ENCRYPTION_CHUNK_SIZE,
+        );
+        rtc.send(`DONE:${totalChunks}`);
+
+        // Wait for acknowledgment
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error('Timeout waiting for acknowledgment'));
+          }, ACK_TIMEOUT_MS);
+
+          const dc = rtc.getDataChannel();
+          if (!dc) {
+            clearTimeout(timeout);
+            reject(new Error('Data channel unavailable'));
+            return;
           }
-        }
-      })
+          dc.onmessage = (event) => {
+            if (event.data === 'ACK') {
+              clearTimeout(timeout);
+              resolve();
+            }
+          };
+        });
 
-      setState({ status: 'complete', message: 'File sent via P2P!', contentType: 'file' })
-
-    } catch (error) {
-      if (!cancelledRef.current) {
         setState({
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Failed to send',
-        })
+          status: 'complete',
+          message: 'File sent via P2P!',
+          contentType: 'file',
+        });
+      } catch (error) {
+        if (!cancelledRef.current) {
+          setState({
+            status: 'error',
+            message: error instanceof Error ? error.message : 'Failed to send',
+          });
+        }
+      } finally {
+        clearExpirationTimeout();
+        sendingRef.current = false;
+        answerResolverRef.current = null;
+        answerRejectRef.current = null;
+        pendingTransferRef.current = null;
+        ecdhPrivateKeyRef.current = null;
+        saltRef.current = null;
+        if (rtcRef.current) {
+          rtcRef.current.close();
+          rtcRef.current = null;
+        }
       }
-    } finally {
-      clearExpirationTimeout()
-      sendingRef.current = false
-      answerResolverRef.current = null
-      answerRejectRef.current = null
-      pendingTransferRef.current = null
-      ecdhPrivateKeyRef.current = null
-      saltRef.current = null
-      if (rtcRef.current) {
-        rtcRef.current.close()
-        rtcRef.current = null
-      }
-    }
-  }, [clearExpirationTimeout])
+    },
+    [clearExpirationTimeout],
+  );
 
   // Memoize return object to prevent unnecessary re-renders in consumers
   return useMemo(
     () => ({ state, send, submitAnswer, cancel }),
-    [state, send, submitAnswer, cancel]
-  )
+    [state, send, submitAnswer, cancel],
+  );
 }

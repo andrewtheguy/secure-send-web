@@ -1,8 +1,8 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
-import { VitePWA } from 'vite-plugin-pwa'
-import path from 'node:path'
+import path from 'node:path';
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -26,7 +26,8 @@ export default defineConfig({
       manifest: {
         name: 'Secure Send Files and Folders',
         short_name: 'Secure Send',
-        description: 'Share files and folders securely with end-to-end encryption',
+        description:
+          'Share files and folders securely with end-to-end encryption',
         theme_color: '#000000',
         background_color: '#000000',
         display: 'standalone',
@@ -59,4 +60,4 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
-})
+});

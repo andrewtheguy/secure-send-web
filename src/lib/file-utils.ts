@@ -3,30 +3,34 @@
  */
 export function readFileAsBytes(file: File): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader()
+    const reader = new FileReader();
     reader.onload = (e) => {
-      const buffer = e.target?.result as ArrayBuffer
-      resolve(new Uint8Array(buffer))
-    }
-    reader.onerror = () => reject(new Error('Failed to read file'))
-    reader.readAsArrayBuffer(file)
-  })
+      const buffer = e.target?.result as ArrayBuffer;
+      resolve(new Uint8Array(buffer));
+    };
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 /**
  * Trigger a file download in the browser
  */
-export function downloadFile(data: Uint8Array, fileName: string, mimeType: string): void {
+export function downloadFile(
+  data: Uint8Array,
+  fileName: string,
+  mimeType: string,
+): void {
   // Blob constructor accepts Uint8Array directly and respects the view's byte range
-  const blob = new Blob([data as BlobPart], { type: mimeType })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = fileName
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  const blob = new Blob([data as BlobPart], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 /**
@@ -35,9 +39,13 @@ export function downloadFile(data: Uint8Array, fileName: string, mimeType: strin
  * @param fileName - The name of the file to download
  * @param mimeType - The MIME type of the file
  */
-export function downloadTextFile(content: string, fileName: string, mimeType: string): void {
-  const bytes = new TextEncoder().encode(content)
-  downloadFile(bytes, fileName, mimeType)
+export function downloadTextFile(
+  content: string,
+  fileName: string,
+  mimeType: string,
+): void {
+  const bytes = new TextEncoder().encode(content);
+  downloadFile(bytes, fileName, mimeType);
 }
 
 /**
@@ -45,16 +53,16 @@ export function downloadTextFile(content: string, fileName: string, mimeType: st
  */
 export function formatFileSize(bytes: number): string {
   // Guard against zero, negative, or non-finite input
-  if (bytes <= 0 || !Number.isFinite(bytes)) return '0 B'
+  if (bytes <= 0 || !Number.isFinite(bytes)) return '0 B';
 
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB']
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB'];
   const i = Math.min(
     Math.floor(Math.log(bytes) / Math.log(k)),
-    sizes.length - 1
-  )
+    sizes.length - 1,
+  );
 
-  return `${parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`
+  return `${parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`;
 }
 
 /**
@@ -78,6 +86,6 @@ export function getMimeTypeDescription(mimeType: string): string {
     'audio/wav': 'WAV Audio',
     'video/mp4': 'MP4 Video',
     'video/webm': 'WebM Video',
-  }
-  return descriptions[mimeType] || mimeType || 'Unknown'
+  };
+  return descriptions[mimeType] || mimeType || 'Unknown';
 }

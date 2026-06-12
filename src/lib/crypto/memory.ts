@@ -11,12 +11,12 @@ export function wipeBufferSource(bufferSource: BufferSource): void {
       new Uint8Array(
         bufferSource.buffer,
         bufferSource.byteOffset,
-        bufferSource.byteLength
-      ).fill(0)
-      return
+        bufferSource.byteLength,
+      ).fill(0);
+      return;
     }
 
-    new Uint8Array(bufferSource).fill(0)
+    new Uint8Array(bufferSource).fill(0);
   } catch {
     // Best-effort cleanup must not change the caller's control flow.
   }

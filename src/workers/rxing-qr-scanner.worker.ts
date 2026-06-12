@@ -1,22 +1,25 @@
-import { readQrCodesFromImageData, type RxingReaderOptions } from '@/lib/wasm/rxingWasm'
+import {
+  type RxingReaderOptions,
+  readQrCodesFromImageData,
+} from '@/lib/wasm/rxingWasm';
 
 interface ScanMessage {
-  type: 'scan'
-  imageData: ImageData
-  options?: RxingReaderOptions
+  type: 'scan';
+  imageData: ImageData;
+  options?: RxingReaderOptions;
 }
 
 interface ScanResult {
-  type: 'result'
-  data: Uint8Array[]
-  error?: string
+  type: 'result';
+  data: Uint8Array[];
+  error?: string;
 }
 
 self.onmessage = async (e: MessageEvent<ScanMessage>) => {
-  if (e.data.type !== 'scan') return
+  if (e.data.type !== 'scan') return;
 
   try {
-    const { imageData, options } = e.data
+    const { imageData, options } = e.data;
 
     const readerOptions: RxingReaderOptions = {
       tryHarder: true,
@@ -24,18 +27,18 @@ self.onmessage = async (e: MessageEvent<ScanMessage>) => {
       binarizer: 'hybrid',
       binarizerFallback: true,
       ...options,
-    }
+    };
 
-    const data = await readQrCodesFromImageData(imageData, readerOptions)
+    const data = await readQrCodesFromImageData(imageData, readerOptions);
 
-    const result: ScanResult = { type: 'result', data }
-    self.postMessage(result)
+    const result: ScanResult = { type: 'result', data };
+    self.postMessage(result);
   } catch (error) {
     const result: ScanResult = {
       type: 'result',
       data: [],
       error: error instanceof Error ? error.message : 'Unknown error',
-    }
-    self.postMessage(result)
+    };
+    self.postMessage(result);
   }
-}
+};

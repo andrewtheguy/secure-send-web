@@ -1,4 +1,4 @@
-import { AES_KEY_LENGTH } from './constants'
+import { AES_KEY_LENGTH } from './constants';
 
 /**
  * ECDH key agreement for Manual Exchange mode.
@@ -15,10 +15,10 @@ import { AES_KEY_LENGTH } from './constants'
  */
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength) {
-    return bytes.buffer as ArrayBuffer
+    return bytes.buffer as ArrayBuffer;
   }
   // Create a copy for subarray views
-  return bytes.slice().buffer as ArrayBuffer
+  return bytes.slice().buffer as ArrayBuffer;
 }
 
 /**
@@ -26,14 +26,21 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
  * Returns 16 uppercase hex characters (64 bits from SHA-256 hash).
  * Used for event filtering and verification display.
  */
-export async function publicKeyToFingerprint(publicKeyBytes: Uint8Array): Promise<string> {
-  const hash = await crypto.subtle.digest('SHA-256', publicKeyBytes as BufferSource)
-  const hashArray = new Uint8Array(hash)
+export async function publicKeyToFingerprint(
+  publicKeyBytes: Uint8Array,
+): Promise<string> {
+  const hash = await crypto.subtle.digest(
+    'SHA-256',
+    publicKeyBytes as BufferSource,
+  );
+  const hashArray = new Uint8Array(hash);
 
   // Take first 8 bytes (64 bits) and convert to uppercase hex
-  return Array.from(hashArray.slice(0, 8), (b) => b.toString(16).padStart(2, '0'))
+  return Array.from(hashArray.slice(0, 8), (b) =>
+    b.toString(16).padStart(2, '0'),
+  )
     .join('')
-    .toUpperCase()
+    .toUpperCase();
 }
 
 /**
@@ -45,16 +52,14 @@ export async function publicKeyToFingerprint(publicKeyBytes: Uint8Array): Promis
 export function formatFingerprint(fingerprint: string): string {
   if (typeof fingerprint !== 'string' || fingerprint.length !== 16) {
     throw new TypeError(
-      `Invalid fingerprint: expected 16-character hex string, got ${typeof fingerprint === 'string' ? `${fingerprint.length} characters` : typeof fingerprint}`
-    )
+      `Invalid fingerprint: expected 16-character hex string, got ${typeof fingerprint === 'string' ? `${fingerprint.length} characters` : typeof fingerprint}`,
+    );
   }
   if (!/^[0-9A-Fa-f]+$/.test(fingerprint)) {
-    throw new TypeError(
-      `Invalid fingerprint: contains non-hex characters`
-    )
+    throw new TypeError(`Invalid fingerprint: contains non-hex characters`);
   }
-  const fp = fingerprint.toUpperCase()
-  return `${fp.slice(0, 4)}-${fp.slice(4, 8)}-${fp.slice(8, 12)}-${fp.slice(12, 16)}`
+  const fp = fingerprint.toUpperCase();
+  return `${fp.slice(0, 4)}-${fp.slice(4, 8)}-${fp.slice(8, 12)}-${fp.slice(12, 16)}`;
 }
 
 /**
@@ -62,9 +67,9 @@ export function formatFingerprint(fingerprint: string): string {
  * WARNING: privateKey must never be exported or stored - use only for deriveBits.
  */
 export interface ECDHKeyPair {
-  publicKey: CryptoKey
-  privateKey: CryptoKey // Ephemeral only - never export or store
-  publicKeyBytes: Uint8Array // 65 bytes uncompressed P-256 (0x04 || x || y)
+  publicKey: CryptoKey;
+  privateKey: CryptoKey; // Ephemeral only - never export or store
+  publicKeyBytes: Uint8Array; // 65 bytes uncompressed P-256 (0x04 || x || y)
 }
 
 /**
@@ -80,36 +85,38 @@ export async function generateECDHKeyPair(): Promise<ECDHKeyPair> {
       namedCurve: 'P-256',
     },
     false, // non-extractable
-    ['deriveBits', 'deriveKey']
-  )
+    ['deriveBits', 'deriveKey'],
+  );
 
   // Export public key to raw format (65 bytes for P-256 uncompressed)
   const publicKeyBytes = new Uint8Array(
-    await crypto.subtle.exportKey('raw', keyPair.publicKey)
-  )
+    await crypto.subtle.exportKey('raw', keyPair.publicKey),
+  );
 
   return {
     publicKey: keyPair.publicKey,
     privateKey: keyPair.privateKey,
     publicKeyBytes,
-  }
+  };
 }
 
 /**
  * Import a peer's public key from raw bytes.
  * Expects 65-byte uncompressed P-256 format: 0x04 || X (32 bytes) || Y (32 bytes)
  */
-export async function importECDHPublicKey(publicKeyBytes: Uint8Array): Promise<CryptoKey> {
+export async function importECDHPublicKey(
+  publicKeyBytes: Uint8Array,
+): Promise<CryptoKey> {
   // Validate uncompressed P-256 public key format
   if (!(publicKeyBytes instanceof Uint8Array) || publicKeyBytes.length !== 65) {
     throw new TypeError(
-      'Invalid ECDH public key: expected 65-byte uncompressed P-256 key (0x04 || X || Y)'
-    )
+      'Invalid ECDH public key: expected 65-byte uncompressed P-256 key (0x04 || X || Y)',
+    );
   }
   if (publicKeyBytes[0] !== 0x04) {
     throw new TypeError(
-      'Invalid ECDH public key: missing uncompressed point prefix (0x04)'
-    )
+      'Invalid ECDH public key: missing uncompressed point prefix (0x04)',
+    );
   }
 
   return await crypto.subtle.importKey(
@@ -120,8 +127,8 @@ export async function importECDHPublicKey(publicKeyBytes: Uint8Array): Promise<C
       namedCurve: 'P-256',
     },
     false, // non-extractable - only used for deriveBits
-    []
-  )
+    [],
+  );
 }
 
 /**
@@ -137,9 +144,9 @@ export async function importECDHPublicKey(publicKeyBytes: Uint8Array): Promise<C
  */
 export async function deriveSharedSecretKey(
   privateKey: CryptoKey,
-  peerPublicKeyBytes: Uint8Array
+  peerPublicKeyBytes: Uint8Array,
 ): Promise<CryptoKey> {
-  const peerPublicKey = await importECDHPublicKey(peerPublicKeyBytes)
+  const peerPublicKey = await importECDHPublicKey(peerPublicKeyBytes);
 
   // Use deriveKey to get HKDF key material directly from ECDH
   // The shared secret stays inside Web Crypto as non-extractable key
@@ -153,8 +160,8 @@ export async function deriveSharedSecretKey(
       name: 'HKDF',
     },
     false, // non-extractable
-    ['deriveKey', 'deriveBits']
-  )
+    ['deriveKey', 'deriveBits'],
+  );
 }
 
 /**
@@ -166,10 +173,12 @@ export async function deriveSharedSecretKey(
  */
 export async function deriveAESKeyFromSecretKey(
   sharedSecretKey: CryptoKey,
-  salt: Uint8Array
+  salt: Uint8Array,
 ): Promise<CryptoKey> {
   if (salt.length < 16) {
-    throw new Error(`Salt too short: expected at least 16 bytes, got ${salt.length}`)
+    throw new Error(
+      `Salt too short: expected at least 16 bytes, got ${salt.length}`,
+    );
   }
 
   return await crypto.subtle.deriveKey(
@@ -182,8 +191,8 @@ export async function deriveAESKeyFromSecretKey(
     sharedSecretKey,
     { name: 'AES-GCM', length: AES_KEY_LENGTH },
     false,
-    ['encrypt', 'decrypt']
-  )
+    ['encrypt', 'decrypt'],
+  );
 }
 
 /**
@@ -195,10 +204,12 @@ export async function deriveAESKeyFromSecretKey(
  */
 export async function deriveKeyConfirmationFromSecretKey(
   sharedSecretKey: CryptoKey,
-  salt: Uint8Array
+  salt: Uint8Array,
 ): Promise<Uint8Array> {
   if (salt.length < 16) {
-    throw new Error(`Salt too short: expected at least 16 bytes, got ${salt.length}`)
+    throw new Error(
+      `Salt too short: expected at least 16 bytes, got ${salt.length}`,
+    );
   }
 
   // Derive 16 bytes using HKDF with key-confirm label
@@ -210,10 +221,10 @@ export async function deriveKeyConfirmationFromSecretKey(
       info: new TextEncoder().encode('secure-send-key-confirm'),
     },
     sharedSecretKey,
-    128 // 16 bytes = 128 bits
-  )
+    128, // 16 bytes = 128 bits
+  );
 
-  return new Uint8Array(confirmBits)
+  return new Uint8Array(confirmBits);
 }
 
 /**
@@ -222,22 +233,29 @@ export async function deriveKeyConfirmationFromSecretKey(
  * @param confirmValue - 16-byte key confirmation value from deriveKeyConfirmation
  * @throws TypeError if input is not a 16-byte Uint8Array
  */
-export async function hashKeyConfirmation(confirmValue: Uint8Array): Promise<string> {
+export async function hashKeyConfirmation(
+  confirmValue: Uint8Array,
+): Promise<string> {
   if (!(confirmValue instanceof Uint8Array)) {
     throw new TypeError(
-      `Invalid key confirmation value: expected Uint8Array, got ${typeof confirmValue}`
-    )
+      `Invalid key confirmation value: expected Uint8Array, got ${typeof confirmValue}`,
+    );
   }
   if (confirmValue.length !== 16) {
     throw new TypeError(
-      `Invalid key confirmation value length: expected 16 bytes, got ${confirmValue.length}`
-    )
+      `Invalid key confirmation value length: expected 16 bytes, got ${confirmValue.length}`,
+    );
   }
 
-  const hash = await crypto.subtle.digest('SHA-256', confirmValue as BufferSource)
-  const hashArray = new Uint8Array(hash)
+  const hash = await crypto.subtle.digest(
+    'SHA-256',
+    confirmValue as BufferSource,
+  );
+  const hashArray = new Uint8Array(hash);
   // Take first 16 bytes (32 hex chars) for the commitment
-  return Array.from(hashArray.slice(0, 16), (b) => b.toString(16).padStart(2, '0')).join('')
+  return Array.from(hashArray.slice(0, 16), (b) =>
+    b.toString(16).padStart(2, '0'),
+  ).join('');
 }
 
 /**
@@ -245,17 +263,24 @@ export async function hashKeyConfirmation(confirmValue: Uint8Array): Promise<str
  * Used to prevent relay MITM attacks by committing to receiver's identity.
  * Returns 32 hex characters.
  */
-export async function computePublicKeyCommitment(publicKeyBytes: Uint8Array): Promise<string> {
+export async function computePublicKeyCommitment(
+  publicKeyBytes: Uint8Array,
+): Promise<string> {
   if (!(publicKeyBytes instanceof Uint8Array) || publicKeyBytes.length < 16) {
     throw new TypeError(
-      `Invalid public key bytes: expected at least 16 bytes, got ${publicKeyBytes instanceof Uint8Array ? publicKeyBytes.length : typeof publicKeyBytes}`
-    )
+      `Invalid public key bytes: expected at least 16 bytes, got ${publicKeyBytes instanceof Uint8Array ? publicKeyBytes.length : typeof publicKeyBytes}`,
+    );
   }
 
-  const hash = await crypto.subtle.digest('SHA-256', publicKeyBytes as BufferSource)
-  const hashArray = new Uint8Array(hash)
+  const hash = await crypto.subtle.digest(
+    'SHA-256',
+    publicKeyBytes as BufferSource,
+  );
+  const hashArray = new Uint8Array(hash);
   // Take first 16 bytes (32 hex chars)
-  return Array.from(hashArray.slice(0, 16), (b) => b.toString(16).padStart(2, '0')).join('')
+  return Array.from(hashArray.slice(0, 16), (b) =>
+    b.toString(16).padStart(2, '0'),
+  ).join('');
 }
 
 /**
@@ -264,10 +289,10 @@ export async function computePublicKeyCommitment(publicKeyBytes: Uint8Array): Pr
  */
 export async function verifyPublicKeyCommitment(
   publicKeyBytes: Uint8Array,
-  commitment: string
+  commitment: string,
 ): Promise<boolean> {
-  const computed = await computePublicKeyCommitment(publicKeyBytes)
-  return constantTimeEqual(computed, commitment.toLowerCase())
+  const computed = await computePublicKeyCommitment(publicKeyBytes);
+  return constantTimeEqual(computed, commitment.toLowerCase());
 }
 
 /**
@@ -280,19 +305,19 @@ export async function verifyPublicKeyCommitment(
  * avoids obvious timing leaks from early returns or variable iteration counts.
  */
 export function constantTimeEqual(a: string, b: string): boolean {
-  const maxLen = Math.max(a.length, b.length)
+  const maxLen = Math.max(a.length, b.length);
 
   // XOR lengths to detect mismatch (will be non-zero if different)
-  let result = a.length ^ b.length
+  let result = a.length ^ b.length;
 
   // Compare all characters up to maxLen, using 0 for out-of-bounds access
   for (let i = 0; i < maxLen; i++) {
-    const charA = i < a.length ? a.charCodeAt(i) : 0
-    const charB = i < b.length ? b.charCodeAt(i) : 0
-    result |= charA ^ charB
+    const charA = i < a.length ? a.charCodeAt(i) : 0;
+    const charB = i < b.length ? b.charCodeAt(i) : 0;
+    result |= charA ^ charB;
   }
 
-  return result === 0
+  return result === 0;
 }
 
 /**
@@ -306,15 +331,15 @@ export function constantTimeEqual(a: string, b: string): boolean {
  */
 export function constantTimeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
   // XOR lengths to detect mismatch
-  let result = a.length ^ b.length
+  let result = a.length ^ b.length;
 
   // Compare all bytes up to the longer length
-  const maxLen = Math.max(a.length, b.length)
+  const maxLen = Math.max(a.length, b.length);
   for (let i = 0; i < maxLen; i++) {
-    const byteA = i < a.length ? a[i] : 0
-    const byteB = i < b.length ? b[i] : 0
-    result |= byteA ^ byteB
+    const byteA = i < a.length ? a[i] : 0;
+    const byteB = i < b.length ? b[i] : 0;
+    result |= byteA ^ byteB;
   }
 
-  return result === 0
+  return result === 0;
 }

@@ -1,92 +1,104 @@
-import { useState, useCallback } from 'react'
-import { ClipboardPaste, AlertCircle, Camera } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { parseClipboardPayload, isValidBinaryPayload } from '@/lib/manual-signaling'
-import { isMobileDevice } from '@/lib/utils'
-import { QRScanner } from './qr-scanner'
+import { AlertCircle, Camera, ClipboardPaste } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  isValidBinaryPayload,
+  parseClipboardPayload,
+} from '@/lib/manual-signaling';
+import { isMobileDevice } from '@/lib/utils';
+import { QRScanner } from './qr-scanner';
 
 interface QRInputProps {
-  onSubmit: (payload: Uint8Array) => void
-  expectedType: 'offer' | 'answer'
-  label?: string
-  disabled?: boolean
+  onSubmit: (payload: Uint8Array) => void;
+  expectedType: 'offer' | 'answer';
+  label?: string;
+  disabled?: boolean;
 }
 
-export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProps) {
-  const [value, setValue] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [inputMode, setInputMode] = useState<'scan' | 'paste'>('scan')
-  const [scanStarted, setScanStarted] = useState(false)
-  const scanActionVerb = isMobileDevice() ? 'Tap' : 'Click'
+export function QRInput({
+  onSubmit,
+  expectedType,
+  label,
+  disabled,
+}: QRInputProps) {
+  const [value, setValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [inputMode, setInputMode] = useState<'scan' | 'paste'>('scan');
+  const [scanStarted, setScanStarted] = useState(false);
+  const scanActionVerb = isMobileDevice() ? 'Tap' : 'Click';
 
   const handlePaste = useCallback(async () => {
     try {
-      const text = await navigator.clipboard.readText()
-      setValue(text)
-      setError(null)
+      const text = await navigator.clipboard.readText();
+      setValue(text);
+      setError(null);
     } catch (err) {
-      console.error('Failed to paste:', err)
-      setError('Failed to read clipboard')
+      console.error('Failed to paste:', err);
+      setError('Failed to read clipboard');
     }
-  }, [])
+  }, []);
 
   // Paste tab handles base64-encoded binary payload
   const handleSubmit = useCallback(() => {
-    const trimmed = value.trim()
+    const trimmed = value.trim();
     if (!trimmed) {
-      setError('Please paste the data')
-      return
+      setError('Please paste the data');
+      return;
     }
 
     // Parse as base64 binary payload
-    const binary = parseClipboardPayload(trimmed)
+    const binary = parseClipboardPayload(trimmed);
     if (!binary) {
-      setError('Invalid format. Make sure you copied the complete text.')
-      return
+      setError('Invalid format. Make sure you copied the complete text.');
+      return;
     }
 
     if (!isValidBinaryPayload(binary)) {
-      setError('Invalid or unsupported payload format')
-      return
+      setError('Invalid or unsupported payload format');
+      return;
     }
 
-    setError(null)
-    onSubmit(binary)
-  }, [value, onSubmit])
+    setError(null);
+    onSubmit(binary);
+  }, [value, onSubmit]);
 
-  const handleScanSuccess = useCallback((binary: Uint8Array) => {
-    setError(null)
-    onSubmit(binary)
-  }, [onSubmit])
+  const handleScanSuccess = useCallback(
+    (binary: Uint8Array) => {
+      setError(null);
+      onSubmit(binary);
+    },
+    [onSubmit],
+  );
 
   const handleScanError = useCallback((err: string) => {
     // Only show persistent errors, not transient scan failures
     if (err.includes('denied') || err.includes('unavailable')) {
-      setError(err)
+      setError(err);
     }
-  }, [])
+  }, []);
 
   const handleStartScan = useCallback(() => {
-    setError(null)
-    setScanStarted(true)
-  }, [])
+    setError(null);
+    setScanStarted(true);
+  }, []);
 
   const handleInputModeChange = useCallback((mode: 'scan' | 'paste') => {
-    setInputMode(mode)
+    setInputMode(mode);
     if (mode !== 'scan') {
-      setScanStarted(false)
+      setScanStarted(false);
     }
-  }, [])
+  }, []);
 
   return (
     <div className="space-y-3">
-      {label && (
-        <p className="text-sm font-medium">{label}</p>
-      )}
+      {label && <p className="text-sm font-medium">{label}</p>}
 
-      <Tabs value={inputMode} onValueChange={(v) => handleInputModeChange(v as 'scan' | 'paste')}>
+      <Tabs
+        value={inputMode}
+        onValueChange={(v) => handleInputModeChange(v as 'scan' | 'paste')}
+      >
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="scan" disabled={disabled}>
             <Camera className="h-4 w-4 mr-2" />
@@ -107,12 +119,12 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
               disabled={disabled}
             />
           ) : (
-              <button
-                type="button"
-                onClick={handleStartScan}
-                disabled={disabled}
-                className="w-full rounded-lg border border-dashed p-6 text-center cursor-pointer transition-colors hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
+            <button
+              type="button"
+              onClick={handleStartScan}
+              disabled={disabled}
+              className="w-full rounded-lg border border-dashed p-6 text-center cursor-pointer transition-colors hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               <Camera className="h-6 w-6 mx-auto mb-2" />
               <p className="text-base font-medium">Start scanning</p>
               <p className="text-sm text-muted-foreground mt-1">
@@ -127,8 +139,8 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
             <Textarea
               value={value}
               onChange={(e) => {
-                setValue(e.target.value)
-                setError(null)
+                setValue(e.target.value);
+                setError(null);
               }}
               placeholder={`Paste the ${expectedType} data here...`}
               className="min-h-[100px] font-mono text-xs"
@@ -174,5 +186,5 @@ export function QRInput({ onSubmit, expectedType, label, disabled }: QRInputProp
         </p>
       )}
     </div>
-  )
+  );
 }

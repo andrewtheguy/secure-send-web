@@ -1,6 +1,6 @@
 # Secure Send
 
-A web application for sending encrypted files and folders with PIN-based Nostr signaling, plus optional cloud fallback. Uses WebRTC for direct P2P connections.
+A web application for sending encrypted files and folders with PIN-based Nostr signaling. Uses WebRTC for direct P2P connections.
 
 **Demo:** [https://securesend.kuvi.app/](https://securesend.kuvi.app/)
 
@@ -40,7 +40,7 @@ Sender and receiver should use the same app version for transfers.
 
 - **PBKDF2-SHA256** with 600,000 iterations for key derivation (browser-compatible)
 - **AES-256-GCM** authenticated encryption
-- **Labeled PIN keys (Nostr)**: One transfer salt derives separate non-extractable AES-GCM keys for `metadata`, `signals`, `p2p-content`, and `cloud-content`
+- **Labeled PIN keys (Nostr)**: One transfer salt derives separate non-extractable AES-GCM keys for `metadata`, `signals`, and `p2p-content`
 - **Encrypted metadata (Nostr)**: File metadata in the PIN exchange payload, including name, size, and MIME type, is encrypted with the PIN-derived `metadata` key
 - **PIN never transmitted (Nostr)**: Only a one-way PBKDF2 hint is published to relays — a time-bucketed (hourly-rotating) lookup tag used to locate the PIN exchange event, never reversible to the PIN or usable to decrypt data. A separate, time-independent one-way derivation (the "PIN fingerprint") is computed locally on both ends and never published — it's only shown for humans to confirm both sides derived the same PIN
 - **Authenticated relay ACKs (Nostr)**: ACK event bodies are encrypted with the PIN-derived `signals` key, so a public transfer ID alone cannot make the sender start, continue, or complete a transfer
@@ -84,13 +84,13 @@ If the app is served from a subpath, scanned Multi-QR links will point to the do
 
 ## Transport Layer
 
-All signaling methods share a **unified encryption layer**: P2P transfers encrypt content in 128KB AES-256-GCM chunks before transmission, with the chunk index authenticated as AES-GCM additional data. Cloud fallback encrypts the whole file, then splits it into 10MB upload chunks; the receiver validates chunk indices, counts, and sizes against the decrypted transfer metadata before buffering.
+All signaling methods share a **unified encryption layer**: P2P transfers encrypt content in 128KB AES-256-GCM chunks before transmission, with the chunk index authenticated as AES-GCM additional data.
 
 **Signaling Methods** (sender chooses):
-- **Nostr** (default): Requires internet. Decentralized relay signaling. Devices can be on different networks. Has cloud fallback.
+- **Nostr** (default): Requires internet. Decentralized relay signaling. Devices can be on different networks.
 - **Manual Exchange**: No internet required. Exchange signaling via QR scan or copy/paste (camera optional). With internet, works across different networks. Without internet, devices must be on same local network.
 
-**Data Transfer**: WebRTC P2P preferred; cloud fallback available in Nostr mode only.
+**Data Transfer**: WebRTC P2P only. If a direct P2P connection cannot be established, the transfer does not complete.
 
 See [Architecture](./docs/ARCHITECTURE.md) for detailed transfer flows and encryption specifics.
 
@@ -99,48 +99,6 @@ See [Architecture](./docs/ARCHITECTURE.md) for detailed transfer flows and encry
 Receivers choose the matching receive mode:
 - **PIN mode**: Nostr signaling with a sender-provided PIN or 7-word equivalent.
 - **QR code mode**: Manual exchange via QR scan or copy/paste.
-
-### Cloud Storage Redundancy
-
-Upload servers and CORS proxies with automatic failover:
-
-**Upload Servers:**
-- tmpfiles.org
-- litterbox.catbox.moe (1h expiration, upload via CORS proxy; direct download)
-- uguu.se
-- x0.at
-
-**CORS Proxies (for download):**
-- corsproxy.io
-- cors.leverson83.org
-- api.codetabs.com
-- api.allorigins.win
-
-## Debug
-
-### Test Cloud Services
-
-Test cloud service availability from browser console:
-
-```javascript
-await window.testCloudServices()
-```
-
-This tests all CORS proxies and upload servers, showing latency and status for each.
-
-### Force Cloud-Only Transfer
-
-Disable P2P and force cloud transfer for testing:
-
-```javascript
-// Enable cloud-only mode (disable WebRTC P2P)
-testCloudTransfer(true)
-
-// Disable cloud-only mode (back to P2P-first)
-testCloudTransfer(false)
-```
-
-When enabled, a "Cloud-only mode" indicator appears in the UI.
 
 ## Documentation
 

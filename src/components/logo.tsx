@@ -1,5 +1,5 @@
 interface LogoProps {
-  className?: string
+  className?: string;
 }
 
 export function Logo({ className = 'h-10 w-10' }: LogoProps) {
@@ -33,5 +33,5 @@ export function Logo({ className = 'h-10 w-10' }: LogoProps) {
         rx="0.7"
       />
     </svg>
-  )
+  );
 }

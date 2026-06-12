@@ -1,19 +1,29 @@
-import { useState } from 'react'
-import { Loader2, CheckCircle2, XCircle, Radio, ChevronDown, ChevronRight } from 'lucide-react'
-import { Progress } from '@/components/ui/progress'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import type { TransferState } from '@/lib/nostr'
-import { formatFileSize } from '@/lib/file-utils'
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Radio,
+  XCircle,
+} from 'lucide-react';
+import { useState } from 'react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress';
+import { formatFileSize } from '@/lib/file-utils';
+import type { TransferState } from '@/lib/nostr';
 
 interface TransferStatusProps {
-  state: TransferState
-  betweenProgressAndChunks?: React.ReactNode
+  state: TransferState;
+  betweenProgressAndChunks?: React.ReactNode;
 }
 
-export function TransferStatus({ state, betweenProgressAndChunks }: TransferStatusProps) {
-  const [showDebug, setShowDebug] = useState(false)
+export function TransferStatus({
+  state,
+  betweenProgressAndChunks,
+}: TransferStatusProps) {
+  const [showDebug, setShowDebug] = useState(false);
 
-  if (state.status === 'idle') return null
+  if (state.status === 'idle') return null;
 
   const getIcon = () => {
     switch (state.status) {
@@ -21,27 +31,27 @@ export function TransferStatus({ state, betweenProgressAndChunks }: TransferStat
       case 'waiting_for_receiver':
       case 'transferring':
       case 'receiving':
-        return <Loader2 className="h-4 w-4 animate-spin" />
+        return <Loader2 className="h-4 w-4 animate-spin" />;
       case 'complete':
-        return <CheckCircle2 className="h-4 w-4 text-green-500" />
+        return <CheckCircle2 className="h-4 w-4 text-green-500" />;
       case 'error':
-        return <XCircle className="h-4 w-4 text-destructive" />
+        return <XCircle className="h-4 w-4 text-destructive" />;
       default:
-        return <Radio className="h-4 w-4" />
+        return <Radio className="h-4 w-4" />;
     }
-  }
+  };
 
   const getVariant = (): 'default' | 'destructive' => {
-    return state.status === 'error' ? 'destructive' : 'default'
-  }
+    return state.status === 'error' ? 'destructive' : 'default';
+  };
 
   const progressPercent =
     state.progress && state.progress.total > 0
       ? (state.progress.current / state.progress.total) * 100
-      : 0
+      : 0;
 
-  // Show relays whenever Nostr was used (for debugging), regardless of P2P or cloud transfer
-  const showRelays = state.currentRelays && state.currentRelays.length > 0
+  // Show relays whenever Nostr was used (for debugging)
+  const showRelays = state.currentRelays && state.currentRelays.length > 0;
 
   return (
     <div className="space-y-3">
@@ -62,7 +72,11 @@ export function TransferStatus({ state, betweenProgressAndChunks }: TransferStat
             onClick={() => setShowDebug(!showDebug)}
             className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
           >
-            {showDebug ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            {showDebug ? (
+              <ChevronDown className="h-3 w-3" />
+            ) : (
+              <ChevronRight className="h-3 w-3" />
+            )}
             <span>Debug info</span>
           </button>
           {showDebug && (
@@ -73,7 +87,11 @@ export function TransferStatus({ state, betweenProgressAndChunks }: TransferStat
               </p>
               <ul className="space-y-0.5 pl-3">
                 {state.currentRelays!.map((relay) => (
-                  <li key={relay} className="text-muted-foreground truncate" title={relay}>
+                  <li
+                    key={relay}
+                    className="text-muted-foreground truncate"
+                    title={relay}
+                  >
                     • {relay.replace('wss://', '')}
                   </li>
                 ))}
@@ -87,12 +105,13 @@ export function TransferStatus({ state, betweenProgressAndChunks }: TransferStat
         <div className="space-y-1">
           <Progress value={progressPercent} className="h-2" />
           <p className="text-xs text-muted-foreground text-right">
-            {formatFileSize(state.progress.current)} / {formatFileSize(state.progress.total)}
+            {formatFileSize(state.progress.current)} /{' '}
+            {formatFileSize(state.progress.total)}
           </p>
         </div>
       )}
 
       {betweenProgressAndChunks}
     </div>
-  )
+  );
 }

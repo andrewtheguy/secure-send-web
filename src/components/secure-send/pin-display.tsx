@@ -1,142 +1,161 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Check, Copy, AlertCircle, Eye, EyeOff, Clock, Hash, MessageSquareText, Fingerprint } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { PIN_DISPLAY_TIMEOUT_MS, pinToWords, computePinFingerprint, formatPinHint } from '@/lib/crypto'
+import {
+  AlertCircle,
+  Check,
+  Clock,
+  Copy,
+  Eye,
+  EyeOff,
+  Fingerprint,
+  Hash,
+  MessageSquareText,
+} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  computePinFingerprint,
+  formatPinHint,
+  PIN_DISPLAY_TIMEOUT_MS,
+  pinToWords,
+} from '@/lib/crypto';
 
 interface PinDisplayProps {
-  pin: string
-  onExpire: () => void
+  pin: string;
+  onExpire: () => void;
 }
 
 export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
-  const [copied, setCopied] = useState(false)
-  const [error, setError] = useState(false)
-  const [isMasked, setIsMasked] = useState(false)
-  const [useWords, setUseWords] = useState(false)
-  const [hasCopied, setHasCopied] = useState(false)
-  const [timeRemaining, setTimeRemaining] = useState(Math.ceil(PIN_DISPLAY_TIMEOUT_MS / 1000))
-  const [progressPercentage, setProgressPercentage] = useState(100)
-  const [fingerprint, setFingerprint] = useState<string>('')
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState(false);
+  const [isMasked, setIsMasked] = useState(false);
+  const [useWords, setUseWords] = useState(false);
+  const [hasCopied, setHasCopied] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState(
+    Math.ceil(PIN_DISPLAY_TIMEOUT_MS / 1000),
+  );
+  const [progressPercentage, setProgressPercentage] = useState(100);
+  const [fingerprint, setFingerprint] = useState<string>('');
 
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const animationFrameRef = useRef<number | null>(null)
-  const mountedRef = useRef(true)
-  const onExpireRef = useRef(onExpire)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
+  const onExpireRef = useRef(onExpire);
 
   // Keep onExpire ref up to date
   useEffect(() => {
-    onExpireRef.current = onExpire
-  }, [onExpire])
+    onExpireRef.current = onExpire;
+  }, [onExpire]);
 
   useEffect(() => {
-    mountedRef.current = true
+    mountedRef.current = true;
 
     // Start high-resolution countdown timer
-    const durationMs = PIN_DISPLAY_TIMEOUT_MS
-    const startTime = performance.now()
+    const durationMs = PIN_DISPLAY_TIMEOUT_MS;
+    const startTime = performance.now();
 
     const tick = () => {
-      if (!mountedRef.current) return
+      if (!mountedRef.current) return;
 
-      const now = performance.now()
-      const elapsed = now - startTime
-      const remainingMs = Math.max(0, durationMs - elapsed)
+      const now = performance.now();
+      const elapsed = now - startTime;
+      const remainingMs = Math.max(0, durationMs - elapsed);
 
-      setTimeRemaining(Math.ceil(remainingMs / 1000))
-      setProgressPercentage((remainingMs / durationMs) * 100)
+      setTimeRemaining(Math.ceil(remainingMs / 1000));
+      setProgressPercentage((remainingMs / durationMs) * 100);
 
       if (remainingMs <= 0) {
-        onExpireRef.current()
-        return
+        onExpireRef.current();
+        return;
       }
 
-      animationFrameRef.current = requestAnimationFrame(tick)
-    }
+      animationFrameRef.current = requestAnimationFrame(tick);
+    };
 
-    animationFrameRef.current = requestAnimationFrame(tick)
+    animationFrameRef.current = requestAnimationFrame(tick);
 
     return () => {
-      mountedRef.current = false
+      mountedRef.current = false;
       if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current)
+        clearTimeout(timeoutRef.current);
       }
       if (animationFrameRef.current !== null) {
-        cancelAnimationFrame(animationFrameRef.current)
+        cancelAnimationFrame(animationFrameRef.current);
       }
-    }
-  }, [])
-  const words = useMemo(() => pinToWords(pin), [pin])
-  const wordsDisplay = useMemo(() => words.join(' '), [words])
+    };
+  }, []);
+  const words = useMemo(() => pinToWords(pin), [pin]);
+  const wordsDisplay = useMemo(() => words.join(' '), [words]);
 
   const handleCopy = useCallback(async () => {
     // Clear any existing timeout
     if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current)
-      timeoutRef.current = null
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
     }
 
     try {
-      const textToCopy = useWords ? wordsDisplay : pin
-      await navigator.clipboard.writeText(textToCopy)
-      if (!mountedRef.current) return
+      const textToCopy = useWords ? wordsDisplay : pin;
+      await navigator.clipboard.writeText(textToCopy);
+      if (!mountedRef.current) return;
 
-      setError(false)
-      setCopied(true)
+      setError(false);
+      setCopied(true);
       // Mask PIN after copying
-      setHasCopied(true)
-      setIsMasked(true)
+      setHasCopied(true);
+      setIsMasked(true);
       timeoutRef.current = setTimeout(() => {
         if (mountedRef.current) {
-          setCopied(false)
+          setCopied(false);
         }
-      }, 2000)
+      }, 2000);
     } catch {
-      if (!mountedRef.current) return
+      if (!mountedRef.current) return;
 
-      setError(true)
-      setCopied(false)
+      setError(true);
+      setCopied(false);
       timeoutRef.current = setTimeout(() => {
         if (mountedRef.current) {
-          setError(false)
+          setError(false);
         }
-      }, 2000)
+      }, 2000);
     }
-  }, [pin, useWords, wordsDisplay])
+  }, [pin, useWords, wordsDisplay]);
 
   const toggleMask = useCallback(() => {
-    setIsMasked((prev) => !prev)
-  }, [])
+    setIsMasked((prev) => !prev);
+  }, []);
 
   // Format time remaining as MM:SS
   const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   const toggleMode = useCallback(() => {
-    setUseWords((prev) => !prev)
-  }, [])
+    setUseWords((prev) => !prev);
+  }, []);
 
   // Mask PIN with bullet characters
-  const maskedPin = pin.replace(/./g, '\u2022')
+  const maskedPin = pin.replace(/./g, '\u2022');
 
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false;
     const loadHint = async () => {
       try {
-        const fp = await computePinFingerprint(pin)
+        const fp = await computePinFingerprint(pin);
         if (!cancelled) {
-          setFingerprint(fp ? formatPinHint(fp) : '')
+          setFingerprint(fp ? formatPinHint(fp) : '');
         }
       } catch {
-        if (!cancelled) setFingerprint('')
+        if (!cancelled) setFingerprint('');
       }
-    }
-    void loadHint()
-    return () => { cancelled = true }
-  }, [pin])
+    };
+    void loadHint();
+    return () => {
+      cancelled = true;
+    };
+  }, [pin]);
 
   return (
     <div className="flex flex-col gap-4 p-6 rounded-lg bg-muted/50 border">
@@ -198,11 +217,7 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
 
       {/* Action buttons */}
       <div className="flex gap-2">
-        <Button
-          variant="default"
-          className="flex-1"
-          onClick={handleCopy}
-        >
+        <Button variant="default" className="flex-1" onClick={handleCopy}>
           {copied ? (
             <>
               <Check className="h-4 w-4 mr-2" />
@@ -228,7 +243,11 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
             onClick={toggleMask}
             title={isMasked ? 'Show PIN' : 'Hide PIN'}
           >
-            {isMasked ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+            {isMasked ? (
+              <Eye className="h-4 w-4" />
+            ) : (
+              <EyeOff className="h-4 w-4" />
+            )}
           </Button>
         )}
       </div>
@@ -239,10 +258,14 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
           {useWords ? (
             <>
               <p className="text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">Words are easier to share by voice</span> - no confusion about case or special characters
+                <span className="font-medium text-foreground">
+                  Words are easier to share by voice
+                </span>{' '}
+                - no confusion about case or special characters
               </p>
               <p className="text-xs text-muted-foreground">
-                Share securely via another channel (phone call, video chat, etc.)
+                Share securely via another channel (phone call, video chat,
+                etc.)
               </p>
             </>
           ) : (
@@ -251,7 +274,8 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
                 Character PIN is shorter to type but case sensitive
               </p>
               <p className="text-xs text-muted-foreground">
-                Best for secure messaging apps. For voice calls, consider using words instead
+                Best for secure messaging apps. For voice calls, consider using
+                words instead
               </p>
             </>
           )}
@@ -282,10 +306,19 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
             <Fingerprint className="h-3 w-3" />
             PIN Fingerprint: {fingerprint}
           </div>
-          <p>- It should match the receiver&apos;s PIN fingerprint if they entered the same words/PIN.</p>
-          <p>- On the receiver&apos;s end, after the PIN is entered the app locks it into a key that cannot be read back out; this fingerprint is the one-way checksum you can compare to confirm you both derived the same secret, but it cannot be reversed to recover the PIN or decrypt any data.</p>
+          <p>
+            - It should match the receiver&apos;s PIN fingerprint if they
+            entered the same words/PIN.
+          </p>
+          <p>
+            - On the receiver&apos;s end, after the PIN is entered the app locks
+            it into a key that cannot be read back out; this fingerprint is the
+            one-way checksum you can compare to confirm you both derived the
+            same secret, but it cannot be reversed to recover the PIN or decrypt
+            any data.
+          </p>
         </div>
       )}
     </div>
-  )
+  );
 }
