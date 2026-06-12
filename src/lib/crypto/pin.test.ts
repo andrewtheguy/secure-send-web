@@ -1,7 +1,7 @@
 import { expect, test, describe } from 'vitest'
 import { generatePinForMethod, pinToWords, wordsToPin, isValidPinWord, computePinHint, computePinHintFromKey, computePinFingerprint, detectSignalingMethod } from './pin'
 import { importPinKey } from './kdf'
-import { PIN_HINT_LENGTH } from './constants'
+import { PIN_HINT_LENGTH, PIN_FINGERPRINT_LENGTH } from './constants'
 
 describe('PIN Utilities', () => {
     test('detectSignalingMethod should identify method from PIN', () => {
@@ -40,7 +40,7 @@ describe('PIN Utilities', () => {
     test('fingerprint is deterministic and domain-separated from the wire hint', async () => {
         const pin = 'A/B:C;D(E)F'
         const fp = await computePinFingerprint(pin)
-        expect(fp).toMatch(new RegExp(`^[0-9a-f]{${PIN_HINT_LENGTH}}$`))
+        expect(fp).toMatch(new RegExp(`^[0-9a-f]{${PIN_FINGERPRINT_LENGTH}}$`))
         // Stable across calls (no time bucket in the salt)
         expect(await computePinFingerprint(pin)).toBe(fp)
         // Different salt than any time-bucketed wire hint

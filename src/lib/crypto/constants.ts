@@ -46,12 +46,18 @@ export const CLOUD_CHUNK_SIZE = 10 * 1024 * 1024 // 10MB per cloud chunk
 export const MAX_MESSAGE_SIZE = 100 * 1024 * 1024 // 100MB
 
 // PIN hint length.
-// 16 hex chars = 64 bits. The hint is both the Nostr `#h` filter tag and the
-// displayed PIN fingerprint. 64 bits is birthday-collision-free at any realistic
-// concurrent-transfer scale. Both the published wire hint and the local-only
-// display fingerprint are PBKDF2-stretched (see the iteration counts below); the
-// fingerprint uses a lighter work factor since it never crosses the network.
+// 16 hex chars = 64 bits. The hint is the Nostr `#h` filter tag. 64 bits is
+// birthday-collision-free at any realistic concurrent-transfer scale. The hint is
+// PBKDF2-stretched (see the iteration counts below).
 export const PIN_HINT_LENGTH = 16 // hex characters
+
+// PIN fingerprint length.
+// 8 hex chars = 32 bits. The fingerprint is local-only and exists solely for two
+// humans to visually compare on-device that they entered the same PIN. It is not a
+// collision-resistance primitive and never crosses the network, so 32 bits is more
+// than enough to make an accidental match between two distinct PINs negligible while
+// keeping the displayed value short and easy to read aloud.
+export const PIN_FINGERPRINT_LENGTH = 8 // hex characters
 
 // Domain-separation salt for the PIN hint KDF.
 // Shared (public) constant so sender and receiver derive the same hint from the
@@ -89,7 +95,7 @@ export const PIN_HINT_ITERATIONS = 600_000
 // the PIN. It is still PBKDF2-stretched (rather than a bare hash) for defence in
 // depth against an attacker who observes the on-screen fingerprint, but uses a
 // lighter work factor than PIN_HINT_ITERATIONS so PIN entry/display stays snappy.
-export const PIN_FINGERPRINT_ITERATIONS = 100_000
+export const PIN_FINGERPRINT_ITERATIONS = 200_000
 
 // Transfer timeouts
 export const TRANSFER_EXPIRATION_MS = 60 * 60 * 1000 // 1 hour
