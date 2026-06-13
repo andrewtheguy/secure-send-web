@@ -2,8 +2,8 @@ import { KeyRound, Lock, QrCode, Shield, Zap } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
   PinModeIllustration,
+  PrivateByDesignIllustration,
   QrModeIllustration,
-  SecureTransferIllustration,
 } from '@/components/illustrations';
 import { SectionContainer } from '@/components/section-container';
 import { OFFLINE_QR_TRANSFER_URL } from '@/lib/constants';
@@ -15,24 +15,49 @@ const VALUE_PROPS = [
   { icon: Shield, label: 'No sign-up' },
 ] as const;
 
-const TECHNICAL_DETAILS = [
+// Shared by every transfer, whatever mode you use.
+const COMMON_DETAILS = [
+  { label: 'Content encryption:', value: 'AES-256-GCM' },
+  { label: 'File transport:', value: 'Direct peer-to-peer over WebRTC' },
+  { label: 'Max size:', value: '100 MB per transfer' },
+] as const;
+
+// Specific to PIN mode.
+const PIN_DETAILS = [
   {
-    label: 'Encryption:',
-    value:
-      'AES-256-GCM; PIN mode uses PBKDF2-SHA256 key derivation (600,000 iterations), QR code mode uses ECDH',
+    label: 'Key derivation:',
+    value: 'PBKDF2-SHA256 (600,000 iterations)',
   },
   {
     label: 'PIN format:',
     value: '12 characters with built-in checksum for typo detection',
   },
-  { label: 'Max size:', value: '100 MB per transfer' },
   { label: 'PIN expiry:', value: '1 hour' },
-  {
-    label: 'Signaling:',
-    value:
-      'Receiver chooses the matching mode (PIN mode uses relay signaling, QR code mode uses direct QR exchange)',
-  },
+  { label: 'Signaling:', value: 'Relay signaling' },
 ] as const;
+
+// Specific to QR code mode.
+const QR_DETAILS = [
+  { label: 'Key exchange:', value: 'ECDH' },
+  { label: 'Signaling:', value: 'Direct QR exchange (no relay)' },
+] as const;
+
+function SpecList({
+  items,
+}: {
+  items: readonly { label: string; value: string }[];
+}) {
+  return (
+    <dl className="mt-4 grid gap-x-6 gap-y-2 rounded-xl bg-muted/40 p-4 sm:grid-cols-2">
+      {items.map(({ label, value }) => (
+        <div key={label} className="flex flex-col gap-0.5">
+          <dt className="text-xs font-medium text-foreground">{label}</dt>
+          <dd className="text-xs text-muted-foreground">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 
 export function AboutContent() {
   const siteUrl = typeof window !== 'undefined' ? window.location.origin : '';
@@ -59,24 +84,37 @@ export function AboutContent() {
 
   return (
     <div className="flex flex-col gap-16 pb-8 sm:gap-24">
-      {/* Intro band */}
+      {/* What is Secure Send */}
       <SectionContainer className="pt-2 sm:pt-6">
-        <div className="grid items-center gap-10 md:grid-cols-2 md:gap-8">
+        <div className="grid items-center gap-10 md:grid-cols-2 md:gap-12">
           <div className="flex flex-col items-center text-center md:items-start md:text-left">
-            <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-medium text-primary">
-              <Lock className="h-3.5 w-3.5" />
-              How the security works
-            </span>
-
-            <h1 className="mt-5 text-balance bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent">
-              Encrypted end to end, sent device to device.
+            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+              What is Secure Send?
             </h1>
 
-            <p className="mt-4 max-w-md text-pretty text-base text-muted-foreground sm:text-lg">
-              Secure Send encrypts your content on your device and transfers it
-              directly to your recipient over a peer-to-peer connection. Here's
-              what powers it and how the two transfer modes differ.
-            </p>
+            <div className="mt-5 max-w-md space-y-4 text-pretty text-base text-muted-foreground">
+              <p>
+                Secure Send is a free, open-source tool for sending files and
+                folders straight from one device to another with end-to-end
+                encryption. Your content is encrypted in your browser and
+                travels over a direct peer-to-peer connection — it's never
+                uploaded to a server or stored in the cloud.
+              </p>
+              <p>
+                There are no accounts and no tracking. Each transfer uses a
+                fresh, throwaway identity, and the whole app is a static site
+                with no backend, no database, and nothing to sign up for. It
+                also installs as a Progressive Web App, so it keeps working
+                offline.
+              </p>
+              <p>
+                Two transfer modes cover different situations: a shareable{' '}
+                <span className="font-medium text-foreground">PIN</span> for the
+                most reliable connection across networks, or a direct{' '}
+                <span className="font-medium text-foreground">QR code</span>{' '}
+                exchange that can even work offline on the same local network.
+              </p>
+            </div>
 
             <ul className="mt-8 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-muted-foreground md:justify-start">
               {VALUE_PROPS.map(({ icon: Icon, label }) => (
@@ -89,7 +127,7 @@ export function AboutContent() {
           </div>
 
           <div className="order-first md:order-last">
-            <SecureTransferIllustration className="mx-auto w-full max-w-md" />
+            <PrivateByDesignIllustration className="mx-auto w-full max-w-md" />
           </div>
         </div>
       </SectionContainer>
@@ -99,15 +137,12 @@ export function AboutContent() {
         <div className="mx-auto max-w-2xl text-center">
           <h2 className="text-3xl">Technical details</h2>
           <p className="mt-3 text-muted-foreground">
-            The cryptography and limits behind every transfer.
+            What's the same for every transfer, whichever mode you pick.
           </p>
         </div>
-        <dl className="mt-8 grid gap-x-8 gap-y-3 rounded-2xl bg-muted/40 p-6 sm:grid-cols-2 sm:p-8">
-          {TECHNICAL_DETAILS.map(({ label, value }) => (
-            <div
-              key={label}
-              className="flex flex-col gap-0.5 border-b border-border/50 pb-3 last:border-b-0 sm:last:[&:nth-last-child(2)]:border-b-0"
-            >
+        <dl className="mt-8 grid gap-x-8 gap-y-3 rounded-2xl bg-muted/40 p-6 sm:grid-cols-3 sm:p-8">
+          {COMMON_DETAILS.map(({ label, value }) => (
+            <div key={label} className="flex flex-col gap-0.5">
               <dt className="text-sm font-medium text-foreground">{label}</dt>
               <dd className="text-sm text-muted-foreground">{value}</dd>
             </div>
@@ -118,10 +153,10 @@ export function AboutContent() {
       {/* Transfer Modes */}
       <SectionContainer>
         <div className="mx-auto max-w-2xl text-center">
-          <h2 className="text-3xl">Transfer modes</h2>
+          <h2 className="text-3xl">Two ways to connect</h2>
           <p className="mt-3 text-muted-foreground">
-            Select the mode before sending. Receiver uses the matching mode to
-            complete the transfer.
+            Every transfer is end-to-end encrypted — the two modes differ only
+            in how the sending and receiving devices find each other.
           </p>
         </div>
         <div className="mt-10 grid gap-6">
@@ -167,6 +202,7 @@ export function AboutContent() {
                   .
                 </li>
               </ul>
+              <SpecList items={PIN_DETAILS} />
             </div>
           </div>
           <div className="grid gap-5 rounded-2xl border bg-card p-6 shadow-sm sm:grid-cols-[200px_1fr] sm:items-start sm:gap-7">
@@ -211,6 +247,7 @@ export function AboutContent() {
                   scan conditions, and manual QR exchange friction.
                 </li>
               </ul>
+              <SpecList items={QR_DETAILS} />
             </div>
           </div>
         </div>
