@@ -369,6 +369,7 @@ export function ReceiveTab() {
               >
                 <Download className="mr-2 h-4 w-4" />
                 Receive
+                <span aria-hidden="true" className="ml-2 h-4 w-4" />
               </Button>
             </>
           ) : (
