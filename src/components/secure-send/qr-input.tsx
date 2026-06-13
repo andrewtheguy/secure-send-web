@@ -26,7 +26,10 @@ export function QRInput({
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [inputMode, setInputMode] = useState<'scan' | 'paste'>('scan');
-  const [scanStarted, setScanStarted] = useState(false);
+  // Receiver scans the offer — start the camera immediately. Sender scans the
+  // answer behind a click gate so the camera isn't running prematurely.
+  const autoStartScan = expectedType === 'offer';
+  const [scanStarted, setScanStarted] = useState(autoStartScan);
   const scanActionVerb = isMobileDevice() ? 'Tap' : 'Click';
 
   const handlePaste = useCallback(async () => {
@@ -84,12 +87,16 @@ export function QRInput({
     setScanStarted(true);
   }, []);
 
-  const handleInputModeChange = useCallback((mode: 'scan' | 'paste') => {
-    setInputMode(mode);
-    if (mode !== 'scan') {
-      setScanStarted(false);
-    }
-  }, []);
+  const handleInputModeChange = useCallback(
+    (mode: 'scan' | 'paste') => {
+      setError(null);
+      setInputMode(mode);
+      if (mode !== 'scan') {
+        setScanStarted(autoStartScan);
+      }
+    },
+    [autoStartScan],
+  );
 
   return (
     <div className="space-y-3">
