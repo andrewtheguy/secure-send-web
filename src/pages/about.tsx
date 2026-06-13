@@ -1,9 +1,5 @@
-import { SecureSend } from '@/components/secure-send';
+import { AboutContent } from '@/components/secure-send/about-content';
 
 export function AboutPage() {
-  return (
-    <div className="flex w-full justify-center">
-      <SecureSend view="about" />
-    </div>
-  );
+  return <AboutContent />;
 }
