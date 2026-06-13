@@ -7,6 +7,7 @@ import {
   isValidBinaryPayload,
   parseClipboardPayload,
 } from '@/lib/manual-signaling';
+import { isMobileDevice } from '@/lib/utils';
 import { QRScanner } from './qr-scanner';
 
 interface QRInputProps {
@@ -25,6 +26,11 @@ export function QRInput({
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [inputMode, setInputMode] = useState<'scan' | 'paste'>('scan');
+  // Receiver scans the offer — start the camera immediately. Sender scans the
+  // answer behind a click gate so the camera isn't running prematurely.
+  const autoStartScan = expectedType === 'offer';
+  const [scanStarted, setScanStarted] = useState(autoStartScan);
+  const scanActionVerb = isMobileDevice() ? 'Tap' : 'Click';
 
   const handlePaste = useCallback(async () => {
     try {
@@ -76,10 +82,21 @@ export function QRInput({
     }
   }, []);
 
-  const handleInputModeChange = useCallback((mode: 'scan' | 'paste') => {
+  const handleStartScan = useCallback(() => {
     setError(null);
-    setInputMode(mode);
+    setScanStarted(true);
   }, []);
+
+  const handleInputModeChange = useCallback(
+    (mode: 'scan' | 'paste') => {
+      setError(null);
+      setInputMode(mode);
+      if (mode !== 'scan') {
+        setScanStarted(autoStartScan);
+      }
+    },
+    [autoStartScan],
+  );
 
   return (
     <div className="space-y-3">
@@ -101,12 +118,27 @@ export function QRInput({
         </TabsList>
 
         <TabsContent value="scan" className="mt-3">
-          <QRScanner
-            expectedType={expectedType}
-            onScan={handleScanSuccess}
-            onError={handleScanError}
-            disabled={disabled}
-          />
+          {scanStarted ? (
+            <QRScanner
+              expectedType={expectedType}
+              onScan={handleScanSuccess}
+              onError={handleScanError}
+              disabled={disabled}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={handleStartScan}
+              disabled={disabled}
+              className="w-full rounded-lg border border-dashed p-6 text-center cursor-pointer transition-colors hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Camera className="h-6 w-6 mx-auto mb-2" />
+              <p className="text-base font-medium">Start scanning</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {`${scanActionVerb} anywhere in this area to start the camera scanner.`}
+              </p>
+            </button>
+          )}
         </TabsContent>
 
         <TabsContent value="paste" className="mt-3">
