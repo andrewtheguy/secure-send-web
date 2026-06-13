@@ -21,10 +21,13 @@ export function NotFoundPage() {
         </div>
 
         <div className="mt-6 space-y-4 text-sm text-muted-foreground">
-          <p>Check the URL or head back to Secure Send to start a transfer.</p>
-          <div>
+          <p>Check the URL or head back home to start a transfer.</p>
+          <div className="flex flex-wrap gap-3">
             <Button asChild>
-              <Link to="/">Go to Send</Link>
+              <Link to="/">Go home</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/send">Send a file</Link>
             </Button>
           </div>
         </div>
