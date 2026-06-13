@@ -7,11 +7,10 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { AboutContent } from './about-content';
 import { ReceiveTab } from './receive-tab';
 import { SendTab } from './send-tab';
 
-type SecureSendView = 'send' | 'receive' | 'about';
+type SecureSendView = 'send' | 'receive';
 
 type SecureSendProps = {
   view?: SecureSendView;
@@ -24,8 +23,6 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
         return 'Secure Send';
       case 'receive':
         return 'Secure Receive';
-      case 'about':
-        return 'About Secure Send';
       default:
         return 'Secure Send';
     }
@@ -72,14 +69,11 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
           )}
           {view === 'receive' &&
             'Use PIN mode or QR code mode to securely receive files or messages.'}
-          {view === 'about' &&
-            'Learn how Secure Send works and what keeps it secure.'}
         </CardDescription>
       </CardHeader>
       <CardContent>
         {view === 'send' && <SendTab />}
         {view === 'receive' && <ReceiveTab />}
-        {view === 'about' && <AboutContent />}
       </CardContent>
     </Card>
   );

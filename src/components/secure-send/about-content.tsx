@@ -1,54 +1,62 @@
 import { KeyRound, Lock, QrCode, Shield, Zap } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import {
+  PinModeIllustration,
+  QrModeIllustration,
+} from '@/components/illustrations';
+import { SectionContainer } from '@/components/section-container';
 import { OFFLINE_QR_TRANSFER_URL } from '@/lib/constants';
 import { generateTextQRCode } from '@/lib/qr-utils';
 
-const HOW_IT_WORKS = [
-  'Select what you want to share (files or folder)',
-  'Choose your transfer mode: PIN mode or QR code mode',
-  'PIN mode: generate and share the PIN; QR code mode: exchange QR codes between devices',
-  'Recipient follows the same mode to complete the encrypted transfer',
+const VALUE_PROPS = [
+  { icon: Lock, label: 'End-to-end encrypted' },
+  { icon: Zap, label: 'Direct peer-to-peer' },
+  { icon: Shield, label: 'No sign-up' },
 ] as const;
 
-const FEATURES = [
-  {
-    icon: Shield,
-    title: 'End-to-End Encryption',
-    description:
-      'Your content is encrypted with AES-256-GCM before it ever leaves your device. Only someone with the PIN or completed QR exchange key can decrypt it.',
-  },
-  {
-    icon: Zap,
-    title: 'Direct P2P Transfer',
-    description:
-      'Files are sent directly between devices using WebRTC. File data never touches a server, only your two devices.',
-  },
-  {
-    icon: Lock,
-    title: 'No Accounts Required',
-    description:
-      "No sign-ups, no tracking. Each transfer uses a fresh ephemeral identity that's discarded after use.",
-  },
+// Shared by every transfer, whatever mode you use.
+const COMMON_DETAILS = [
+  { label: 'Content encryption:', value: 'AES-256-GCM' },
+  { label: 'File transport:', value: 'Direct peer-to-peer over WebRTC' },
+  { label: 'Max size:', value: '100 MB per transfer' },
 ] as const;
 
-const TECHNICAL_DETAILS = [
+// Specific to PIN mode.
+const PIN_DETAILS = [
   {
-    label: 'Encryption:',
-    value:
-      'AES-256-GCM; PIN mode uses PBKDF2-SHA256 key derivation (600,000 iterations), QR code mode uses ECDH',
+    label: 'Key derivation:',
+    value: 'PBKDF2-SHA256 (600,000 iterations)',
   },
   {
     label: 'PIN format:',
     value: '12 characters with built-in checksum for typo detection',
   },
-  { label: 'Max size:', value: '100 MB per transfer' },
   { label: 'PIN expiry:', value: '1 hour' },
-  {
-    label: 'Signaling:',
-    value:
-      'Receiver chooses the matching mode (PIN mode uses relay signaling, QR code mode uses direct QR exchange)',
-  },
+  { label: 'Signaling:', value: 'Relay signaling' },
 ] as const;
+
+// Specific to QR code mode.
+const QR_DETAILS = [
+  { label: 'Key exchange:', value: 'ECDH' },
+  { label: 'Signaling:', value: 'Direct QR exchange (no relay)' },
+] as const;
+
+function SpecList({
+  items,
+}: {
+  items: readonly { label: string; value: string }[];
+}) {
+  return (
+    <dl className="mt-4 grid gap-x-6 gap-y-2 rounded-xl bg-muted/40 p-4 sm:grid-cols-2">
+      {items.map(({ label, value }) => (
+        <div key={label} className="flex flex-col gap-0.5">
+          <dt className="text-xs font-medium text-foreground">{label}</dt>
+          <dd className="text-xs text-muted-foreground">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 
 export function AboutContent() {
   const siteUrl = typeof window !== 'undefined' ? window.location.origin : '';
@@ -74,154 +82,187 @@ export function AboutContent() {
   }, [siteUrl]);
 
   return (
-    <div className="space-y-8 pt-4 text-sm">
-      {/* How It Works */}
-      <section>
-        <h3 className="mb-3 text-base font-semibold">How It Works</h3>
-        <ol className="grid gap-3 sm:grid-cols-2">
-          {HOW_IT_WORKS.map((step, index) => (
-            <li
-              key={step}
-              className="flex items-start gap-3 rounded-xl border bg-card p-3"
-            >
-              <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                {index + 1}
-              </span>
-              <span className="text-muted-foreground">{step}</span>
-            </li>
-          ))}
-        </ol>
-      </section>
+    <div className="flex flex-col gap-16 pb-8 sm:gap-24">
+      {/* What is Secure Send */}
+      <SectionContainer className="pt-2 sm:pt-6">
+        <div className="mx-auto flex max-w-2xl flex-col items-center text-center">
+          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+            What is Secure Send?
+          </h1>
 
-      {/* Features */}
-      <section>
-        <h3 className="mb-3 text-base font-semibold">Features</h3>
-        <div className="grid gap-3 sm:grid-cols-3">
-          {FEATURES.map(({ icon: Icon, title, description }) => (
-            <div key={title} className="rounded-xl border bg-card p-4">
-              <div className="inline-flex rounded-lg bg-primary/10 p-2 text-primary">
-                <Icon className="h-5 w-5" />
-              </div>
-              <p className="mt-3 font-medium">{title}</p>
-              <p className="mt-1 text-muted-foreground">{description}</p>
-            </div>
-          ))}
+          <div className="mt-5 space-y-4 text-pretty text-base text-muted-foreground">
+            <p>
+              Secure Send is a free, open-source tool for sending files and
+              folders straight from one device to another with end-to-end
+              encryption. Your content is encrypted in your browser and travels
+              over a direct peer-to-peer connection — it's never uploaded to a
+              server or stored in the cloud.
+            </p>
+            <p>
+              There are no accounts and no tracking. Each transfer uses a fresh,
+              throwaway identity, and the whole app is a static site with no
+              backend, no database, and nothing to sign up for. It also installs
+              as a Progressive Web App, so it keeps working offline.
+            </p>
+            <p>
+              Two transfer modes cover different situations: a shareable{' '}
+              <span className="font-medium text-foreground">PIN</span> for the
+              most reliable connection across networks, or a direct{' '}
+              <span className="font-medium text-foreground">QR code</span>{' '}
+              exchange that can even work offline on the same local network.
+            </p>
+          </div>
+
+          <ul className="mt-8 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+            {VALUE_PROPS.map(({ icon: Icon, label }) => (
+              <li key={label} className="inline-flex items-center gap-1.5">
+                <Icon className="h-4 w-4 text-primary" />
+                {label}
+              </li>
+            ))}
+          </ul>
         </div>
-      </section>
+      </SectionContainer>
 
       {/* Technical Details */}
-      <section>
-        <h3 className="mb-3 text-base font-semibold">Technical Details</h3>
-        <dl className="space-y-2 rounded-xl bg-muted/40 p-4">
-          {TECHNICAL_DETAILS.map(({ label, value }) => (
-            <div
-              key={label}
-              className="flex flex-col gap-0.5 sm:flex-row sm:gap-2"
-            >
-              <dt className="font-medium text-foreground sm:w-28 sm:flex-shrink-0">
-                {label}
-              </dt>
-              <dd className="text-muted-foreground">{value}</dd>
+      <SectionContainer>
+        <div className="mx-auto max-w-2xl text-center">
+          <h2 className="text-3xl">Technical details</h2>
+          <p className="mt-3 text-muted-foreground">
+            What's the same for every transfer, whichever mode you pick.
+          </p>
+        </div>
+        <dl className="mt-8 grid gap-x-8 gap-y-3 rounded-2xl bg-muted/40 p-6 sm:grid-cols-3 sm:p-8">
+          {COMMON_DETAILS.map(({ label, value }) => (
+            <div key={label} className="flex flex-col gap-0.5">
+              <dt className="text-sm font-medium text-foreground">{label}</dt>
+              <dd className="text-sm text-muted-foreground">{value}</dd>
             </div>
           ))}
         </dl>
-      </section>
+      </SectionContainer>
 
       {/* Transfer Modes */}
-      <section>
-        <h3 className="mb-2 text-base font-semibold">Transfer Modes</h3>
-        <p className="mb-3 text-sm text-muted-foreground">
-          Select the mode before sending. Receiver uses the matching mode to
-          complete the transfer.
-        </p>
-        <div className="grid gap-4">
-          <div className="rounded-xl border bg-card p-4">
-            <p className="flex items-center gap-2 font-medium text-foreground">
-              <KeyRound className="h-4 w-4 text-primary" />
-              PIN mode
-            </p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              More reliable option, but requires manual PIN input. Coordination
-              happens through third-party relay servers. Relays can see routing
-              metadata, but not plaintext file contents or your decryption key.
-            </p>
-            <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-muted-foreground">
-              <li>
-                Best when sender and receiver are on different networks and you
-                want the highest connection success rate.
-              </li>
-              <li>
-                PIN is shared out-of-band (chat, voice, etc.), then receiver
-                enters it to derive the decryption key locally.
-              </li>
-              <li>
-                Relay servers coordinate signaling only; they do not get
-                plaintext file contents or your decryption key.
-              </li>
-              <li>
-                File data is transferred directly peer-to-peer over WebRTC; if a
-                direct connection cannot be established, the transfer does not
-                complete. When devices are side by side, you can instead
-                transfer the file offline with animated QR codes using{' '}
-                <a
-                  href={OFFLINE_QR_TRANSFER_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium underline underline-offset-2"
-                >
-                  Secure QR Transfer
-                </a>
-                .
-              </li>
-            </ul>
+      <SectionContainer>
+        <div className="mx-auto max-w-2xl text-center">
+          <h2 className="text-3xl">Two ways to connect</h2>
+          <p className="mt-3 text-muted-foreground">
+            Every transfer is end-to-end encrypted — the two modes differ only
+            in how the sending and receiving devices find each other.
+          </p>
+        </div>
+        <div className="mt-10 grid gap-6">
+          <div className="grid gap-5 rounded-2xl border bg-card p-6 shadow-sm sm:grid-cols-[200px_1fr] sm:items-start sm:gap-7">
+            <PinModeIllustration className="mx-auto w-full max-w-[200px] sm:mx-0" />
+            <div>
+              <p className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                <KeyRound className="h-5 w-5 text-primary" />
+                PIN mode
+              </p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                More reliable option, but requires manual PIN input.
+                Coordination happens through third-party relay servers. Relays
+                can see routing metadata, but not plaintext file contents or
+                your decryption key.
+              </p>
+              <ul className="mt-3 list-inside list-disc space-y-1 text-sm text-muted-foreground">
+                <li>
+                  Best when sender and receiver are on different networks and
+                  you want the highest connection success rate.
+                </li>
+                <li>
+                  PIN is shared out-of-band (chat, voice, etc.), then receiver
+                  enters it to derive the decryption key locally.
+                </li>
+                <li>
+                  Relay servers coordinate signaling only; they do not get
+                  plaintext file contents or your decryption key.
+                </li>
+                <li>
+                  File data is always transferred directly peer-to-peer over
+                  WebRTC — the relay coordinates signaling only and never
+                  carries file contents.
+                </li>
+              </ul>
+              <SpecList items={PIN_DETAILS} />
+            </div>
           </div>
-          <div className="rounded-xl border bg-card p-4">
-            <p className="flex items-center gap-2 font-medium text-foreground">
-              <QrCode className="h-4 w-4 text-primary" />
-              QR code mode
-            </p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Coordination happens directly through QR code exchange, with no
-              third-party coordination servers. The QR/clipboard signaling
-              payload is obfuscated, not encrypted, so exchange it only with the
-              intended recipient. STUN may be used when internet is available;
-              without internet, no third-party servers are involved at all. When
-              STUN is used, it only sees connection setup metadata such as IP
-              address and port, not file contents or encryption keys. File data
-              remains encrypted throughout the transfer, regardless of internet
-              availability and whether STUN is used.
-            </p>
-            <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-muted-foreground">
-              <li>
-                Best when you prefer direct device-to-device coordination using
-                camera scan or copy/paste.
-              </li>
-              <li>
-                Offer/answer signaling is exchanged as QR chunks, so no relay
-                coordination service is required.
-              </li>
-              <li>
-                With internet, STUN can assist network traversal for peer
-                connection setup using only connection metadata (for example IP
-                address and port).
-              </li>
-              <li>
-                Without internet, transfer can still work over a shared local
-                network with no third-party servers.
-              </li>
-              <li>
-                Typically less reliable than PIN mode due to camera quality,
-                scan conditions, and manual QR exchange friction.
-              </li>
-            </ul>
+          <div className="grid gap-5 rounded-2xl border bg-card p-6 shadow-sm sm:grid-cols-[200px_1fr] sm:items-start sm:gap-7">
+            <QrModeIllustration className="mx-auto w-full max-w-[200px] sm:mx-0" />
+            <div>
+              <p className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                <QrCode className="h-5 w-5 text-primary" />
+                QR code mode
+              </p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Coordination happens directly through QR code exchange, with no
+                third-party coordination servers. The QR/clipboard signaling
+                payload is obfuscated, not encrypted, so exchange it only with
+                the intended recipient. STUN may be used when internet is
+                available; without internet, no third-party servers are involved
+                at all. When STUN is used, it only sees connection setup
+                metadata such as IP address and port, not file contents or
+                encryption keys. File data remains encrypted throughout the
+                transfer, regardless of internet availability and whether STUN
+                is used.
+              </p>
+              <ul className="mt-3 list-inside list-disc space-y-1 text-sm text-muted-foreground">
+                <li>
+                  Best when you prefer direct device-to-device coordination
+                  using camera scan or copy/paste.
+                </li>
+                <li>
+                  Offer/answer signaling is exchanged as QR chunks, so no relay
+                  coordination service is required.
+                </li>
+                <li>
+                  With internet, STUN can assist network traversal for peer
+                  connection setup using only connection metadata (for example
+                  IP address and port).
+                </li>
+                <li>
+                  Without internet, transfer can still work over a shared local
+                  network with no third-party servers.
+                </li>
+                <li>
+                  Typically less reliable than PIN mode due to camera quality,
+                  scan conditions, and manual QR exchange friction.
+                </li>
+              </ul>
+              <SpecList items={QR_DETAILS} />
+            </div>
           </div>
         </div>
-      </section>
+        <div className="mt-6 flex gap-3 rounded-2xl border border-dashed bg-muted/30 p-5 text-sm text-muted-foreground">
+          <QrCode className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <p>
+            Either way, file data always travels over a direct peer-to-peer
+            WebRTC connection with no relay to fall back on, so a transfer that
+            cannot establish a direct connection cannot complete. When that
+            happens and the two devices are together, transfer the file offline
+            with animated QR codes using{' '}
+            <a
+              href={OFFLINE_QR_TRANSFER_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium underline underline-offset-2"
+            >
+              Secure QR Transfer
+            </a>{' '}
+            instead.
+          </p>
+        </div>
+      </SectionContainer>
 
       {/* Share App */}
-      <section>
-        <h3 className="mb-3 text-base font-semibold">Share App</h3>
-        <div className="flex flex-col items-center gap-4 rounded-xl border bg-muted/40 p-4">
+      <SectionContainer>
+        <div className="mx-auto max-w-2xl text-center">
+          <h2 className="text-3xl">Share the app</h2>
+          <p className="mt-3 text-muted-foreground">
+            Scan to open Secure Send on another device.
+          </p>
+        </div>
+        <div className="mx-auto mt-8 flex max-w-md flex-col items-center gap-4 rounded-2xl border bg-muted/40 p-6">
           {shareQrUrl && !shareQrError ? (
             <div className="flex flex-col items-center gap-2">
               <img
@@ -244,10 +285,11 @@ export function AboutContent() {
             {siteUrl}
           </p>
         </div>
-      </section>
+      </SectionContainer>
 
-      <section className="border-t pt-4">
-        <p className="text-xs text-muted-foreground">
+      {/* Source */}
+      <SectionContainer>
+        <p className="text-center text-xs text-muted-foreground">
           Source code available for audit at{' '}
           <a
             href="https://github.com/andrewtheguy/secure-send-web"
@@ -258,7 +300,7 @@ export function AboutContent() {
             GitHub
           </a>
         </p>
-      </section>
+      </SectionContainer>
     </div>
   );
 }
