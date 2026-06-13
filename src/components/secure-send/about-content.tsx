@@ -2,7 +2,6 @@ import { KeyRound, Lock, QrCode, Shield, Zap } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
   PinModeIllustration,
-  PrivateByDesignIllustration,
   QrModeIllustration,
 } from '@/components/illustrations';
 import { SectionContainer } from '@/components/section-container';
@@ -86,49 +85,42 @@ export function AboutContent() {
     <div className="flex flex-col gap-16 pb-8 sm:gap-24">
       {/* What is Secure Send */}
       <SectionContainer className="pt-2 sm:pt-6">
-        <div className="grid items-center gap-10 md:grid-cols-2 md:gap-12">
-          <div className="flex flex-col items-center text-center md:items-start md:text-left">
-            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-              What is Secure Send?
-            </h1>
+        <div className="mx-auto flex max-w-2xl flex-col items-center text-center">
+          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+            What is Secure Send?
+          </h1>
 
-            <div className="mt-5 max-w-md space-y-4 text-pretty text-base text-muted-foreground">
-              <p>
-                Secure Send is a free, open-source tool for sending files and
-                folders straight from one device to another with end-to-end
-                encryption. Your content is encrypted in your browser and
-                travels over a direct peer-to-peer connection — it's never
-                uploaded to a server or stored in the cloud.
-              </p>
-              <p>
-                There are no accounts and no tracking. Each transfer uses a
-                fresh, throwaway identity, and the whole app is a static site
-                with no backend, no database, and nothing to sign up for. It
-                also installs as a Progressive Web App, so it keeps working
-                offline.
-              </p>
-              <p>
-                Two transfer modes cover different situations: a shareable{' '}
-                <span className="font-medium text-foreground">PIN</span> for the
-                most reliable connection across networks, or a direct{' '}
-                <span className="font-medium text-foreground">QR code</span>{' '}
-                exchange that can even work offline on the same local network.
-              </p>
-            </div>
-
-            <ul className="mt-8 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-muted-foreground md:justify-start">
-              {VALUE_PROPS.map(({ icon: Icon, label }) => (
-                <li key={label} className="inline-flex items-center gap-1.5">
-                  <Icon className="h-4 w-4 text-primary" />
-                  {label}
-                </li>
-              ))}
-            </ul>
+          <div className="mt-5 space-y-4 text-pretty text-base text-muted-foreground">
+            <p>
+              Secure Send is a free, open-source tool for sending files and
+              folders straight from one device to another with end-to-end
+              encryption. Your content is encrypted in your browser and travels
+              over a direct peer-to-peer connection — it's never uploaded to a
+              server or stored in the cloud.
+            </p>
+            <p>
+              There are no accounts and no tracking. Each transfer uses a fresh,
+              throwaway identity, and the whole app is a static site with no
+              backend, no database, and nothing to sign up for. It also installs
+              as a Progressive Web App, so it keeps working offline.
+            </p>
+            <p>
+              Two transfer modes cover different situations: a shareable{' '}
+              <span className="font-medium text-foreground">PIN</span> for the
+              most reliable connection across networks, or a direct{' '}
+              <span className="font-medium text-foreground">QR code</span>{' '}
+              exchange that can even work offline on the same local network.
+            </p>
           </div>
 
-          <div className="order-first md:order-last">
-            <PrivateByDesignIllustration className="mx-auto w-full max-w-md" />
-          </div>
+          <ul className="mt-8 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+            {VALUE_PROPS.map(({ icon: Icon, label }) => (
+              <li key={label} className="inline-flex items-center gap-1.5">
+                <Icon className="h-4 w-4 text-primary" />
+                {label}
+              </li>
+            ))}
+          </ul>
         </div>
       </SectionContainer>
 
@@ -187,10 +179,12 @@ export function AboutContent() {
                   plaintext file contents or your decryption key.
                 </li>
                 <li>
-                  File data is transferred directly peer-to-peer over WebRTC; if
-                  a direct connection cannot be established, the transfer does
-                  not complete. When devices are side by side, you can instead
-                  transfer the file offline with animated QR codes using{' '}
+                  File data is always transferred directly peer-to-peer over
+                  WebRTC — it is never relayed through a server. Because there
+                  is no relay to fall back on, a transfer that cannot establish
+                  a direct connection cannot complete. When that happens and the
+                  two devices are together, transfer the file offline with
+                  animated QR codes using{' '}
                   <a
                     href={OFFLINE_QR_TRANSFER_URL}
                     target="_blank"
@@ -198,8 +192,8 @@ export function AboutContent() {
                     className="font-medium underline underline-offset-2"
                   >
                     Secure QR Transfer
-                  </a>
-                  .
+                  </a>{' '}
+                  instead.
                 </li>
               </ul>
               <SpecList items={PIN_DETAILS} />
