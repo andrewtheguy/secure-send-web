@@ -233,9 +233,11 @@ export function AboutContent() {
                 Scan to open on mobile
               </p>
             </div>
+          ) : shareQrError ? (
+            <div className="text-xs text-destructive">{shareQrError}</div>
           ) : (
-            <div className="text-xs text-destructive">
-              {shareQrError || 'Generating QR code...'}
+            <div className="text-xs text-muted-foreground">
+              Generating QR code...
             </div>
           )}
           <p className="break-all text-center text-sm text-muted-foreground">

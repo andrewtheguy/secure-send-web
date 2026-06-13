@@ -76,7 +76,10 @@ export function HomePage() {
               key={title}
               className="relative rounded-2xl border bg-card p-6 shadow-sm transition-shadow hover:shadow-md"
             >
-              <span className="absolute right-5 top-5 text-5xl font-bold leading-none text-primary/10">
+              <span
+                aria-hidden="true"
+                className="absolute right-5 top-5 text-5xl font-bold leading-none text-primary/10"
+              >
                 {index + 1}
               </span>
               <div className="inline-flex rounded-xl bg-primary/10 p-2.5 text-primary">
