@@ -12,7 +12,7 @@ const VALUE_PROPS = [
 
 export function Hero() {
   return (
-    <SectionContainer className="pt-6 pb-4 sm:pt-12">
+    <SectionContainer className="sm:pt-12 sm:pb-4">
       <div className="grid items-center gap-10 md:grid-cols-2 md:gap-8">
         <div className="flex flex-col items-center text-center md:items-start md:text-left">
           <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-medium text-primary">

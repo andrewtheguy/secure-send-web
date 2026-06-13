@@ -15,7 +15,7 @@ function App() {
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-b from-background to-muted/20">
       <Navbar />
-      <main className="flex-1 px-6 py-10">
+      <main className="flex-1 px-6 py-6 sm:py-10">
         <Routes>
           <Route path="/" element={<HomePage />} />
           {/* Send tool routes wrapped with SendLayout */}
