@@ -180,20 +180,8 @@ export function AboutContent() {
                 </li>
                 <li>
                   File data is always transferred directly peer-to-peer over
-                  WebRTC — it is never relayed through a server. Because there
-                  is no relay to fall back on, a transfer that cannot establish
-                  a direct connection cannot complete. When that happens and the
-                  two devices are together, transfer the file offline with
-                  animated QR codes using{' '}
-                  <a
-                    href={OFFLINE_QR_TRANSFER_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-medium underline underline-offset-2"
-                  >
-                    Secure QR Transfer
-                  </a>{' '}
-                  instead.
+                  WebRTC — the relay coordinates signaling only and never
+                  carries file contents.
                 </li>
               </ul>
               <SpecList items={PIN_DETAILS} />
@@ -244,6 +232,25 @@ export function AboutContent() {
               <SpecList items={QR_DETAILS} />
             </div>
           </div>
+        </div>
+        <div className="mt-6 flex gap-3 rounded-2xl border border-dashed bg-muted/30 p-5 text-sm text-muted-foreground">
+          <QrCode className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <p>
+            Either way, file data always travels over a direct peer-to-peer
+            WebRTC connection with no relay to fall back on, so a transfer that
+            cannot establish a direct connection cannot complete. When that
+            happens and the two devices are together, transfer the file offline
+            with animated QR codes using{' '}
+            <a
+              href={OFFLINE_QR_TRANSFER_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium underline underline-offset-2"
+            >
+              Secure QR Transfer
+            </a>{' '}
+            instead.
+          </p>
         </div>
       </SectionContainer>
 
