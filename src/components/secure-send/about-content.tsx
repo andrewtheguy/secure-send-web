@@ -134,7 +134,7 @@ export function AboutContent() {
           Select the mode before sending. Receiver uses the matching mode to
           complete the transfer.
         </p>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4">
           <div className="rounded-xl border bg-card p-4">
             <p className="flex items-center gap-2 font-medium text-foreground">
               <KeyRound className="h-4 w-4 text-primary" />
