@@ -13,14 +13,14 @@ const VALUE_PROPS = [
 export function Hero() {
   return (
     <SectionContainer className="sm:pt-12 sm:pb-4">
-      <div className="grid items-center gap-10 md:grid-cols-2 md:gap-8">
+      <div className="grid items-center gap-3 md:grid-cols-2 md:gap-8">
         <div className="flex flex-col items-center text-center md:items-start md:text-left">
           <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-medium text-primary">
             <Lock className="h-3.5 w-3.5" />
             Private by design
           </span>
 
-          <h1 className="mt-5 text-balance bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent">
+          <h1 className="mt-4 text-balance bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent sm:mt-5">
             Send files. Stay private.
           </h1>
 
