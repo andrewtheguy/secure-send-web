@@ -15,15 +15,15 @@ export function SendTransferLayout() {
   const navigate = useNavigate();
   const { config, clearConfig } = useSend();
 
-  // Redirect to home if no config (user navigated directly to transfer page)
+  // Redirect to the send tool if no config (user navigated directly here)
   useEffect(() => {
     if (!config) {
-      void navigate('/', { replace: true });
+      void navigate('/send', { replace: true });
     }
   }, [config, navigate]);
 
   const handleBack = () => {
-    void navigate('/');
+    void navigate('/send');
     clearConfig();
   };
 
@@ -41,7 +41,7 @@ export function SendTransferLayout() {
               size="sm"
               onClick={handleBack}
               className="h-8 w-8 p-0"
-              aria-label="Go back to home"
+              aria-label="Go back to send"
             >
               <ArrowLeft className="h-4 w-4" />
             </Button>

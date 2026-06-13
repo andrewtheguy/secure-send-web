@@ -188,7 +188,7 @@ export function SendTransferPage() {
   const handleCancel = useCallback(() => {
     cancel();
     clearConfig();
-    void navigate('/');
+    void navigate('/send');
   }, [cancel, clearConfig, navigate]);
 
   const handleSwitchToOffline = useCallback(() => {
@@ -225,7 +225,7 @@ export function SendTransferPage() {
   const handleSendAnother = useCallback(() => {
     cancel();
     clearConfig();
-    void navigate('/');
+    void navigate('/send');
   }, [cancel, clearConfig, navigate]);
 
   if (!config) {
