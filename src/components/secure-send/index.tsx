@@ -25,7 +25,7 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
       case 'receive':
         return 'Secure Receive';
       case 'about':
-        return 'About Secure Transfer';
+        return 'About Secure Send';
       default:
         return 'Secure Send';
     }
