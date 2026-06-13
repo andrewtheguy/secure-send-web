@@ -20,17 +20,17 @@ export function Hero() {
             Private by design
           </span>
 
-          <h1 className="mt-4 text-balance bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent sm:mt-5">
+          <h1 className="mt-3 text-balance bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent sm:mt-5">
             Send files. Stay private.
           </h1>
 
-          <p className="mt-4 max-w-md text-pretty text-base text-muted-foreground sm:text-lg">
+          <p className="mt-3 max-w-md text-pretty text-base text-muted-foreground sm:mt-4 sm:text-lg">
             Share files and folders straight from your device with end-to-end
             encryption. No accounts, no uploads to a server — just a secure
             direct transfer between you and your recipient.
           </p>
 
-          <div className="mt-6 flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+          <div className="mt-3 flex w-full flex-col gap-3 sm:mt-6 sm:w-auto sm:flex-row">
             <Button asChild size="lg" className="gap-2">
               <Link to="/send">
                 <Send className="h-4 w-4" />
