@@ -4,10 +4,18 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+function getGitCommitHash(): string {
+  // Cloudflare Pages exposes the deployed commit via this env var. Local builds
+  // fall back to a placeholder to avoid confusion about which commit is running.
+  const cfSha = process.env.CF_PAGES_COMMIT_SHA;
+  return cfSha ? cfSha.slice(0, 7) : 'local';
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '0.0.0'),
+    __GIT_COMMIT_HASH__: JSON.stringify(getGitCommitHash()),
   },
   plugins: [
     tailwindcss(),
