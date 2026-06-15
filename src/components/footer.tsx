@@ -4,7 +4,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { APP_VERSION } from '@/lib/app-version';
+import { APP_VERSION, GIT_COMMIT_HASH } from '@/lib/app-version';
 
 interface FooterLabelProps {
   shortLabel: string;
@@ -74,6 +74,7 @@ export function Footer() {
           >
             Compatibility is not expected between v0.0.x versions. Sender and
             receiver should use the same app version.
+            <div className="mt-1 text-muted-foreground">{`v${APP_VERSION} (${GIT_COMMIT_HASH})`}</div>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
