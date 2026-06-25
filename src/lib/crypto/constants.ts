@@ -12,12 +12,6 @@ export const PIN_CHARSET =
 // Used for compact 7-word representation of the PIN
 export const PIN_WORDLIST = BIP39_ENGLISH_WORDLIST;
 
-// Reserved first character marking a Nostr-signaling PIN.
-// A single, case-sensitive letter (not a range): every generated PIN starts with
-// this exact character and isValidPin requires it. Any other first character is
-// left unassigned, reserved for a future signaling protocol.
-export const NOSTR_FIRST_CHAR = 'N';
-
 // PBKDF2 parameters (browser-compatible alternative to Argon2id)
 export const PBKDF2_ITERATIONS = 600_000;
 export const PBKDF2_HASH = 'SHA-256';

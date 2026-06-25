@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'vitest';
 import {
-  NOSTR_FIRST_CHAR,
   PIN_FINGERPRINT_LENGTH,
   PIN_HINT_LENGTH,
   PIN_LENGTH,
@@ -18,18 +17,10 @@ import {
 } from './pin';
 
 describe('PIN Utilities', () => {
-  test('generatePin produces a valid PIN reserved for Nostr', () => {
+  test('generatePin produces a valid PIN', () => {
     const pin = generatePin();
     expect(pin).toHaveLength(PIN_LENGTH);
-    expect(pin[0]).toBe(NOSTR_FIRST_CHAR);
     expect(isValidPin(pin)).toBe(true);
-  });
-
-  test('isValidPin rejects a PIN whose first character is not reserved', () => {
-    const pin = generatePin();
-    // Replace the reserved first character; no longer this protocol's PIN.
-    const tampered = `2${pin.slice(1)}`;
-    expect(isValidPin(tampered)).toBe(false);
   });
 
   test('computePinHint should return PIN_HINT_LENGTH hex characters', async () => {

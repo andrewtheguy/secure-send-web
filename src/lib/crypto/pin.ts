@@ -1,5 +1,4 @@
 import {
-  NOSTR_FIRST_CHAR,
   PIN_CHARSET,
   PIN_CHECKSUM_LENGTH,
   PIN_FINGERPRINT_ITERATIONS,
@@ -30,23 +29,18 @@ function computeChecksum(data: string): string {
 /**
  * Generate a random PIN with checksum.
  *
- * The first character is always NOSTR_FIRST_CHAR, reserving the first-character
- * slot to mark the Nostr signaling protocol (any other first character is left
- * unassigned for a future protocol). The remaining characters are drawn from
- * PIN_CHARSET — which excludes confusing characters (I, O, i, l, o, 0, 1) — using
- * rejection sampling to eliminate modulo bias, and the final character is a
- * checksum for typo detection.
+ * All characters are drawn from PIN_CHARSET — which excludes confusing characters
+ * (I, O, i, l, o, 0, 1) — using rejection sampling to eliminate modulo bias, and the
+ * final character is a checksum for typo detection.
  */
 export function generatePin(): string {
   const dataLength = PIN_LENGTH - PIN_CHECKSUM_LENGTH;
 
-  // Generate remaining characters from full charset
   const n = PIN_CHARSET.length;
   const maxMultiple = Math.floor(256 / n) * n;
-  const remainingLength = dataLength - 1;
 
-  const result: string[] = [NOSTR_FIRST_CHAR];
-  const buffer = new Uint8Array(remainingLength * 2);
+  const result: string[] = [];
+  const buffer = new Uint8Array(dataLength * 2);
 
   while (result.length < dataLength) {
     crypto.getRandomValues(buffer);
@@ -65,13 +59,9 @@ export function generatePin(): string {
 
 /**
  * Validate PIN format and checksum.
- *
- * Requires the reserved Nostr first character (NOSTR_FIRST_CHAR); PINs whose first
- * character is anything else are not part of this protocol and are rejected.
  */
 export function isValidPin(pin: string): boolean {
   if (pin.length !== PIN_LENGTH) return false;
-  if (pin[0] !== NOSTR_FIRST_CHAR) return false;
   if (![...pin].every((char) => PIN_CHARSET.includes(char))) return false;
 
   // Verify checksum
