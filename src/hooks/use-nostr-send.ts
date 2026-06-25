@@ -7,7 +7,7 @@ import {
   ENCRYPTION_CHUNK_SIZE,
   encrypt,
   encryptChunk,
-  generatePinForMethod,
+  generatePin,
   generateSalt,
   generateTransferId,
   MAX_MESSAGE_SIZE,
@@ -125,7 +125,7 @@ export function useNostrSend(): UseNostrSendReturn {
 
         // PIN mode
         setState({ status: 'connecting', message: 'Generating secure PIN...' });
-        const newPin = generatePinForMethod('nostr');
+        const newPin = generatePin();
         const hint = await computePinHint(newPin);
         const keys = await deriveNostrTransferKeysFromPin(newPin, salt);
         setPin(newPin);

@@ -18,7 +18,6 @@ import {
   formatFileSize,
   getMimeTypeDescription,
 } from '@/lib/file-utils';
-import type { SignalingMethod } from '@/lib/nostr/types';
 import type { PinKeyMaterial } from '@/lib/types';
 import { type PinChangePayload, PinInput, type PinInputRef } from './pin-input';
 import { QRDisplay } from './qr-display';
@@ -31,21 +30,18 @@ const PIN_MODE_DESCRIPTION =
 const MANUAL_MODE_DESCRIPTION =
   'You and the sender directly exchange a short signaling payload — by QR code or copy/paste — to establish the transfer. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.';
 
-type PinSecret = PinKeyMaterial & { method: SignalingMethod | null };
-
 type ReceiveMode = 'pin' | 'scan';
 
 export function ReceiveTab() {
   const [receiveMode, setReceiveMode] = useState<ReceiveMode>('pin');
 
   // Store PIN in ref to avoid React DevTools exposure
-  const pinSecretRef = useRef<PinSecret | null>(null);
+  const pinSecretRef = useRef<PinKeyMaterial | null>(null);
   const pinInputLengthRef = useRef(0);
   const pinInputRef = useRef<PinInputRef>(null);
   const [isPinValid, setIsPinValid] = useState(false);
   const [pinExpired, setPinExpired] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(0);
-  const [, setDetectedMethod] = useState<SignalingMethod>('nostr');
   const [pinFingerprint, setPinFingerprint] = useState<string | null>(null);
 
   // All hooks must be called unconditionally (React rules)
@@ -61,7 +57,7 @@ export function ReceiveTab() {
 
   // Get the right receive function based on mode
   // nostrHook has .receive, manualHook does not
-  const pinReceive: ((secret: PinSecret) => Promise<void>) | undefined =
+  const pinReceive: ((secret: PinKeyMaterial) => Promise<void>) | undefined =
     !isManualMode &&
     'receive' in activeHook &&
     typeof activeHook.receive === 'function'
@@ -212,11 +208,11 @@ export function ReceiveTab() {
 
   const handlePinChange = useCallback(
     (payload: PinChangePayload) => {
-      const { key, fingerprint, method, isValid, length } = payload;
+      const { key, fingerprint, isValid, length } = payload;
       pinInputLengthRef.current = length;
 
       if (isValid && key && fingerprint) {
-        pinSecretRef.current = { key, fingerprint, method: method ?? null };
+        pinSecretRef.current = { key, fingerprint };
         setIsPinValid(true);
         setPinFingerprint(formatPinHint(fingerprint));
       } else {
@@ -226,12 +222,6 @@ export function ReceiveTab() {
       }
 
       resetPinInactivityTimeout(length > 0);
-
-      if (method) {
-        setDetectedMethod(method);
-      } else if (length === 0) {
-        setDetectedMethod('nostr');
-      }
     },
     [resetPinInactivityTimeout],
   );

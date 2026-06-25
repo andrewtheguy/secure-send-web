@@ -107,6 +107,3 @@ export interface SignalingPayload {
   sdp?: string;
   candidate?: RTCIceCandidateInit;
 }
-
-// Signaling method for P2P connection
-export type SignalingMethod = 'nostr' | 'manual';

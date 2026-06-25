@@ -1,26 +1,35 @@
 import { describe, expect, test } from 'vitest';
-import { PIN_FINGERPRINT_LENGTH, PIN_HINT_LENGTH } from './constants';
+import {
+  NOSTR_FIRST_CHAR,
+  PIN_FINGERPRINT_LENGTH,
+  PIN_HINT_LENGTH,
+  PIN_LENGTH,
+} from './constants';
 import { importPinKey } from './kdf';
 import {
   computePinFingerprint,
   computePinHint,
   computePinHintFromKey,
-  detectSignalingMethod,
-  generatePinForMethod,
+  generatePin,
+  isValidPin,
   isValidPinWord,
   pinToWords,
   wordsToPin,
 } from './pin';
 
 describe('PIN Utilities', () => {
-  test('detectSignalingMethod should identify method from PIN', () => {
-    // Nostr (Uppercase)
-    expect(detectSignalingMethod('A1234567890B')).toBe('nostr');
-    // QR/Manual ('2')
-    expect(detectSignalingMethod('21234567890b')).toBe('manual');
-    // Unknown/Empty
-    expect(detectSignalingMethod('')).toBeNull();
-    expect(detectSignalingMethod('!1234567890b')).toBeNull();
+  test('generatePin produces a valid PIN reserved for Nostr', () => {
+    const pin = generatePin();
+    expect(pin).toHaveLength(PIN_LENGTH);
+    expect(pin[0]).toBe(NOSTR_FIRST_CHAR);
+    expect(isValidPin(pin)).toBe(true);
+  });
+
+  test('isValidPin rejects a PIN whose first character is not reserved', () => {
+    const pin = generatePin();
+    // Replace the reserved first character; no longer this protocol's PIN.
+    const tampered = `2${pin.slice(1)}`;
+    expect(isValidPin(tampered)).toBe(false);
   });
 
   test('computePinHint should return PIN_HINT_LENGTH hex characters', async () => {
@@ -78,7 +87,7 @@ describe('PIN Word Mapping', () => {
 
   test('wordsToPin should be the inverse of pinToWords', () => {
     // Let's use a real PIN
-    const pin = generatePinForMethod('nostr');
+    const pin = generatePin();
     const words = pinToWords(pin);
     const recoveredPin = wordsToPin(words);
     expect(recoveredPin).toBe(pin);
