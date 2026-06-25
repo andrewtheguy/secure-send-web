@@ -21,7 +21,7 @@ const COMMON_DETAILS = [
   { label: 'Max size:', value: '100 MB per transfer' },
 ] as const;
 
-// Specific to PIN mode.
+// Specific to Auto Exchange mode.
 const PIN_DETAILS = [
   {
     label: 'Key derivation:',
@@ -163,13 +163,15 @@ export function AboutContent() {
             <div>
               <p className="flex items-center gap-2 text-lg font-semibold text-foreground">
                 <KeyRound className="h-5 w-5 text-primary" />
-                PIN mode
+                Auto Exchange mode
               </p>
               <p className="mt-2 text-sm text-muted-foreground">
-                More reliable option, but requires manual PIN input.
-                Coordination happens through third-party relay servers. Relays
-                can see routing metadata, but not plaintext file contents or
-                your decryption key.
+                The same direct, end-to-end encrypted WebRTC transfer as Manual
+                Exchange — the difference is the handshake. Instead of you
+                exchanging it by QR or copy/paste, the app exchanges it
+                automatically through third-party relay servers, matched by a
+                short PIN you share. Relays can see routing metadata, but not
+                plaintext file contents or your decryption key.
               </p>
               <ul className="mt-3 list-inside list-disc space-y-1 text-sm text-muted-foreground">
                 <li>
@@ -178,7 +180,9 @@ export function AboutContent() {
                 </li>
                 <li>
                   PIN is shared out-of-band (chat, voice, etc.), then receiver
-                  enters it to derive the decryption key locally.
+                  enters it to derive the decryption key locally — the PIN is
+                  the means that matches the two sides, not a separate
+                  transport.
                 </li>
                 <li>
                   Relay servers coordinate signaling only; they do not get
@@ -231,8 +235,8 @@ export function AboutContent() {
                   network with no third-party servers.
                 </li>
                 <li>
-                  Typically less reliable than PIN mode due to camera quality,
-                  scan conditions, and manual QR exchange friction.
+                  Typically less reliable than Auto Exchange mode due to camera
+                  quality, scan conditions, and manual QR exchange friction.
                 </li>
               </ul>
               <SpecList items={QR_DETAILS} />

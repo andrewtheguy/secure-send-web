@@ -123,7 +123,7 @@ export function useNostrSend(): UseNostrSendReturn {
         const sessionStartTime = Date.now();
         const salt = generateSalt();
 
-        // PIN mode
+        // Auto Exchange mode
         setState({ status: 'connecting', message: 'Generating secure PIN...' });
         const newPin = generatePin();
         const hint = await computePinHint(newPin);

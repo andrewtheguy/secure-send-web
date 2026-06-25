@@ -261,8 +261,8 @@ export function SendTransferPage() {
                 Unable to connect to relay servers
               </p>
               <p className="text-sm text-amber-700 dark:text-amber-300">
-                PIN mode is temporarily unavailable. Switch to Manual Exchange
-                mode or retry the connection.
+                Auto Exchange mode is temporarily unavailable. Switch to Manual
+                Exchange mode or retry the connection.
               </p>
             </div>
           </div>

@@ -26,7 +26,7 @@ import { TransferStatus } from './transfer-status';
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const PIN_MODE_DESCRIPTION =
-  'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.';
+  'Most reliable option. Sets up the connection automatically through relays using the PIN the sender shares; the same end-to-end encrypted transfer, without the manual handoff.';
 const MANUAL_MODE_DESCRIPTION =
   'You and the sender directly exchange a short signaling payload — by QR code or copy/paste — to establish the transfer. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.';
 
@@ -271,7 +271,7 @@ export function ReceiveTab() {
                 <div className="space-y-1">
                   <span className="flex items-center gap-2 text-sm font-medium">
                     <KeyRound className="h-4 w-4" />
-                    PIN mode
+                    Auto Exchange mode
                   </span>
                   <p className="text-xs text-muted-foreground">
                     {PIN_MODE_DESCRIPTION}
@@ -307,7 +307,7 @@ export function ReceiveTab() {
 
           {receiveMode === 'pin' ? (
             <>
-              {/* PIN mode */}
+              {/* Auto Exchange mode */}
               <div className="space-y-2">
                 <div className="text-sm font-medium">Enter PIN from sender</div>
                 <PinInput

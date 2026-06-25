@@ -57,9 +57,9 @@ export function SendTab() {
     folderFiles && folderFiles.length > 0 && !isFolderOverLimit;
   const canSend = mode === 'file' ? canSendFiles : canSendFolder;
   const pinModeDescription =
-    'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.';
+    'Most reliable option. Sets up the connection automatically through relays using a short PIN you share; the same end-to-end encrypted transfer, without the manual handoff.';
   const pinModeHowItWorksDescription =
-    'More reliable option, but requires manual PIN input. Relays coordinate signaling and can see routing metadata, but they do not receive plaintext file contents or your decryption key.';
+    'Same direct, end-to-end encrypted transfer as Manual Exchange — the difference is the handshake is exchanged automatically through relays, matched by your PIN, instead of by hand. Relays coordinate signaling and can see routing metadata, but they do not receive plaintext file contents or your decryption key.';
   const manualModeDescription =
     'You and the recipient directly exchange a short signaling payload — by QR code or copy/paste — to establish the transfer. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.';
   const manualModeHowItWorksDescription =
@@ -344,7 +344,7 @@ export function SendTab() {
             <div className="space-y-1">
               <span className="flex items-center gap-2 text-sm font-medium">
                 <KeyRound className="h-4 w-4" />
-                PIN mode
+                Auto Exchange mode
               </span>
               <p className="text-xs text-muted-foreground">
                 {pinModeDescription}
@@ -411,7 +411,7 @@ export function SendTab() {
         <Send className="mr-2 h-4 w-4" />
         {methodChoice === 'offline'
           ? 'Start Manual Exchange'
-          : 'Generate Secure PIN'}
+          : 'Start Auto Exchange'}
         <ChevronRight className="ml-1 h-3 w-3" />
       </Button>
     </div>

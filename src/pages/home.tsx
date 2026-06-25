@@ -23,7 +23,7 @@ const STEPS = [
     icon: KeyRound,
     title: 'Choose a mode',
     description:
-      'PIN mode for reliability, or Manual Exchange mode for offline swaps.',
+      'Auto Exchange mode for reliability, or Manual Exchange mode for offline swaps.',
   },
   {
     icon: Share2,

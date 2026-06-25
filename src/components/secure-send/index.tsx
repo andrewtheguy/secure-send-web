@@ -68,7 +68,7 @@ export function SecureSend({ view = 'send' }: SecureSendProps) {
             </span>
           )}
           {view === 'receive' &&
-            'Use PIN mode or Manual Exchange mode to securely receive files or messages.'}
+            'Use Auto Exchange mode or Manual Exchange mode to securely receive files or messages.'}
         </CardDescription>
       </CardHeader>
       <CardContent>
