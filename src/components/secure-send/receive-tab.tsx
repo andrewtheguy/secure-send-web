@@ -1,9 +1,9 @@
 import {
+  ArrowLeftRight,
   Download,
   FileDown,
   Fingerprint,
   KeyRound,
-  QrCode,
   RotateCcw,
   X,
 } from 'lucide-react';
@@ -28,8 +28,8 @@ import { TransferStatus } from './transfer-status';
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const PIN_MODE_DESCRIPTION =
   'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.';
-const QR_MODE_DESCRIPTION =
-  'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.';
+const MANUAL_MODE_DESCRIPTION =
+  'You and the sender directly exchange a short signaling payload — by QR code or copy/paste — to establish the transfer. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.';
 
 type PinSecret = PinKeyMaterial & { method: SignalingMethod | null };
 
@@ -304,11 +304,11 @@ export function ReceiveTab() {
                 />
                 <div className="space-y-1">
                   <span className="flex items-center gap-2 text-sm font-medium">
-                    <QrCode className="h-4 w-4" />
-                    QR code mode
+                    <ArrowLeftRight className="h-4 w-4" />
+                    Manual Exchange mode
                   </span>
                   <p className="text-xs text-muted-foreground">
-                    {QR_MODE_DESCRIPTION}
+                    {MANUAL_MODE_DESCRIPTION}
                   </p>
                 </div>
               </label>
@@ -378,9 +378,9 @@ export function ReceiveTab() {
                 <p className="text-sm text-muted-foreground">
                   For{' '}
                   <span className="font-medium text-foreground">
-                    QR code mode
+                    Manual Exchange mode
                   </span>{' '}
-                  transfers only. Scan or paste the intended sender's QR code to
+                  transfers only. Scan or paste the sender's signaling data to
                   receive their content.
                 </p>
               </div>

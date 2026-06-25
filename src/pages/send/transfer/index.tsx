@@ -1,8 +1,8 @@
 import {
   AlertTriangle,
+  ArrowLeftRight,
   CheckCircle2,
   Loader2,
-  QrCode,
   RotateCcw,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -261,8 +261,8 @@ export function SendTransferPage() {
                 Unable to connect to relay servers
               </p>
               <p className="text-sm text-amber-700 dark:text-amber-300">
-                PIN mode is temporarily unavailable. Switch to QR code mode or
-                retry the connection.
+                PIN mode is temporarily unavailable. Switch to Manual Exchange
+                mode or retry the connection.
               </p>
             </div>
           </div>
@@ -272,8 +272,8 @@ export function SendTransferPage() {
               className="flex-1"
               size="sm"
             >
-              <QrCode className="mr-2 h-4 w-4" />
-              Switch to QR Mode
+              <ArrowLeftRight className="mr-2 h-4 w-4" />
+              Switch to Manual Exchange
             </Button>
             <Button onClick={handleRetry} variant="outline" size="sm">
               Retry
@@ -285,7 +285,7 @@ export function SendTransferPage() {
       {/* Active transfer */}
       {step === 'active' && (
         <>
-          {/* QR code mode: showing offer */}
+          {/* Manual Exchange mode: showing offer */}
           {!isOnline &&
             offerData &&
             submitAnswer &&
@@ -337,7 +337,7 @@ export function SendTransferPage() {
               </div>
             )}
 
-          {/* QR code mode: other states (connecting, transferring, etc.) */}
+          {/* Manual Exchange mode: other states (connecting, transferring, etc.) */}
           {!isOnline && state.status !== 'showing_offer' && (
             <TransferStatus state={state} />
           )}

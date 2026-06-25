@@ -32,7 +32,7 @@ Sender and receiver should use the same app version for transfers.
 
 ### Receiving
 
-1. For PIN mode, enter the PIN or 7-word sequence shared by the sender. For QR code mode, scan or paste the sender's QR payload.
+1. For PIN mode, enter the PIN or 7-word sequence shared by the sender. For Manual Exchange mode, scan or paste the sender's signaling payload.
 2. Click "Receive"
 3. Click "Download File" to save
 
@@ -98,7 +98,7 @@ See [Architecture](./docs/ARCHITECTURE.md) for detailed transfer flows and encry
 
 Receivers choose the matching receive mode:
 - **PIN mode**: Nostr signaling with a sender-provided PIN or 7-word equivalent.
-- **QR code mode**: Manual exchange via QR scan or copy/paste.
+- **Manual Exchange mode**: Direct signaling exchange via QR scan or copy/paste (no relay).
 
 ## Documentation
 

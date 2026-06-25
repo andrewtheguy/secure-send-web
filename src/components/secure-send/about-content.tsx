@@ -35,10 +35,13 @@ const PIN_DETAILS = [
   { label: 'Signaling:', value: 'Relay signaling' },
 ] as const;
 
-// Specific to QR code mode.
+// Specific to Manual Exchange mode.
 const QR_DETAILS = [
   { label: 'Key exchange:', value: 'ECDH' },
-  { label: 'Signaling:', value: 'Direct QR exchange (no relay)' },
+  {
+    label: 'Signaling:',
+    value: 'Direct exchange via QR or copy/paste (no relay)',
+  },
 ] as const;
 
 function SpecList({
@@ -108,8 +111,11 @@ export function AboutContent() {
               Two transfer modes cover different situations: a shareable{' '}
               <span className="font-medium text-foreground">PIN</span> for the
               most reliable connection across networks, or a direct{' '}
-              <span className="font-medium text-foreground">QR code</span>{' '}
-              exchange that can even work offline on the same local network.
+              <span className="font-medium text-foreground">
+                Manual Exchange
+              </span>{' '}
+              (QR code or copy/paste) that can even work offline on the same
+              local network.
             </p>
           </div>
 
@@ -192,19 +198,19 @@ export function AboutContent() {
             <div>
               <p className="flex items-center gap-2 text-lg font-semibold text-foreground">
                 <QrCode className="h-5 w-5 text-primary" />
-                QR code mode
+                Manual Exchange mode
               </p>
               <p className="mt-2 text-sm text-muted-foreground">
-                Coordination happens directly through QR code exchange, with no
-                third-party coordination servers. The QR/clipboard signaling
-                payload is obfuscated, not encrypted, so exchange it only with
-                the intended recipient. STUN may be used when internet is
-                available; without internet, no third-party servers are involved
-                at all. When STUN is used, it only sees connection setup
-                metadata such as IP address and port, not file contents or
-                encryption keys. File data remains encrypted throughout the
-                transfer, regardless of internet availability and whether STUN
-                is used.
+                Coordination happens by directly exchanging a signaling payload
+                with the recipient — by QR code or copy/paste — with no
+                third-party coordination servers. The signaling payload is
+                obfuscated, not encrypted, so exchange it only with the intended
+                recipient. STUN may be used when internet is available; without
+                internet, no third-party servers are involved at all. When STUN
+                is used, it only sees connection setup metadata such as IP
+                address and port, not file contents or encryption keys. File
+                data remains encrypted throughout the transfer, regardless of
+                internet availability and whether STUN is used.
               </p>
               <ul className="mt-3 list-inside list-disc space-y-1 text-sm text-muted-foreground">
                 <li>

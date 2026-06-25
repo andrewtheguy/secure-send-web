@@ -22,12 +22,14 @@ const STEPS = [
   {
     icon: KeyRound,
     title: 'Choose a mode',
-    description: 'PIN mode for reliability, or QR code mode for offline swaps.',
+    description:
+      'PIN mode for reliability, or Manual Exchange mode for offline swaps.',
   },
   {
     icon: Share2,
     title: 'Share the key',
-    description: 'Hand off the PIN or scan QR codes with your recipient.',
+    description:
+      'Hand off the PIN, or exchange QR/copy-paste data with your recipient.',
   },
   {
     icon: Send,

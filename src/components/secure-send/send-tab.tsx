@@ -1,10 +1,10 @@
 import {
+  ArrowLeftRight,
   ChevronRight,
   FileUp,
   FolderUp,
   Info,
   KeyRound,
-  QrCode,
   Send,
   Upload,
   X,
@@ -60,10 +60,10 @@ export function SendTab() {
     'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.';
   const pinModeHowItWorksDescription =
     'More reliable option, but requires manual PIN input. Relays coordinate signaling and can see routing metadata, but they do not receive plaintext file contents or your decryption key.';
-  const qrModeDescription =
-    'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.';
-  const qrModeHowItWorksDescription =
-    'Coordination happens through QR exchange. The QR/clipboard signaling payload is obfuscated, not encrypted, so exchange it only with the intended recipient. If internet is available, STUN is used for connection setup metadata such as IP address and port; it does not receive your file contents or encryption keys. It also works without internet when the devices can reach each other over a network path, such as the same LAN/Wi-Fi.';
+  const manualModeDescription =
+    'You and the recipient directly exchange a short signaling payload — by QR code or copy/paste — to establish the transfer. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.';
+  const manualModeHowItWorksDescription =
+    'You and the recipient directly exchange a short signaling payload, either by scanning QR codes or by copy/paste. The signaling payload is obfuscated, not encrypted, so exchange it only with the intended recipient. If internet is available, STUN is used for connection setup metadata such as IP address and port; it does not receive your file contents or encryption keys. It also works without internet when the devices can reach each other over a network path, such as the same LAN/Wi-Fi.';
 
   const handleSend = () => {
     // Set context with all the configuration
@@ -367,11 +367,11 @@ export function SendTab() {
             />
             <div className="space-y-1">
               <span className="flex items-center gap-2 text-sm font-medium">
-                <QrCode className="h-4 w-4" />
-                QR code mode
+                <ArrowLeftRight className="h-4 w-4" />
+                Manual Exchange mode
               </span>
               <p className="text-xs text-muted-foreground">
-                {qrModeDescription}
+                {manualModeDescription}
               </p>
             </div>
           </label>
@@ -396,10 +396,10 @@ export function SendTab() {
                 </>
               ) : (
                 <>
-                  Exchange QR codes with your recipient to establish the
-                  transfer session.
+                  Exchange signaling data with your recipient — by QR code or
+                  copy/paste — to establish the transfer session.
                   <br />
-                  {qrModeHowItWorksDescription}
+                  {manualModeHowItWorksDescription}
                 </>
               )}
             </p>
@@ -410,7 +410,7 @@ export function SendTab() {
       <Button onClick={handleSend} disabled={!canSend} className="w-full">
         <Send className="mr-2 h-4 w-4" />
         {methodChoice === 'offline'
-          ? 'Start QR Code Transfer'
+          ? 'Start Manual Exchange'
           : 'Generate Secure PIN'}
         <ChevronRight className="ml-1 h-3 w-3" />
       </Button>
