@@ -1,8 +1,8 @@
 import {
   AlertTriangle,
+  ArrowLeftRight,
   CheckCircle2,
   Loader2,
-  QrCode,
   RotateCcw,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -261,8 +261,8 @@ export function SendTransferPage() {
                 Unable to connect to relay servers
               </p>
               <p className="text-sm text-amber-700 dark:text-amber-300">
-                PIN mode is temporarily unavailable. Switch to QR code mode or
-                retry the connection.
+                Auto Exchange mode is temporarily unavailable. Switch to Manual
+                Exchange mode or retry the connection.
               </p>
             </div>
           </div>
@@ -272,8 +272,8 @@ export function SendTransferPage() {
               className="flex-1"
               size="sm"
             >
-              <QrCode className="mr-2 h-4 w-4" />
-              Switch to QR Mode
+              <ArrowLeftRight className="mr-2 h-4 w-4" />
+              Switch to Manual Exchange
             </Button>
             <Button onClick={handleRetry} variant="outline" size="sm">
               Retry
@@ -285,7 +285,7 @@ export function SendTransferPage() {
       {/* Active transfer */}
       {step === 'active' && (
         <>
-          {/* QR code mode: showing offer */}
+          {/* Manual Exchange mode: showing offer */}
           {!isOnline &&
             offerData &&
             submitAnswer &&
@@ -295,36 +295,41 @@ export function SendTransferPage() {
                 <div className="rounded-lg bg-muted/50 border p-4 space-y-3">
                   <div className="space-y-2">
                     <p className="font-medium">
-                      Show these QR codes to the receiver
+                      Send your connection data to the receiver
                     </p>
-                    <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
-                      <li>
-                        Receiver scans <strong>any</strong> QR code with their
-                        phone camera to get started
-                      </li>
-                      <li>App opens and guides scanning remaining codes</li>
-                      <li>
-                        QR codes do not need to be scanned in order, but all QR
-                        codes must be scanned
-                      </li>
-                      <li>Receiver shows you their response QR code</li>
-                      <li>You scan/paste their response below</li>
-                    </ol>
-                  </div>
-                  <div className="rounded-md bg-background/70 border border-dashed p-3 text-sm">
-                    <p className="font-medium">
-                      Camera not working? Use copy &amp; paste instead
+                    <p className="text-sm text-muted-foreground">
+                      The data below sets up the connection. Get it to your
+                      recipient either way — a QR code and copy/paste work
+                      equally well:
                     </p>
-                    <p className="text-muted-foreground mt-1">
-                      Tap <strong>Copy Data</strong> below the QR codes to copy
-                      the offer, send it to the receiver over any channel (chat,
-                      email, AirDrop), then use the <strong>Paste</strong> tab
-                      below to submit their response.
+                    <ul className="text-sm text-muted-foreground space-y-2">
+                      <li>
+                        <span className="font-medium text-foreground">
+                          QR code:
+                        </span>{' '}
+                        the receiver scans <strong>any</strong> code below with
+                        their camera to get started, then the app guides them
+                        through the rest. Codes can be scanned in any order, but
+                        all of them must be scanned.
+                      </li>
+                      <li>
+                        <span className="font-medium text-foreground">
+                          Copy &amp; paste:
+                        </span>{' '}
+                        tap <strong>Copy Data</strong> below the codes, send the
+                        text to the receiver over any trusted channel (an
+                        end-to-end encrypted chat, AirDrop, etc.), and they
+                        paste it on their device.
+                      </li>
+                    </ul>
+                    <p className="text-sm text-muted-foreground">
+                      Either way, the receiver then sends their response back
+                      the same way — scan or paste it below to connect.
                     </p>
                   </div>
                 </div>
 
-                {/* QR codes */}
+                {/* Connection data: QR codes + Copy Data button */}
                 <MultiQRDisplay data={offerData} />
 
                 {/* Input for receiver's response */}
@@ -337,7 +342,7 @@ export function SendTransferPage() {
               </div>
             )}
 
-          {/* QR code mode: other states (connecting, transferring, etc.) */}
+          {/* Manual Exchange mode: other states (connecting, transferring, etc.) */}
           {!isOnline && state.status !== 'showing_offer' && (
             <TransferStatus state={state} />
           )}

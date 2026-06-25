@@ -1,5 +1,4 @@
 import {
-  NOSTR_FIRST_CHARSET,
   PIN_CHARSET,
   PIN_CHECKSUM_LENGTH,
   PIN_FINGERPRINT_ITERATIONS,
@@ -11,7 +10,6 @@ import {
   PIN_HINT_SALT,
   PIN_LENGTH,
   PIN_WORDLIST,
-  QR_FIRST_CHARSET,
 } from './constants';
 import { importPinKey } from './kdf';
 
@@ -29,47 +27,20 @@ function computeChecksum(data: string): string {
 }
 
 /**
- * Generate random character from a charset using rejection sampling
+ * Generate a random PIN with checksum.
+ *
+ * All characters are drawn from PIN_CHARSET — which excludes confusing characters
+ * (I, O, i, l, o, 0, 1) — using rejection sampling to eliminate modulo bias, and the
+ * final character is a checksum for typo detection.
  */
-function randomCharFromCharset(charset: string): string {
-  const n = charset.length;
-  const maxMultiple = Math.floor(256 / n) * n;
-  const buffer = new Uint8Array(2);
-
-  while (true) {
-    crypto.getRandomValues(buffer);
-    for (const byte of buffer) {
-      if (byte < maxMultiple) {
-        return charset[byte % n];
-      }
-    }
-  }
-}
-
-/**
- * Generate random PIN with checksum with signaling method encoded in first character
- * Charset excludes confusing characters: I, O, i, l, o, 0, 1
- * Uses rejection sampling to eliminate modulo bias
- * Last character is a checksum for typo detection
- * - Uppercase first char (A-Z excluding I,L,O) = Nostr
- * - '2' first char = QR/Manual
- */
-export function generatePinForMethod(method: 'nostr' | 'manual'): string {
-  const firstCharset =
-    method === 'nostr' ? NOSTR_FIRST_CHARSET : QR_FIRST_CHARSET;
-
+export function generatePin(): string {
   const dataLength = PIN_LENGTH - PIN_CHECKSUM_LENGTH;
 
-  // Generate first character from method-specific charset
-  const firstChar = randomCharFromCharset(firstCharset);
-
-  // Generate remaining characters from full charset
   const n = PIN_CHARSET.length;
   const maxMultiple = Math.floor(256 / n) * n;
-  const remainingLength = dataLength - 1;
 
-  const result: string[] = [firstChar];
-  const buffer = new Uint8Array(remainingLength * 2);
+  const result: string[] = [];
+  const buffer = new Uint8Array(dataLength * 2);
 
   while (result.length < dataLength) {
     crypto.getRandomValues(buffer);
@@ -87,21 +58,7 @@ export function generatePinForMethod(method: 'nostr' | 'manual'): string {
 }
 
 /**
- * Detect signaling method from PIN's first character
- * - Uppercase = Nostr
- * - '2' = QR/Manual
- * - Other = null (reserved for future protocols)
- */
-export function detectSignalingMethod(pin: string): 'nostr' | 'manual' | null {
-  if (!pin || pin.length === 0) return null;
-  const firstChar = pin[0];
-  if (QR_FIRST_CHARSET.includes(firstChar)) return 'manual';
-  if (NOSTR_FIRST_CHARSET.includes(firstChar)) return 'nostr';
-  return null; // Reserved for future protocols
-}
-
-/**
- * Validate PIN format and checksum
+ * Validate PIN format and checksum.
  */
 export function isValidPin(pin: string): boolean {
   if (pin.length !== PIN_LENGTH) return false;

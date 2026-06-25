@@ -21,7 +21,7 @@ const COMMON_DETAILS = [
   { label: 'Max size:', value: '100 MB per transfer' },
 ] as const;
 
-// Specific to PIN mode.
+// Specific to Auto Exchange mode.
 const PIN_DETAILS = [
   {
     label: 'Key derivation:',
@@ -35,10 +35,13 @@ const PIN_DETAILS = [
   { label: 'Signaling:', value: 'Relay signaling' },
 ] as const;
 
-// Specific to QR code mode.
+// Specific to Manual Exchange mode.
 const QR_DETAILS = [
   { label: 'Key exchange:', value: 'ECDH' },
-  { label: 'Signaling:', value: 'Direct QR exchange (no relay)' },
+  {
+    label: 'Signaling:',
+    value: 'Direct exchange via QR or copy/paste (no relay)',
+  },
 ] as const;
 
 function SpecList({
@@ -108,8 +111,11 @@ export function AboutContent() {
               Two transfer modes cover different situations: a shareable{' '}
               <span className="font-medium text-foreground">PIN</span> for the
               most reliable connection across networks, or a direct{' '}
-              <span className="font-medium text-foreground">QR code</span>{' '}
-              exchange that can even work offline on the same local network.
+              <span className="font-medium text-foreground">
+                Manual Exchange
+              </span>{' '}
+              (QR code or copy/paste) that can even work offline on the same
+              local network.
             </p>
           </div>
 
@@ -157,13 +163,15 @@ export function AboutContent() {
             <div>
               <p className="flex items-center gap-2 text-lg font-semibold text-foreground">
                 <KeyRound className="h-5 w-5 text-primary" />
-                PIN mode
+                Auto Exchange mode
               </p>
               <p className="mt-2 text-sm text-muted-foreground">
-                More reliable option, but requires manual PIN input.
-                Coordination happens through third-party relay servers. Relays
-                can see routing metadata, but not plaintext file contents or
-                your decryption key.
+                The same direct, end-to-end encrypted WebRTC transfer as Manual
+                Exchange — the difference is the handshake. Instead of you
+                exchanging it by QR or copy/paste, the app exchanges it
+                automatically through third-party relay servers, matched by a
+                short PIN you share. Relays can see routing metadata, but not
+                plaintext file contents or your decryption key.
               </p>
               <ul className="mt-3 list-inside list-disc space-y-1 text-sm text-muted-foreground">
                 <li>
@@ -172,7 +180,9 @@ export function AboutContent() {
                 </li>
                 <li>
                   PIN is shared out-of-band (chat, voice, etc.), then receiver
-                  enters it to derive the decryption key locally.
+                  enters it to derive the decryption key locally — the PIN is
+                  the means that matches the two sides, not a separate
+                  transport.
                 </li>
                 <li>
                   Relay servers coordinate signaling only; they do not get
@@ -192,19 +202,19 @@ export function AboutContent() {
             <div>
               <p className="flex items-center gap-2 text-lg font-semibold text-foreground">
                 <QrCode className="h-5 w-5 text-primary" />
-                QR code mode
+                Manual Exchange mode
               </p>
               <p className="mt-2 text-sm text-muted-foreground">
-                Coordination happens directly through QR code exchange, with no
-                third-party coordination servers. The QR/clipboard signaling
-                payload is obfuscated, not encrypted, so exchange it only with
-                the intended recipient. STUN may be used when internet is
-                available; without internet, no third-party servers are involved
-                at all. When STUN is used, it only sees connection setup
-                metadata such as IP address and port, not file contents or
-                encryption keys. File data remains encrypted throughout the
-                transfer, regardless of internet availability and whether STUN
-                is used.
+                Coordination happens by directly exchanging a signaling payload
+                with the recipient — by QR code or copy/paste — with no
+                third-party coordination servers. The signaling payload is
+                obfuscated, not encrypted, so exchange it only with the intended
+                recipient. STUN may be used when internet is available; without
+                internet, no third-party servers are involved at all. When STUN
+                is used, it only sees connection setup metadata such as IP
+                address and port, not file contents or encryption keys. File
+                data remains encrypted throughout the transfer, regardless of
+                internet availability and whether STUN is used.
               </p>
               <ul className="mt-3 list-inside list-disc space-y-1 text-sm text-muted-foreground">
                 <li>
@@ -212,7 +222,8 @@ export function AboutContent() {
                   using camera scan or copy/paste.
                 </li>
                 <li>
-                  Offer/answer signaling is exchanged as QR chunks, so no relay
+                  Offer/answer signaling is exchanged directly between the two
+                  devices — as a QR code or by copy/paste — so no relay
                   coordination service is required.
                 </li>
                 <li>
@@ -225,8 +236,9 @@ export function AboutContent() {
                   network with no third-party servers.
                 </li>
                 <li>
-                  Typically less reliable than PIN mode due to camera quality,
-                  scan conditions, and manual QR exchange friction.
+                  Typically less reliable than Auto Exchange mode: you exchange
+                  the data by hand, and scanning adds the variables of camera
+                  quality and lighting.
                 </li>
               </ul>
               <SpecList items={QR_DETAILS} />

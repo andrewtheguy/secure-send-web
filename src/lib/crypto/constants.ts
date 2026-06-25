@@ -12,14 +12,6 @@ export const PIN_CHARSET =
 // Used for compact 7-word representation of the PIN
 export const PIN_WORDLIST = BIP39_ENGLISH_WORDLIST;
 
-// First character charset split (for signaling method detection)
-// Uppercase = Nostr, '2' = QR/Manual, Rest = Reserved for future
-// I, L, O are excluded (ambiguous chars) to keep symmetry at 23 symbols and leave room for a future protocol
-export const NOSTR_FIRST_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ'; // 23 uppercase (excluding I, L, O)
-
-export const QR_FIRST_CHARSET = '2'; // Single digit for QR method
-// Reserved for future protocols: '3456789-/:;()$&@?!.,"' (remaining digits + symbols)
-
 // PBKDF2 parameters (browser-compatible alternative to Argon2id)
 export const PBKDF2_ITERATIONS = 600_000;
 export const PBKDF2_HASH = 'SHA-256';

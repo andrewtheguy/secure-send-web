@@ -75,7 +75,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     try {
       let keys: NostrTransferKeys | null = null;
 
-      // PIN mode: use provided material
+      // Auto Exchange mode: use provided material
       if (!pinMaterial.key || !pinMaterial.fingerprint) {
         setState({
           status: 'error',
@@ -157,7 +157,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         }
         sawNonExpiredCandidate = true;
 
-        // PIN mode
+        // Auto Exchange mode
         const parsed = parsePinExchangeEvent(event);
         if (!parsed) continue;
 

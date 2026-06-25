@@ -22,12 +22,14 @@ const STEPS = [
   {
     icon: KeyRound,
     title: 'Choose a mode',
-    description: 'PIN mode for reliability, or QR code mode for offline swaps.',
+    description:
+      'Auto Exchange mode for reliability, or Manual Exchange mode to swap connection data by QR or copy/paste — across networks when online, or on the same local network offline.',
   },
   {
     icon: Share2,
     title: 'Share the key',
-    description: 'Hand off the PIN or scan QR codes with your recipient.',
+    description:
+      'Hand off the PIN, or exchange the connection data — by QR code or copy/paste — with your recipient.',
   },
   {
     icon: Send,
@@ -41,7 +43,7 @@ const FEATURES = [
     icon: Lock,
     title: 'End-to-end encryption',
     description:
-      'Content is encrypted with AES-256-GCM before it ever leaves your device. Only the PIN or completed QR exchange can decrypt it.',
+      'Content is encrypted with AES-256-GCM before it ever leaves your device. Only the PIN or a completed Manual Exchange can decrypt it.',
   },
   {
     icon: Zap,

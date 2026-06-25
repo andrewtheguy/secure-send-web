@@ -82,7 +82,7 @@ export interface AckData {
 }
 
 /**
- * Transfer metadata for PIN mode.
+ * Transfer metadata for Auto Exchange mode.
  * @property hint - Time-bucketed Nostr event-filtering tag: a one-way PBKDF2-SHA256
  *   derivation of the PIN truncated to 16 hex chars (see computePinHint)
  */
@@ -107,6 +107,3 @@ export interface SignalingPayload {
   sdp?: string;
   candidate?: RTCIceCandidateInit;
 }
-
-// Signaling method for P2P connection
-export type SignalingMethod = 'nostr' | 'manual';

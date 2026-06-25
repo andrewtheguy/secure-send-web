@@ -1,9 +1,9 @@
 import {
+  ArrowLeftRight,
   Download,
   FileDown,
   Fingerprint,
   KeyRound,
-  QrCode,
   RotateCcw,
   X,
 } from 'lucide-react';
@@ -18,7 +18,6 @@ import {
   formatFileSize,
   getMimeTypeDescription,
 } from '@/lib/file-utils';
-import type { SignalingMethod } from '@/lib/nostr/types';
 import type { PinKeyMaterial } from '@/lib/types';
 import { type PinChangePayload, PinInput, type PinInputRef } from './pin-input';
 import { QRDisplay } from './qr-display';
@@ -27,11 +26,9 @@ import { TransferStatus } from './transfer-status';
 
 const PIN_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const PIN_MODE_DESCRIPTION =
-  'Most reliable option. Requires manual PIN entry and relay coordination; data stays end-to-end encrypted.';
-const QR_MODE_DESCRIPTION =
-  'Coordination happens through QR exchange. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.';
-
-type PinSecret = PinKeyMaterial & { method: SignalingMethod | null };
+  'Most reliable option. Sets up the connection automatically through relays using the PIN the sender shares; the same end-to-end encrypted transfer, without the manual handoff.';
+const MANUAL_MODE_DESCRIPTION =
+  'You and the sender directly exchange a short signaling payload — by QR code or copy/paste — to establish the transfer. No third-party coordination servers; STUN may be used when internet is available. File data stays encrypted.';
 
 type ReceiveMode = 'pin' | 'scan';
 
@@ -39,13 +36,12 @@ export function ReceiveTab() {
   const [receiveMode, setReceiveMode] = useState<ReceiveMode>('pin');
 
   // Store PIN in ref to avoid React DevTools exposure
-  const pinSecretRef = useRef<PinSecret | null>(null);
+  const pinSecretRef = useRef<PinKeyMaterial | null>(null);
   const pinInputLengthRef = useRef(0);
   const pinInputRef = useRef<PinInputRef>(null);
   const [isPinValid, setIsPinValid] = useState(false);
   const [pinExpired, setPinExpired] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(0);
-  const [, setDetectedMethod] = useState<SignalingMethod>('nostr');
   const [pinFingerprint, setPinFingerprint] = useState<string | null>(null);
 
   // All hooks must be called unconditionally (React rules)
@@ -61,7 +57,7 @@ export function ReceiveTab() {
 
   // Get the right receive function based on mode
   // nostrHook has .receive, manualHook does not
-  const pinReceive: ((secret: PinSecret) => Promise<void>) | undefined =
+  const pinReceive: ((secret: PinKeyMaterial) => Promise<void>) | undefined =
     !isManualMode &&
     'receive' in activeHook &&
     typeof activeHook.receive === 'function'
@@ -212,11 +208,11 @@ export function ReceiveTab() {
 
   const handlePinChange = useCallback(
     (payload: PinChangePayload) => {
-      const { key, fingerprint, method, isValid, length } = payload;
+      const { key, fingerprint, isValid, length } = payload;
       pinInputLengthRef.current = length;
 
       if (isValid && key && fingerprint) {
-        pinSecretRef.current = { key, fingerprint, method: method ?? null };
+        pinSecretRef.current = { key, fingerprint };
         setIsPinValid(true);
         setPinFingerprint(formatPinHint(fingerprint));
       } else {
@@ -226,12 +222,6 @@ export function ReceiveTab() {
       }
 
       resetPinInactivityTimeout(length > 0);
-
-      if (method) {
-        setDetectedMethod(method);
-      } else if (length === 0) {
-        setDetectedMethod('nostr');
-      }
     },
     [resetPinInactivityTimeout],
   );
@@ -281,7 +271,7 @@ export function ReceiveTab() {
                 <div className="space-y-1">
                   <span className="flex items-center gap-2 text-sm font-medium">
                     <KeyRound className="h-4 w-4" />
-                    PIN mode
+                    Auto Exchange mode
                   </span>
                   <p className="text-xs text-muted-foreground">
                     {PIN_MODE_DESCRIPTION}
@@ -304,11 +294,11 @@ export function ReceiveTab() {
                 />
                 <div className="space-y-1">
                   <span className="flex items-center gap-2 text-sm font-medium">
-                    <QrCode className="h-4 w-4" />
-                    QR code mode
+                    <ArrowLeftRight className="h-4 w-4" />
+                    Manual Exchange mode
                   </span>
                   <p className="text-xs text-muted-foreground">
-                    {QR_MODE_DESCRIPTION}
+                    {MANUAL_MODE_DESCRIPTION}
                   </p>
                 </div>
               </label>
@@ -317,7 +307,7 @@ export function ReceiveTab() {
 
           {receiveMode === 'pin' ? (
             <>
-              {/* PIN mode */}
+              {/* Auto Exchange mode */}
               <div className="space-y-2">
                 <div className="text-sm font-medium">Enter PIN from sender</div>
                 <PinInput
@@ -378,9 +368,9 @@ export function ReceiveTab() {
                 <p className="text-sm text-muted-foreground">
                   For{' '}
                   <span className="font-medium text-foreground">
-                    QR code mode
+                    Manual Exchange mode
                   </span>{' '}
-                  transfers only. Scan or paste the intended sender's QR code to
+                  transfers only. Scan or paste the sender's signaling data to
                   receive their content.
                 </p>
               </div>
@@ -411,13 +401,42 @@ export function ReceiveTab() {
             </div>
           )}
 
-          {/* QR Code display for receiver's answer */}
+          {/* Answer display: returned to the sender by QR or copy/paste */}
           {showQRDisplay && answerData && (
             <div className="space-y-4">
+              <div className="rounded-lg bg-muted/50 border p-4 space-y-2">
+                <p className="font-medium">
+                  Send your response back to the sender
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Get your response back to the sender by the QR code below or
+                  copy/paste the data:
+                </p>
+                <ul className="text-sm text-muted-foreground space-y-2">
+                  <li>
+                    <span className="font-medium text-foreground">
+                      QR code:
+                    </span>{' '}
+                    the sender scans the code below with their camera.
+                  </li>
+                  <li>
+                    <span className="font-medium text-foreground">
+                      Copy &amp; paste:
+                    </span>{' '}
+                    tap <strong>Copy Data</strong> below the code and send the
+                    text back to the sender over the same secure channel; they
+                    paste it to connect.
+                  </li>
+                </ul>
+                <p className="text-sm text-muted-foreground">
+                  Keep this page open — the transfer connects automatically once
+                  the sender has your response.
+                </p>
+              </div>
               <QRDisplay
                 data={answerData}
                 clipboardData={clipboardData}
-                label="Show this to sender and wait for connection"
+                label="Your response"
               />
             </div>
           )}
