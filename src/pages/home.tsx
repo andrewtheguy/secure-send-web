@@ -23,7 +23,7 @@ const STEPS = [
     icon: KeyRound,
     title: 'Choose a mode',
     description:
-      'Auto Exchange mode for reliability, or Manual Exchange mode to swap connection data by QR or copy/paste — across networks when online, or on the same local network offline.',
+      'Auto Exchange mode for reliability, or Manual Exchange mode to swap connection data by QR or copy/paste — online across networks, or offline on the same network.',
   },
   {
     icon: Share2,
