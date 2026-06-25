@@ -29,7 +29,7 @@ const STEPS = [
     icon: Share2,
     title: 'Share the key',
     description:
-      'Hand off the PIN, or exchange QR/copy-paste data with your recipient.',
+      'Hand off the PIN, or exchange the connection data — by QR code or copy/paste — with your recipient.',
   },
   {
     icon: Send,
@@ -43,7 +43,7 @@ const FEATURES = [
     icon: Lock,
     title: 'End-to-end encryption',
     description:
-      'Content is encrypted with AES-256-GCM before it ever leaves your device. Only the PIN or completed QR exchange can decrypt it.',
+      'Content is encrypted with AES-256-GCM before it ever leaves your device. Only the PIN or a completed Manual Exchange can decrypt it.',
   },
   {
     icon: Zap,

@@ -222,7 +222,8 @@ export function AboutContent() {
                   using camera scan or copy/paste.
                 </li>
                 <li>
-                  Offer/answer signaling is exchanged as QR chunks, so no relay
+                  Offer/answer signaling is exchanged directly between the two
+                  devices — as a QR code or by copy/paste — so no relay
                   coordination service is required.
                 </li>
                 <li>
@@ -235,8 +236,9 @@ export function AboutContent() {
                   network with no third-party servers.
                 </li>
                 <li>
-                  Typically less reliable than Auto Exchange mode due to camera
-                  quality, scan conditions, and manual QR exchange friction.
+                  Typically less reliable than Auto Exchange mode: you exchange
+                  the data by hand, and scanning adds the variables of camera
+                  quality and lighting.
                 </li>
               </ul>
               <SpecList items={QR_DETAILS} />

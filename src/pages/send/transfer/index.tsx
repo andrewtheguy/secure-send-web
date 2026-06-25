@@ -295,36 +295,40 @@ export function SendTransferPage() {
                 <div className="rounded-lg bg-muted/50 border p-4 space-y-3">
                   <div className="space-y-2">
                     <p className="font-medium">
-                      Show these QR codes to the receiver
+                      Send your connection data to the receiver
                     </p>
-                    <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
-                      <li>
-                        Receiver scans <strong>any</strong> QR code with their
-                        phone camera to get started
-                      </li>
-                      <li>App opens and guides scanning remaining codes</li>
-                      <li>
-                        QR codes do not need to be scanned in order, but all QR
-                        codes must be scanned
-                      </li>
-                      <li>Receiver shows you their response QR code</li>
-                      <li>You scan/paste their response below</li>
-                    </ol>
-                  </div>
-                  <div className="rounded-md bg-background/70 border border-dashed p-3 text-sm">
-                    <p className="font-medium">
-                      Camera not working? Use copy &amp; paste instead
+                    <p className="text-sm text-muted-foreground">
+                      The data below sets up the connection. Get it to your
+                      recipient either way — a QR code and copy/paste work
+                      equally well:
                     </p>
-                    <p className="text-muted-foreground mt-1">
-                      Tap <strong>Copy Data</strong> below the QR codes to copy
-                      the offer, send it to the receiver over any channel (chat,
-                      email, AirDrop), then use the <strong>Paste</strong> tab
-                      below to submit their response.
+                    <ul className="text-sm text-muted-foreground space-y-2">
+                      <li>
+                        <span className="font-medium text-foreground">
+                          QR code:
+                        </span>{' '}
+                        the receiver scans <strong>any</strong> code below with
+                        their camera to get started, then the app guides them
+                        through the rest. Codes can be scanned in any order, but
+                        all of them must be scanned.
+                      </li>
+                      <li>
+                        <span className="font-medium text-foreground">
+                          Copy &amp; paste:
+                        </span>{' '}
+                        tap <strong>Copy Data</strong> below the codes, send the
+                        text to the receiver over any secure channel (chat,
+                        email, AirDrop), and they paste it on their device.
+                      </li>
+                    </ul>
+                    <p className="text-sm text-muted-foreground">
+                      Either way, the receiver then sends their response back
+                      the same way — scan or paste it below to connect.
                     </p>
                   </div>
                 </div>
 
-                {/* QR codes */}
+                {/* Connection data: QR codes + Copy Data button */}
                 <MultiQRDisplay data={offerData} />
 
                 {/* Input for receiver's response */}
