@@ -306,13 +306,40 @@ export function ReceiveChunkedPage() {
           <TransferStatus state={receiveState} />
         )}
 
-        {/* Answer QR display — receiver shows this to the sender */}
+        {/* Answer display: returned to the sender by QR or copy/paste */}
         {showQRDisplay && answerData && (
           <div className="space-y-4">
+            <div className="rounded-lg bg-muted/50 border p-4 space-y-2">
+              <p className="font-medium">
+                Send your response back to the sender
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Get your response back to the sender by the QR code below or
+                copy/paste the data:
+              </p>
+              <ul className="text-sm text-muted-foreground space-y-2">
+                <li>
+                  <span className="font-medium text-foreground">QR code:</span>{' '}
+                  the sender scans the code below with their camera.
+                </li>
+                <li>
+                  <span className="font-medium text-foreground">
+                    Copy &amp; paste:
+                  </span>{' '}
+                  tap <strong>Copy Data</strong> below the code and send the
+                  text back to the sender over the same secure channel; they
+                  paste it to connect.
+                </li>
+              </ul>
+              <p className="text-sm text-muted-foreground">
+                Keep this page open — the transfer connects automatically once
+                the sender has your response.
+              </p>
+            </div>
             <QRDisplay
               data={answerData}
               clipboardData={clipboardData}
-              label="Show this to sender and wait for connection"
+              label="Your response"
             />
           </div>
         )}
