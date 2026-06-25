@@ -317,8 +317,9 @@ export function SendTransferPage() {
                           Copy &amp; paste:
                         </span>{' '}
                         tap <strong>Copy Data</strong> below the codes, send the
-                        text to the receiver over any secure channel (chat,
-                        email, AirDrop), and they paste it on their device.
+                        text to the receiver over any trusted channel (an
+                        end-to-end encrypted chat, AirDrop, etc.), and they
+                        paste it on their device.
                       </li>
                     </ul>
                     <p className="text-sm text-muted-foreground">
