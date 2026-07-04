@@ -31,7 +31,8 @@ const PIN_DETAILS = [
     label: 'PIN format:',
     value: '12 characters with built-in checksum for typo detection',
   },
-  { label: 'PIN expiry:', value: '1 hour' },
+  { label: 'Sender PIN window:', value: '5 minutes before display expires' },
+  { label: 'Transfer TTL:', value: '1 hour protocol validity' },
   { label: 'Signaling:', value: 'Relay signaling' },
 ] as const;
 

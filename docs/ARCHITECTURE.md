@@ -15,7 +15,7 @@ Secure Send is a browser-based encrypted file and folder transfer application. I
 
 ## Signaling Methods
 
-By default, Nostr is used for signaling. QR/Manual exchange is available as an alternative under "Advanced Options" in the UI. Both sender and receiver must use the same method.
+By default, Nostr is used for signaling. Manual Exchange is available as an alternative under the Transfer mode selector in the send/receive UI. Both sender and receiver must use the same method.
 
 | Feature | Nostr (Default) | Manual Exchange (No Signaling Server) |
 |---------|-----------------|---------------------------------------|
@@ -26,7 +26,7 @@ By default, Nostr is used for signaling. QR/Manual exchange is available as an a
 | Complexity | More complex | Manual exchange (QR or copy/paste) |
 | Internet Required | Yes | No (if on same local network) |
 | Network Requirement | Any (via internet) | Same local network (without internet) |
-| Recommended For | Unreliable networks, NAT issues | Offline transfers, local network only |
+| Recommended For | Remote transfers and automatic signaling | Offline/local transfers, or avoiding signaling relays |
 
 ## Transfer Flow
 
@@ -150,7 +150,7 @@ sequenceDiagram
   - On CRC32 failure after full reassembly, receivers MUST drop the reassembled payload, log a checksum/protocol error, and fail the current transfer attempt (retry/rescan is an implementation-level recovery action).
 - Each chunk is base64url-encoded and embedded in a URL: `{origin}/r#{base64url}`
 - Deployment requirement: app must be hosted at domain root (no subpath), because chunk URLs are built from `window.location.origin` and append `/r` directly
-- Displayed as a grid of text-mode QR codes, each scannable by a phone's native camera
+- Displayed as a grid of URL QR codes, each scannable by a phone's native camera
 - For a typical `1200`-byte offer: `3` QR codes. Single-chunk payloads (`≤400` payload bytes) produce `1` QR code.
 - Copy/paste fallback: base64-encoded full binary for clipboard
 
@@ -236,12 +236,13 @@ The input component is designed for high-performance manual entry:
 The display component focuses on secure and clear communication:
 - **Masking**: Automatically masks the PIN after the first copy operation to prevent shoulder surfing.
 - **Contextual Copy**: The "Copy" button copies whichever format is currently visible (characters or words).
-- **Ephemeral Visibility**: Includes a countdown progress bar showing remaining TTL until the local display expires.
+- **Ephemeral Visibility**: Includes a countdown progress bar showing the 5-minute local display/wait window before the sender PIN expires.
 
 **Key Parameters:**
 - `MAX_MESSAGE_SIZE`: 100MB (maximum file size)
 - `ENCRYPTION_CHUNK_SIZE`: 128KB (application-level encryption chunk size for all methods)
 - `PBKDF2_ITERATIONS`: 600,000
+- `PIN_DISPLAY_TIMEOUT_MS`: 5 minutes (sender PIN display/wait window)
 
 ### Nostr Signaling (`src/lib/nostr/`)
 
@@ -370,7 +371,7 @@ A 2-hour sliding window (current bucket + 1 previous bucket) is used to find the
 - No internet required when devices are on same local network
 - With internet: works across different networks via STUN (stun.l.google.com) for NAT traversal
 - Not air-gapped: requires network connectivity between devices (either local network or internet)
-- URL QR codes use text mode (alphanumeric); answer QR uses binary mode (8-bit byte)
+- URL QR codes are generated from URL text with auto-selected QR encoding; answer QR uses binary mode (8-bit byte)
 - Uses the bundled QR WASM packages for generation and scanning
 
 **Security Model:**
@@ -532,6 +533,7 @@ Both receive modes reject extra, duplicate, out-of-range, malformed, and oversiz
 | Data-channel ACK wait | 30 seconds | Sender wait after `DONE:<chunkCount>` for receiver `ACK` |
 | P2P data transfer | No per-chunk timeout | Once connected, chunk sending is governed by WebRTC backpressure and the receiver-side overall timeout |
 | Overall transfer | 10 minutes | Maximum time for entire transfer (receiver side) |
+| Sender PIN display/wait | 5 minutes | Sender-side visible PIN window before the waiting transfer is canceled |
 | Transfer TTL | 1 hour | Transfer session validity (`TRANSFER_EXPIRATION_MS`) |
 | Receiver PIN inactivity | 5 minutes | Clears PIN input if no changes made |
 

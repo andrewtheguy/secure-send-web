@@ -24,17 +24,18 @@ Sender and receiver should use the same app version for transfers.
 
 ### Sending Files or Folders
 
-1. Select the "File" or "Folder" tab
-2. Drag and drop a file/folder or click to select (max 100MB total)
-3. Click "Generate PIN & Send"
-4. Share the generated 12-character PIN (or 7-word equivalent) with the receiver
-5. Wait for the receiver to connect and receive the file
+1. Select the "Files" or "Folder" tab
+2. Drag and drop files or click to select a file/folder (max 100MB total)
+3. Choose Auto Exchange mode or Manual Exchange mode
+4. For Auto Exchange, click "Start Auto Exchange" and share the generated 12-character PIN (or 7-word equivalent) with the receiver
+5. For Manual Exchange, click "Start Manual Exchange" and exchange the QR/copy-paste signaling payloads with the receiver
 
 ### Receiving
 
-1. For Auto Exchange mode, enter the PIN or 7-word sequence shared by the sender. For Manual Exchange mode, scan or paste the sender's signaling payload.
-2. Click "Receive"
-3. Click "Download File" to save
+1. Choose the transfer mode that matches the sender
+2. For Auto Exchange mode, enter the PIN or 7-word sequence shared by the sender and click "Receive"
+3. For Manual Exchange mode, click "Start Receive", then scan or paste the sender's signaling payload
+4. Click "Download File" to save
 
 ## Security
 
@@ -45,7 +46,7 @@ Sender and receiver should use the same app version for transfers.
 - **PIN never transmitted (Nostr)**: Only a one-way PBKDF2 hint is published to relays — a time-bucketed (hourly-rotating) lookup tag used to locate the PIN exchange event, never reversible to the PIN or usable to decrypt data. A separate, time-independent one-way derivation (the "PIN fingerprint") is computed locally on both ends and never published — it's only shown for humans to confirm both sides derived the same PIN
 - **Authenticated relay readiness (Nostr)**: The receiver's ready ACK and all WebRTC signaling events are encrypted with the PIN-derived `signals` key, so a public transfer ID alone cannot make the sender start a P2P transfer. Completion is confirmed later with a WebRTC data-channel ACK after the file authenticates and reassembles.
 - **Ephemeral identities**: New Nostr keypairs generated per transfer
-- **1-hour expiration**: Clients enforce a 1-hour transfer TTL; Nostr events include an expiration tag for relays that honor it
+- **Expiration windows**: The sender's visible PIN/wait screen expires after 5 minutes; clients enforce a separate 1-hour transfer TTL, and Nostr events include an expiration tag for relays that honor it
 - **Manual exchange signaling**: QR payloads are time-bucketed obfuscated, not cryptographically confidential; file data is encrypted with an ECDH-derived AES key after the QR/clipboard exchange
 
 ## Tech Stack

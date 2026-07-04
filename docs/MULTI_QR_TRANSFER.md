@@ -21,8 +21,8 @@ The QR payload carries signaling metadata needed to connect the devices. Treat i
 ### Sender
 
 1. Open the app and select your file(s)
-2. Under **Advanced Options**, select **Manual** mode
-3. Click **Send**
+2. Under **Transfer mode**, select **Manual Exchange mode**
+3. Click **Start Manual Exchange**
 4. A grid of QR codes appears (typically 2-4 codes), each labeled "1 of N", "2 of N", etc.
 5. Tell the receiver to scan any one QR code with their phone camera
 
@@ -45,7 +45,7 @@ The QR payload carries signaling metadata needed to connect the devices. Treat i
 
 - **Order doesn't matter**: You can scan the QR codes in any order
 - **Duplicates are fine**: Scanning the same QR code twice won't cause issues
-- **Copy/paste fallback**: If cameras aren't available, use the "Copy Data" button on the sender side and paste it on the receiver's `/receive` page under the "Scan Code" → "Paste" tab
+- **Copy/paste fallback**: If cameras aren't available, use the "Copy Data" button on the sender side. On the receiver's `/receive` page, choose Manual Exchange mode, click "Start Receive", and use the "Paste" tab.
 - **Single QR**: Very small payloads may produce just one QR code — the flow still works the same way
 - **Same network required**: Without internet, both devices must be on the same Wi-Fi or local network. With internet, STUN enables connections across different networks.
 - **Deployment path**: Host at domain root (for example `https://example.com`). Subpath deployments (for example `https://example.com/my-app`) can break scanned links.
