@@ -13,7 +13,7 @@ Manual mode is useful when:
 ## How It Works
 
 In Manual mode, the sender's offer is split across multiple QR codes. The receiver scans one QR code to open the app, then scans the rest in-app.
-Each QR opens the receive route using fragment format (`/r#...`), and the full payload is integrity-checked before transfer starts.
+Each QR opens the receive route using fragment format (`/r#...`), and the reassembled signaling payload is error-checked (a CRC over the offer) before the transfer starts — this only guards against a misread/garbled QR code, and is separate from the file's cryptographic integrity, which is enforced later over WebRTC by per-chunk AES-GCM authentication.
 The QR payload carries signaling metadata needed to connect the devices. Treat it as shareable only with the intended receiver. File bytes are sent later over WebRTC using the shared Secure Send data-channel protocol: encrypted chunks, `DONE:<chunkCount>`, then a receiver `ACK` after authentication and reassembly.
 
 ## Step-by-Step

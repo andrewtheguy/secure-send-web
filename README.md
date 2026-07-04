@@ -85,7 +85,7 @@ If the app is served from a subpath, scanned Multi-QR links will point to the do
 
 ## Transport Layer
 
-All signaling methods share the same **data-channel transfer protocol**: P2P transfers encrypt content in 128KB AES-256-GCM chunks before transmission, with the chunk index authenticated as AES-GCM additional data. The sender then sends `DONE:<chunkCount>`, and the receiver replies with `ACK` on the WebRTC data channel only after every chunk has authenticated and reassembled.
+All signaling methods share the same **data-channel transfer protocol**: P2P transfers encrypt content in 128KB AES-256-GCM chunks before transmission, with the chunk index authenticated as AES-GCM additional data. The sender then sends `DONE:<chunkCount>`, and the receiver replies with `ACK` on the WebRTC data channel only after every chunk has authenticated and reassembled. Integrity is enforced per chunk by AES-GCM authentication — there is no separate whole-file checksum, so nothing needs to re-read the assembled file to verify it.
 
 **Signaling Methods** (sender chooses):
 - **Nostr** (default): Requires internet. Decentralized relay signaling. Devices can be on different networks.
