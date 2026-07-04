@@ -13,17 +13,17 @@
 
 import { execFileSync } from 'node:child_process';
 import {
+  deriveSharedSecretKey,
+  generateECDHKeyPair,
+} from '../src/lib/crypto/ecdh';
+import {
   decryptChunk,
   encryptChunk,
   parseChunkMessage,
 } from '../src/lib/crypto/stream-crypto';
 import {
-  deriveSharedSecretKey,
-  generateECDHKeyPair,
-} from '../src/lib/crypto/ecdh';
-import {
-  generateMutualOfferBinary,
   generateMutualClipboardData,
+  generateMutualOfferBinary,
   parseMutualPayload,
 } from '../src/lib/manual-signaling';
 
@@ -77,9 +77,14 @@ async function testSs03WebToRust() {
   console.log('SS03: web encodes -> Rust parses');
   const kp = await generateECDHKeyPair();
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const offer = { type: 'offer', sdp: 'v=0\r\nweb-offer\r\n' };
+  const offer: RTCSessionDescriptionInit = {
+    type: 'offer',
+    sdp: 'v=0\r\nweb-offer\r\n',
+  };
   const candidates = [
-    { candidate: 'candidate:1 1 udp 100 10.0.0.1 4444 typ host' } as RTCIceCandidate,
+    {
+      candidate: 'candidate:1 1 udp 100 10.0.0.1 4444 typ host',
+    } as RTCIceCandidate,
   ];
   const binary = generateMutualOfferBinary(offer, candidates, {
     createdAt: Date.now(),
@@ -127,7 +132,11 @@ async function testEcdhAgreement() {
     256,
   );
   const webKeyHex = toHex(new Uint8Array(keyBits));
-  check('web and Rust derive the same AES key', webKeyHex === out.keyHex, out.keyHex);
+  check(
+    'web and Rust derive the same AES key',
+    webKeyHex === out.keyHex,
+    out.keyHex,
+  );
 }
 
 async function testChunkFormat() {
