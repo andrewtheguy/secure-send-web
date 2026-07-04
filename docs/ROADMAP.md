@@ -19,11 +19,11 @@ Implement automatic relay discovery using Nostr relay list events:
 ### Custom Relay Configuration
 Allow users to specify their own preferred Nostr relays for signaling.
 
-### True Streaming for Large Files
-Current chunked implementation still loads 10MB chunks into memory.
-- Implement true streaming with smaller buffer sizes
-- Use Streams API for more efficient memory usage
-- Enable even larger file transfers
+### Lower-Memory Large File Pipeline
+The current protocol streams 128KB encrypted chunks over WebRTC and decrypts directly into a preallocated receive buffer, but the app still reads the selected file/archive into memory before sending and keeps the final received file in memory for download.
+- Use browser Streams APIs for sender-side file reads instead of materializing the full file first
+- Pair the receive path with direct-to-disk writes where supported
+- Enable larger transfers without increasing peak memory usage
 
 ### Argon2id Key Derivation
 Replace PBKDF2 with Argon2id (via WASM) for stronger resistance to brute-force attacks on the PIN.

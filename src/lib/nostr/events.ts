@@ -122,12 +122,13 @@ function createAckEvent(
 
 /**
  * Create ACK event (kind 24242) with PIN-authenticated encrypted content.
- * seq=0 for ready ACK, seq=-1 for completion ACK.
+ * The current protocol emits seq=0 for the receiver ready ACK. Transfer
+ * completion is confirmed later with an ACK on the WebRTC data channel.
  *
  * Tags remain plaintext so relays can filter by transfer and sequence, but the
  * sender MUST verify that the encrypted body repeats the same transfer/sequence.
  * This proves the ACK author knows the PIN-derived session key; a public
- * transferId alone is not enough to advance the sender state machine.
+ * transferId alone is not enough to mark the receiver ready.
  *
  * hint is optional - used to confirm which PIN exchange event was processed
  * (event correlation/debugging); it carries no key-selection meaning in PIN-only mode.
@@ -180,7 +181,7 @@ export function parseAckEvent(event: Event): {
 
   const seq = parseInt(seqStr, 10);
 
-  // Validate: seq must be integer, valid values are -1 (complete), 0 (ready), or > 0 (chunk ack)
+  // Validate: seq must be an integer in the protocol ACK range.
   if (!Number.isInteger(seq) || seq < -1) return null;
 
   return { senderPubkey, transferId, seq, hint };
