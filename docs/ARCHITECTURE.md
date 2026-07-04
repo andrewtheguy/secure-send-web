@@ -533,7 +533,7 @@ Both receive modes reject extra, duplicate, out-of-range, malformed, and oversiz
 | ICE gathering | 5 seconds | Bounded wait while preparing Manual offer/answer QR payloads |
 | Nostr P2P offer retry | 5 seconds | Interval to retry WebRTC offer if no answer event has been processed |
 | Data-channel ACK wait | 30 seconds | Sender wait after `DONE:<chunkCount>` for receiver `ACK` |
-| P2P transfer stall | 60 seconds | Idle/stall window (`STALL_TIMEOUT_MS`) applied to both sides once data starts flowing. Resets on each chunk sent / message received, so a steadily-progressing transfer of any size never trips it; a peer that goes quiet mid-stream aborts after this span. There is no overall transfer deadline. |
+| P2P transfer stall | 60 seconds | Idle/stall window (`STALL_TIMEOUT_MS`) applied to both sides of an active transfer. The receiver arms it via the watchdog's `start()` when the data channel opens (not only after the first chunk arrives); the sender applies it per chunk hand-off. It resets on each chunk sent / message received, so a steadily-progressing transfer of any size never trips it; a peer that goes quiet aborts after this span. There is no overall transfer deadline. |
 | Sender PIN display/wait | 5 minutes | Sender-side visible PIN window before the waiting transfer is canceled |
 | Transfer TTL | 1 hour | Transfer session validity (`TRANSFER_EXPIRATION_MS`) |
 | Receiver PIN inactivity | 5 minutes | Clears PIN input if no changes made |

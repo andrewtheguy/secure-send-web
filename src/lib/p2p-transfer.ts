@@ -45,6 +45,17 @@ export const ACK_TIMEOUT_MS = 30000;
 export const STALL_TIMEOUT_MS = 60000;
 
 /**
+ * Coerce a caller-supplied stall timeout to a safe value. A zero, negative,
+ * NaN or non-finite window would arm a watchdog that fires immediately (or
+ * never), so fall back to the default in those cases.
+ */
+function resolveStallTimeoutMs(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : STALL_TIMEOUT_MS;
+}
+
+/**
  * The chunk index is a 2-byte big-endian field on the wire, so a transfer can
  * span at most 65536 chunks (indices 0-65535). Totals beyond this cannot be
  * represented and are rejected before any allocation or processing.
@@ -103,7 +114,7 @@ export async function sendFileOverDataChannel(
   opts: SendOptions = {},
 ): Promise<void> {
   const { onProgress, isCancelled } = opts;
-  const stallTimeoutMs = opts.stallTimeoutMs ?? STALL_TIMEOUT_MS;
+  const stallTimeoutMs = resolveStallTimeoutMs(opts.stallTimeoutMs);
   const total = contentBytes.length;
   const totalChunks = Math.ceil(total / ENCRYPTION_CHUNK_SIZE);
   if (totalChunks > MAX_CHUNKS) {
@@ -234,7 +245,7 @@ export function createDataChannelReceiver(
   opts: ReceiverOptions = {},
 ): DataChannelReceiver {
   const { onProgress } = opts;
-  const stallTimeoutMs = opts.stallTimeoutMs ?? STALL_TIMEOUT_MS;
+  const stallTimeoutMs = resolveStallTimeoutMs(opts.stallTimeoutMs);
 
   // Validate the untrusted advertised size before allocating or processing.
   if (!Number.isInteger(totalBytes) || totalBytes < 0) {
@@ -334,6 +345,9 @@ export function createDataChannelReceiver(
       receivedIndices.add(chunkIndex);
 
       const decryptedChunk = await decryptChunk(key, encryptedData, chunkIndex);
+      // The flow may have ended (completed, failed or disposed) while this
+      // decrypt was in flight; skip all side effects, including onProgress.
+      if (settled) return;
       if (decryptedChunk.length !== expectedPlaintextLength) {
         throw new Error(
           `Invalid chunk ${chunkIndex} length: expected ${expectedPlaintextLength}, got ${decryptedChunk.length}`,
