@@ -303,26 +303,14 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
           let cancelPoll: ReturnType<typeof setInterval> | null = null;
 
-          const overallTimeout = setTimeout(
-            () => {
-              if (!settled) {
-                settled = true;
-                if (cancelPoll) clearInterval(cancelPoll);
-                if (rtc) rtc.close();
-                client.unsubscribe(subId);
-                reject(new P2PConnectionError('Transfer timeout'));
-              }
-            },
-            10 * 60 * 1000,
-          );
-
           // cancel() only flips cancelledRef and closes the relay client; rtc is
           // local to this Promise and unreachable from there. Poll so a cancel
           // always settles the wait, even when rtc cannot be closed by cancel().
+          // A stalled stream is aborted by the receiver's own idle watchdog.
           cancelPoll = setInterval(() => {
             if (cancelledRef.current && !settled) {
               settled = true;
-              clearTimeout(overallTimeout);
+              receiver.dispose();
               if (cancelPoll) clearInterval(cancelPoll);
               client.unsubscribe(subId);
               try {
@@ -338,7 +326,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             .then((result) => {
               if (settled) return;
               settled = true;
-              clearTimeout(overallTimeout);
               if (cancelPoll) clearInterval(cancelPoll);
               client.unsubscribe(subId);
               // The file is fully received; a failure to send the ACK or tear
@@ -356,7 +343,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             .catch((err) => {
               if (settled) return;
               settled = true;
-              clearTimeout(overallTimeout);
               if (cancelPoll) clearInterval(cancelPoll);
               client.unsubscribe(subId);
               try {
@@ -388,6 +374,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 await client.publish(event);
               },
               () => {
+                // Data channel opened; the idle watchdog covers the receiving
+                // stage from here on.
+                receiver.start();
                 setState((s) => ({
                   ...s,
                   message: 'Receiving via P2P...',

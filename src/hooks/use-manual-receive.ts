@@ -270,7 +270,9 @@ export function useManualReceive(): UseManualReceiveReturn {
           }
         },
         () => {
-          // Data channel opened
+          // Data channel opened; the idle watchdog covers the receiving stage
+          // from here on.
+          receiver.start();
           if (dataChannelResolver) {
             dataChannelResolver();
           }
@@ -396,32 +398,25 @@ export function useManualReceive(): UseManualReceiveReturn {
         progress: { current: 0, total: totalBytes! },
       });
 
-      // Wait for the streaming receiver to finish, racing cancellation and a
-      // 10-minute timeout. The receiver decrypts, authenticates and reassembles
-      // as chunks arrive and resolves with the exact-size plaintext.
+      // Wait for the streaming receiver to finish, racing cancellation. The
+      // receiver decrypts, authenticates and reassembles as chunks arrive and
+      // resolves with the exact-size plaintext. A stalled stream is aborted by
+      // the receiver's own idle watchdog (see createDataChannelReceiver).
       const receivedData = await new Promise<Uint8Array>((resolve, reject) => {
-        const timeout = setTimeout(
-          () => {
-            reject(new Error('Transfer timeout'));
-          },
-          10 * 60 * 1000,
-        ); // 10 minutes
         const checkInterval = setInterval(() => {
           if (cancelledRef.current) {
             clearInterval(checkInterval);
-            clearTimeout(timeout);
+            receiver.dispose();
             reject(new Error('Cancelled'));
           }
         }, 500);
 
         receiver.done
           .then((data) => {
-            clearTimeout(timeout);
             clearInterval(checkInterval);
             resolve(data);
           })
           .catch((err) => {
-            clearTimeout(timeout);
             clearInterval(checkInterval);
             reject(err);
           });
