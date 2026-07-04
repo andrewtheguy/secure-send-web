@@ -1,15 +1,9 @@
 import { useCallback, useRef, useState } from 'react';
 import {
-  AES_NONCE_LENGTH,
-  AES_TAG_LENGTH,
-  decryptChunk,
   deriveAESKeyFromSecretKey,
   deriveSharedSecretKey,
-  ENCRYPTED_CHUNK_OVERHEAD,
-  ENCRYPTION_CHUNK_SIZE,
   generateECDHKeyPair,
   MAX_MESSAGE_SIZE,
-  parseChunkMessage,
   TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto';
 import { P2PConnectionError } from '@/lib/errors';
@@ -19,6 +13,7 @@ import {
   type SignalingPayload,
 } from '@/lib/manual-signaling';
 import type { TransferState } from '@/lib/nostr';
+import { createDataChannelReceiver } from '@/lib/p2p-transfer';
 import type { ReceivedContent } from '@/lib/types';
 import { WebRTCConnection } from '@/lib/webrtc';
 import { getWebRTCConfig } from '@/lib/webrtc-config';
@@ -251,14 +246,14 @@ export function useManualReceive(): UseManualReceiveReturn {
       const iceCandidates: RTCIceCandidate[] = [];
       let answerSDP: RTCSessionDescriptionInit | null = null;
 
-      // Track received data
-      const receivedChunks: Uint8Array[] = [];
-      const receivedEncryptedChunkIndices = new Set<number>();
-      let receivedBytes = 0;
-      let transferComplete = false;
+      // Streaming receiver: decrypts each chunk into a single preallocated
+      // buffer as it arrives and resolves once DONE arrives and all chunks
+      // authenticate.
+      const receiver = createDataChannelReceiver(key, totalBytes!, {
+        onProgress: (current, total) =>
+          setState((s) => ({ ...s, progress: { current, total } })),
+      });
       let dataChannelResolver: (() => void) | null = null;
-      let transferResolver: (() => void) | null = null;
-      let transferRejecter: ((err: Error) => void) | null = null;
       let answerSDPResolver: (() => void) | null = null;
 
       const rtc = new WebRTCConnection(
@@ -281,111 +276,7 @@ export function useManualReceive(): UseManualReceiveReturn {
           }
         },
         (data) => {
-          // Message received
-          if (typeof data === 'string') {
-            if (data.startsWith('DONE:')) {
-              const expectedChunks = Math.ceil(
-                totalBytes! / ENCRYPTION_CHUNK_SIZE,
-              );
-              const receivedChunkCount = parseInt(data.split(':')[1], 10);
-              if (
-                !Number.isFinite(receivedChunkCount) ||
-                receivedChunkCount <= 0
-              ) {
-                transferRejecter?.(
-                  new Error('Invalid DONE message: missing chunk count'),
-                );
-                return;
-              }
-              if (receivedChunkCount !== expectedChunks) {
-                transferRejecter?.(
-                  new Error(
-                    `Invalid DONE message: expected ${expectedChunks} chunks, got ${receivedChunkCount}`,
-                  ),
-                );
-                return;
-              }
-              transferComplete = true;
-              if (transferResolver) {
-                transferResolver();
-              }
-            } else if (data === 'DONE') {
-              transferRejecter?.(
-                new Error(
-                  'Unsupported sender: missing chunk count. Ask sender to update and retry.',
-                ),
-              );
-            }
-          } else if (data instanceof ArrayBuffer) {
-            // Store encrypted chunk for later decryption
-            const encryptedChunk = new Uint8Array(data);
-            const expectedChunks = Math.ceil(
-              totalBytes! / ENCRYPTION_CHUNK_SIZE,
-            );
-            const expectedEncryptedBytes =
-              totalBytes! + expectedChunks * ENCRYPTED_CHUNK_OVERHEAD;
-
-            try {
-              const { chunkIndex, encryptedData } =
-                parseChunkMessage(encryptedChunk);
-              if (receivedEncryptedChunkIndices.has(chunkIndex)) {
-                transferRejecter?.(
-                  new Error(`Duplicate chunk index: ${chunkIndex}`),
-                );
-                return;
-              }
-              if (chunkIndex >= expectedChunks) {
-                transferRejecter?.(
-                  new Error(`Chunk index out of range: ${chunkIndex}`),
-                );
-                return;
-              }
-
-              const expectedPlaintextLength =
-                chunkIndex === expectedChunks - 1
-                  ? totalBytes! - chunkIndex * ENCRYPTION_CHUNK_SIZE
-                  : ENCRYPTION_CHUNK_SIZE;
-              const expectedEncryptedLength =
-                expectedPlaintextLength + AES_NONCE_LENGTH + AES_TAG_LENGTH;
-              if (encryptedData.length !== expectedEncryptedLength) {
-                transferRejecter?.(
-                  new Error(
-                    `Invalid encrypted chunk ${chunkIndex} length: expected ${expectedEncryptedLength}, got ${encryptedData.length}`,
-                  ),
-                );
-                return;
-              }
-              if (
-                receivedBytes + encryptedChunk.length >
-                expectedEncryptedBytes
-              ) {
-                transferRejecter?.(
-                  new Error('Transfer exceeds advertised size'),
-                );
-                return;
-              }
-
-              receivedEncryptedChunkIndices.add(chunkIndex);
-            } catch (err) {
-              transferRejecter?.(
-                err instanceof Error
-                  ? err
-                  : new Error('Invalid encrypted chunk'),
-              );
-              return;
-            }
-
-            receivedChunks.push(encryptedChunk);
-            receivedBytes += encryptedChunk.length;
-
-            setState((s) => ({
-              ...s,
-              progress: {
-                current: receivedBytes,
-                total: totalBytes!,
-              },
-            }));
-          }
+          receiver.onMessage(data);
         },
       );
 
@@ -505,8 +396,10 @@ export function useManualReceive(): UseManualReceiveReturn {
         progress: { current: 0, total: totalBytes! },
       });
 
-      // Wait for transfer to complete
-      await new Promise<void>((resolve, reject) => {
+      // Wait for the streaming receiver to finish, racing cancellation and a
+      // 10-minute timeout. The receiver decrypts, authenticates and reassembles
+      // as chunks arrive and resolves with the exact-size plaintext.
+      const receivedData = await new Promise<Uint8Array>((resolve, reject) => {
         const timeout = setTimeout(
           () => {
             reject(new Error('Transfer timeout'));
@@ -521,93 +414,23 @@ export function useManualReceive(): UseManualReceiveReturn {
           }
         }, 500);
 
-        transferResolver = () => {
-          clearTimeout(timeout);
-          clearInterval(checkInterval);
-          resolve();
-        };
-        transferRejecter = (err) => {
-          clearTimeout(timeout);
-          clearInterval(checkInterval);
-          reject(err);
-        };
-
-        // Check if already complete
-        if (transferComplete) {
-          clearTimeout(timeout);
-          clearInterval(checkInterval);
-          resolve();
-        }
+        receiver.done
+          .then((data) => {
+            clearTimeout(timeout);
+            clearInterval(checkInterval);
+            resolve(data);
+          })
+          .catch((err) => {
+            clearTimeout(timeout);
+            clearInterval(checkInterval);
+            reject(err);
+          });
       });
 
       if (cancelledRef.current) return;
 
-      // Decrypt and reassemble chunks
-      const contentData = new Uint8Array(totalBytes!);
-      const expectedChunks = Math.ceil(totalBytes! / ENCRYPTION_CHUNK_SIZE);
-      const decryptedChunkIndices = new Set<number>();
-      let totalDecryptedBytes = 0;
-
-      if (receivedChunks.length !== expectedChunks) {
-        throw new Error(
-          `Missing chunks: got ${receivedChunks.length}, expected ${expectedChunks}`,
-        );
-      }
-
-      for (const encryptedChunk of receivedChunks) {
-        // Parse chunk to get index and encrypted data
-        const { chunkIndex, encryptedData } = parseChunkMessage(encryptedChunk);
-        if (decryptedChunkIndices.has(chunkIndex)) {
-          throw new Error(`Duplicate chunk index: ${chunkIndex}`);
-        }
-        if (chunkIndex >= expectedChunks) {
-          throw new Error(`Chunk index out of range: ${chunkIndex}`);
-        }
-
-        const decryptedChunk = await decryptChunk(
-          key,
-          encryptedData,
-          chunkIndex,
-        );
-
-        // Calculate write position based on chunk index
-        const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE;
-        const expectedChunkLength =
-          chunkIndex === expectedChunks - 1
-            ? totalBytes! - writePosition
-            : ENCRYPTION_CHUNK_SIZE;
-
-        if (decryptedChunk.length !== expectedChunkLength) {
-          throw new Error(
-            `Invalid chunk ${chunkIndex} length: expected ${expectedChunkLength}, got ${decryptedChunk.length}`,
-          );
-        }
-
-        const requiredSize = writePosition + decryptedChunk.length;
-        if (requiredSize > contentData.length) {
-          throw new Error(`Chunk ${chunkIndex} exceeds expected file size`);
-        }
-
-        // Write to correct position based on authenticated chunk index
-        contentData.set(decryptedChunk, writePosition);
-        decryptedChunkIndices.add(chunkIndex);
-        totalDecryptedBytes += decryptedChunk.length;
-      }
-
-      if (
-        decryptedChunkIndices.size !== expectedChunks ||
-        totalDecryptedBytes !== totalBytes
-      ) {
-        throw new Error(
-          `Incomplete transfer: got ${totalDecryptedBytes} bytes, expected ${totalBytes}`,
-        );
-      }
-
-      // Send acknowledgment only after all encrypted chunks authenticate and reassemble.
+      // Acknowledge only after all chunks authenticate and reassemble.
       rtc.send('ACK');
-
-      // Trim buffer to actual content size
-      const receivedData = contentData.slice(0, totalDecryptedBytes);
 
       // Set received content
       setReceivedContent({

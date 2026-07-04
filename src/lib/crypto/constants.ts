@@ -24,9 +24,6 @@ export const AES_TAG_LENGTH = 16; // bytes (128 bits)
 // Salt length
 export const SALT_LENGTH = 16;
 
-// Chunk size for WebRTC data channel transfer
-export const CHUNK_SIZE = 16 * 1024; // 16KB
-
 // Encryption chunk size for P2P transfers
 // 128KB chunks, each encrypted with unique nonce
 // WebRTC data channel has ~256KB message limit, so 128KB + encryption overhead stays safe

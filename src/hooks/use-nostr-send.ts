@@ -4,9 +4,7 @@ import {
   computePinHint,
   decrypt,
   deriveNostrTransferKeysFromPin,
-  ENCRYPTION_CHUNK_SIZE,
   encrypt,
-  encryptChunk,
   generatePin,
   generateSalt,
   generateTransferId,
@@ -30,6 +28,7 @@ import {
   type TransferState,
   verifyAuthenticatedAckEvent,
 } from '@/lib/nostr';
+import { sendFileOverDataChannel } from '@/lib/p2p-transfer';
 import { WebRTCConnection } from '@/lib/webrtc';
 import { getWebRTCConfig } from '@/lib/webrtc-config';
 
@@ -372,48 +371,29 @@ export function useNostrSend(): UseNostrSendReturn {
                 }));
 
                 try {
-                  let chunkIndex = 0;
-                  const totalChunks = Math.ceil(
-                    contentBytes.length / ENCRYPTION_CHUNK_SIZE,
+                  // After the data channel is open, nostr is no longer involved:
+                  // completion is the data-channel ACK awaited here.
+                  await sendFileOverDataChannel(
+                    rtc,
+                    keys.p2pContent,
+                    contentBytes,
+                    {
+                      onProgress: (current, total) =>
+                        setState((s) => ({
+                          ...s,
+                          progress: { current, total },
+                        })),
+                      isCancelled: () => cancelledRef.current,
+                    },
                   );
-
-                  for (
-                    let i = 0;
-                    i < contentBytes.length;
-                    i += ENCRYPTION_CHUNK_SIZE
-                  ) {
-                    if (cancelledRef.current) throw new Error('Cancelled');
-
-                    const end = Math.min(
-                      i + ENCRYPTION_CHUNK_SIZE,
-                      contentBytes.length,
-                    );
-                    const plainChunk = contentBytes.slice(i, end);
-                    const encryptedChunk = await encryptChunk(
-                      keys.p2pContent,
-                      plainChunk,
-                      chunkIndex,
-                    );
-                    await rtc.sendWithBackpressure(encryptedChunk);
-                    chunkIndex++;
-
-                    setState((s) => ({
-                      ...s,
-                      progress: { current: end, total: contentBytes.length },
-                    }));
-                  }
-
-                  rtc.send(`DONE:${totalChunks}`);
                   webRTCSuccess = true;
                   resolve();
                 } catch (err) {
                   reject(err);
                 }
               },
-              (data) => {
-                if (data === 'DONE_ACK') {
-                  console.debug('WebRTC: Remote confirmed receipt (DONE_ACK)');
-                }
+              () => {
+                // Data-channel messages are not used by the auto-mode sender.
               },
             );
 
@@ -489,21 +469,8 @@ export function useNostrSend(): UseNostrSendReturn {
             : new Error(message);
         }
 
-        // Wait for completion ACK (seq=-1)
-        const completionReceived = await waitForAck(
-          client,
-          transferId,
-          publicKey,
-          receiverPubkey,
-          -1,
-          keys.signals,
-          () => cancelledRef.current,
-        );
-
-        if (!completionReceived) {
-          throw new Error('Failed to receive completion confirmation');
-        }
-
+        // Completion is confirmed by the data-channel ACK (awaited inside
+        // sendFileOverDataChannel). Nostr is not involved past signaling.
         setState((prevState) => ({
           status: 'complete',
           message: 'File sent via P2P!',
@@ -539,141 +506,4 @@ export function useNostrSend(): UseNostrSendReturn {
     () => ({ state, pin, send, cancel }),
     [state, pin, send, cancel],
   );
-}
-
-/**
- * Wait for ACK with specific sequence number from receiver.
- *
- * Uses subscribe-first pattern to avoid race conditions:
- * 1. Subscribe first (to catch all new events)
- * 2. Then query for existing events
- * 3. Periodic re-query as safety net for relay propagation delays
- */
-function waitForAck(
-  client: NostrClient,
-  transferId: string,
-  senderPubkey: string,
-  receiverPubkey: string,
-  expectedSeq: number,
-  key: CryptoKey,
-  isCancelled: () => boolean,
-  timeoutMs: number = 5 * 60 * 1000,
-): Promise<boolean> {
-  if (isCancelled()) {
-    return Promise.resolve(false);
-  }
-
-  return new Promise((resolve) => {
-    let resolved = false;
-    let subId: string | null = null;
-    let reQueryInterval: ReturnType<typeof setInterval> | null = null;
-
-    const cleanup = () => {
-      if (subId) {
-        client.unsubscribe(subId);
-        subId = null;
-      }
-      if (reQueryInterval) {
-        clearInterval(reQueryInterval);
-        reQueryInterval = null;
-      }
-    };
-
-    const timeout = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        cleanup();
-        resolve(false);
-      }
-    }, timeoutMs);
-
-    const checkEvent = async (event: Event): Promise<boolean> => {
-      const ack = parseAckEvent(event);
-      if (ack && ack.transferId === transferId && ack.seq === expectedSeq) {
-        return await verifyAuthenticatedAckEvent(
-          event,
-          key,
-          transferId,
-          expectedSeq,
-        );
-      }
-      return false;
-    };
-
-    const onFound = () => {
-      if (!resolved) {
-        resolved = true;
-        clearTimeout(timeout);
-        cleanup();
-        resolve(true);
-      }
-    };
-
-    // 1. Subscribe FIRST to avoid race condition
-    subId = client.subscribe(
-      [
-        {
-          kinds: [EVENT_KIND_DATA_TRANSFER],
-          '#t': [transferId],
-          '#p': [senderPubkey],
-          authors: [receiverPubkey],
-        },
-      ],
-      (event) => {
-        if (resolved) return;
-
-        if (isCancelled()) {
-          resolved = true;
-          clearTimeout(timeout);
-          cleanup();
-          resolve(false);
-          return;
-        }
-
-        void (async () => {
-          if (await checkEvent(event)) {
-            onFound();
-          }
-        })();
-      },
-    );
-
-    // 2. THEN query for existing events (catches events that existed before subscribe)
-    const queryExisting = async () => {
-      if (resolved || isCancelled()) return;
-
-      try {
-        const existingEvents = await client.query([
-          {
-            kinds: [EVENT_KIND_DATA_TRANSFER],
-            '#t': [transferId],
-            '#p': [senderPubkey],
-            authors: [receiverPubkey],
-            limit: 50,
-          },
-        ]);
-
-        for (const event of existingEvents) {
-          if (resolved) return;
-          if (await checkEvent(event)) {
-            onFound();
-            return;
-          }
-        }
-      } catch (err) {
-        console.error('Failed to query for existing ACK:', err);
-      }
-    };
-
-    // Initial query
-    void queryExisting();
-
-    // 3. Periodic re-query as safety net for relay propagation delays
-    // Re-query every 3 seconds to catch any events that may have been missed
-    reQueryInterval = setInterval(() => {
-      if (!resolved && !isCancelled()) {
-        void queryExisting();
-      }
-    }, 3000);
-  });
 }

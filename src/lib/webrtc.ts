@@ -5,6 +5,9 @@ export type WebRTCSignal =
 
 type WebRTCData = string | ArrayBuffer | ArrayBufferView | Blob;
 
+// Backpressure threshold: pause sending while the send buffer exceeds this.
+const BACKPRESSURE_THRESHOLD = 1024 * 1024; // 1MB
+
 export class WebRTCConnection {
   private pc: RTCPeerConnection;
   private dataChannel: RTCDataChannel | null = null;
@@ -64,6 +67,11 @@ export class WebRTCConnection {
 
   private setupDataChannel(channel: RTCDataChannel) {
     this.dataChannel = channel;
+    // Receivers assume binary messages arrive as ArrayBuffer; make it explicit
+    // rather than relying on the browser default.
+    channel.binaryType = 'arraybuffer';
+    // Enables the 'bufferedamountlow' event used by sendWithBackpressure.
+    channel.bufferedAmountLowThreshold = BACKPRESSURE_THRESHOLD;
     this.dataChannel.onopen = () => {
       console.log('Data channel open state:', this.dataChannel?.readyState);
       this.onDataChannelOpen();
@@ -274,29 +282,39 @@ export class WebRTCConnection {
    */
   public async sendWithBackpressure(
     data: WebRTCData,
-    bufferThreshold: number = 1024 * 1024, // 1MB default threshold
+    bufferThreshold: number = BACKPRESSURE_THRESHOLD,
   ): Promise<void> {
     if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
       throw new Error('Data channel not open');
     }
 
-    // Wait for buffer to drain if it's too full
+    // Wait for the buffer to drain if it's too full, driven by the
+    // 'bufferedamountlow' event with a coarse interval as a safety fallback
+    // (covers unsupported/missed events and channel close).
     while (this.dataChannel.bufferedAmount > bufferThreshold) {
+      const dc = this.dataChannel;
+      dc.bufferedAmountLowThreshold = bufferThreshold;
       await new Promise<void>((resolve) => {
-        // Use bufferedamountlow event if supported, otherwise poll
-        const checkBuffer = () => {
-          if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
-            resolve();
-            return;
-          }
-          if (this.dataChannel.bufferedAmount <= bufferThreshold) {
-            resolve();
-          } else {
-            setTimeout(checkBuffer, 10);
-          }
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          dc.removeEventListener('bufferedamountlow', onLow);
+          clearInterval(poll);
+          resolve();
         };
-        setTimeout(checkBuffer, 10);
+        const onLow = () => finish();
+        const poll = setInterval(() => {
+          if (
+            dc.readyState !== 'open' ||
+            dc.bufferedAmount <= bufferThreshold
+          ) {
+            finish();
+          }
+        }, 100);
+        dc.addEventListener('bufferedamountlow', onLow);
       });
+      if (this.dataChannel.readyState !== 'open') return;
     }
 
     this.sendData(data);
@@ -314,11 +332,9 @@ export class WebRTCConnection {
     } else if (data instanceof ArrayBuffer) {
       this.dataChannel.send(data);
     } else if (ArrayBuffer.isView(data)) {
-      const copyBuffer = new ArrayBuffer(data.byteLength);
-      new Uint8Array(copyBuffer).set(
-        new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
-      );
-      this.dataChannel.send(new Uint8Array(copyBuffer));
+      // send() transmits exactly [byteOffset, byteOffset+byteLength). Callers
+      // pass fresh, exact-size views (encryptChunk output), so no copy is needed.
+      this.dataChannel.send(data as ArrayBufferView<ArrayBuffer>);
     } else {
       throw new Error('Unsupported data type for data channel send');
     }
