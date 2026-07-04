@@ -145,6 +145,7 @@ sequenceDiagram
   - Maximum chunks: `255` (`chunk_index` valid range `0..254`, with `chunk_index < total_chunks`)
   - With `400` data bytes per chunk, maximum payload size is `102,000` bytes (`255 * 400`) before base64url encoding.
 - CRC32 sequencing and failure handling:
+  - Scope: this CRC-32 is a **signaling-payload error-detection** checksum for multi-QR reassembly only (it detects a misread/garbled QR before the offer is parsed). It is **not** file-content integrity and is not a substitute for it — transferred file bytes are protected separately by per-chunk AES-GCM authentication over the WebRTC data channel (see *Streaming Encryption*).
   - CRC32 is carried only in chunk `0`; receivers MUST buffer chunk `1..N-1` data until chunk `0` is received (this spec does not define a streaming-without-chunk-0 mode).
   - CRC32 validation is deferred until full reassembly is complete and chunk `0` (with `payload_crc32_be_u32`) is available.
   - On CRC32 failure after full reassembly, receivers MUST drop the reassembled payload, log a checksum/protocol error, and fail the current transfer attempt (retry/rescan is an implementation-level recovery action).
@@ -488,6 +489,8 @@ All P2P transfers (Nostr, Manual Exchange) encrypt content in 128KB chunks using
 - **Sender side**: the file is walked in 128KB slices. Each slice is encrypted with the transfer key and its own chunk index, then sent over the data channel in order. The index is carried in the chunk and bound into the encryption as authenticated data.
 - **Receiver side (all P2P modes)**: a single output buffer is preallocated from the expected file size. As each chunk arrives, the receiver parses its index, decrypts and authenticates it, and writes the plaintext directly to its position (`index * 128KB`) in the buffer — no intermediate encrypted-chunk storage.
 - **Completion**: the sender finishes with `DONE:<totalChunks>`. The receiver verifies the advertised chunk count, received index set, and total decrypted byte count before sending `ACK` on the data channel.
+
+**No whole-file checksum:** File-content integrity relies solely on per-chunk AES-GCM authentication (auth tag + authenticated chunk index) together with the completeness checks above and the final `ACK`. There is deliberately **no digest/hash computed over the assembled file** — neither sender nor receiver ever hashes the whole file, and no metadata/manifest carries a file digest. This keeps the transfer self-validating chunk-by-chunk, which is what allows the receive path to stay streamable and low-memory (and lets future direct-to-disk writes drop each chunk after decrypt) without a final pass that would force the whole file back into memory.
 
 **Encrypted Chunk Format:**
 ```

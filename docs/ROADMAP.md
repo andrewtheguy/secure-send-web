@@ -25,6 +25,8 @@ The current protocol streams 128KB encrypted chunks over WebRTC and decrypts dir
 - Pair the receive path with direct-to-disk writes where supported
 - Enable larger transfers without increasing peak memory usage
 
+**Integrity invariant (preserve):** The transfer has **no whole-file checksum** — content integrity comes entirely from per-chunk AES-256-GCM authentication (each chunk carries a 16-byte auth tag with its index bound in as authenticated data), plus chunk-count/byte-count completeness checks and the final data-channel `ACK`. Because integrity is verified per chunk and never over the assembled whole, no design in this pipeline needs to materialize the full file to compute or re-check a digest. A whole-file checksum would have forced full materialization on both sides and been slow in the browser for large files; the streaming rework must keep relying on the self-validating per-chunk model rather than reintroducing one.
+
 ### Argon2id Key Derivation
 Replace PBKDF2 with Argon2id (via WASM) for stronger resistance to brute-force attacks on the PIN.
 
@@ -35,6 +37,7 @@ Use the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/AP
 - Near-zero memory usage for receiving files (only one chunk in memory at a time)
 - Enable transfers of files larger than available RAM
 - Decrypted chunks written directly to file handle
+- Safe to write-and-drop each chunk immediately: every chunk self-authenticates on decrypt (AES-GCM auth tag + authenticated index), so there is no post-assembly whole-file verification step that would require keeping the full file around
 
 **Implementation approach:**
 - Use `showSaveFilePicker()` to get a writable file handle before transfer starts
