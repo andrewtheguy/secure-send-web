@@ -256,7 +256,7 @@ export async function computePinFingerprint(pin: string): Promise<string> {
 
 /**
  * Format a PIN hint for display as the user-visible PIN fingerprint.
- * Uppercases and groups the full hint into 4-char blocks (e.g. ABCD-EF01-2345-6789)
+ * Uppercases and groups the full value into 4-char blocks (e.g. ABCD-EF01)
  * so the sender and receiver can visually confirm they derived the same PIN.
  */
 export function formatPinHint(hint: string): string {

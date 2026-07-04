@@ -69,8 +69,8 @@ function labeledSalt(salt: Uint8Array, label: PinKeyLabel): Uint8Array {
  * Derive an AES-256 key for a specific Nostr PIN-mode purpose.
  *
  * The transfer salt stays public and shared, but each purpose appends a stable
- * domain-separation label before PBKDF2 so metadata, relay signals/ACKs, and P2P
- * content never reuse the same AES-GCM key.
+ * domain-separation label before PBKDF2 so metadata, relay signals/ready ACKs,
+ * and P2P content never reuse the same AES-GCM key.
  */
 export async function deriveLabeledKeyFromPinKey(
   keyMaterial: CryptoKey,

@@ -1,17 +1,12 @@
 import type { Event } from 'nostr-tools';
 import { useCallback, useRef, useState } from 'react';
 import {
-  AES_NONCE_LENGTH,
-  AES_TAG_LENGTH,
   computePinHintFromKey,
   decrypt,
-  decryptChunk,
   deriveNostrTransferKeysFromPinKey,
-  ENCRYPTION_CHUNK_SIZE,
   encrypt,
   MAX_MESSAGE_SIZE,
   type NostrTransferKeys,
-  parseChunkMessage,
   TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto';
 import { P2PConnectionError } from '@/lib/errors';
@@ -29,6 +24,7 @@ import {
   parseSignalingEvent,
   type TransferState,
 } from '@/lib/nostr';
+import { ACK, createDataChannelReceiver } from '@/lib/p2p-transfer';
 import type { PinKeyMaterial, ReceivedContent } from '@/lib/types';
 import { WebRTCConnection } from '@/lib/webrtc';
 import { getWebRTCConfig } from '@/lib/webrtc-config';
@@ -287,21 +283,31 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       const transferResult = await new Promise<Uint8Array>(
         (resolve, reject) => {
           let rtc: WebRTCConnection | null = null;
-          const expectedSize = resolvedFileSize;
-          let combinedBuffer: Uint8Array | null =
-            expectedSize > 0 ? new Uint8Array(expectedSize) : null;
-          const receivedChunkIndices: Set<number> = new Set();
-          const pendingChunkPromises: Set<Promise<void>> = new Set();
-          const expectedP2PChunks = Math.ceil(
-            resolvedFileSize / ENCRYPTION_CHUNK_SIZE,
-          );
-          let totalDecryptedBytes = 0;
           let settled = false;
+
+          // Streaming receiver: decrypts each chunk into a single preallocated
+          // buffer as it arrives. Nostr is not involved past signaling; the
+          // data-channel ACK below confirms completion.
+          const receiver = createDataChannelReceiver(
+            keys!.p2pContent,
+            resolvedFileSize,
+            {
+              onProgress: (current, total) =>
+                setState((s) => ({
+                  ...s,
+                  status: 'receiving',
+                  progress: { current, total },
+                })),
+            },
+          );
+
+          let cancelPoll: ReturnType<typeof setInterval> | null = null;
 
           const overallTimeout = setTimeout(
             () => {
               if (!settled) {
                 settled = true;
+                if (cancelPoll) clearInterval(cancelPoll);
                 if (rtc) rtc.close();
                 client.unsubscribe(subId);
                 reject(new P2PConnectionError('Transfer timeout'));
@@ -309,6 +315,57 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             },
             10 * 60 * 1000,
           );
+
+          // cancel() only flips cancelledRef and closes the relay client; rtc is
+          // local to this Promise and unreachable from there. Poll so a cancel
+          // always settles the wait, even when rtc cannot be closed by cancel().
+          cancelPoll = setInterval(() => {
+            if (cancelledRef.current && !settled) {
+              settled = true;
+              clearTimeout(overallTimeout);
+              if (cancelPoll) clearInterval(cancelPoll);
+              client.unsubscribe(subId);
+              try {
+                if (rtc) rtc.close();
+              } catch {
+                // ignore
+              }
+              reject(new Error('Cancelled'));
+            }
+          }, 250);
+
+          receiver.done
+            .then((result) => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(overallTimeout);
+              if (cancelPoll) clearInterval(cancelPoll);
+              client.unsubscribe(subId);
+              // The file is fully received; a failure to send the ACK or tear
+              // down rtc must not prevent the Promise from settling.
+              try {
+                if (rtc) {
+                  rtc.send(ACK);
+                  rtc.close();
+                }
+              } catch (e) {
+                console.error('ACK/teardown error', e);
+              }
+              resolve(result);
+            })
+            .catch((err) => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(overallTimeout);
+              if (cancelPoll) clearInterval(cancelPoll);
+              client.unsubscribe(subId);
+              try {
+                if (rtc) rtc.close();
+              } catch {
+                // ignore
+              }
+              reject(err instanceof Error ? err : new Error('Transfer failed'));
+            });
 
           const initWebRTC = () => {
             if (rtc) return rtc;
@@ -338,169 +395,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 }));
               },
               (data) => {
-                if (typeof data === 'string' && data.startsWith('DONE:')) {
-                  void (async () => {
-                    const expectedChunks = parseInt(data.split(':')[1], 10);
-                    if (
-                      !Number.isInteger(expectedChunks) ||
-                      expectedChunks <= 0
-                    ) {
-                      reject(
-                        new Error('Invalid DONE message: missing chunk count'),
-                      );
-                      return;
-                    }
-                    if (expectedChunks !== expectedP2PChunks) {
-                      reject(
-                        new Error(
-                          `Invalid DONE message: expected ${expectedP2PChunks} chunks, got ${expectedChunks}`,
-                        ),
-                      );
-                      return;
-                    }
-
-                    if (pendingChunkPromises.size > 0) {
-                      await Promise.allSettled(
-                        Array.from(pendingChunkPromises),
-                      );
-                    }
-
-                    if (receivedChunkIndices.size !== expectedChunks) {
-                      reject(
-                        new Error(
-                          `Missing chunks: got ${receivedChunkIndices.size}, expected ${expectedChunks}`,
-                        ),
-                      );
-                      return;
-                    }
-                    if (totalDecryptedBytes !== resolvedFileSize) {
-                      reject(
-                        new Error(
-                          `Incomplete transfer: got ${totalDecryptedBytes} bytes, expected ${resolvedFileSize}`,
-                        ),
-                      );
-                      return;
-                    }
-
-                    if (!settled) {
-                      settled = true;
-                      clearTimeout(overallTimeout);
-                      client.unsubscribe(subId);
-                      if (rtc) {
-                        rtc.send('DONE_ACK');
-                        rtc.close();
-                      }
-
-                      const result = combinedBuffer
-                        ? combinedBuffer.slice(0, totalDecryptedBytes)
-                        : new Uint8Array(0);
-
-                      resolve(result);
-                    }
-                  })();
-                  return;
-                }
-
-                if (typeof data === 'string' && data === 'DONE') {
-                  reject(
-                    new Error(
-                      'Unsupported sender: missing chunk count. Ask sender to update and retry.',
-                    ),
-                  );
-                  return;
-                }
-
-                if (data instanceof ArrayBuffer) {
-                  if (settled) return;
-                  const decryptPromise = (async () => {
-                    try {
-                      const { chunkIndex, encryptedData } =
-                        parseChunkMessage(data);
-                      if (receivedChunkIndices.has(chunkIndex)) {
-                        throw new Error(`Duplicate chunk index: ${chunkIndex}`);
-                      }
-                      if (chunkIndex >= expectedP2PChunks) {
-                        throw new Error(
-                          `Chunk index out of range: ${chunkIndex}`,
-                        );
-                      }
-
-                      const expectedPlaintextLength =
-                        chunkIndex === expectedP2PChunks - 1
-                          ? resolvedFileSize -
-                            chunkIndex * ENCRYPTION_CHUNK_SIZE
-                          : ENCRYPTION_CHUNK_SIZE;
-                      const expectedEncryptedLength =
-                        expectedPlaintextLength +
-                        AES_NONCE_LENGTH +
-                        AES_TAG_LENGTH;
-                      if (encryptedData.length !== expectedEncryptedLength) {
-                        throw new Error(
-                          `Invalid encrypted chunk ${chunkIndex} length: expected ${expectedEncryptedLength}, got ${encryptedData.length}`,
-                        );
-                      }
-
-                      const decryptedChunk = await decryptChunk(
-                        keys!.p2pContent,
-                        encryptedData,
-                        chunkIndex,
-                      );
-                      const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE;
-                      const requiredSize =
-                        writePosition + decryptedChunk.length;
-                      const expectedChunkLength =
-                        chunkIndex === expectedP2PChunks - 1
-                          ? resolvedFileSize - writePosition
-                          : ENCRYPTION_CHUNK_SIZE;
-
-                      if (decryptedChunk.length !== expectedChunkLength) {
-                        throw new Error(
-                          `Invalid chunk ${chunkIndex} length: expected ${expectedChunkLength}, got ${decryptedChunk.length}`,
-                        );
-                      }
-                      if (requiredSize > resolvedFileSize) {
-                        throw new Error(
-                          `Chunk ${chunkIndex} exceeds expected file size`,
-                        );
-                      }
-
-                      if (
-                        !combinedBuffer ||
-                        combinedBuffer.length < requiredSize
-                      ) {
-                        const newBuffer = new Uint8Array(
-                          Math.max(
-                            requiredSize,
-                            (combinedBuffer?.length || 0) * 2,
-                          ),
-                        );
-                        if (combinedBuffer) {
-                          newBuffer.set(combinedBuffer);
-                        }
-                        combinedBuffer = newBuffer;
-                      }
-
-                      combinedBuffer.set(decryptedChunk, writePosition);
-                      receivedChunkIndices.add(chunkIndex);
-                      totalDecryptedBytes += decryptedChunk.length;
-
-                      setState((s) => ({
-                        ...s,
-                        status: 'receiving',
-                        progress: {
-                          current: totalDecryptedBytes,
-                          total: resolvedFileSize,
-                        },
-                      }));
-                    } catch (err) {
-                      console.error('Failed to decrypt chunk:', err);
-                    }
-                  })();
-                  pendingChunkPromises.add(decryptPromise);
-                  void decryptPromise.finally(() => {
-                    pendingChunkPromises.delete(decryptPromise);
-                  });
-                }
+                if (settled) return;
+                receiver.onMessage(data);
               },
             );
             return rtc;
@@ -573,15 +469,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       if (cancelledRef.current) return;
 
-      // Send completion ACK
-      const completeAck = await createAuthenticatedAckEvent(
-        secretKey,
-        senderPubkey,
-        transferId,
-        -1,
-        keys.signals,
-      );
-      await client.publish(completeAck);
+      // Completion is confirmed to the sender via the data-channel ACK sent when
+      // receiver.done resolved; no relay event is published post-transfer.
 
       // Set received content
       setReceivedContent({

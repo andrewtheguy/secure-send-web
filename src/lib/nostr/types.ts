@@ -78,7 +78,7 @@ export interface PinExchangePayload {
 // ACK payload
 export interface AckData {
   transferId: string;
-  seq: number; // -1 for final completion ACK, 0 for ready, N for chunk N ACK (1-based)
+  seq: number; // Current flow emits 0 for receiver ready; completion is data-channel ACK.
 }
 
 /**

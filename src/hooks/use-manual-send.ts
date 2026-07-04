@@ -2,8 +2,6 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   deriveAESKeyFromSecretKey,
   deriveSharedSecretKey,
-  ENCRYPTION_CHUNK_SIZE,
-  encryptChunk,
   generateECDHKeyPair,
   generateSalt,
   MAX_MESSAGE_SIZE,
@@ -16,6 +14,7 @@ import {
   parseMutualPayload,
   type SignalingPayload,
 } from '@/lib/manual-signaling';
+import { sendFileOverDataChannel } from '@/lib/p2p-transfer';
 import { WebRTCConnection } from '@/lib/webrtc';
 import { getWebRTCConfig } from '@/lib/webrtc-config';
 
@@ -77,7 +76,6 @@ export interface UseManualSendReturn {
 
 const ICE_GATHER_TIMEOUT_MS = 5000;
 const MANUAL_CONNECTION_TIMEOUT_MS = 120000;
-const ACK_TIMEOUT_MS = 30000;
 
 export function useManualSend(): UseManualSendReturn {
   const [state, setState] = useState<ManualTransferState>({ status: 'idle' });
@@ -448,58 +446,17 @@ export function useManualSend(): UseManualSendReturn {
           fileMetadata: { fileName, fileSize, mimeType },
         });
 
-        // Send data in encrypted chunks
-        let chunkIndex = 0;
-        for (let i = 0; i < contentBytes.length; i += ENCRYPTION_CHUNK_SIZE) {
-          if (cancelledRef.current) throw new Error('Cancelled');
-
-          const end = Math.min(i + ENCRYPTION_CHUNK_SIZE, contentBytes.length);
-          const plainChunk = contentBytes.slice(i, end);
-
-          // Encrypt this chunk with chunk index prefix
-          const encryptedChunk = await encryptChunk(
-            key,
-            plainChunk,
-            chunkIndex,
-          );
-
-          await rtc.sendWithBackpressure(encryptedChunk);
-
-          chunkIndex++;
-
-          setState({
-            status: 'transferring',
-            message: 'Sending via P2P...',
-            progress: { current: end, total: contentBytes.length },
-            contentType: 'file',
-            fileMetadata: { fileName, fileSize, mimeType },
-          });
-        }
-
-        // Send done signal with chunk count
-        const totalChunks = Math.ceil(
-          contentBytes.length / ENCRYPTION_CHUNK_SIZE,
-        );
-        rtc.send(`DONE:${totalChunks}`);
-
-        // Wait for acknowledgment
-        await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error('Timeout waiting for acknowledgment'));
-          }, ACK_TIMEOUT_MS);
-
-          const dc = rtc.getDataChannel();
-          if (!dc) {
-            clearTimeout(timeout);
-            reject(new Error('Data channel unavailable'));
-            return;
-          }
-          dc.onmessage = (event) => {
-            if (event.data === 'ACK') {
-              clearTimeout(timeout);
-              resolve();
-            }
-          };
+        // Send data in encrypted chunks and wait for the receiver's ACK.
+        await sendFileOverDataChannel(rtc, key, contentBytes, {
+          onProgress: (current, total) =>
+            setState({
+              status: 'transferring',
+              message: 'Sending via P2P...',
+              progress: { current, total },
+              contentType: 'file',
+              fileMetadata: { fileName, fileSize, mimeType },
+            }),
+          isCancelled: () => cancelledRef.current,
         });
 
         setState({

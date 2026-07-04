@@ -14,7 +14,7 @@ Manual mode is useful when:
 
 In Manual mode, the sender's offer is split across multiple QR codes. The receiver scans one QR code to open the app, then scans the rest in-app.
 Each QR opens the receive route using fragment format (`/r#...`), and the full payload is integrity-checked before transfer starts.
-The QR payload carries signaling metadata needed to connect the devices. Treat it as shareable only with the intended receiver.
+The QR payload carries signaling metadata needed to connect the devices. Treat it as shareable only with the intended receiver. File bytes are sent later over WebRTC using the shared Secure Send data-channel protocol: encrypted chunks, `DONE:<chunkCount>`, then a receiver `ACK` after authentication and reassembly.
 
 ## Step-by-Step
 
@@ -32,7 +32,7 @@ The QR payload carries signaling metadata needed to connect the devices. Treat i
 2. Your phone shows a link notification — tap it to open the app
 3. The app opens and shows your collection progress ("Collected 1 of N")
 4. The in-app camera activates automatically — scan the remaining QR codes one by one
-5. Once all codes are collected, the app automatically starts the transfer
+5. Once all codes are collected, the app validates the offer and generates a response
 6. A response QR code appears on your screen — show it to the sender
 
 ### Back to Sender
@@ -59,3 +59,4 @@ The QR payload carries signaling metadata needed to connect the devices. Treat i
 | "Camera access denied" in-app | Allow camera permissions in your browser settings and reload the page. |
 | Transfer fails after all chunks collected | Both devices must have network connectivity to each other (same Wi-Fi, or both on the internet). |
 | Sender shows expired error | Generate a new offer by retrying the send flow. |
+| Sender times out after sending | Keep the receiver page open until it verifies the file and sends the final data-channel ACK. |
