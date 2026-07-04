@@ -24,6 +24,7 @@ import {
   encryptChunk,
   parseChunkMessage,
 } from '@/lib/crypto';
+import { P2PConnectionError } from '@/lib/errors';
 import type { WebRTCConnection } from '@/lib/webrtc';
 
 /** Control-message tokens exchanged over the data channel. */
@@ -33,6 +34,26 @@ export const ACK = 'ACK';
 
 /** Maximum time the sender waits for the receiver's ACK. */
 export const ACK_TIMEOUT_MS = 30000;
+
+/**
+ * Idle/stall timeout for an in-flight transfer. This is a per-activity window,
+ * not an overall deadline: each chunk sent (sender) or message received
+ * (receiver) resets it, so an arbitrarily large but steadily-progressing
+ * transfer never trips it, while a peer that goes quiet mid-stream aborts after
+ * this span instead of hanging.
+ */
+export const STALL_TIMEOUT_MS = 60000;
+
+/**
+ * Coerce a caller-supplied stall timeout to a safe value. A zero, negative,
+ * NaN or non-finite window would arm a watchdog that fires immediately (or
+ * never), so fall back to the default in those cases.
+ */
+function resolveStallTimeoutMs(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : STALL_TIMEOUT_MS;
+}
 
 /**
  * The chunk index is a 2-byte big-endian field on the wire, so a transfer can
@@ -46,11 +67,23 @@ export interface SendOptions {
   onProgress?: (current: number, total: number) => void;
   /** Return true to abort the transfer between chunks. */
   isCancelled?: () => boolean;
+  /**
+   * Idle window in ms for a single chunk send. If the receiver stops draining
+   * the channel and one chunk cannot be handed off within this span, the
+   * transfer aborts. Defaults to STALL_TIMEOUT_MS.
+   */
+  stallTimeoutMs?: number;
 }
 
 export interface ReceiverOptions {
   /** Called after each chunk with cumulative decrypted bytes and the total. */
   onProgress?: (current: number, total: number) => void;
+  /**
+   * Idle window in ms: once `start()` is called, the transfer aborts if no
+   * data-channel message arrives within this span. Every message resets it.
+   * Defaults to STALL_TIMEOUT_MS.
+   */
+  stallTimeoutMs?: number;
 }
 
 export interface DataChannelReceiver {
@@ -58,6 +91,16 @@ export interface DataChannelReceiver {
   onMessage: (data: string | ArrayBuffer) => void;
   /** Resolves with the fully reassembled plaintext, or rejects on any error. */
   done: Promise<Uint8Array>;
+  /**
+   * Arm the stall watchdog. Call once the data channel is open and data should
+   * begin flowing; every subsequent message resets the idle window.
+   */
+  start: () => void;
+  /**
+   * Stop the stall watchdog and make the receiver inert. Call from a hook's own
+   * cancel path so the timer does not outlive an abandoned transfer.
+   */
+  dispose: () => void;
 }
 
 /**
@@ -71,6 +114,7 @@ export async function sendFileOverDataChannel(
   opts: SendOptions = {},
 ): Promise<void> {
   const { onProgress, isCancelled } = opts;
+  const stallTimeoutMs = resolveStallTimeoutMs(opts.stallTimeoutMs);
   const total = contentBytes.length;
   const totalChunks = Math.ceil(total / ENCRYPTION_CHUNK_SIZE);
   if (totalChunks > MAX_CHUNKS) {
@@ -85,7 +129,13 @@ export async function sendFileOverDataChannel(
     // subarray is a zero-copy view; encryptChunk reads it synchronously.
     const plainChunk = contentBytes.subarray(i, end);
     const encryptedChunk = await encryptChunk(key, plainChunk, chunkIndex);
-    await rtc.sendWithBackpressure(encryptedChunk);
+    // A single chunk that cannot be handed off within the idle window means the
+    // receiver has stopped draining the channel; abort rather than block here.
+    await withStallTimeout(
+      rtc.sendWithBackpressure(encryptedChunk),
+      stallTimeoutMs,
+      `Transfer stalled: receiver stopped accepting data within ${Math.round(stallTimeoutMs / 1000)}s`,
+    );
     chunkIndex++;
 
     onProgress?.(end, total);
@@ -94,6 +144,35 @@ export async function sendFileOverDataChannel(
   rtc.send(`${DONE_PREFIX}${totalChunks}`);
 
   await waitForAckMessage(rtc);
+}
+
+/**
+ * Reject with a P2PConnectionError if `promise` has not settled within `ms`.
+ *
+ * The pending `promise` is left to settle on its own after a timeout; its
+ * outcome is still consumed here (so it never surfaces as an unhandled
+ * rejection) but is ignored once the stall has already been reported.
+ */
+function withStallTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  message: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new P2PConnectionError(message));
+    }, ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 function waitForAckMessage(rtc: WebRTCConnection): Promise<void> {
@@ -166,6 +245,7 @@ export function createDataChannelReceiver(
   opts: ReceiverOptions = {},
 ): DataChannelReceiver {
   const { onProgress } = opts;
+  const stallTimeoutMs = resolveStallTimeoutMs(opts.stallTimeoutMs);
 
   // Validate the untrusted advertised size before allocating or processing.
   if (!Number.isInteger(totalBytes) || totalBytes < 0) {
@@ -186,6 +266,14 @@ export function createDataChannelReceiver(
   let totalDecryptedBytes = 0;
   let settled = false;
 
+  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearStallTimer = () => {
+    if (stallTimer !== null) {
+      clearTimeout(stallTimer);
+      stallTimer = null;
+    }
+  };
+
   let resolveDone!: (value: Uint8Array) => void;
   let rejectDone!: (error: Error) => void;
   const done = new Promise<Uint8Array>((resolve, reject) => {
@@ -196,7 +284,28 @@ export function createDataChannelReceiver(
   const fail = (error: Error) => {
     if (settled) return;
     settled = true;
+    clearStallTimer();
     rejectDone(error);
+  };
+
+  // Arm (or reset) the idle watchdog: no message within the window aborts the
+  // transfer. `start()` and every incoming message call this.
+  const armStallTimer = () => {
+    if (settled) return;
+    clearStallTimer();
+    stallTimer = setTimeout(() => {
+      fail(
+        new P2PConnectionError(
+          `Transfer stalled: no data received within ${Math.round(stallTimeoutMs / 1000)}s`,
+        ),
+      );
+    }, stallTimeoutMs);
+  };
+
+  const dispose = () => {
+    // Make the receiver inert so a late message cannot re-arm the timer.
+    settled = true;
+    clearStallTimer();
   };
 
   const handleChunk = (data: ArrayBuffer) => {
@@ -236,6 +345,9 @@ export function createDataChannelReceiver(
       receivedIndices.add(chunkIndex);
 
       const decryptedChunk = await decryptChunk(key, encryptedData, chunkIndex);
+      // The flow may have ended (completed, failed or disposed) while this
+      // decrypt was in flight; skip all side effects, including onProgress.
+      if (settled) return;
       if (decryptedChunk.length !== expectedPlaintextLength) {
         throw new Error(
           `Invalid chunk ${chunkIndex} length: expected ${expectedPlaintextLength}, got ${decryptedChunk.length}`,
@@ -287,11 +399,15 @@ export function createDataChannelReceiver(
     }
 
     settled = true;
+    clearStallTimer();
     resolveDone(buffer);
   };
 
   const onMessage = (data: string | ArrayBuffer) => {
     if (settled) return;
+
+    // Any message is activity; reset the idle watchdog before dispatching.
+    armStallTimer();
 
     if (typeof data === 'string') {
       if (data.startsWith(DONE_PREFIX)) {
@@ -318,5 +434,5 @@ export function createDataChannelReceiver(
     }
   };
 
-  return { onMessage, done };
+  return { onMessage, done, start: armStallTimer, dispose };
 }

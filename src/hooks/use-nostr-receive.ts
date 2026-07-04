@@ -29,6 +29,13 @@ import type { PinKeyMaterial, ReceivedContent } from '@/lib/types';
 import { WebRTCConnection } from '@/lib/webrtc';
 import { getWebRTCConfig } from '@/lib/webrtc-config';
 
+/**
+ * Time to establish the WebRTC data channel after the ready ACK is published.
+ * Bounds the pre-open phase, which the per-transfer stall watchdog does not
+ * cover (it only arms once the channel opens). Mirrors the sender's timeout.
+ */
+const P2P_CONNECTION_TIMEOUT_MS = 30000;
+
 export interface UseNostrReceiveReturn {
   state: TransferState;
   receivedContent: ReceivedContent | null;
@@ -302,27 +309,41 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           );
 
           let cancelPoll: ReturnType<typeof setInterval> | null = null;
+          let dataChannelOpened = false;
+          let connectionTimeout: ReturnType<typeof setTimeout> | null = null;
+          const clearConnectionTimeout = () => {
+            if (connectionTimeout) {
+              clearTimeout(connectionTimeout);
+              connectionTimeout = null;
+            }
+          };
 
-          const overallTimeout = setTimeout(
-            () => {
-              if (!settled) {
-                settled = true;
-                if (cancelPoll) clearInterval(cancelPoll);
-                if (rtc) rtc.close();
-                client.unsubscribe(subId);
-                reject(new P2PConnectionError('Transfer timeout'));
-              }
-            },
-            10 * 60 * 1000,
-          );
+          // Bound the pre-open phase: the stall watchdog only arms once the data
+          // channel opens, so a sender that never completes WebRTC would leave
+          // receiver.done unresolved without this. Cleared the moment the channel
+          // opens (see below), on cancel, and on success/failure.
+          connectionTimeout = setTimeout(() => {
+            if (settled || dataChannelOpened) return;
+            settled = true;
+            if (cancelPoll) clearInterval(cancelPoll);
+            client.unsubscribe(subId);
+            try {
+              if (rtc) rtc.close();
+            } catch {
+              // ignore
+            }
+            reject(new P2PConnectionError('WebRTC connection timeout'));
+          }, P2P_CONNECTION_TIMEOUT_MS);
 
           // cancel() only flips cancelledRef and closes the relay client; rtc is
           // local to this Promise and unreachable from there. Poll so a cancel
           // always settles the wait, even when rtc cannot be closed by cancel().
+          // A stalled stream is aborted by the receiver's own idle watchdog.
           cancelPoll = setInterval(() => {
             if (cancelledRef.current && !settled) {
               settled = true;
-              clearTimeout(overallTimeout);
+              clearConnectionTimeout();
+              receiver.dispose();
               if (cancelPoll) clearInterval(cancelPoll);
               client.unsubscribe(subId);
               try {
@@ -338,7 +359,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             .then((result) => {
               if (settled) return;
               settled = true;
-              clearTimeout(overallTimeout);
+              clearConnectionTimeout();
               if (cancelPoll) clearInterval(cancelPoll);
               client.unsubscribe(subId);
               // The file is fully received; a failure to send the ACK or tear
@@ -356,7 +377,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             .catch((err) => {
               if (settled) return;
               settled = true;
-              clearTimeout(overallTimeout);
+              clearConnectionTimeout();
               if (cancelPoll) clearInterval(cancelPoll);
               client.unsubscribe(subId);
               try {
@@ -388,6 +409,11 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 await client.publish(event);
               },
               () => {
+                // Data channel opened; the idle watchdog covers the receiving
+                // stage from here on, replacing the pre-open connection timeout.
+                dataChannelOpened = true;
+                clearConnectionTimeout();
+                receiver.start();
                 setState((s) => ({
                   ...s,
                   message: 'Receiving via P2P...',
