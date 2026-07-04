@@ -301,10 +301,13 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             },
           );
 
+          let cancelPoll: ReturnType<typeof setInterval> | null = null;
+
           const overallTimeout = setTimeout(
             () => {
               if (!settled) {
                 settled = true;
+                if (cancelPoll) clearInterval(cancelPoll);
                 if (rtc) rtc.close();
                 client.unsubscribe(subId);
                 reject(new P2PConnectionError('Transfer timeout'));
@@ -313,15 +316,40 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             10 * 60 * 1000,
           );
 
+          // cancel() only flips cancelledRef and closes the relay client; rtc is
+          // local to this Promise and unreachable from there. Poll so a cancel
+          // always settles the wait, even when rtc cannot be closed by cancel().
+          cancelPoll = setInterval(() => {
+            if (cancelledRef.current && !settled) {
+              settled = true;
+              clearTimeout(overallTimeout);
+              if (cancelPoll) clearInterval(cancelPoll);
+              client.unsubscribe(subId);
+              try {
+                if (rtc) rtc.close();
+              } catch {
+                // ignore
+              }
+              reject(new Error('Cancelled'));
+            }
+          }, 250);
+
           receiver.done
             .then((result) => {
               if (settled) return;
               settled = true;
               clearTimeout(overallTimeout);
+              if (cancelPoll) clearInterval(cancelPoll);
               client.unsubscribe(subId);
-              if (rtc) {
-                rtc.send('ACK');
-                rtc.close();
+              // The file is fully received; a failure to send the ACK or tear
+              // down rtc must not prevent the Promise from settling.
+              try {
+                if (rtc) {
+                  rtc.send('ACK');
+                  rtc.close();
+                }
+              } catch (e) {
+                console.error('ACK/teardown error', e);
               }
               resolve(result);
             })
@@ -329,8 +357,13 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               if (settled) return;
               settled = true;
               clearTimeout(overallTimeout);
+              if (cancelPoll) clearInterval(cancelPoll);
               client.unsubscribe(subId);
-              if (rtc) rtc.close();
+              try {
+                if (rtc) rtc.close();
+              } catch {
+                // ignore
+              }
               reject(err instanceof Error ? err : new Error('Transfer failed'));
             });
 

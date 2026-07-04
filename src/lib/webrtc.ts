@@ -314,7 +314,9 @@ export class WebRTCConnection {
         }, 100);
         dc.addEventListener('bufferedamountlow', onLow);
       });
-      if (this.dataChannel.readyState !== 'open') return;
+      if (this.dataChannel.readyState !== 'open') {
+        throw new Error('Data channel closed before send completed');
+      }
     }
 
     this.sendData(data);

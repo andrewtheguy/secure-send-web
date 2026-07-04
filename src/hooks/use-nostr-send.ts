@@ -390,6 +390,15 @@ export function useNostrSend(): UseNostrSendReturn {
                   resolve();
                 } catch (err) {
                   reject(err);
+                } finally {
+                  // The local peer connection is scoped to this Promise and is
+                  // not reachable from the outer catch/finally, so close it here
+                  // on success, error, or cancellation to avoid leaking it.
+                  try {
+                    rtc.close();
+                  } catch {
+                    // ignore
+                  }
                 }
               },
               () => {
