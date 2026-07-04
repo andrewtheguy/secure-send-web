@@ -46,7 +46,7 @@ flowchart TD
         M1 --> M2
     end
 
-    N2 --> Channel[Open WebRTC data channel]
+    N2 --> Channel[Unified transfer inputs ready:<br/>open WebRTC data channel + CryptoKey]
     M2 --> Channel
 
     Channel --> Transfer[Unified transfer layer<br/>src/lib/p2p-transfer.ts]
@@ -56,9 +56,9 @@ flowchart TD
     Verify --> Ack[Data-channel ACK]
 ```
 
-The key source is still mode-specific: Nostr uses the PIN-derived `p2p-content` AES key, while Manual Exchange uses an ECDH-derived AES key. The chunk format, validation rules, `DONE:<chunkCount>` terminator, and final `ACK` are identical.
+The only mode-specific difference at the convergence point is how setup produced the opaque `CryptoKey`: Nostr derives it as the PIN-based `p2p-content` key, while Manual Exchange derives it from ECDH. `src/lib/p2p-transfer.ts` receives that key plus an open data channel and then runs the same chunk encryption, validation, `DONE:<chunkCount>` terminator, and final `ACK` flow for every signaling method.
 
-### Nostr Mode - P2P Success Path (Preferred)
+### Nostr Mode - Signaling Setup
 ```mermaid
 sequenceDiagram
     participant Sender
@@ -67,11 +67,7 @@ sequenceDiagram
     Receiver-->>Sender: Authenticated Ready ACK (seq=0)
     Sender->>Receiver: WebRTC Offer
     Receiver-->>Sender: WebRTC Answer
-    Note over Sender,Receiver: Method-specific signaling ends when the WebRTC data channel opens
-    Note over Sender,Receiver: Unified transfer phase: src/lib/p2p-transfer.ts
-    Sender->>Receiver: Encrypted chunks + DONE:N
-    Receiver-->>Sender: Data-channel ACK after auth/reassembly
-    Note over Sender,Receiver: No Nostr completion event after WebRTC opens
+    Sender->>Receiver: WebRTC data channel opens
 ```
 
 ### Nostr Mode - P2P Connection Failure
@@ -85,7 +81,7 @@ sequenceDiagram
     Note over Sender,Receiver: Transfer fails — UI suggests offline-QR app
 ```
 
-### Manual Exchange Mode (No Internet Required)
+### Manual Exchange Mode - Signaling Setup
 ```mermaid
 sequenceDiagram
     participant Sender
@@ -100,11 +96,7 @@ sequenceDiagram
     Receiver->>Receiver: Create WebRTC answer
     Receiver-->>Sender: Display Answer QR (single binary QR)
     Sender->>Receiver: Process answer, establish WebRTC
-    Note over Sender,Receiver: Method-specific signaling ends when the WebRTC data channel opens
-    Note over Sender,Receiver: Unified transfer phase: src/lib/p2p-transfer.ts
-    Sender->>Receiver: Encrypted chunks + DONE:N
-    Receiver-->>Sender: Data-channel ACK after auth/reassembly
-    Note over Sender,Receiver: If P2P connection fails, transfer fails (no server fallback)
+    Sender->>Receiver: WebRTC data channel opens
 ```
 
 **Requirements:**
@@ -447,7 +439,7 @@ Handles direct peer-to-peer connections using WebRTC data channels.
 
 ### Unified Transfer Layer
 
-Both signaling methods (Nostr, Manual Exchange) share the same encrypted chunk framing for P2P file content. The key source differs: Nostr uses the PIN-derived `p2p-content` AES key, while Manual Exchange uses an ECDH-derived AES key.
+Both signaling methods (Nostr, Manual Exchange) enter the same transfer code path with an open WebRTC data channel and an already-derived AES-GCM `CryptoKey`. The key is prepared during setup (PIN-derived `p2p-content` for Nostr, ECDH-derived for Manual), but the unified transfer layer treats it as an opaque AES key and uses the same encrypted chunk framing for file content.
 
 **Why encrypt when WebRTC provides DTLS?**
 - **Defense in depth**: Multiple encryption layers protect against implementation bugs
