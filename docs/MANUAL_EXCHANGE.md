@@ -1,0 +1,107 @@
+# Manual Exchange Mode Guide
+
+This guide is intentionally high-level and user-focused.
+For protocol internals, signaling payload format, and implementation details, see `docs/ARCHITECTURE.md`.
+
+## What Manual Exchange Is
+
+Manual Exchange is the no-server signaling mode. Instead of a relay coordinating the
+two devices, **you** carry the connection data between them by hand — using **QR codes**,
+**copy/paste**, or a mix of the two. The two methods are interchangeable at every step:
+either side can scan or paste, whichever is more convenient.
+
+Once the two devices are connected, file bytes are sent directly peer-to-peer over WebRTC
+using the shared Secure Send data-channel protocol (encrypted 128KB chunks, `DONE:<chunkCount>`,
+then a receiver `ACK` after every chunk has authenticated and reassembled).
+
+## When to Use This
+
+Manual mode is useful when:
+- You want to transfer files between two devices on the same local network without internet
+- You prefer not to use any signaling server
+- You want no signaling server involved; the QR/clipboard signaling payload is only obfuscated, while file data is encrypted after the exchange
+
+## How It Works
+
+The two devices swap two small pieces of connection data:
+
+1. **Offer** — sender → receiver
+2. **Answer** — receiver → sender
+
+Each piece can be transferred **either** as QR code(s) **or** as copied text — the receiver
+can scan the offer or paste it, and the sender can scan the answer or paste it. Mixing works
+too (e.g. QR one direction, copy/paste the other).
+
+- **As QR codes:** The sender's offer is larger, so it is split across **multiple QR codes**
+  (typically 2-4, each labeled "1 of N"). The receiver's answer is smaller and fits in a
+  **single QR code**. QR codes are scanned with a phone camera / the in-app scanner.
+- **As copy/paste:** Each side offers a **Copy Data** button that puts a base64 text blob on
+  the clipboard for the other person to paste. If the browser can't access the clipboard
+  (insecure context or in-app browser), use **Show text to copy manually** to select the text
+  yourself.
+
+The signaling data carries what the two devices need to find and connect to each other. Treat
+it as shareable only with your intended recipient. When the offer is reassembled from QR codes,
+it is error-checked (a CRC over the offer) before use — this only guards against a misread or
+garbled QR code and is **separate** from the file's cryptographic integrity, which is enforced
+later over WebRTC by per-chunk AES-GCM authentication.
+
+## Step-by-Step
+
+### Sender — present the offer
+
+1. Open the app and select your file(s)
+2. Under **Transfer mode**, select **Manual Exchange mode**
+3. Click **Start Manual Exchange**
+4. The sender's offer appears as **a grid of QR codes** (typically 2-4, labeled "1 of N"),
+   with a **Copy Data** button beneath them
+5. Give the offer to the receiver by **either** method:
+   - **QR:** tell them to scan any one QR code with their phone camera, then the rest in-app
+   - **Copy/paste:** tap **Copy Data** and send the text to them (or **Show text to copy
+     manually** if the copy button doesn't work), for them to paste on their device
+
+### Receiver — take the offer, return an answer
+
+1. On the `/receive` page, choose **Manual Exchange mode** and click **Start Receive**
+2. Take in the sender's offer by **either** method:
+   - **Scan tab:** point the camera at any one of the sender's QR codes, tap the link to open
+     the app if needed, then scan the remaining codes one by one (progress shows "Collected 1 of N")
+   - **Paste tab:** paste the copied offer text
+3. Once the full offer is collected, the app validates it and generates your **answer**
+4. Your answer appears as a **single QR code** with a **Copy Data** button
+5. Send the answer back to the sender by **either** method — show the QR code, or copy/paste
+   the text the same way
+
+### Back to Sender — connect
+
+1. Take in the receiver's answer by **either** method — scan the response QR with the in-app
+   scanner, or paste the copied response text
+2. The P2P connection establishes and the file transfers directly
+3. Both sides show "Transfer Complete" when done
+
+## Tips
+
+- **QR and copy/paste are interchangeable**: Pick whichever is easier at each step; you can mix them
+- **Order doesn't matter (QR)**: Multi-QR offer codes can be scanned in any order
+- **Duplicates are fine (QR)**: Scanning the same QR code twice won't cause issues
+- **Copy/paste fallback**: If cameras aren't available, use **Copy Data** on the sending side and
+  the **Paste** tab on the receiving side. If the clipboard is blocked, use **Show text to copy
+  manually** to select the text by hand
+- **Single QR**: Very small offers may produce just one QR code — the flow still works the same way
+- **Same network required**: Without internet, both devices must be on the same Wi-Fi or local
+  network. With internet, STUN enables connections across different networks
+- **Deployment path**: Host at domain root (for example `https://example.com`). Subpath
+  deployments (for example `https://example.com/my-app`) can break scanned QR links
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Phone camera doesn't show a link | Make sure the QR code is well-lit and in focus. The QR contains a URL that your phone should recognize. |
+| App doesn't open from the link | Confirm the app is deployed at domain root (no subpath). Then retry scanning and open the link again. |
+| "Camera access denied" in-app | Allow camera permissions in your browser settings and reload the page. Or switch to the **Paste** tab and use copy/paste instead. |
+| Copy button does nothing | Some browsers block clipboard access. Use **Show text to copy manually** and select the text by hand. |
+| Pasted data is rejected | Make sure you copied the entire blob and pasted the matching piece (offer to the receiver, answer to the sender). |
+| Transfer fails after the offer is collected | Both devices must have network connectivity to each other (same Wi-Fi, or both on the internet). |
+| Sender shows expired error | Generate a new offer by retrying the send flow. |
+| Sender times out after sending | Keep the receiver page open until it verifies the file and sends the final data-channel ACK. |
