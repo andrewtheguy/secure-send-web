@@ -28,7 +28,8 @@ import type { WebRTCConnection } from '@/lib/webrtc';
 
 /** Control-message tokens exchanged over the data channel. */
 const DONE_PREFIX = 'DONE:';
-const ACK = 'ACK';
+/** Canonical acknowledgement token; receive hooks send this exact value. */
+export const ACK = 'ACK';
 
 /** Maximum time the sender waits for the receiver's ACK. */
 export const ACK_TIMEOUT_MS = 30000;

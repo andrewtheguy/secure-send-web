@@ -13,7 +13,7 @@ import {
   type SignalingPayload,
 } from '@/lib/manual-signaling';
 import type { TransferState } from '@/lib/nostr';
-import { createDataChannelReceiver } from '@/lib/p2p-transfer';
+import { ACK, createDataChannelReceiver } from '@/lib/p2p-transfer';
 import type { ReceivedContent } from '@/lib/types';
 import { WebRTCConnection } from '@/lib/webrtc';
 import { getWebRTCConfig } from '@/lib/webrtc-config';
@@ -430,7 +430,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       if (cancelledRef.current) return;
 
       // Acknowledge only after all chunks authenticate and reassemble.
-      rtc.send('ACK');
+      rtc.send(ACK);
 
       // Set received content
       setReceivedContent({

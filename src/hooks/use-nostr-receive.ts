@@ -24,7 +24,7 @@ import {
   parseSignalingEvent,
   type TransferState,
 } from '@/lib/nostr';
-import { createDataChannelReceiver } from '@/lib/p2p-transfer';
+import { ACK, createDataChannelReceiver } from '@/lib/p2p-transfer';
 import type { PinKeyMaterial, ReceivedContent } from '@/lib/types';
 import { WebRTCConnection } from '@/lib/webrtc';
 import { getWebRTCConfig } from '@/lib/webrtc-config';
@@ -345,7 +345,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               // down rtc must not prevent the Promise from settling.
               try {
                 if (rtc) {
-                  rtc.send('ACK');
+                  rtc.send(ACK);
                   rtc.close();
                 }
               } catch (e) {
