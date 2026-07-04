@@ -33,6 +33,13 @@ const ACK = 'ACK';
 /** Maximum time the sender waits for the receiver's ACK. */
 export const ACK_TIMEOUT_MS = 30000;
 
+/**
+ * The chunk index is a 2-byte big-endian field on the wire, so a transfer can
+ * span at most 65536 chunks (indices 0-65535). Totals beyond this cannot be
+ * represented and are rejected before any allocation or processing.
+ */
+const MAX_CHUNKS = 0x10000; // 65536
+
 export interface SendOptions {
   /** Called after each chunk with cumulative bytes sent and the total. */
   onProgress?: (current: number, total: number) => void;
@@ -65,6 +72,9 @@ export async function sendFileOverDataChannel(
   const { onProgress, isCancelled } = opts;
   const total = contentBytes.length;
   const totalChunks = Math.ceil(total / ENCRYPTION_CHUNK_SIZE);
+  if (totalChunks > MAX_CHUNKS) {
+    throw new Error('File too large for the transfer chunk-index range');
+  }
 
   let chunkIndex = 0;
   for (let i = 0; i < total; i += ENCRYPTION_CHUNK_SIZE) {
@@ -92,10 +102,16 @@ function waitForAckMessage(rtc: WebRTCConnection): Promise<void> {
       reject(new Error('Data channel unavailable'));
       return;
     }
+    if (dc.readyState !== 'open') {
+      reject(new Error('Data channel closed before acknowledgment'));
+      return;
+    }
 
     let settled = false;
     const cleanup = () => {
       dc.removeEventListener('message', onMessage);
+      dc.removeEventListener('close', onClose);
+      dc.removeEventListener('error', onError);
       clearTimeout(timeout);
     };
     const onMessage = (event: MessageEvent) => {
@@ -105,6 +121,20 @@ function waitForAckMessage(rtc: WebRTCConnection): Promise<void> {
         cleanup();
         resolve();
       }
+    };
+    // A close/error means the ACK can never arrive, so fail immediately instead
+    // of waiting out ACK_TIMEOUT_MS.
+    const onClose = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('Data channel closed before acknowledgment'));
+    };
+    const onError = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('Data channel error while waiting for acknowledgment'));
     };
     const timeout = setTimeout(() => {
       if (settled) return;
@@ -116,6 +146,8 @@ function waitForAckMessage(rtc: WebRTCConnection): Promise<void> {
     // addEventListener (not .onmessage) so this coexists with the connection's
     // own message handler.
     dc.addEventListener('message', onMessage);
+    dc.addEventListener('close', onClose);
+    dc.addEventListener('error', onError);
   });
 }
 
@@ -134,8 +166,16 @@ export function createDataChannelReceiver(
 ): DataChannelReceiver {
   const { onProgress } = opts;
 
-  const buffer = new Uint8Array(totalBytes);
+  // Validate the untrusted advertised size before allocating or processing.
+  if (!Number.isInteger(totalBytes) || totalBytes < 0) {
+    throw new Error('Invalid transfer size');
+  }
   const expectedChunks = Math.ceil(totalBytes / ENCRYPTION_CHUNK_SIZE);
+  if (expectedChunks > MAX_CHUNKS) {
+    throw new Error('Transfer size exceeds the supported chunk-index range');
+  }
+
+  const buffer = new Uint8Array(totalBytes);
   const expectedEncryptedBytes =
     totalBytes + expectedChunks * ENCRYPTED_CHUNK_OVERHEAD;
 
@@ -190,6 +230,10 @@ export function createDataChannelReceiver(
         throw new Error('Transfer exceeds advertised size');
       }
 
+      // Claim the index now, before the async decrypt, so a duplicate arriving
+      // while decryptChunk is still pending is rejected by the check above.
+      receivedIndices.add(chunkIndex);
+
       const decryptedChunk = await decryptChunk(key, encryptedData, chunkIndex);
       if (decryptedChunk.length !== expectedPlaintextLength) {
         throw new Error(
@@ -201,7 +245,6 @@ export function createDataChannelReceiver(
       }
 
       buffer.set(decryptedChunk, writePosition);
-      receivedIndices.add(chunkIndex);
       totalDecryptedBytes += decryptedChunk.length;
 
       onProgress?.(totalDecryptedBytes, totalBytes);
@@ -251,7 +294,14 @@ export function createDataChannelReceiver(
 
     if (typeof data === 'string') {
       if (data.startsWith(DONE_PREFIX)) {
-        void handleDone(parseInt(data.slice(DONE_PREFIX.length), 10));
+        const countStr = data.slice(DONE_PREFIX.length);
+        // Only accept a pure-digit count; parseInt would silently accept
+        // trailing junk (e.g. "5x") and truncate to a valid-looking number.
+        if (!/^\d+$/.test(countStr)) {
+          fail(new Error('Invalid DONE message: non-numeric chunk count'));
+          return;
+        }
+        void handleDone(parseInt(countStr, 10));
       } else if (data === 'DONE') {
         fail(
           new Error(
