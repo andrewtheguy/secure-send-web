@@ -316,10 +316,13 @@ export function SendTransferPage() {
                         <span className="font-medium text-foreground">
                           Copy &amp; paste:
                         </span>{' '}
-                        tap <strong>Copy Data</strong> below the codes, send the
-                        text to the receiver over any trusted channel (an
-                        end-to-end encrypted chat, AirDrop, etc.), and they
-                        paste it on their device.
+                        tap <strong>Copy Data</strong> below the codes, then
+                        send the copied text to the receiver over any trusted
+                        channel (an end-to-end encrypted chat, AirDrop, etc.)
+                        for them to paste on their device. If the button
+                        doesn&apos;t work, use{' '}
+                        <strong>Show text to copy manually</strong> to select
+                        and copy the data yourself.
                       </li>
                     </ul>
                     <p className="text-sm text-muted-foreground">

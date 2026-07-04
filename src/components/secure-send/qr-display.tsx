@@ -1,7 +1,12 @@
-import { AlertCircle, Check, Copy, Loader2 } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, Copy, Loader2 } from 'lucide-react';
 import type * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { Textarea } from '@/components/ui/textarea';
 import { generateMutualClipboardData } from '@/lib/manual-signaling';
 import { generateBinaryQRCode } from '@/lib/qr-utils';
@@ -134,40 +139,41 @@ export function QRDisplay({
 
       {showCopyButton && copyPayload && (
         <div className="flex flex-col items-center gap-2 w-full">
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            {clipboardWriteSupported && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleCopy}
-                className="text-xs"
-              >
-                {copied ? (
-                  <>
-                    <Check className="h-3 w-3 mr-1 text-green-500" />
-                    Copied!
-                  </>
-                ) : (
-                  <>
-                    <Copy className="h-3 w-3 mr-1" />
-                    Copy Data
-                  </>
-                )}
-              </Button>
-            )}
+          {clipboardWriteSupported && (
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              onClick={() => setShowText((v) => !v)}
+              onClick={handleCopy}
               className="text-xs"
-              aria-expanded={showText}
             >
-              {showText ? 'Hide text' : 'Show text'}
+              {copied ? (
+                <>
+                  <Check className="h-3 w-3 mr-1 text-green-500" />
+                  Copied!
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3 w-3 mr-1" />
+                  Copy Data
+                </>
+              )}
             </Button>
-          </div>
+          )}
 
-          {showText && (
-            <div className="w-full space-y-1">
+          <Collapsible
+            open={showText}
+            onOpenChange={setShowText}
+            className="w-full flex flex-col items-center gap-2"
+          >
+            <CollapsibleTrigger className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">
+              <ChevronDown
+                className={`h-3 w-3 transition-transform ${showText ? 'rotate-180' : ''}`}
+              />
+              {clipboardWriteSupported
+                ? "Can't copy? Show text to copy manually"
+                : 'Show text to copy manually'}
+            </CollapsibleTrigger>
+            <CollapsibleContent className="w-full space-y-1">
               <Textarea
                 readOnly
                 value={copyPayload}
@@ -179,12 +185,11 @@ export function QRDisplay({
                 className="w-full font-mono text-xs break-all resize-none"
               />
               <p className="text-xs text-muted-foreground text-center">
-                {clipboardWriteSupported
-                  ? "If Copy Data doesn't work, select all the text above and copy it manually."
-                  : 'Copying is unavailable in this browser — select all the text above and copy it manually.'}
+                Select all the text above, copy it, and send it back to the
+                sender.
               </p>
-            </div>
-          )}
+            </CollapsibleContent>
+          </Collapsible>
         </div>
       )}
     </div>

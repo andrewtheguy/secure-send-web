@@ -423,9 +423,11 @@ export function ReceiveTab() {
                     <span className="font-medium text-foreground">
                       Copy &amp; paste:
                     </span>{' '}
-                    tap <strong>Copy Data</strong> below the code and send the
-                    text back to the sender over the same secure channel; they
-                    paste it to connect.
+                    tap <strong>Copy Data</strong> below the code, then send the
+                    copied text back to the sender over the same secure channel
+                    for them to paste. If the button doesn&apos;t work, use{' '}
+                    <strong>Show text to copy manually</strong> to select and
+                    copy the response yourself.
                   </li>
                 </ul>
                 <p className="text-sm text-muted-foreground">
