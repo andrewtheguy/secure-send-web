@@ -32,6 +32,8 @@ By default, Nostr is used for signaling. QR/Manual exchange is available as an a
 
 Secure Send has two method-specific signaling paths, but only one file-transfer path. Nostr and Manual Exchange differ only until both peers have enough SDP/ICE/key material to open a WebRTC data channel. After that convergence point, both modes call the same shared transfer layer in `src/lib/p2p-transfer.ts`.
 
+### Unified Transfer Flow (All Signaling Methods)
+
 ```mermaid
 flowchart TD
     subgraph Nostr[Nostr setup]
@@ -57,6 +59,8 @@ flowchart TD
 ```
 
 The only mode-specific difference at the convergence point is how setup produced the opaque `CryptoKey`: Nostr derives it as the PIN-based `p2p-content` key, while Manual Exchange derives it from ECDH. `src/lib/p2p-transfer.ts` receives that key plus an open data channel and then runs the same chunk encryption, validation, `DONE:<chunkCount>` terminator, and final `ACK` flow for every signaling method.
+
+### Signaling Setup Diagrams
 
 ### Nostr Mode - Signaling Setup
 ```mermaid
