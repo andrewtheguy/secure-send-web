@@ -6,11 +6,11 @@ Secure Send is a browser-based encrypted file and folder transfer application. I
 
 ## Core Principles
 
-1. **P2P First**: Direct WebRTC connections are always preferred for data transfer.
-2. **Shared P2P Chunk Encryption**: P2P content is encrypted at the application layer using AES-256-GCM in 128KB chunks regardless of transport encryption.
-3. **Shared Data-Channel Protocol**: `src/lib/p2p-transfer.ts` is the single implementation of file transfer over an open WebRTC data channel for both Nostr and Manual Exchange.
+1. **WebRTC-Only File Transfer**: File bytes are transferred only over a direct WebRTC data channel. Nostr and Manual Exchange are signaling methods only; neither carries file content and there is no non-WebRTC transfer path in the app.
+2. **Single Data-Channel Transfer Path**: `src/lib/p2p-transfer.ts` is the only implementation of file transfer once signaling has opened a WebRTC data channel. Both signaling methods converge here before any file bytes are sent.
+3. **Application-Layer Chunk Encryption**: File content is encrypted at the application layer using AES-256-GCM in 128KB chunks regardless of WebRTC DTLS transport encryption.
 4. **Memory-Efficient Receive Path**: Receivers preallocate the expected output buffer from authenticated signaling metadata, then decrypt, authenticate, and write each chunk directly to its indexed position as it arrives.
-5. **Pluggable Signaling**: Signaling (Nostr, QR/clipboard) is decoupled from the transfer layer. The same encrypted chunk framing, `DONE:<chunkCount>` terminator, and data-channel `ACK` are used for file content regardless of signaling method.
+5. **Pluggable Signaling, Fixed Transfer**: Nostr and QR/clipboard flows only exchange setup material: metadata, keys, SDP, and ICE candidates. The encrypted chunk framing, `DONE:<chunkCount>` terminator, and data-channel `ACK` are identical after signaling completes.
 6. **Dual PIN Representation (Nostr mode)**: A 12-character alphanumeric PIN serves as the Nostr shared secret. To improve shareability (e.g., via voice), this PIN can be bijectively mapped to a 7-word sequence from the BIP-39 wordlist.
 
 ## Signaling Methods
@@ -30,6 +30,34 @@ By default, Nostr is used for signaling. QR/Manual exchange is available as an a
 
 ## Transfer Flow
 
+Secure Send has two method-specific signaling paths, but only one file-transfer path. Nostr and Manual Exchange differ only until both peers have enough SDP/ICE/key material to open a WebRTC data channel. After that convergence point, both modes call the same shared transfer layer in `src/lib/p2p-transfer.ts`.
+
+```mermaid
+flowchart TD
+    subgraph Nostr[Nostr setup]
+        N1[PIN exchange event<br/>metadata key]
+        N2[Ready ACK + encrypted WebRTC signals<br/>signals key]
+        N1 --> N2
+    end
+
+    subgraph Manual[Manual setup]
+        M1[QR/clipboard offer<br/>obfuscated SS03 payload]
+        M2[QR/clipboard answer<br/>obfuscated SS03 payload]
+        M1 --> M2
+    end
+
+    N2 --> Channel[Open WebRTC data channel]
+    M2 --> Channel
+
+    Channel --> Transfer[Unified transfer layer<br/>src/lib/p2p-transfer.ts]
+    Transfer --> Chunks[128KB AES-GCM chunks<br/>authenticated chunk index]
+    Chunks --> Done[DONE:&lt;chunkCount&gt;]
+    Done --> Verify[Receiver verifies count, indexes,<br/>sizes, and authentication tags]
+    Verify --> Ack[Data-channel ACK]
+```
+
+The key source is still mode-specific: Nostr uses the PIN-derived `p2p-content` AES key, while Manual Exchange uses an ECDH-derived AES key. The chunk format, validation rules, `DONE:<chunkCount>` terminator, and final `ACK` are identical.
+
 ### Nostr Mode - P2P Success Path (Preferred)
 ```mermaid
 sequenceDiagram
@@ -39,7 +67,8 @@ sequenceDiagram
     Receiver-->>Sender: Authenticated Ready ACK (seq=0)
     Sender->>Receiver: WebRTC Offer
     Receiver-->>Sender: WebRTC Answer
-    Note over Sender,Receiver: P2P Data Channel (128KB encrypted chunks)
+    Note over Sender,Receiver: Method-specific signaling ends when the WebRTC data channel opens
+    Note over Sender,Receiver: Unified transfer phase: src/lib/p2p-transfer.ts
     Sender->>Receiver: Encrypted chunks + DONE:N
     Receiver-->>Sender: Data-channel ACK after auth/reassembly
     Note over Sender,Receiver: No Nostr completion event after WebRTC opens
@@ -71,7 +100,8 @@ sequenceDiagram
     Receiver->>Receiver: Create WebRTC answer
     Receiver-->>Sender: Display Answer QR (single binary QR)
     Sender->>Receiver: Process answer, establish WebRTC
-    Note over Sender,Receiver: P2P Data Channel (128KB encrypted chunks)
+    Note over Sender,Receiver: Method-specific signaling ends when the WebRTC data channel opens
+    Note over Sender,Receiver: Unified transfer phase: src/lib/p2p-transfer.ts
     Sender->>Receiver: Encrypted chunks + DONE:N
     Receiver-->>Sender: Data-channel ACK after auth/reassembly
     Note over Sender,Receiver: If P2P connection fails, transfer fails (no server fallback)
