@@ -22,7 +22,7 @@ import {
   archiveTimestamp,
   type CompressedArchive,
   compressFilesToZip,
-  getFolderName,
+  getArchiveBaseName,
 } from '@/lib/folder-utils';
 import { testRelayAvailability } from '@/lib/nostr';
 
@@ -128,9 +128,7 @@ export function SendTransferPage() {
         }
 
         // Prepare file
-        const files = config.folderFiles
-          ? Array.from(config.folderFiles)
-          : config.selectedFiles;
+        const files = config.selectedFiles;
 
         if (files.length === 0) {
           if (cancelled) return;
@@ -139,19 +137,17 @@ export function SendTransferPage() {
           return;
         }
 
-        if (files.length === 1 && !config.folderFiles) {
-          // Single file, no compression needed
+        if (files.length === 1 && !files[0].webkitRelativePath) {
+          // Single loose file, no compression needed
           if (cancelled) return;
           setCompressedFile(files[0]);
           setStep('ready');
         } else {
-          // Multiple files or folder, compress
+          // Multiple files, or a folder selection whose structure must be
+          // preserved: compress
           if (cancelled) return;
           setStep('compressing');
-          const archiveBase = config.folderFiles
-            ? getFolderName(config.folderFiles)
-            : 'files';
-          const archiveName = `${archiveBase}_${archiveTimestamp()}`;
+          const archiveName = `${getArchiveBaseName(files)}_${archiveTimestamp()}`;
           // Drop any stale archive from a previous prepare pass.
           discardArchive();
           const archive = await compressFilesToZip(files, archiveName);

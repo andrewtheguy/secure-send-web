@@ -68,6 +68,29 @@ function resolveStallTimeoutMs(value: number | undefined): number {
  */
 const MAX_CHUNKS = 0x10000; // 65536
 
+/** Minimum spacing between intermediate onProgress emissions. */
+const PROGRESS_MIN_INTERVAL_MS = 100;
+
+/**
+ * Pace an onProgress callback: intermediate updates are capped to one per
+ * interval, and the final update (current === total) always fires. Raw
+ * chunk-rate emissions (hundreds per second on a fast link) each restart the
+ * progress bar's CSS transition, which flickers on iOS Safari and wastes
+ * main-thread time on re-renders.
+ */
+function paceProgress(
+  onProgress: ((current: number, total: number) => void) | undefined,
+): (current: number, total: number) => void {
+  if (!onProgress) return () => {};
+  let lastEmit = -Infinity;
+  return (current, total) => {
+    const now = performance.now();
+    if (current < total && now - lastEmit < PROGRESS_MIN_INTERVAL_MS) return;
+    lastEmit = now;
+    onProgress(current, total);
+  };
+}
+
 export interface SendOptions {
   /** Called after each chunk with cumulative bytes sent and the total. */
   onProgress?: (current: number, total: number) => void;
@@ -122,7 +145,8 @@ export async function sendFileOverDataChannel(
   content: Blob,
   opts: SendOptions = {},
 ): Promise<void> {
-  const { onProgress, isCancelled } = opts;
+  const { isCancelled } = opts;
+  const reportProgress = paceProgress(opts.onProgress);
   const stallTimeoutMs = resolveStallTimeoutMs(opts.stallTimeoutMs);
   const total = content.size;
   const totalChunks = Math.ceil(total / ENCRYPTION_CHUNK_SIZE);
@@ -150,7 +174,7 @@ export async function sendFileOverDataChannel(
     );
     chunkIndex++;
 
-    onProgress?.(end, total);
+    reportProgress(end, total);
   }
 
   rtc.send(`${DONE_PREFIX}${totalChunks}`);
@@ -259,7 +283,7 @@ export function createDataChannelReceiver(
   sink: ReceiveSink,
   opts: ReceiverOptions = {},
 ): DataChannelReceiver {
-  const { onProgress } = opts;
+  const reportProgress = paceProgress(opts.onProgress);
   const stallTimeoutMs = resolveStallTimeoutMs(opts.stallTimeoutMs);
 
   // Validate the untrusted advertised size before allocating or processing.
@@ -377,7 +401,7 @@ export function createDataChannelReceiver(
       if (settled) return;
       totalDecryptedBytes += decryptedChunk.length;
 
-      onProgress?.(totalDecryptedBytes, totalBytes);
+      reportProgress(totalDecryptedBytes, totalBytes);
     })().catch(fail);
 
     pending.add(promise);
