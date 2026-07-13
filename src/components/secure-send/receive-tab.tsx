@@ -334,8 +334,8 @@ export function ReceiveTab() {
                     PIN Fingerprint: {pinFingerprint}
                   </div>
                   <p>
-                    - It should match the sender's PIN fingerprint if you
-                    entered the same words/PIN.
+                    - It should match the fingerprint under the PIN currently
+                    shown on the sender's screen.
                   </p>
                   <p>
                     - After you enter the correct PIN the app locks it into a

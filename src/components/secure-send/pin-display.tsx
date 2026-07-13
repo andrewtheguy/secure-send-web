@@ -1,67 +1,82 @@
 import {
   AlertCircle,
   Check,
-  Clock,
   Copy,
   Eye,
   EyeOff,
   Fingerprint,
-  Hash,
-  MessageSquareText,
+  RefreshCw,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
-  computePinFingerprint,
-  formatPinHint,
-  PIN_DISPLAY_TIMEOUT_MS,
-  pinToWords,
+  formatPin,
+  PIN_ACTIVE_GENERATIONS,
+  PIN_ROTATION_MS,
+  PIN_WAIT_TIMEOUT_MS,
 } from '@/lib/crypto';
 
 interface PinDisplayProps {
+  /** The currently active PIN; rotates every PIN_ROTATION_MS. */
   pin: string;
+  /** Fingerprint of the current PIN (already display-formatted), if derived. */
+  fingerprint: string | null;
+  /** Called when the wait backstop (PIN_WAIT_TIMEOUT_MS) elapses. */
   onExpire: () => void;
 }
 
-export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
+export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState(false);
   const [isMasked, setIsMasked] = useState(false);
-  const [useWords, setUseWords] = useState(false);
   const [hasCopied, setHasCopied] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(
-    Math.ceil(PIN_DISPLAY_TIMEOUT_MS / 1000),
+    Math.ceil(PIN_WAIT_TIMEOUT_MS / 1000),
   );
-  const [progressPercentage, setProgressPercentage] = useState(100);
-  const [fingerprint, setFingerprint] = useState<string>('');
+  const [rotationPercentage, setRotationPercentage] = useState(100);
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
   const onExpireRef = useRef(onExpire);
+  // Start of the overall wait window (first mount) and of the current PIN's
+  // rotation period (reset whenever the pin prop changes).
+  const windowStartRef = useRef<number | null>(null);
+  const rotationStartRef = useRef<number>(0);
 
   // Keep onExpire ref up to date
   useEffect(() => {
     onExpireRef.current = onExpire;
   }, [onExpire]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pin restarts the rotation countdown by design
+  useEffect(() => {
+    rotationStartRef.current = performance.now();
+  }, [pin]);
+
   useEffect(() => {
     mountedRef.current = true;
-
-    // Start high-resolution countdown timer
-    const durationMs = PIN_DISPLAY_TIMEOUT_MS;
-    const startTime = performance.now();
+    if (windowStartRef.current === null) {
+      windowStartRef.current = performance.now();
+    }
 
     const tick = () => {
       if (!mountedRef.current) return;
 
       const now = performance.now();
-      const elapsed = now - startTime;
-      const remainingMs = Math.max(0, durationMs - elapsed);
+      const windowStart = windowStartRef.current ?? now;
+      const remainingMs = Math.max(
+        0,
+        PIN_WAIT_TIMEOUT_MS - (now - windowStart),
+      );
+      const rotationRemainingMs = Math.max(
+        0,
+        PIN_ROTATION_MS - (now - rotationStartRef.current),
+      );
 
       setTimeRemaining(Math.ceil(remainingMs / 1000));
-      setProgressPercentage((remainingMs / durationMs) * 100);
+      setRotationPercentage((rotationRemainingMs / PIN_ROTATION_MS) * 100);
 
       if (remainingMs <= 0) {
         onExpireRef.current();
@@ -83,8 +98,8 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
       }
     };
   }, []);
-  const words = useMemo(() => pinToWords(pin), [pin]);
-  const wordsDisplay = useMemo(() => words.join(' '), [words]);
+
+  const formattedPin = formatPin(pin);
 
   const handleCopy = useCallback(async () => {
     // Clear any existing timeout
@@ -94,8 +109,7 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
     }
 
     try {
-      const textToCopy = useWords ? wordsDisplay : pin;
-      await navigator.clipboard.writeText(textToCopy);
+      await navigator.clipboard.writeText(formattedPin);
       if (!mountedRef.current) return;
 
       setError(false);
@@ -119,101 +133,47 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
         }
       }, 2000);
     }
-  }, [pin, useWords, wordsDisplay]);
+  }, [formattedPin]);
 
   const toggleMask = useCallback(() => {
     setIsMasked((prev) => !prev);
   }, []);
 
-  // Format time remaining as MM:SS
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  // Mask PIN with bullet characters (dashes stay visible)
+  const maskedPin = formattedPin.replace(/[^-]/g, '•');
 
-  const toggleMode = useCallback(() => {
-    setUseWords((prev) => !prev);
-  }, []);
-
-  // Mask PIN with bullet characters
-  const maskedPin = pin.replace(/./g, '\u2022');
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadHint = async () => {
-      try {
-        const fp = await computePinFingerprint(pin);
-        if (!cancelled) {
-          setFingerprint(fp ? formatPinHint(fp) : '');
-        }
-      } catch {
-        if (!cancelled) setFingerprint('');
-      }
-    };
-    void loadHint();
-    return () => {
-      cancelled = true;
-    };
-  }, [pin]);
+  const graceMinutes = Math.round(
+    ((PIN_ACTIVE_GENERATIONS - 1) * PIN_ROTATION_MS) / 60000,
+  );
 
   return (
     <div className="flex flex-col gap-4 p-6 rounded-lg bg-muted/50 border">
-      {/* Header with timer */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">
-          Share this PIN with the receiver{!useWords && ' (case sensitive)'}
-        </h3>
-        <div className="flex items-center gap-2 text-sm">
-          <Clock className="h-4 w-4 text-amber-600" />
-          <span className="font-mono font-medium text-amber-600">
-            {formatTime(timeRemaining)}
-          </span>
-        </div>
-      </div>
+      <h3 className="text-sm font-medium">Share this PIN with the receiver</h3>
 
-      {/* Progress bar */}
-      <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
-        <div
-          className="h-full bg-amber-600"
-          style={{ width: `${progressPercentage}%` }}
+      {/* PIN Display */}
+      <div className="flex flex-col gap-2">
+        <Input
+          value={isMasked ? maskedPin : formattedPin}
+          readOnly
+          aria-label="PIN"
+          onFocus={(e) => e.currentTarget.select()}
+          onClick={(e) => e.currentTarget.select()}
+          className="text-center font-mono text-xl tracking-wider h-12 bg-background cursor-default select-all border-green-500"
         />
-      </div>
 
-      {/* PIN/Words Display */}
-      {useWords ? (
-        <div className="flex flex-col gap-3">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {words.map((word, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length PIN word slots
-              <div key={i} className="relative">
-                <Input
-                  value={isMasked ? '\u2022\u2022\u2022\u2022\u2022' : word}
-                  readOnly
-                  aria-label={`PIN word ${i + 1} of ${words.length}`}
-                  onFocus={(e) => e.currentTarget.select()}
-                  onClick={(e) => e.currentTarget.select()}
-                  className="text-center font-mono h-10 bg-background border-green-500 bg-green-50/50 cursor-default select-all"
-                />
-                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                  {i + 1}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <Input
-            value={isMasked ? maskedPin : pin}
-            readOnly
-            aria-label="Alphanumeric PIN"
-            onFocus={(e) => e.currentTarget.select()}
-            onClick={(e) => e.currentTarget.select()}
-            className="text-center font-mono text-xl tracking-wider h-12 bg-background cursor-default select-all border-green-500"
+        {/* Rotation progress: time until a fresh PIN replaces this one */}
+        <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
+          <div
+            className="h-full bg-amber-600"
+            style={{ width: `${rotationPercentage}%` }}
           />
         </div>
-      )}
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <RefreshCw className="h-3 w-3" />A new PIN appears every{' '}
+          {Math.round(PIN_ROTATION_MS / 60000)} minutes; a code shown in the
+          last {graceMinutes} minutes still works.
+        </p>
+      </div>
 
       {/* Action buttons */}
       <div className="flex gap-2">
@@ -231,7 +191,7 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
           ) : (
             <>
               <Copy className="h-4 w-4 mr-2" />
-              Copy {useWords ? 'words' : 'PIN'}
+              Copy PIN
             </>
           )}
         </Button>
@@ -252,53 +212,20 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
         )}
       </div>
 
-      {/* Info and toggle */}
-      <div className="flex flex-col gap-3 items-center">
-        <div className="flex flex-col gap-1.5 text-center">
-          {useWords ? (
-            <>
-              <p className="text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">
-                  Words are easier to share by voice
-                </span>{' '}
-                - no confusion about case or special characters
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Share securely via another channel (phone call, video chat,
-                etc.)
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-xs font-medium text-foreground">
-                Character PIN is shorter to type but case sensitive
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Best for secure messaging apps. For voice calls, consider using
-                words instead
-              </p>
-            </>
-          )}
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={toggleMode}
-          className="gap-2"
-        >
-          {useWords ? (
-            <>
-              <Hash className="h-4 w-4" />
-              Switch to character PIN
-            </>
-          ) : (
-            <>
-              <MessageSquareText className="h-4 w-4" />
-              Switch to words
-            </>
-          )}
-        </Button>
-      </div>
+      <p className="text-xs text-muted-foreground text-center">
+        Not case sensitive — easy to read over a call or type from another
+        screen. Share it over a channel you trust.
+      </p>
+
+      {/* Quiet resource backstop, not a security deadline: rotation already
+          caps each code's life, so there is no urgency to surface here. */}
+      <p className="text-xs text-muted-foreground/70 text-center">
+        Waiting stops automatically in{' '}
+        {timeRemaining >= 60
+          ? `about ${Math.ceil(timeRemaining / 60)} min`
+          : 'less than a minute'}{' '}
+        if no one connects.
+      </p>
 
       {fingerprint && (
         <div className="space-y-1 text-xs text-muted-foreground">
@@ -308,14 +235,11 @@ export function PinDisplay({ pin, onExpire }: PinDisplayProps) {
           </div>
           <p>
             - It should match the receiver&apos;s PIN fingerprint if they
-            entered the same words/PIN.
+            entered the PIN currently shown here.
           </p>
           <p>
-            - On the receiver&apos;s end, after the PIN is entered the app locks
-            it into a key that cannot be read back out; this fingerprint is the
-            one-way checksum you can compare to confirm you both derived the
-            same secret, but it cannot be reversed to recover the PIN or decrypt
-            any data.
+            - This fingerprint is a one-way checksum for human comparison only;
+            it cannot be reversed to recover the PIN or decrypt any data.
           </p>
         </div>
       )}

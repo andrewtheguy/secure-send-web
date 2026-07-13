@@ -5,8 +5,8 @@ import {
   getPublicKey,
 } from 'nostr-tools';
 import { decrypt, encrypt } from '../crypto/aes-gcm';
-import { TRANSFER_EXPIRATION_MS } from '../crypto/constants';
-import { EVENT_KIND_DATA_TRANSFER, EVENT_KIND_PIN_EXCHANGE } from './types';
+import { PIN_TTL_MS } from '../crypto/constants';
+import { EVENT_KIND_DATA_TRANSFER, EVENT_KIND_RENDEZVOUS } from './types';
 
 /**
  * Generate ephemeral keypair for a transfer
@@ -21,18 +21,33 @@ export function generateEphemeralKeys(): {
 }
 
 /**
- * Create PIN exchange event (kind 24243)
- * Contains encrypted payload with transfer metadata.
- *
- * @param hint - Time-bucketed event-filtering tag: one-way PBKDF2-SHA256 derivation of the PIN (first 16 hex chars), salted with the current hourly bucket; see computePinHint
- *
- * TTL Behavior:
- * - Events include an 'expiration' tag set to 1 hour from creation (NIP-40)
- * - NIP-40 compliant relays MAY auto-delete events after expiration
- * - Sender enforces TTL by refusing to start transfer after expiration
- * - Receiver enforces TTL by refusing to ACK/establish sessions for expired events
+ * Generate a random handshake nonce (16 bytes, base64).
+ * The sender mints one per rendezvous publication; the receiver mints one per
+ * claim. Echoing them inside the sealed claim/confirm payloads prevents replay
+ * across rotations, transfers, and handshake directions.
  */
-export function createPinExchangeEvent(
+export function generateHandshakeNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return uint8ArrayToBase64(bytes);
+}
+
+/**
+ * Create rendezvous event (kind 24243).
+ * Contains the payload encrypted with the PIN-derived rendezvous key.
+ *
+ * @param hint - Rotation-bucket-scoped event-filtering tag: an HKDF derivation
+ * off the PBKDF2 PIN root (see computePinHintFromRoot)
+ *
+ * TTL behavior:
+ * - The 'expiration' tag is set PIN_TTL_MS ahead (NIP-40): a rendezvous event
+ *   is only claimable while its PIN generation is still honored by the sender,
+ *   so relays are asked to drop it as soon as that window closes
+ * - The sender stops publishing (and stops honoring retained PIN generations)
+ *   once a claim is verified
+ * - The receiver refuses rendezvous events older than PIN_TTL_MS
+ */
+export function createRendezvousEvent(
   secretKey: Uint8Array,
   encryptedPayload: Uint8Array,
   salt: Uint8Array,
@@ -40,17 +55,17 @@ export function createPinExchangeEvent(
   hint: string,
 ): Event {
   // Soft TTL: relays may auto-delete after this timestamp (NIP-40)
-  const expiration = Math.floor((Date.now() + TRANSFER_EXPIRATION_MS) / 1000);
+  const expiration = Math.floor((Date.now() + PIN_TTL_MS) / 1000);
 
   const event = finalizeEvent(
     {
-      kind: EVENT_KIND_PIN_EXCHANGE,
+      kind: EVENT_KIND_RENDEZVOUS,
       content: uint8ArrayToBase64(encryptedPayload),
       tags: [
         ['h', hint],
         ['s', uint8ArrayToBase64(salt)],
         ['t', transferId],
-        ['type', 'pin_exchange'],
+        ['type', 'rendezvous'],
         ['expiration', expiration.toString()],
       ],
       created_at: Math.floor(Date.now() / 1000),
@@ -62,16 +77,16 @@ export function createPinExchangeEvent(
 }
 
 /**
- * Parse PIN exchange event tags.
- * @returns Object with hint (one-way PBKDF2 PIN derivation), salt, transferId, and encryptedPayload
+ * Parse rendezvous event tags.
+ * @returns Object with hint, salt, transferId, and encryptedPayload
  */
-export function parsePinExchangeEvent(event: Event): {
+export function parseRendezvousEvent(event: Event): {
   hint: string;
   salt: Uint8Array;
   transferId: string;
   encryptedPayload: Uint8Array;
 } | null {
-  if (event.kind !== EVENT_KIND_PIN_EXCHANGE) return null;
+  if (event.kind !== EVENT_KIND_RENDEZVOUS) return null;
 
   const hint = event.tags.find((t) => t[0] === 'h')?.[1];
   const saltB64 = event.tags.find((t) => t[0] === 's')?.[1];
@@ -79,39 +94,43 @@ export function parsePinExchangeEvent(event: Event): {
 
   if (!hint || !saltB64 || !transferId) return null;
 
-  return {
-    hint,
-    salt: base64ToUint8Array(saltB64),
-    transferId,
-    encryptedPayload: base64ToUint8Array(event.content),
-  };
+  try {
+    return {
+      hint,
+      salt: base64ToUint8Array(saltB64),
+      transferId,
+      encryptedPayload: base64ToUint8Array(event.content),
+    };
+  } catch {
+    return null;
+  }
 }
 
-function createAckEvent(
+export type HandshakeType = 'claim' | 'confirm';
+
+/**
+ * Create a handshake event (kind 24242, type=claim|confirm).
+ *
+ * Tags stay plaintext so relays can route by transfer and recipient, but they
+ * carry no authority: the sealed body must decrypt under the PIN-derived auth
+ * key and repeat the transfer/nonces before either side acts on it.
+ */
+export function createHandshakeEvent(
   secretKey: Uint8Array,
-  senderPubkey: string,
+  recipientPubkey: string,
   transferId: string,
-  seq: number,
-  content: string,
-  hint?: string,
+  type: HandshakeType,
+  sealedPayload: Uint8Array,
 ): Event {
-  const tags: string[][] = [
-    ['p', senderPubkey],
-    ['t', transferId],
-    ['seq', seq.toString()],
-    ['type', 'ack'],
-  ];
-
-  // Add hint tag if provided (one-way PBKDF2 PIN derivation, for event correlation/debugging)
-  if (hint) {
-    tags.push(['h', hint]);
-  }
-
   const event = finalizeEvent(
     {
       kind: EVENT_KIND_DATA_TRANSFER,
-      content,
-      tags,
+      content: uint8ArrayToBase64(sealedPayload),
+      tags: [
+        ['p', recipientPubkey],
+        ['t', transferId],
+        ['type', type],
+      ],
       created_at: Math.floor(Date.now() / 1000),
     },
     secretKey,
@@ -121,102 +140,59 @@ function createAckEvent(
 }
 
 /**
- * Create ACK event (kind 24242) with PIN-authenticated encrypted content.
- * The current protocol emits seq=0 for the receiver ready ACK. Transfer
- * completion is confirmed later with an ACK on the WebRTC data channel.
- *
- * Tags remain plaintext so relays can filter by transfer and sequence, but the
- * sender MUST verify that the encrypted body repeats the same transfer/sequence.
- * This proves the ACK author knows the PIN-derived session key; a public
- * transferId alone is not enough to mark the receiver ready.
- *
- * hint is optional - used to confirm which PIN exchange event was processed
- * (event correlation/debugging); it carries no key-selection meaning in PIN-only mode.
+ * Parse a handshake event (claim or confirm).
  */
-export async function createAuthenticatedAckEvent(
-  secretKey: Uint8Array,
-  senderPubkey: string,
-  transferId: string,
-  seq: number,
-  key: CryptoKey,
-  hint?: string,
-): Promise<Event> {
-  const payload = {
-    type: 'ack',
-    transferId,
-    seq,
-  };
-  const payloadBytes = new TextEncoder().encode(JSON.stringify(payload));
-  const encryptedPayload = await encrypt(key, payloadBytes);
-  return createAckEvent(
-    secretKey,
-    senderPubkey,
-    transferId,
-    seq,
-    uint8ArrayToBase64(encryptedPayload),
-    hint,
-  );
-}
-
-/**
- * Parse ACK event
- */
-export function parseAckEvent(event: Event): {
-  senderPubkey: string;
+export function parseHandshakeEvent(event: Event): {
+  recipientPubkey: string;
   transferId: string;
-  seq: number;
-  hint?: string;
+  type: HandshakeType;
+  sealedPayload: Uint8Array;
 } | null {
   if (event.kind !== EVENT_KIND_DATA_TRANSFER) return null;
 
   const type = event.tags.find((t) => t[0] === 'type')?.[1];
-  if (type !== 'ack') return null;
+  if (type !== 'claim' && type !== 'confirm') return null;
 
-  const senderPubkey = event.tags.find((t) => t[0] === 'p')?.[1];
+  const recipientPubkey = event.tags.find((t) => t[0] === 'p')?.[1];
   const transferId = event.tags.find((t) => t[0] === 't')?.[1];
-  const seqStr = event.tags.find((t) => t[0] === 'seq')?.[1];
-  const hint = event.tags.find((t) => t[0] === 'h')?.[1];
 
-  if (!senderPubkey || !transferId || !seqStr) return null;
+  if (!recipientPubkey || !transferId || !event.content) return null;
 
-  const seq = parseInt(seqStr, 10);
-
-  // Validate: seq must be an integer in the protocol ACK range.
-  if (!Number.isInteger(seq) || seq < -1) return null;
-
-  return { senderPubkey, transferId, seq, hint };
+  try {
+    return {
+      recipientPubkey,
+      transferId,
+      type,
+      sealedPayload: base64ToUint8Array(event.content),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
- * Verify that an ACK event body is encrypted with the session key and matches
- * its plaintext routing tags.
+ * Seal a handshake payload (claim/confirm) with the PIN-derived auth key.
+ * AES-GCM's authentication tag is what makes a wrong-PIN proof unverifiable.
  */
-export async function verifyAuthenticatedAckEvent(
-  event: Event,
-  key: CryptoKey,
-  expectedTransferId: string,
-  expectedSeq: number,
-): Promise<boolean> {
-  const ack = parseAckEvent(event);
-  if (!ack) return false;
-  if (ack.transferId !== expectedTransferId || ack.seq !== expectedSeq)
-    return false;
-  if (!event.content) return false;
+export async function sealHandshakePayload(
+  authKey: CryptoKey,
+  payload: object,
+): Promise<Uint8Array> {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  return encrypt(authKey, bytes);
+}
 
-  try {
-    const decrypted = await decrypt(key, base64ToUint8Array(event.content));
-    const payload = JSON.parse(new TextDecoder().decode(decrypted)) as unknown;
-    if (!payload || typeof payload !== 'object') return false;
-
-    const p = payload as Record<string, unknown>;
-    if (p.type !== 'ack') return false;
-    if (p.transferId !== ack.transferId) return false;
-    if (p.seq !== ack.seq) return false;
-
-    return true;
-  } catch {
-    return false;
-  }
+/**
+ * Open a sealed handshake payload. Throws if the payload was not sealed with
+ * this auth key (i.e. the author used a different PIN) or is not valid JSON.
+ * Field validation is the caller's job.
+ */
+export async function openHandshakePayload(
+  authKey: CryptoKey,
+  sealedPayload: Uint8Array,
+): Promise<unknown> {
+  const decrypted = await decrypt(authKey, sealedPayload);
+  return JSON.parse(new TextDecoder().decode(decrypted)) as unknown;
 }
 
 /**
