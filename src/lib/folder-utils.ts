@@ -125,6 +125,18 @@ async function streamZipToSink(
 }
 
 /**
+ * Local-time `yyyymmddhhmmss` stamp appended to archive names, so repeated
+ * sends of the same selection don't all arrive under one file name.
+ */
+export function archiveTimestamp(date: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
+    `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+  );
+}
+
+/**
  * Extract folder name from FileList (for folder selection)
  */
 export function getFolderName(files: FileList): string {

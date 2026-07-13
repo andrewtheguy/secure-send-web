@@ -1,7 +1,7 @@
 import { unzipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { installOpfsMock, type OpfsMock } from '../test/opfs-mock';
-import { compressFilesToZip } from './folder-utils';
+import { archiveTimestamp, compressFilesToZip } from './folder-utils';
 
 let opfs: OpfsMock;
 
@@ -58,5 +58,16 @@ describe('compressFilesToZip', () => {
     expect(Object.keys(entries)).toEqual([]);
 
     await archive.discard();
+  });
+});
+
+describe('archiveTimestamp', () => {
+  it('formats a local-time yyyymmddhhmmss stamp', () => {
+    const stamp = archiveTimestamp(new Date(2026, 6, 13, 9, 5, 7));
+    expect(stamp).toBe('20260713090507');
+  });
+
+  it('is 14 digits for the current time', () => {
+    expect(archiveTimestamp()).toMatch(/^\d{14}$/);
   });
 });

@@ -19,6 +19,7 @@ import {
 } from '@/hooks/use-manual-send';
 import { type UseNostrSendReturn, useNostrSend } from '@/hooks/use-nostr-send';
 import {
+  archiveTimestamp,
   type CompressedArchive,
   compressFilesToZip,
   getFolderName,
@@ -147,9 +148,10 @@ export function SendTransferPage() {
           // Multiple files or folder, compress
           if (cancelled) return;
           setStep('compressing');
-          const archiveName = config.folderFiles
+          const archiveBase = config.folderFiles
             ? getFolderName(config.folderFiles)
             : 'files';
+          const archiveName = `${archiveBase}_${archiveTimestamp()}`;
           // Drop any stale archive from a previous prepare pass.
           discardArchive();
           const archive = await compressFilesToZip(files, archiveName);
