@@ -18,7 +18,7 @@ const VALUE_PROPS = [
 const COMMON_DETAILS = [
   { label: 'Content encryption:', value: 'AES-256-GCM' },
   { label: 'File transport:', value: 'Direct peer-to-peer over WebRTC' },
-  { label: 'Max size:', value: '100 MB per transfer' },
+  { label: 'Max size:', value: '100 MB per transferred file or ZIP archive' },
 ] as const;
 
 // Specific to Auto Exchange mode.
@@ -118,7 +118,7 @@ export function AboutContent() {
             <p>
               Two transfer modes cover different situations: a shareable{' '}
               <span className="font-medium text-foreground">PIN</span> for the
-              most reliable connection across networks, or a direct{' '}
+              automatic signaling, or a direct{' '}
               <span className="font-medium text-foreground">
                 Manual Exchange
               </span>{' '}
@@ -183,8 +183,8 @@ export function AboutContent() {
               </p>
               <ul className="mt-3 list-inside list-disc space-y-1 text-sm text-muted-foreground">
                 <li>
-                  Best when sender and receiver are on different networks and
-                  you want the highest connection success rate.
+                  Best when you want the app to exchange signaling automatically
+                  through Nostr relays instead of carrying it by hand.
                 </li>
                 <li>
                   PIN is shared out-of-band (chat, voice, etc.), then receiver
@@ -235,9 +235,9 @@ export function AboutContent() {
                   coordination service is required.
                 </li>
                 <li>
-                  With internet, STUN can assist network traversal for peer
-                  connection setup using only connection metadata (for example
-                  IP address and port).
+                  With internet, STUN can assist direct candidate discovery
+                  using only connection metadata (for example IP address and
+                  port), but it does not relay file traffic.
                 </li>
                 <li>
                   Without internet, transfer can still work over a shared local
@@ -257,8 +257,8 @@ export function AboutContent() {
           <QrCode className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <p>
             Either way, file data always travels over a direct peer-to-peer
-            WebRTC connection with no relay to fall back on, so a transfer that
-            cannot establish a direct connection cannot complete. When that
+            WebRTC connection with no TURN relay to fall back on, so a transfer
+            that cannot establish a direct connection cannot complete. When that
             happens and the two devices are together, transfer the file offline
             with animated QR codes using{' '}
             <a

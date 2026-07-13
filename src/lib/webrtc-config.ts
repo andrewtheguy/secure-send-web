@@ -1,16 +1,10 @@
 /**
  * WebRTC ICE Server Configuration
  *
- * Provides reliable ICE server configuration with multiple STUN fallbacks
- * and optional TURN server support for NAT traversal.
- *
- * TURN credentials should be set via environment variables:
- * - VITE_TURN_URL: TURN server URL (e.g., "turn:turn.example.com:3478")
- * - VITE_TURN_USERNAME: TURN username
- * - VITE_TURN_CREDENTIAL: TURN credential/password
- *
- * For TURN servers with time-limited credentials (TURN REST API),
- * you may need to fetch fresh credentials from your backend.
+ * Provides multiple public STUN servers for direct ICE candidate discovery.
+ * TURN is intentionally unsupported: file transport must remain a direct
+ * peer-to-peer connection, and connection attempts fail when no direct ICE
+ * route can be established.
  */
 
 /**
@@ -26,48 +20,11 @@ const STUN_SERVERS: RTCIceServer[] = [
 ];
 
 /**
- * Get TURN server configuration from environment variables.
- * Returns undefined if TURN is not configured.
- */
-function getTurnServer(): RTCIceServer | undefined {
-  const turnUrl = import.meta.env.VITE_TURN_URL;
-  const turnUsername = import.meta.env.VITE_TURN_USERNAME;
-  const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
-
-  if (!turnUrl) {
-    return undefined;
-  }
-
-  // TURN requires credentials
-  if (!turnUsername || !turnCredential) {
-    console.warn(
-      'TURN server URL provided but credentials missing. ' +
-        'Set VITE_TURN_USERNAME and VITE_TURN_CREDENTIAL.',
-    );
-    return undefined;
-  }
-
-  return {
-    urls: turnUrl,
-    username: turnUsername,
-    credential: turnCredential,
-  };
-}
-
-/**
  * Get the complete ICE server configuration.
- * Includes multiple STUN servers and optional TURN server.
+ * Includes STUN servers only; no relay candidates are configured.
  */
 export function getIceServers(): RTCIceServer[] {
-  const servers = [...STUN_SERVERS];
-
-  const turnServer = getTurnServer();
-  if (turnServer) {
-    // TURN servers should be listed after STUN for proper fallback order
-    servers.push(turnServer);
-  }
-
-  return servers;
+  return [...STUN_SERVERS];
 }
 
 /**
@@ -80,12 +37,4 @@ export function getWebRTCConfig(): RTCConfiguration {
     // Use all available candidates for best connectivity
     iceCandidatePoolSize: 10,
   };
-}
-
-/**
- * Check if TURN server is configured.
- * Useful for UI feedback about relay availability.
- */
-export function isTurnConfigured(): boolean {
-  return getTurnServer() !== undefined;
 }
