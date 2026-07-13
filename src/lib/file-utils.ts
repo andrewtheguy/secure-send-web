@@ -36,7 +36,9 @@ export function formatFileSize(bytes: number): string {
     sizes.length - 1,
   );
 
-  return `${parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`;
+  // Bytes are whole numbers; larger units always show one decimal (e.g. "5.0 MB")
+  const value = bytes / k ** i;
+  return `${i === 0 ? value : value.toFixed(1)} ${sizes[i]}`;
 }
 
 /**

@@ -9,17 +9,17 @@ describe('File Utils', () => {
     });
 
     it('should format KB', () => {
-      expect(formatFileSize(1024)).toBe('1 KB');
+      expect(formatFileSize(1024)).toBe('1.0 KB');
       expect(formatFileSize(1536)).toBe('1.5 KB');
     });
 
     it('should format MB', () => {
-      expect(formatFileSize(1024 * 1024)).toBe('1 MB');
+      expect(formatFileSize(1024 * 1024)).toBe('1.0 MB');
       expect(formatFileSize(2.5 * 1024 * 1024)).toBe('2.5 MB');
     });
 
     it('should format GB', () => {
-      expect(formatFileSize(1024 * 1024 * 1024)).toBe('1 GB');
+      expect(formatFileSize(1024 * 1024 * 1024)).toBe('1.0 GB');
     });
 
     it('should handle negative or invalid inputs', () => {
