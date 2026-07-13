@@ -18,8 +18,8 @@ import {
   MAX_MESSAGE_SIZE,
   type NostrSessionKeys,
   PIN_ACTIVE_GENERATIONS,
-  PIN_DISPLAY_TIMEOUT_MS,
   PIN_ROTATION_MS,
+  PIN_WAIT_TIMEOUT_MS,
 } from '@/lib/crypto';
 import { P2PConnectionError } from '@/lib/errors';
 import { readFileAsBytes } from '@/lib/file-utils';
@@ -267,7 +267,7 @@ export function useNostrSend(): UseNostrSendReturn {
           reject(
             new Error('No receiver connected. Please start a new transfer.'),
           );
-        }, PIN_DISPLAY_TIMEOUT_MS);
+        }, PIN_WAIT_TIMEOUT_MS);
 
         cancelPoll = setInterval(() => {
           if (cancelledRef.current && !settled) {

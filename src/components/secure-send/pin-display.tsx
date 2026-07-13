@@ -1,7 +1,6 @@
 import {
   AlertCircle,
   Check,
-  Clock,
   Copy,
   Eye,
   EyeOff,
@@ -14,8 +13,8 @@ import { Input } from '@/components/ui/input';
 import {
   formatPin,
   PIN_ACTIVE_GENERATIONS,
-  PIN_DISPLAY_TIMEOUT_MS,
   PIN_ROTATION_MS,
+  PIN_WAIT_TIMEOUT_MS,
 } from '@/lib/crypto';
 
 interface PinDisplayProps {
@@ -23,7 +22,7 @@ interface PinDisplayProps {
   pin: string;
   /** Fingerprint of the current PIN (already display-formatted), if derived. */
   fingerprint: string | null;
-  /** Called when the overall wait window (PIN_DISPLAY_TIMEOUT_MS) elapses. */
+  /** Called when the wait backstop (PIN_WAIT_TIMEOUT_MS) elapses. */
   onExpire: () => void;
 }
 
@@ -33,7 +32,7 @@ export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
   const [isMasked, setIsMasked] = useState(false);
   const [hasCopied, setHasCopied] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(
-    Math.ceil(PIN_DISPLAY_TIMEOUT_MS / 1000),
+    Math.ceil(PIN_WAIT_TIMEOUT_MS / 1000),
   );
   const [rotationPercentage, setRotationPercentage] = useState(100);
 
@@ -69,7 +68,7 @@ export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
       const windowStart = windowStartRef.current ?? now;
       const remainingMs = Math.max(
         0,
-        PIN_DISPLAY_TIMEOUT_MS - (now - windowStart),
+        PIN_WAIT_TIMEOUT_MS - (now - windowStart),
       );
       const rotationRemainingMs = Math.max(
         0,
@@ -140,13 +139,6 @@ export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
     setIsMasked((prev) => !prev);
   }, []);
 
-  // Format time remaining as MM:SS
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   // Mask PIN with bullet characters (dashes stay visible)
   const maskedPin = formattedPin.replace(/[^-]/g, '•');
 
@@ -156,18 +148,7 @@ export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
 
   return (
     <div className="flex flex-col gap-4 p-6 rounded-lg bg-muted/50 border">
-      {/* Header with overall window timer */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">
-          Share this PIN with the receiver
-        </h3>
-        <div className="flex items-center gap-2 text-sm">
-          <Clock className="h-4 w-4 text-amber-600" />
-          <span className="font-mono font-medium text-amber-600">
-            {formatTime(timeRemaining)}
-          </span>
-        </div>
-      </div>
+      <h3 className="text-sm font-medium">Share this PIN with the receiver</h3>
 
       {/* PIN Display */}
       <div className="flex flex-col gap-2">
@@ -234,6 +215,16 @@ export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
       <p className="text-xs text-muted-foreground text-center">
         Not case sensitive — easy to read over a call or type from another
         screen. Share it over a channel you trust.
+      </p>
+
+      {/* Quiet resource backstop, not a security deadline: rotation already
+          caps each code's life, so there is no urgency to surface here. */}
+      <p className="text-xs text-muted-foreground/70 text-center">
+        Waiting stops automatically in{' '}
+        {timeRemaining >= 60
+          ? `about ${Math.ceil(timeRemaining / 60)} min`
+          : 'less than a minute'}{' '}
+        if no one connects.
       </p>
 
       {fingerprint && (

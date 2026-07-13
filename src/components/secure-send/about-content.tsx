@@ -38,7 +38,7 @@ const PIN_DETAILS = [
   },
   {
     label: 'Sender wait window:',
-    value: '5 minutes before the transfer expires',
+    value: '30 minutes before an unclaimed transfer gives up',
   },
   { label: 'Signaling:', value: 'Relay signaling' },
 ] as const;

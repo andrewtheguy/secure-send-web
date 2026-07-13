@@ -69,7 +69,7 @@ Both modes derive the opaque `CryptoKey` from an ephemeral ECDH exchange — the
 sequenceDiagram
     participant Sender
     participant Receiver
-    loop Every 60s until claimed (max 5 min)
+    loop Every 60s until claimed (max 30 min)
         Sender->>Receiver: Rendezvous event (fresh PIN, hint, nonce; via Nostr)
     end
     Receiver-->>Sender: Claim (sealed with PIN auth key; receiver ECDH pubkey)
@@ -251,7 +251,7 @@ The input component is designed for fast, error-proof manual entry:
 The display component focuses on secure and clear communication:
 - **Rotation Countdown**: A progress bar under the PIN shows the time until the next 60-second rotation replaces it, plus a note that recently rotated codes still work.
 - **Masking**: Automatically masks the PIN after the first copy operation to prevent shoulder surfing.
-- **Overall Window**: A countdown timer shows the 5-minute wait window before the sender gives up.
+- **Quiet Backstop**: A muted footnote notes when waiting stops automatically (30 minutes); it is deliberately unobtrusive because rotation, not this window, is the security-relevant timer.
 - **Fingerprint**: Shows the current PIN's fingerprint for human comparison with the receiver.
 
 **Key Parameters:**
@@ -260,7 +260,7 @@ The display component focuses on secure and clear communication:
 - `PBKDF2_ITERATIONS`: 600,000
 - `PIN_ROTATION_MS`: 60 seconds (fresh PIN + rendezvous event cadence)
 - `PIN_ACTIVE_GENERATIONS`: 3 (PINs honored at any moment; PIN_TTL_MS = 3 minutes)
-- `PIN_DISPLAY_TIMEOUT_MS`: 5 minutes (sender rotation/wait window)
+- `PIN_WAIT_TIMEOUT_MS`: 30 minutes (sender rotation/wait backstop — a resource bound, not a security control; rotation already caps each PIN's exposure)
 
 ### Nostr Signaling (`src/lib/nostr/`)
 
@@ -413,7 +413,7 @@ Handles direct peer-to-peer connections using WebRTC data channels.
 
 **`use-nostr-send.ts`** - Sender logic (Nostr):
 1. Read content; generate transfer salt, ephemeral Nostr identity, and ephemeral ECDH key pair
-2. Rotate: every 60 s mint a fresh PIN and publish a rendezvous event (up to 5 minutes)
+2. Rotate: every 60 s mint a fresh PIN and publish a rendezvous event (up to 30 minutes)
 3. Wait for a claim sealed with one of the 3 retained PIN auth keys; verify nonce/transfer/ECDH bindings; first verified claim locks the transfer (invalid claims are ignored)
 4. Publish confirm under the same auth key; derive ECDH session keys
 5. Attempt P2P connection (30s timeout for connection only)
@@ -560,7 +560,7 @@ Both receive modes reject extra, duplicate, out-of-range, malformed, and oversiz
 | PIN rotation | 60 seconds | Fresh PIN + rendezvous event cadence (`PIN_ROTATION_MS`) |
 | PIN validity | 3 minutes | How long any single PIN is honored (`PIN_TTL_MS` = 3 generations); also the rendezvous NIP-40 expiry and the receiver's rendezvous freshness bound |
 | Sender confirm wait | 30 seconds | Receiver wait for the sender's confirm after publishing a claim |
-| Sender PIN rotation/wait window | 5 minutes | Sender-side rotation window before the waiting transfer is canceled (`PIN_DISPLAY_TIMEOUT_MS`) |
+| Sender PIN rotation/wait backstop | 30 minutes | Resource bound on an unclaimed transfer (relay publishing + file in memory) before it is canceled (`PIN_WAIT_TIMEOUT_MS`); not a security window — rotation caps each PIN at 3 minutes regardless |
 | Manual transfer TTL | 1 hour | Manual Exchange session validity (`TRANSFER_EXPIRATION_MS`) |
 | Receiver PIN inactivity | 5 minutes | Clears PIN input if no changes made |
 
@@ -569,7 +569,7 @@ Both receive modes reject extra, duplicate, out-of-range, malformed, and oversiz
 Secure Send enforces hard session TTLs. Expired requests MUST NOT establish a session or begin transfer, even if the PIN/key is correct.
 
 **Duration**
-- **Nostr**: `PIN_TTL_MS` (currently 3 minutes) per PIN generation, inside a `PIN_DISPLAY_TIMEOUT_MS` (5 minute) overall wait window
+- **Nostr**: `PIN_TTL_MS` (currently 3 minutes) per PIN generation, inside a `PIN_WAIT_TIMEOUT_MS` (30 minute) resource-backstop wait window
 - **Manual Exchange**: `TRANSFER_EXPIRATION_MS` (currently 1 hour)
 
 **TTL Anchor (start time)**
@@ -580,7 +580,7 @@ Secure Send enforces hard session TTLs. Expired requests MUST NOT establish a se
 - **Receiver-side (pre-session)**:
   - Reject rendezvous events older than `PIN_TTL_MS` before claiming (Nostr); reject expired/missing TTL before answering (Manual).
 - **Sender-side (pre-transfer)**:
-  - Only honor claims sealed with one of the `PIN_ACTIVE_GENERATIONS` retained PIN auth keys, each of which existed for at most `PIN_TTL_MS`; stop publishing and honoring PINs at the first verified claim and at the 5-minute window.
+  - Only honor claims sealed with one of the `PIN_ACTIVE_GENERATIONS` retained PIN auth keys, each of which existed for at most `PIN_TTL_MS`; stop publishing and honoring PINs at the first verified claim and at the 30-minute backstop.
 
 **No Backward Compatibility**
 - Requests/payloads missing TTL fields are rejected (treated as invalid).

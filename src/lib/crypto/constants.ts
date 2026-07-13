@@ -79,4 +79,8 @@ export const PIN_FINGERPRINT_LENGTH = 8; // uppercase base32 characters
 
 // Transfer timeouts
 export const TRANSFER_EXPIRATION_MS = 60 * 60 * 1000; // 1 hour (manual-exchange session TTL)
-export const PIN_DISPLAY_TIMEOUT_MS = 5 * 60 * 1000; // Total time the sender keeps rotating/waiting before giving up (5 minutes)
+// Resource backstop, not a security control: rotation already caps any single
+// PIN's exposure at PIN_TTL_MS, so waiting longer is not less safe. This only
+// bounds how long an unclaimed transfer keeps publishing rendezvous events and
+// holding the file in memory before giving up.
+export const PIN_WAIT_TIMEOUT_MS = 30 * 60 * 1000; // Total time the sender keeps rotating/waiting before giving up (30 minutes)

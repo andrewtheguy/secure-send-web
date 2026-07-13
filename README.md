@@ -45,7 +45,7 @@ Sender and receiver should use the same app version for transfers.
 - **PIN authenticates, then expires (Nostr)**: The sender mints a fresh 10-character PIN (~45 bits) every 60 seconds and honors only the 3 most recent. The PIN locates the rendezvous event (via a one-way rotating hint tag) and seals a mutual claim/confirm challenge-response that binds both sides' ECDH public keys, defeating relay man-in-the-middle. The first verified claim locks the transfer to that receiver; the PIN itself is never transmitted
 - **Encrypted rendezvous metadata (Nostr)**: File name, size, and MIME type in the rendezvous payload are encrypted with a PIN-derived key; a local-only "PIN fingerprint" is shown for humans to confirm both sides entered the same PIN
 - **Ephemeral identities**: New Nostr keypairs and ECDH key pairs generated per transfer
-- **Expiration windows**: Each PIN is honored for 3 minutes; rendezvous events carry a matching NIP-40 expiration tag for relays that honor it, and the sender's wait screen gives up after 5 minutes
+- **Expiration windows**: Each PIN is honored for 3 minutes; rendezvous events carry a matching NIP-40 expiration tag for relays that honor it, and the sender stops waiting after 30 minutes (a resource backstop — rotation, not the wait window, bounds PIN exposure)
 - **Manual exchange signaling**: QR payloads are time-bucketed obfuscated, not cryptographically confidential; file data is encrypted with an ECDH-derived AES key after the QR/clipboard exchange
 
 ## Tech Stack
