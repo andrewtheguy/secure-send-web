@@ -42,8 +42,15 @@ export const PIN_ROOT_SALT = 'secure-send:pin-root:v2';
 
 // HKDF salt shared by every derivation off the PIN root; each purpose is
 // domain-separated by its HKDF info label ('hint:<bucket>', 'auth',
-// 'rendezvous', 'fingerprint') so no two purposes ever share a key.
+// 'rendezvous') so no two purposes ever share a key.
 export const PIN_HKDF_SALT = 'secure-send:pin:v2';
+
+// The on-screen PIN fingerprint is never transmitted — it exists only for
+// human visual comparison — so it uses its own deliberately light stretch
+// instead of the full PIN-root work factor, cheap enough to show the moment
+// the PIN is typed.
+export const PIN_FINGERPRINT_ITERATIONS = 1_000;
+export const PIN_FINGERPRINT_SALT = 'secure-send:pin-fingerprint:v2';
 
 // AES-GCM parameters
 export const AES_KEY_LENGTH = 256; // bits
