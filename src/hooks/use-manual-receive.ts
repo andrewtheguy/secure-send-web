@@ -264,7 +264,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       const iceCandidates: RTCIceCandidate[] = [];
       let answerSDP: RTCSessionDescriptionInit | null = null;
 
-      // Decrypted chunks land in OPFS scratch as they arrive.
+      // Decrypted chunks land in the receive sink as they arrive.
       const sink = await createReceiveSink(totalBytes);
       sinkRef.current = sink;
 

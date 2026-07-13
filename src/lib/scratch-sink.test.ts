@@ -1,10 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { installOpfsMock, type OpfsMock } from '../test/opfs-mock';
+import { MEMORY_SINK_MAX_BYTES } from './crypto/constants';
 import {
   createAppendSink,
   createReceiveSink,
   sweepTransferScratch,
 } from './scratch-sink';
+
+/** Smallest payload size that dispatches to the OPFS backend. */
+const OPFS_SIZE = MEMORY_SINK_MAX_BYTES + 1;
 
 let opfs: OpfsMock;
 
@@ -25,7 +29,16 @@ async function scratchDirNames(): Promise<string[]> {
   return names;
 }
 
-describe('createReceiveSink', () => {
+async function withoutOpfs<T>(run: () => Promise<T>): Promise<T> {
+  opfs.uninstall();
+  try {
+    return await run();
+  } finally {
+    opfs = installOpfsMock();
+  }
+}
+
+describe('createReceiveSink (memory, at or below threshold)', () => {
   it('assembles out-of-order positional writes into the payload', async () => {
     const sink = await createReceiveSink(8);
     await sink.write(4, new Uint8Array([5, 6, 7, 8]));
@@ -69,8 +82,39 @@ describe('createReceiveSink', () => {
     await sink.discard();
   });
 
+  it('never touches OPFS', async () => {
+    await withoutOpfs(async () => {
+      const sink = await createReceiveSink(4);
+      await sink.write(0, new Uint8Array([1, 2, 3, 4]));
+      const blob = await sink.finish();
+      expect(blob.size).toBe(4);
+      await sink.discard();
+    });
+    const sink = await createReceiveSink(MEMORY_SINK_MAX_BYTES);
+    expect(await scratchDirNames()).toHaveLength(0);
+    await sink.discard();
+  });
+});
+
+describe('createReceiveSink (OPFS, over threshold)', () => {
+  it('assembles positional writes into a disk-backed payload', async () => {
+    const sink = await createReceiveSink(OPFS_SIZE);
+    expect(await scratchDirNames()).toHaveLength(1);
+    await sink.write(OPFS_SIZE - 2, new Uint8Array([7, 8]));
+    await sink.write(0, new Uint8Array([1, 2]));
+    const blob = await sink.finish();
+    expect(blob.size).toBe(OPFS_SIZE);
+    expect(new Uint8Array(await blob.slice(0, 2).arrayBuffer())).toEqual(
+      new Uint8Array([1, 2]),
+    );
+    expect(
+      new Uint8Array(await blob.slice(OPFS_SIZE - 2).arrayBuffer()),
+    ).toEqual(new Uint8Array([7, 8]));
+    await sink.discard();
+  });
+
   it('tolerates repeated discard calls and removes the scratch entry', async () => {
-    const sink = await createReceiveSink(4);
+    const sink = await createReceiveSink(OPFS_SIZE);
     expect(await scratchDirNames()).toHaveLength(1);
     await sink.discard();
     await expect(sink.discard()).resolves.toBeUndefined();
@@ -78,19 +122,16 @@ describe('createReceiveSink', () => {
   });
 
   it('rejects when OPFS is unavailable', async () => {
-    opfs.uninstall();
-    try {
-      await expect(createReceiveSink(4)).rejects.toThrow('OPFS');
-      await expect(createAppendSink()).rejects.toThrow('OPFS');
-    } finally {
-      opfs = installOpfsMock();
-    }
+    await withoutOpfs(async () => {
+      await expect(createReceiveSink(OPFS_SIZE)).rejects.toThrow('OPFS');
+      await expect(createAppendSink(OPFS_SIZE)).rejects.toThrow('OPFS');
+    });
   });
 });
 
-describe('createAppendSink', () => {
+describe('createAppendSink (memory, at or below threshold)', () => {
   it('concatenates appended chunks into the payload', async () => {
-    const sink = await createAppendSink();
+    const sink = await createAppendSink(5);
     await sink.append(new Uint8Array([1, 2, 3]));
     await sink.append(new Uint8Array([4, 5]));
     const blob = await sink.finish();
@@ -101,7 +142,7 @@ describe('createAppendSink', () => {
   });
 
   it('does not retain a reference to the caller buffer', async () => {
-    const sink = await createAppendSink();
+    const sink = await createAppendSink(2);
     const chunk = new Uint8Array([9, 9]);
     await sink.append(chunk);
     chunk.fill(0);
@@ -113,16 +154,44 @@ describe('createAppendSink', () => {
   });
 
   it('rejects appends and finish after discard', async () => {
-    const sink = await createAppendSink();
+    const sink = await createAppendSink(4);
     await sink.discard();
     await expect(sink.append(new Uint8Array([1]))).rejects.toThrow();
     await expect(sink.finish()).rejects.toThrow();
+  });
+
+  it('never touches OPFS', async () => {
+    await withoutOpfs(async () => {
+      const sink = await createAppendSink(MEMORY_SINK_MAX_BYTES);
+      await sink.append(new Uint8Array([1, 2]));
+      const blob = await sink.finish();
+      expect(blob.size).toBe(2);
+      await sink.discard();
+    });
+    const sink = await createAppendSink(4);
+    expect(await scratchDirNames()).toHaveLength(0);
+    await sink.discard();
+  });
+});
+
+describe('createAppendSink (OPFS, over threshold)', () => {
+  it('concatenates appended chunks into a disk-backed payload', async () => {
+    const sink = await createAppendSink(OPFS_SIZE);
+    expect(await scratchDirNames()).toHaveLength(1);
+    await sink.append(new Uint8Array([1, 2, 3]));
+    await sink.append(new Uint8Array([4, 5]));
+    const blob = await sink.finish();
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(
+      new Uint8Array([1, 2, 3, 4, 5]),
+    );
+    await sink.discard();
+    expect(await scratchDirNames()).toHaveLength(0);
   });
 });
 
 describe('sweepTransferScratch', () => {
   it('removes entries no live sink owns and keeps owned ones', async () => {
-    const sink = await createAppendSink();
+    const sink = await createAppendSink(OPFS_SIZE);
     const dir = await opfs.root.getDirectoryHandle('transfer-scratch', {
       create: true,
     });

@@ -484,7 +484,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           totalRelays: DEFAULT_RELAYS.length,
         });
 
-        // Decrypted chunks land in OPFS scratch as they arrive.
+        // Decrypted chunks land in the receive sink as they arrive.
         const sink = await createReceiveSink(resolvedFileSize);
         sinkRef.current = sink;
 
@@ -694,7 +694,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         if (cancelledRef.current) return;
 
         // P2P transfer streamed already-decrypted chunks into the sink; this is
-        // the sealed payload (disk-backed under OPFS).
+        // the sealed payload.
         const contentData = transferResult;
 
         if (cancelledRef.current) return;
