@@ -79,13 +79,13 @@ export const MEMORY_SINK_MAX_BYTES = 100 * 1024 * 1024; // 100MB
 export const PIN_HINT_LENGTH = 16; // hex characters
 
 // PIN fingerprint length.
-// 8 uppercase base32 chars (RFC 4648, the Tor v3 .onion alphabet) = 40 bits. The
-// fingerprint is local-only and exists solely for two humans to visually compare
-// on-device that they entered the same PIN. It is not a collision-resistance primitive
-// and never crosses the network, so 40 bits is more than enough to make an accidental
-// match between two distinct PINs negligible while keeping the displayed value short
-// and easy to read aloud.
-export const PIN_FINGERPRINT_LENGTH = 8; // uppercase base32 characters
+// 12 lowercase hex chars = 48 bits. The fingerprint is local-only and exists
+// solely for two humans to visually compare on-device that they entered the
+// same PIN. It is not a collision-resistance primitive and never crosses the
+// network, so 48 bits is more than enough to make an accidental match between
+// two distinct PINs negligible while keeping the displayed value short and
+// easy to read aloud.
+export const PIN_FINGERPRINT_LENGTH = 12; // lowercase hex characters
 
 // Transfer timeouts
 export const TRANSFER_EXPIRATION_MS = 60 * 60 * 1000; // 1 hour (manual-exchange session TTL)

@@ -83,7 +83,7 @@ describe('PIN Utilities', () => {
   test('fingerprint is stable and domain-separated from the hint', async () => {
     const root = await importPinRoot(generatePin());
     const fp = await computePinFingerprintFromRoot(root);
-    expect(fp).toMatch(new RegExp(`^[A-Z2-7]{${PIN_FINGERPRINT_LENGTH}}$`));
+    expect(fp).toMatch(new RegExp(`^[0-9a-f]{${PIN_FINGERPRINT_LENGTH}}$`));
     expect(await computePinFingerprintFromRoot(root)).toBe(fp);
     expect(fp).not.toBe(await computePinHintFromRoot(root, 0));
   });

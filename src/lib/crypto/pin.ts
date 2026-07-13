@@ -101,37 +101,6 @@ export function isValidPin(pin: string): boolean {
 }
 
 /**
- * Uppercase RFC 4648 base32 alphabet (A–Z, 2–7), the same alphabet used by Tor v3
- * .onion addresses. It omits 0/1/8/9 so the encoded fingerprint stays unambiguous
- * when read aloud or copied by hand.
- */
-const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-
-/**
- * Encode bytes as unpadded uppercase base32 (RFC 4648), 5 bits per output char.
- */
-function toBase32(bytes: Uint8Array): string {
-  let value = 0;
-  let bits = 0;
-  let output = '';
-
-  for (const byte of bytes) {
-    value = (value << 8) | byte;
-    bits += 8;
-    while (bits >= 5) {
-      output += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
-      bits -= 5;
-    }
-  }
-
-  if (bits > 0) {
-    output += BASE32_ALPHABET[(value << (5 - bits)) & 31];
-  }
-
-  return output;
-}
-
-/**
  * Derive the PIN root: a non-extractable HKDF key produced by the full
  * PBKDF2-SHA-256 stretch of the PIN with the public PIN_ROOT_SALT.
  *
@@ -284,8 +253,7 @@ export async function derivePinRendezvousKey(
  * entered the same PIN. Never published to relays — it exists only for human
  * visual comparison, so it carries no rotation-bucket scoping.
  *
- * Encoded as PIN_FINGERPRINT_LENGTH uppercase base32 chars (RFC 4648, the Tor
- * v3 .onion alphabet) so the human-compared value avoids ambiguous glyphs.
+ * Encoded as PIN_FINGERPRINT_LENGTH lowercase hex chars.
  */
 export async function computePinFingerprintFromRoot(
   root: CryptoKey,
@@ -293,20 +261,21 @@ export async function computePinFingerprintFromRoot(
   const bytes = await deriveRootBytes(
     root,
     'fingerprint',
-    // 5 bits per base32 char; ceil covers a non-multiple-of-8 bit width
-    Math.ceil((PIN_FINGERPRINT_LENGTH * 5) / 8),
+    Math.ceil(PIN_FINGERPRINT_LENGTH / 2),
   );
-  return toBase32(bytes).slice(0, PIN_FINGERPRINT_LENGTH);
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, PIN_FINGERPRINT_LENGTH);
 }
 
 /**
- * Format a PIN fingerprint for display.
- * Uppercases and groups the full value into 4-char blocks (e.g. ABCD-EF23)
- * so the sender and receiver can visually confirm they derived the same PIN.
+ * Format a PIN fingerprint for display: the plain lowercase hex value,
+ * ungrouped, so the sender and receiver can visually confirm they derived
+ * the same PIN.
  */
 export function formatPinHint(hint: string): string {
-  const compact = hint.toUpperCase();
-  return compact.match(/.{1,4}/g)?.join('-') ?? compact;
+  return hint.toLowerCase();
 }
 
 /**
