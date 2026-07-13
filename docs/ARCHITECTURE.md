@@ -221,7 +221,7 @@ The Nostr-mode PIN is a short-lived pairing code, not an encryption root. It has
 | Fingerprint | `fingerprint` | 8 base32 chars (40 bits) | Local-only human comparison value; never published |
 
 - **Receiver look-back**: the published hint is scoped to the rotation bucket it was minted in, and a rendezvous event is accepted up to `PIN_TTL_MS` old. Because publication is not aligned to bucket boundaries, an event of age exactly `PIN_TTL_MS` can sit `PIN_ACTIVE_GENERATIONS` buckets back, so the receiver derives offsets `0..PIN_HINT_LOOKBACK_BUCKETS` (= 3) and filters `#h` on all of them — provably covering the whole non-expired window.
-- **Hint properties**: 64 bits is birthday-collision-free at any realistic concurrent-transfer scale (the receiver queries up to 10 candidates and tries each); per-bucket scoping means the tag rotates every 2 minutes and is never a stable cross-transfer correlator.
+- **Hint properties**: at 64 bits, the birthday-collision probability among `n` transfers sharing a bucket is about `n²/2⁶⁵` — roughly 3×10⁻⁸ even at a million concurrent transfers — and a collision is tolerated rather than fatal: the receiver queries up to 10 candidates and tries to decrypt each. Per-bucket scoping means the tag rotates every 2 minutes and is never a stable cross-transfer correlator.
 - **Fingerprint**: displayed grouped as `XXXX-XXXX` on both ends so humans can confirm they hold the same PIN. It rotates with the sender's PIN — the receiver's fingerprint should match the one under the code currently (or very recently) shown by the sender. Never transmitted.
 
 #### Claim / Confirm Handshake (mutual PIN proof, MITM-proof ECDH)
@@ -249,7 +249,7 @@ The input component is designed for fast, error-proof manual entry:
 
 #### `PinDisplay` (Sender Side)
 The display component focuses on secure and clear communication:
-- **Rotation Countdown**: A progress bar under the PIN shows the time until the next 60-second rotation replaces it, plus a note that recently rotated codes still work.
+- **Rotation Countdown**: A progress bar under the PIN shows the time until the next 2-minute rotation replaces it, plus a note that recently rotated codes still work.
 - **Masking**: Automatically masks the PIN after the first copy operation to prevent shoulder surfing.
 - **Quiet Backstop**: A muted footnote notes when waiting stops automatically (30 minutes); it is deliberately unobtrusive because rotation, not this window, is the security-relevant timer.
 - **Fingerprint**: Shows the current PIN's fingerprint for human comparison with the receiver.
@@ -422,7 +422,7 @@ Handles direct peer-to-peer connections using WebRTC data channels.
 8. Wait for the receiver's data-channel `ACK` after `DONE:<chunkCount>`
 
 **`use-nostr-receive.ts`** - Receiver logic (Nostr):
-1. Stretch the entered PIN into its root key; derive look-back hints and locate a fresh (≤3 min old) rendezvous event
+1. Stretch the entered PIN into its root key; derive look-back hints and locate a fresh (≤6 min old, the `PIN_TTL_MS` validity window) rendezvous event
 2. Decrypt and validate the rendezvous payload (author/transfer binding, metadata)
 3. Publish a claim with an ephemeral ECDH public key; wait (30s) for the sender's confirm and verify it
 4. Derive ECDH session keys; listen for P2P signals
