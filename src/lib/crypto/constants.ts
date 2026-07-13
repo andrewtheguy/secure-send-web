@@ -39,12 +39,13 @@ export const MAX_MESSAGE_SIZE = 100 * 1024 * 1024; // 100MB
 export const PIN_HINT_LENGTH = 16; // hex characters
 
 // PIN fingerprint length.
-// 8 hex chars = 32 bits. The fingerprint is local-only and exists solely for two
-// humans to visually compare on-device that they entered the same PIN. It is not a
-// collision-resistance primitive and never crosses the network, so 32 bits is more
-// than enough to make an accidental match between two distinct PINs negligible while
-// keeping the displayed value short and easy to read aloud.
-export const PIN_FINGERPRINT_LENGTH = 8; // hex characters
+// 8 uppercase base32 chars (RFC 4648, the Tor v3 .onion alphabet) = 40 bits. The
+// fingerprint is local-only and exists solely for two humans to visually compare
+// on-device that they entered the same PIN. It is not a collision-resistance primitive
+// and never crosses the network, so 40 bits is more than enough to make an accidental
+// match between two distinct PINs negligible while keeping the displayed value short
+// and easy to read aloud.
+export const PIN_FINGERPRINT_LENGTH = 8; // uppercase base32 characters
 
 // Domain-separation salt for the PIN hint KDF.
 // Shared (public) constant so sender and receiver derive the same hint from the

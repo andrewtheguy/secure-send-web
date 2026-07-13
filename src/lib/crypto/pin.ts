@@ -150,22 +150,50 @@ function pinHintSalt(bucketOffset: number): string {
 }
 
 /**
- * Derive `hexLength` hex chars from a salted PBKDF2-SHA-256 derivation of the PIN,
- * using already-imported PBKDF2 key material, an explicit salt string, an explicit
- * iteration count, and an explicit output length (the published wire hint and the
- * local-only fingerprint use different work factors and widths — see
+ * Uppercase RFC 4648 base32 alphabet (A–Z, 2–7), the same alphabet used by Tor v3
+ * .onion addresses. It omits 0/1/8/9 so the encoded fingerprint stays unambiguous
+ * when read aloud or copied by hand.
+ */
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+/**
+ * Encode bytes as unpadded uppercase base32 (RFC 4648), 5 bits per output char.
+ */
+function toBase32(bytes: Uint8Array): string {
+  let value = 0;
+  let bits = 0;
+  let output = '';
+
+  for (const byte of bytes) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      output += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+
+  if (bits > 0) {
+    output += BASE32_ALPHABET[(value << (5 - bits)) & 31];
+  }
+
+  return output;
+}
+
+/**
+ * Derive `byteCount` raw bytes from a salted PBKDF2-SHA-256 derivation of the PIN,
+ * using already-imported PBKDF2 key material, an explicit salt string, and an explicit
+ * iteration count (the published wire hint and the local-only fingerprint use different
+ * work factors and widths — see
  * PIN_HINT_LENGTH/PIN_HINT_ITERATIONS vs PIN_FINGERPRINT_LENGTH/PIN_FINGERPRINT_ITERATIONS).
  */
-async function derivePinBits(
+async function derivePinBytes(
   keyMaterial: CryptoKey,
   saltStr: string,
   iterations: number,
-  hexLength: number,
-): Promise<string> {
+  byteCount: number,
+): Promise<Uint8Array> {
   const encoder = new TextEncoder();
-
-  // Each byte produces 2 hex chars; ceil handles odd hexLength
-  const byteCount = Math.ceil(hexLength / 2);
   const derivedBits = await crypto.subtle.deriveBits(
     {
       name: 'PBKDF2',
@@ -177,7 +205,27 @@ async function derivePinBits(
     byteCount * 8,
   );
 
-  const hex = Array.from(new Uint8Array(derivedBits))
+  return new Uint8Array(derivedBits);
+}
+
+/**
+ * Derive `hexLength` lowercase hex chars from a salted PBKDF2-SHA-256 derivation of the PIN.
+ */
+async function derivePinHex(
+  keyMaterial: CryptoKey,
+  saltStr: string,
+  iterations: number,
+  hexLength: number,
+): Promise<string> {
+  // Each byte produces 2 hex chars; ceil handles odd hexLength
+  const bytes = await derivePinBytes(
+    keyMaterial,
+    saltStr,
+    iterations,
+    Math.ceil(hexLength / 2),
+  );
+
+  const hex = Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 
@@ -201,7 +249,7 @@ export async function computePinHint(
   bucketOffset = 0,
 ): Promise<string> {
   const keyMaterial = await importPinKey(pin);
-  return derivePinBits(
+  return derivePinHex(
     keyMaterial,
     pinHintSalt(bucketOffset),
     PIN_HINT_ITERATIONS,
@@ -220,7 +268,7 @@ export async function computePinHintFromKey(
   keyMaterial: CryptoKey,
   bucketOffset = 0,
 ): Promise<string> {
-  return derivePinBits(
+  return derivePinHex(
     keyMaterial,
     pinHintSalt(bucketOffset),
     PIN_HINT_ITERATIONS,
@@ -243,15 +291,20 @@ export async function computePinHintFromKey(
  * Salted with the static, dedicated PIN_FINGERPRINT_SALT (no time bucket) so the two
  * sides always display the same value, even across a time-bucket rollover, and so the
  * fingerprint is domain-separated from the wire hint and every other PIN derivation.
+ *
+ * Encoded as PIN_FINGERPRINT_LENGTH uppercase base32 chars (RFC 4648, the Tor v3
+ * .onion alphabet) so the human-compared value avoids ambiguous glyphs.
  */
 export async function computePinFingerprint(pin: string): Promise<string> {
   const keyMaterial = await importPinKey(pin);
-  return derivePinBits(
+  const bytes = await derivePinBytes(
     keyMaterial,
     PIN_FINGERPRINT_SALT,
     PIN_FINGERPRINT_ITERATIONS,
-    PIN_FINGERPRINT_LENGTH,
+    // 5 bits per base32 char; ceil covers a non-multiple-of-8 bit width
+    Math.ceil((PIN_FINGERPRINT_LENGTH * 5) / 8),
   );
+  return toBase32(bytes).slice(0, PIN_FINGERPRINT_LENGTH);
 }
 
 /**
