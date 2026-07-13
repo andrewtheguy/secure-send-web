@@ -14,7 +14,7 @@ export const PIN_CHARSET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 // rotation still authenticates. PIN_TTL_MS is the resulting validity of any
 // single PIN: it bounds rendezvous-event freshness on the receiver and is the
 // NIP-40 expiration the sender attaches so relays can drop stale events.
-export const PIN_ROTATION_MS = 60_000;
+export const PIN_ROTATION_MS = 120_000;
 export const PIN_ACTIVE_GENERATIONS = 3;
 export const PIN_TTL_MS = PIN_ROTATION_MS * PIN_ACTIVE_GENERATIONS;
 

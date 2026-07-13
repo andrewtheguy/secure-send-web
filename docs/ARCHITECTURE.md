@@ -11,7 +11,7 @@ Secure Send is a browser-based encrypted file and folder transfer application. I
 3. **Application-Layer Chunk Encryption**: File content is encrypted at the application layer using AES-256-GCM in 128KB chunks regardless of WebRTC DTLS transport encryption.
 4. **Memory-Efficient Receive Path**: Receivers preallocate the expected output buffer from authenticated signaling metadata, then decrypt, authenticate, and write each chunk directly to its indexed position as it arrives.
 5. **Pluggable Signaling, Fixed Transfer**: Nostr and QR/clipboard flows only exchange setup material: metadata, keys, SDP, and ICE candidates. The encrypted chunk framing, `DONE:<chunkCount>` terminator, and data-channel `ACK` are identical after signaling completes.
-6. **PIN Locates and Authenticates, ECDH Encrypts (Nostr mode)**: A short rotating PIN (10 Crockford base32 characters, not case sensitive, fresh every 60 seconds) locates the sender's rendezvous event and seals a mutual claim/confirm challenge-response. Content and signaling keys are derived from an ephemeral P-256 ECDH exchange that the challenge-response authenticates — never from the PIN itself.
+6. **PIN Locates and Authenticates, ECDH Encrypts (Nostr mode)**: A short rotating PIN (10 Crockford base32 characters, not case sensitive, fresh every 2 minutes) locates the sender's rendezvous event and seals a mutual claim/confirm challenge-response. Content and signaling keys are derived from an ephemeral P-256 ECDH exchange that the challenge-response authenticates — never from the PIN itself.
 
 ## Signaling Methods
 
@@ -69,7 +69,7 @@ Both modes derive the opaque `CryptoKey` from an ephemeral ECDH exchange — the
 sequenceDiagram
     participant Sender
     participant Receiver
-    loop Every 60s until claimed (max 30 min)
+    loop Every 2 min until claimed (max 30 min)
         Sender->>Receiver: Rendezvous event (fresh PIN, hint, nonce; via Nostr)
     end
     Receiver-->>Sender: Claim (sealed with PIN auth key; receiver ECDH pubkey)
@@ -203,7 +203,7 @@ The Nostr-mode PIN is a short-lived pairing code, not an encryption root. It has
 - **Length**: 10 characters, displayed and entered as two symmetric 5-char groups (`XXXXX-XXXXX`).
 - **Charset**: Crockford base32 (`0-9` + uppercase letters excluding `I`, `L`, `O`, `U`). Entry is case-insensitive; look-alikes are canonicalized as you type (`O→0`, `I/L→1`) by `normalizePinInput`.
 - **Entropy**: 9 random data characters = 45 bits; the 10th character is a checksum.
-- **Rotation**: the sender mints a fresh PIN and publishes a new rendezvous event every `PIN_ROTATION_MS` (60 s), honoring the `PIN_ACTIVE_GENERATIONS` (3) most recent PINs when verifying a claim — so any displayed PIN stays usable for `PIN_TTL_MS` (3 minutes) and is dead afterwards.
+- **Rotation**: the sender mints a fresh PIN and publishes a new rendezvous event every `PIN_ROTATION_MS` (2 minutes), honoring the `PIN_ACTIVE_GENERATIONS` (3) most recent PINs when verifying a claim — so any displayed PIN stays usable for `PIN_TTL_MS` (6 minutes) and is dead afterwards.
 
 #### Typo Detection (Weighted Checksum)
 - **Algorithm**: `sum(char_index * (2 * position + 1)) % 32`.
@@ -221,7 +221,7 @@ The Nostr-mode PIN is a short-lived pairing code, not an encryption root. It has
 | Fingerprint | `fingerprint` | 8 base32 chars (40 bits) | Local-only human comparison value; never published |
 
 - **Receiver look-back**: the published hint is scoped to the rotation bucket it was minted in, and a rendezvous event is accepted up to `PIN_TTL_MS` old. Because publication is not aligned to bucket boundaries, an event of age exactly `PIN_TTL_MS` can sit `PIN_ACTIVE_GENERATIONS` buckets back, so the receiver derives offsets `0..PIN_HINT_LOOKBACK_BUCKETS` (= 3) and filters `#h` on all of them — provably covering the whole non-expired window.
-- **Hint properties**: 64 bits is birthday-collision-free at any realistic concurrent-transfer scale (the receiver queries up to 10 candidates and tries each); per-bucket scoping means the tag rotates every 60 s and is never a stable cross-transfer correlator.
+- **Hint properties**: 64 bits is birthday-collision-free at any realistic concurrent-transfer scale (the receiver queries up to 10 candidates and tries each); per-bucket scoping means the tag rotates every 2 minutes and is never a stable cross-transfer correlator.
 - **Fingerprint**: displayed grouped as `XXXX-XXXX` on both ends so humans can confirm they hold the same PIN. It rotates with the sender's PIN — the receiver's fingerprint should match the one under the code currently (or very recently) shown by the sender. Never transmitted.
 
 #### Claim / Confirm Handshake (mutual PIN proof, MITM-proof ECDH)
@@ -231,11 +231,11 @@ The rendezvous payload carries the sender's ephemeral P-256 public key and a fre
 2. **Verify + lockout (sender)**: the sender tries its retained (≤3) generations' auth keys. A payload that decrypts *and* matches the generation's nonce, the transfer id, and the sender's own ECDH key is proof the receiver knows a live PIN. The **first verified claim locks the transfer** to that receiver: rotation stops, rendezvous publishing stops, and all other claims are ignored. Invalid claims are silently ignored (transfer tags are public, so treating them as fatal would allow trivial denial of service).
 3. **Confirm (sender → receiver)**: sealed with the same auth key; echoes both nonces and the receiver ECDH key the sender locked onto. This is the sender's PIN proof in the reverse direction and tells the receiver its claim won.
 
-Both sides then derive the session keys from `ECDH(shared secret)` via HKDF with the public per-transfer salt (`deriveNostrSessionKeys`: `signals` and `content` labels). A relay man-in-the-middle cannot substitute either ECDH key: the keys are bound inside PIN-sealed payloads in both directions, and forging either seal requires the PIN during its ≤3-minute validity window.
+Both sides then derive the session keys from `ECDH(shared secret)` via HKDF with the public per-transfer salt (`deriveNostrSessionKeys`: `signals` and `content` labels). A relay man-in-the-middle cannot substitute either ECDH key: the keys are bound inside PIN-sealed payloads in both directions, and forging either seal requires the PIN during its ≤6-minute validity window.
 
 - **Why nonces**: the sender nonce is fresh per rotation and the receiver nonce fresh per claim, so captured handshake payloads cannot be replayed across rotations, transfers, or directions (claim and confirm also differ by their `type` field under the same key).
 - **Offline guessing is bounded and low-value**: a captured rendezvous/claim/confirm is an offline PIN-guessing target at 600k PBKDF2 iterations per guess across a 45-bit space (~55 GPU-years on average). Even a success reveals only the rendezvous metadata — content keys are ECDH-derived and never PIN-derived, and after the first claim a recovered PIN cannot join, redirect, or decrypt the transfer.
-- **Online guessing is impractical**: an active attacker gets one sealed-claim guess per relay event against a 45-bit space during a ≤3-minute window, with no feedback for failures.
+- **Online guessing is impractical**: an active attacker gets one sealed-claim guess per relay event against a 45-bit space during a ≤6-minute window, with no feedback for failures.
 
 ### User Interface Architecture
 
@@ -258,8 +258,8 @@ The display component focuses on secure and clear communication:
 - `MAX_MESSAGE_SIZE`: 100MB (maximum file size)
 - `ENCRYPTION_CHUNK_SIZE`: 128KB (application-level encryption chunk size for all methods)
 - `PBKDF2_ITERATIONS`: 600,000
-- `PIN_ROTATION_MS`: 60 seconds (fresh PIN + rendezvous event cadence)
-- `PIN_ACTIVE_GENERATIONS`: 3 (PINs honored at any moment; PIN_TTL_MS = 3 minutes)
+- `PIN_ROTATION_MS`: 2 minutes (fresh PIN + rendezvous event cadence)
+- `PIN_ACTIVE_GENERATIONS`: 3 (PINs honored at any moment; PIN_TTL_MS = 6 minutes)
 - `PIN_WAIT_TIMEOUT_MS`: 30 minutes (sender rotation/wait backstop — a resource bound, not a security control; rotation already caps each PIN's exposure)
 
 ### Nostr Signaling (`src/lib/nostr/`)
@@ -273,7 +273,7 @@ Uses Nostr protocol for decentralized signaling between sender and receiver.
 | 24242 | Data Transfer - claim/confirm handshake and WebRTC signals |
 
 **Event Types (via tags):**
-- `rendezvous`: Initial transfer setup; republished with a fresh PIN/hint/nonce every 60 s until claimed
+- `rendezvous`: Initial transfer setup; republished with a fresh PIN/hint/nonce every 2 minutes until claimed
 - `claim`: Receiver's PIN proof + ECDH public key, sealed with the PIN-derived auth key. Tags are plaintext for routing; the sealed body repeats the transfer id and nonces for authentication
 - `confirm`: Sender's mutual PIN proof; locks the transfer to the claiming receiver
 - `signal`: WebRTC signaling (offer/answer/candidates), encrypted in the event content with the ECDH-derived `signals` key
@@ -413,7 +413,7 @@ Handles direct peer-to-peer connections using WebRTC data channels.
 
 **`use-nostr-send.ts`** - Sender logic (Nostr):
 1. Read content; generate transfer salt, ephemeral Nostr identity, and ephemeral ECDH key pair
-2. Rotate: every 60 s mint a fresh PIN and publish a rendezvous event (up to 30 minutes)
+2. Rotate: every 2 minutes mint a fresh PIN and publish a rendezvous event (up to 30 minutes)
 3. Wait for a claim sealed with one of the 3 retained PIN auth keys; verify nonce/transfer/ECDH bindings; first verified claim locks the transfer (invalid claims are ignored)
 4. Publish confirm under the same auth key; derive ECDH session keys
 5. Attempt P2P connection (30s timeout for connection only)
@@ -486,7 +486,7 @@ In Nostr mode, the entire rendezvous payload is encrypted with the PIN-derived `
 ### Encryption Flow
 
 **Nostr Mode:**
-1. **PIN Generation**: fresh 10-character Crockford base32 PIN every 60 s (9 random chars + check digit)
+1. **PIN Generation**: fresh 10-character Crockford base32 PIN every 2 minutes (9 random chars + check digit)
 2. **Salt Generation**: 16 random bytes (public, in the rendezvous event tags; HKDF salt for the session keys)
 3. **PIN Derivations**: PBKDF2-SHA256 (600,000 iterations) stretches the PIN into a root; HKDF fans out the hint, `auth`, `rendezvous`, and fingerprint values
 4. **Session Key Derivation**: after the claim/confirm handshake, both sides derive `signals` and `content` AES-GCM keys from the ephemeral P-256 ECDH shared secret via HKDF with the transfer salt
@@ -545,7 +545,7 @@ Both receive modes reject extra, duplicate, out-of-range, malformed, and oversiz
 |-------|-------|-----------|
 | Max file size | 100MB | Memory constraints |
 | Encryption chunk size | 128KB | Balance of encryption overhead and streaming efficiency |
-| PIN length | 10 chars (9 data + check digit, ~45 bits) | Easy to type/read aloud; the 60 s rotation, 3-minute validity, first-claim lockout, and ECDH content keys carry the security the old long PIN used to |
+| PIN length | 10 chars (9 data + check digit, ~45 bits) | Easy to type/read aloud; the 2-minute rotation, 6-minute validity, first-claim lockout, and ECDH content keys carry the security the old long PIN used to |
 
 ## Timeout Configuration
 
@@ -557,10 +557,10 @@ Both receive modes reject extra, duplicate, out-of-range, malformed, and oversiz
 | Nostr P2P offer retry | 5 seconds | Interval to retry WebRTC offer if no answer event has been processed |
 | Data-channel ACK wait | 30 seconds | Sender wait after `DONE:<chunkCount>` for receiver `ACK` |
 | P2P transfer stall | 60 seconds | Idle/stall window (`STALL_TIMEOUT_MS`) applied to both sides of an active transfer. The receiver arms it via the watchdog's `start()` when the data channel opens (not only after the first chunk arrives); the sender applies it per chunk hand-off. It resets on each chunk sent / message received, so a steadily-progressing transfer of any size never trips it; a peer that goes quiet aborts after this span. There is no overall transfer deadline. |
-| PIN rotation | 60 seconds | Fresh PIN + rendezvous event cadence (`PIN_ROTATION_MS`) |
-| PIN validity | 3 minutes | How long any single PIN is honored (`PIN_TTL_MS` = 3 generations); also the rendezvous NIP-40 expiry and the receiver's rendezvous freshness bound |
+| PIN rotation | 2 minutes | Fresh PIN + rendezvous event cadence (`PIN_ROTATION_MS`) |
+| PIN validity | 6 minutes | How long any single PIN is honored (`PIN_TTL_MS` = 3 generations); also the rendezvous NIP-40 expiry and the receiver's rendezvous freshness bound |
 | Sender confirm wait | 30 seconds | Receiver wait for the sender's confirm after publishing a claim |
-| Sender PIN rotation/wait backstop | 30 minutes | Resource bound on an unclaimed transfer (relay publishing + file in memory) before it is canceled (`PIN_WAIT_TIMEOUT_MS`); not a security window — rotation caps each PIN at 3 minutes regardless |
+| Sender PIN rotation/wait backstop | 30 minutes | Resource bound on an unclaimed transfer (relay publishing + file in memory) before it is canceled (`PIN_WAIT_TIMEOUT_MS`); not a security window — rotation caps each PIN at 6 minutes regardless |
 | Manual transfer TTL | 1 hour | Manual Exchange session validity (`TRANSFER_EXPIRATION_MS`) |
 | Receiver PIN inactivity | 5 minutes | Clears PIN input if no changes made |
 
@@ -569,7 +569,7 @@ Both receive modes reject extra, duplicate, out-of-range, malformed, and oversiz
 Secure Send enforces hard session TTLs. Expired requests MUST NOT establish a session or begin transfer, even if the PIN/key is correct.
 
 **Duration**
-- **Nostr**: `PIN_TTL_MS` (currently 3 minutes) per PIN generation, inside a `PIN_WAIT_TIMEOUT_MS` (30 minute) resource-backstop wait window
+- **Nostr**: `PIN_TTL_MS` (currently 6 minutes) per PIN generation, inside a `PIN_WAIT_TIMEOUT_MS` (30 minute) resource-backstop wait window
 - **Manual Exchange**: `TRANSFER_EXPIRATION_MS` (currently 1 hour)
 
 **TTL Anchor (start time)**
@@ -592,7 +592,7 @@ Secure Send enforces hard session TTLs. Expired requests MUST NOT establish a se
 PIN rotation and the NIP-40 `expiration` tag are **liveness controls, not cryptographic erasure**: they stop a PIN from authenticating anything new, but they cannot delete events a relay already received and chose to retain. So "what if a PIN leaks (or is brute-forced offline) later?" reduces to "what do the PIN's derived keys unlock among retained events?" — and the answer is deliberately small:
 
 - **File content is never recoverable from a PIN — before or after expiry.** Content and signaling keys are derived from the ephemeral ECDH exchange, not the PIN, and file bytes travel over WebRTC/DTLS without ever touching a relay. A leaked PIN yields *no* content ciphertext and *no* content keys.
-- **What a leaked PIN can decrypt** (from retained events of its own ≤3-minute generation): the rendezvous payload — transfer metadata (`fileName`/`fileSize`/`mimeType`, `transferId`, sender pubkey), the sender's ECDH *public* key, and a handshake nonce — plus the claim/confirm bodies (nonces and ECDH public keys). WebRTC signaling (SDP/ICE, i.e. participant **IP addresses**) is encrypted with the ECDH `signals` key, so unlike the previous protocol it is **not** exposed by a PIN leak. The residual exposure is *what* and *who published*, not the content or the peers' addresses.
+- **What a leaked PIN can decrypt** (from retained events of its own ≤6-minute generation): the rendezvous payload — transfer metadata (`fileName`/`fileSize`/`mimeType`, `transferId`, sender pubkey), the sender's ECDH *public* key, and a handshake nonce — plus the claim/confirm bodies (nonces and ECDH public keys). WebRTC signaling (SDP/ICE, i.e. participant **IP addresses**) is encrypted with the ECDH `signals` key, so unlike the previous protocol it is **not** exposed by a PIN leak. The residual exposure is *what* and *who published*, not the content or the peers' addresses.
 - **A recovered PIN grants no access.** After the first verified claim the sender ignores all other claims, so a PIN cracked minutes (or years) later can neither join, redirect, nor decrypt the transfer — it is a privacy leak of one rendezvous record, bounded to one transfer (fresh PIN, keypairs, and salt per rotation/transfer).
 
 **Takeaway:** the "content keys from ECDH + rotating single-transfer PIN + first-claim lockout" design means a PIN leak or offline crack recovers only one generation's rendezvous metadata, mitigated (best-effort) by NIP-40 deletion.
@@ -602,7 +602,7 @@ PIN rotation and the NIP-40 `expiration` tag are **liveness controls, not crypto
 1. **Ephemeral Keys**: New Nostr keypair and ECDH key pair generated for each transfer; in Nostr mode the ECDH exchange gives per-transfer session keys that no long-lived secret can later unlock (forward secrecy relative to the PIN — a recovered PIN never decrypts content)
 2. **PIN Role — Locate and Authenticate Only**: The Nostr PIN derives the rendezvous lookup hint, the rendezvous payload key, and the handshake auth key. It derives **no** signaling or content keys; those come from ECDH.
 3. **No Server Trust for File Content**: Relays see only routing tags and PIN-encrypted rendezvous/handshake ciphertext; file plaintext never leaves the device and is transferred directly peer-to-peer
-4. **PIN Entropy and Windows**: 45 bits (9 random Crockford chars; the check digit is deterministic). Security comes from the combination: 600k-iteration PBKDF2 per offline guess (~2^44 × 600k SHA-256 on average to crack one captured record), one relay event per online guess with no failure feedback, 60 s rotation with only 3 generations honored, and first-claim lockout making any later recovery worthless.
+4. **PIN Entropy and Windows**: 45 bits (9 random Crockford chars; the check digit is deterministic). Security comes from the combination: 600k-iteration PBKDF2 per offline guess (~2^44 × 600k SHA-256 on average to crack one captured record), one relay event per online guess with no failure feedback, 2-minute rotation with only 3 generations honored, and first-claim lockout making any later recovery worthless.
 5. **Relay MITM Resistance**: Both ECDH public keys are bound inside PIN-sealed payloads in both directions (claim and confirm), so a relay that substitutes keys cannot produce valid seals without the live PIN
 6. **Denial-of-Service Posture**: Invalid claims are ignored rather than fatal — transfer tags are public, so failing hard on a bad claim would let any observer kill transfers. The cost is that the attacker gets online guesses; the 45-bit space and relay throughput make that irrelevant.
 7. **Transport Security**: All P2P transfers (Nostr, Manual Exchange) use both AES-256-GCM encryption (128KB chunks) and WebRTC DTLS

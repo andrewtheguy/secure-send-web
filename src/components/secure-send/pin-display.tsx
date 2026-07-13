@@ -170,8 +170,8 @@ export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
         </div>
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <RefreshCw className="h-3 w-3" />A new PIN appears every{' '}
-          {Math.round(PIN_ROTATION_MS / 1000)} seconds; a code shown in the last{' '}
-          {graceMinutes} minutes still works.
+          {Math.round(PIN_ROTATION_MS / 60000)} minutes; a code shown in the
+          last {graceMinutes} minutes still works.
         </p>
       </div>
 
