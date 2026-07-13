@@ -243,11 +243,12 @@ export async function createReceiveSink(
 
 /**
  * Create the sequential sink for output of unknown final size.
- * `expectedInputBytes` (the total size of the data being packaged) picks the
- * backend: at or below `MEMORY_SINK_MAX_BYTES` output is buffered in memory,
- * above it the sink is OPFS-backed and rejects when OPFS is unsupported or
- * fails. The threshold only picks the backend — a memory sink still accepts
- * output that marginally exceeds the estimate.
+ * `expectedInputBytes` (the total size of the data being packaged) is a
+ * heuristic for the output size, used only to pick the backend: at or below
+ * `MEMORY_SINK_MAX_BYTES` output is buffered in memory, above it the sink is
+ * OPFS-backed and rejects when OPFS is unsupported or fails. It is not a
+ * limit — a memory sink accepts output that exceeds the estimate, which for
+ * ZIP archiving stays close enough to the input total to keep memory safe.
  */
 export async function createAppendSink(
   expectedInputBytes: number,

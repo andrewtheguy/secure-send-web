@@ -36,6 +36,11 @@ export async function compressFilesToZip(
   files: readonly File[],
   archiveName: string,
 ): Promise<CompressedArchive> {
+  // The input total is a heuristic stand-in for the unknown archive size, not
+  // a cap on it: deflate output exceeds incompressible input only marginally,
+  // so a selection at or below the memory-sink threshold cannot produce an
+  // archive large enough to cause memory pressure, and the memory sink accepts
+  // whatever the archive ends up being.
   const totalInputBytes = files.reduce((total, file) => total + file.size, 0);
   const sink = await createAppendSink(totalInputBytes);
   try {
