@@ -19,7 +19,7 @@ export type ReceivedContent = ReceivedFile;
  *   rendezvous hints, the rendezvous payload key, and the claim/confirm auth
  *   key. It derives no content-encryption keys — those come from the ephemeral
  *   ECDH exchange the PIN authenticates.
- * @property fingerprint - Stable PIN fingerprint (see computePinFingerprintFromRoot),
+ * @property fingerprint - Stable PIN fingerprint (see computePinFingerprint),
  *   shown for human visual comparison only; never sent across the wire.
  */
 export interface PinKeyMaterial {

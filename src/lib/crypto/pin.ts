@@ -3,7 +3,9 @@ import {
   PBKDF2_ITERATIONS,
   PIN_CHARSET,
   PIN_CHECKSUM_LENGTH,
+  PIN_FINGERPRINT_ITERATIONS,
   PIN_FINGERPRINT_LENGTH,
+  PIN_FINGERPRINT_SALT,
   PIN_GROUP_LENGTH,
   PIN_HINT_LENGTH,
   PIN_HKDF_SALT,
@@ -104,11 +106,12 @@ export function isValidPin(pin: string): boolean {
  * Derive the PIN root: a non-extractable HKDF key produced by the full
  * PBKDF2-SHA-256 stretch of the PIN with the public PIN_ROOT_SALT.
  *
- * Every PIN-scoped value (per-bucket rendezvous hint, claim/confirm auth key,
- * rendezvous payload key, on-screen fingerprint) is a cheap HKDF derivation off
- * this root with a distinct info label, so the expensive stretch runs exactly
- * once per PIN while brute-forcing any derived value still costs the full
- * PBKDF2 work factor per PIN guess.
+ * Every wire-exposed PIN-scoped value (per-bucket rendezvous hint,
+ * claim/confirm auth key, rendezvous payload key) is a cheap HKDF derivation
+ * off this root with a distinct info label, so the expensive stretch runs
+ * exactly once per PIN while brute-forcing any derived value still costs the
+ * full PBKDF2 work factor per PIN guess. The on-screen fingerprint is never
+ * transmitted and uses its own light stretch (computePinFingerprint).
  *
  * The PIN root derives no content-encryption keys — file content and WebRTC
  * signaling are protected by keys from the ephemeral ECDH exchange that the
@@ -251,17 +254,36 @@ export async function derivePinRendezvousKey(
  * Compute the PIN fingerprint: a stable one-way derivation of the PIN,
  * displayed to both sender and receiver so they can visually confirm they
  * entered the same PIN. Never published to relays — it exists only for human
- * visual comparison, so it carries no rotation-bucket scoping.
+ * visual comparison, so it carries no rotation-bucket scoping and only a
+ * light stretch (PIN_FINGERPRINT_ITERATIONS, independent of the PIN root) —
+ * cheap enough to show the moment the PIN is typed.
  *
  * Encoded as PIN_FINGERPRINT_LENGTH lowercase hex chars.
  */
-export async function computePinFingerprintFromRoot(
-  root: CryptoKey,
-): Promise<string> {
-  const bytes = await deriveRootBytes(
-    root,
-    'fingerprint',
-    Math.ceil(PIN_FINGERPRINT_LENGTH / 2),
+export async function computePinFingerprint(pin: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const pinData = encoder.encode(pin);
+
+  let pbkdf2Key: CryptoKey;
+  try {
+    pbkdf2Key = await crypto.subtle.importKey('raw', pinData, 'PBKDF2', false, [
+      'deriveBits',
+    ]);
+  } finally {
+    wipeBufferSource(pinData);
+  }
+
+  const bytes = new Uint8Array(
+    await crypto.subtle.deriveBits(
+      {
+        name: 'PBKDF2',
+        salt: encoder.encode(PIN_FINGERPRINT_SALT),
+        iterations: PIN_FINGERPRINT_ITERATIONS,
+        hash: PBKDF2_HASH,
+      },
+      pbkdf2Key,
+      Math.ceil(PIN_FINGERPRINT_LENGTH / 2) * 8,
+    ),
   );
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, '0'))

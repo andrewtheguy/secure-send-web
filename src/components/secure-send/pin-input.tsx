@@ -9,7 +9,7 @@ import {
 } from 'react';
 import { Input } from '@/components/ui/input';
 import {
-  computePinFingerprintFromRoot,
+  computePinFingerprint,
   importPinRoot,
   isValidPin,
   normalizePinInput,
@@ -113,8 +113,10 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
         if (!isValidPin(pin)) return;
 
         try {
-          const root = await importPinRoot(pin);
-          const fingerprint = await computePinFingerprintFromRoot(root);
+          const [root, fingerprint] = await Promise.all([
+            importPinRoot(pin),
+            computePinFingerprint(pin),
+          ]);
 
           securedKeyRef.current = root;
           securedFingerprintRef.current = fingerprint;

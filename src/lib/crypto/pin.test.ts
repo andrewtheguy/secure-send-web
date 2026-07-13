@@ -6,7 +6,7 @@ import {
   PIN_LENGTH,
 } from './constants';
 import {
-  computePinFingerprintFromRoot,
+  computePinFingerprint,
   computePinHintFromRoot,
   derivePinAuthKey,
   derivePinRendezvousKey,
@@ -81,11 +81,19 @@ describe('PIN Utilities', () => {
   });
 
   test('fingerprint is stable and domain-separated from the hint', async () => {
-    const root = await importPinRoot(generatePin());
-    const fp = await computePinFingerprintFromRoot(root);
+    const pin = generatePin();
+    const fp = await computePinFingerprint(pin);
     expect(fp).toMatch(new RegExp(`^[0-9a-f]{${PIN_FINGERPRINT_LENGTH}}$`));
-    expect(await computePinFingerprintFromRoot(root)).toBe(fp);
+    expect(await computePinFingerprint(pin)).toBe(fp);
+    const root = await importPinRoot(pin);
     expect(fp).not.toBe(await computePinHintFromRoot(root, 0));
+  });
+
+  test('fingerprint matches the cross-implementation vector', async () => {
+    // Parity with secure-send-cli's pin_fingerprint (PBKDF2-SHA-256, 1k
+    // iterations, salt "secure-send:pin-fingerprint:v2"), verified
+    // independently.
+    expect(await computePinFingerprint('ABCDE0123Y')).toBe('e3e017a41404');
   });
 
   test('auth and rendezvous keys are distinct non-extractable AES keys', async () => {
@@ -113,10 +121,6 @@ describe('PIN Utilities', () => {
     expect(await computePinHintFromRoot(receiverRoot, 0)).toBe(
       await computePinHintFromRoot(senderRoot, 0),
     );
-    expect(await computePinFingerprintFromRoot(receiverRoot)).toBe(
-      await computePinFingerprintFromRoot(senderRoot),
-    );
-
     const { encrypt, decrypt } = await import('./aes-gcm');
     const sealed = await encrypt(
       await derivePinAuthKey(senderRoot),
