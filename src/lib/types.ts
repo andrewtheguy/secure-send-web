@@ -1,6 +1,10 @@
 export interface ReceivedFile {
   contentType: 'file';
-  data: Uint8Array;
+  /**
+   * Received plaintext. Disk-backed (OPFS scratch) when the browser supports
+   * it, so reading/downloading streams from disk; in-memory Blob otherwise.
+   */
+  data: Blob;
   fileName: string;
   fileSize: number;
   mimeType: string;

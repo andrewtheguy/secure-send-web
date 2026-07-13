@@ -11,8 +11,13 @@
  *       [2-byte chunk index (big-endian)][12-byte nonce][ciphertext][16-byte tag]
  *     The chunk index is also the AES-GCM additional authenticated data.
  *   - A trailing control string `DONE:<totalChunks>`.
- *   - The receiver replies with the control string `ACK` once the whole file
- *     has authenticated and reassembled.
+ *   - The receiver replies with the control string `ACK` once every chunk has
+ *     authenticated and been written to its sink.
+ *
+ * Neither side materializes the whole file: the sender encrypts
+ * `ENCRYPTION_CHUNK_SIZE` Blob slices on demand, and the receiver writes each
+ * decrypted chunk to a `ReceiveSink` (OPFS-backed where supported) at the
+ * chunk's byte offset.
  */
 
 import {
@@ -25,6 +30,7 @@ import {
   parseChunkMessage,
 } from '@/lib/crypto';
 import { P2PConnectionError } from '@/lib/errors';
+import type { ReceiveSink } from '@/lib/receive-sink';
 import type { WebRTCConnection } from '@/lib/webrtc';
 
 /** Control-message tokens exchanged over the data channel. */
@@ -89,8 +95,11 @@ export interface ReceiverOptions {
 export interface DataChannelReceiver {
   /** Feed every data-channel message here. */
   onMessage: (data: string | ArrayBuffer) => void;
-  /** Resolves with the fully reassembled plaintext, or rejects on any error. */
-  done: Promise<Uint8Array>;
+  /**
+   * Resolves with the sealed plaintext payload from the sink (disk-backed for
+   * an OPFS sink), or rejects on any error.
+   */
+  done: Promise<Blob>;
   /**
    * Arm the stall watchdog. Call once the data channel is open and data should
    * begin flowing; every subsequent message resets the idle window.
@@ -104,18 +113,18 @@ export interface DataChannelReceiver {
 }
 
 /**
- * Encrypt `contentBytes` in `ENCRYPTION_CHUNK_SIZE` chunks and stream them over
+ * Encrypt `content` in `ENCRYPTION_CHUNK_SIZE` chunks and stream them over
  * the data channel, followed by a `DONE:<n>` control message.
  */
 export async function sendFileOverDataChannel(
   rtc: WebRTCConnection,
   key: CryptoKey,
-  contentBytes: Uint8Array,
+  content: Blob,
   opts: SendOptions = {},
 ): Promise<void> {
   const { onProgress, isCancelled } = opts;
   const stallTimeoutMs = resolveStallTimeoutMs(opts.stallTimeoutMs);
-  const total = contentBytes.length;
+  const total = content.size;
   const totalChunks = Math.ceil(total / ENCRYPTION_CHUNK_SIZE);
   if (totalChunks > MAX_CHUNKS) {
     throw new Error('File too large for the transfer chunk-index range');
@@ -126,8 +135,11 @@ export async function sendFileOverDataChannel(
     if (isCancelled?.()) throw new Error('Cancelled');
 
     const end = Math.min(i + ENCRYPTION_CHUNK_SIZE, total);
-    // subarray is a zero-copy view; encryptChunk reads it synchronously.
-    const plainChunk = contentBytes.subarray(i, end);
+    // Blob.slice reads lazily from the underlying storage (disk for a picked
+    // File), so only one chunk is materialized in memory at a time.
+    const plainChunk = new Uint8Array(
+      await content.slice(i, end).arrayBuffer(),
+    );
     const encryptedChunk = await encryptChunk(key, plainChunk, chunkIndex);
     // A single chunk that cannot be handed off within the idle window means the
     // receiver has stopped draining the channel; abort rather than block here.
@@ -234,14 +246,17 @@ function waitForAckMessage(rtc: WebRTCConnection): Promise<void> {
 /**
  * Create a streaming receiver for a transfer of a known `totalBytes`.
  *
- * Decrypts each chunk as it arrives into a single preallocated buffer (size is
- * known up front from signaling), so peak memory is ~1x the file size. Feed
- * every data-channel message to `onMessage`; `done` resolves with the
- * reassembled plaintext once `DONE:<n>` arrives and all chunks authenticate.
+ * Decrypts each chunk as it arrives and writes it to `sink` at the chunk's
+ * byte offset (size is known up front from signaling), so peak memory is
+ * bounded by in-flight chunks, not the file. Feed every data-channel message
+ * to `onMessage`; `done` resolves with the sink's sealed payload once
+ * `DONE:<n>` arrives and all chunks authenticate. The caller owns the sink's
+ * lifecycle and must discard it if the transfer fails or is abandoned.
  */
 export function createDataChannelReceiver(
   key: CryptoKey,
   totalBytes: number,
+  sink: ReceiveSink,
   opts: ReceiverOptions = {},
 ): DataChannelReceiver {
   const { onProgress } = opts;
@@ -256,7 +271,6 @@ export function createDataChannelReceiver(
     throw new Error('Transfer size exceeds the supported chunk-index range');
   }
 
-  const buffer = new Uint8Array(totalBytes);
   const expectedEncryptedBytes =
     totalBytes + expectedChunks * ENCRYPTED_CHUNK_OVERHEAD;
 
@@ -274,9 +288,9 @@ export function createDataChannelReceiver(
     }
   };
 
-  let resolveDone!: (value: Uint8Array) => void;
+  let resolveDone!: (value: Blob) => void;
   let rejectDone!: (error: Error) => void;
-  const done = new Promise<Uint8Array>((resolve, reject) => {
+  const done = new Promise<Blob>((resolve, reject) => {
     resolveDone = resolve;
     rejectDone = reject;
   });
@@ -357,7 +371,10 @@ export function createDataChannelReceiver(
         throw new Error(`Chunk ${chunkIndex} exceeds expected file size`);
       }
 
-      buffer.set(decryptedChunk, writePosition);
+      // The chunk self-authenticated on decrypt, so it is safe to hand off to
+      // storage and drop immediately.
+      await sink.write(writePosition, decryptedChunk);
+      if (settled) return;
       totalDecryptedBytes += decryptedChunk.length;
 
       onProgress?.(totalDecryptedBytes, totalBytes);
@@ -398,9 +415,23 @@ export function createDataChannelReceiver(
       return;
     }
 
+    let payload: Blob;
+    try {
+      payload = await sink.finish();
+    } catch (error) {
+      fail(
+        error instanceof Error
+          ? error
+          : new Error('Failed to finalize received file'),
+      );
+      return;
+    }
+    // A stall timeout or dispose() during the flush already settled `done`.
+    if (settled) return;
+
     settled = true;
     clearStallTimer();
-    resolveDone(buffer);
+    resolveDone(payload);
   };
 
   const onMessage = (data: string | ArrayBuffer) => {
