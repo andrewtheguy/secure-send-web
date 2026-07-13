@@ -58,6 +58,16 @@ const P2P_CONNECTION_TIMEOUT_MS = 30000;
  */
 const CONFIRM_TIMEOUT_MS = 30000;
 
+/**
+ * How long to keep the peer connection alive after sending the final ACK.
+ * The sender closes the connection as soon as the ACK arrives; this delayed
+ * close is only a fallback for a sender that never does. Closing in the same
+ * tick as the send can tear the transport down before the ACK datagram is
+ * delivered, making the sender report "data channel closed before
+ * acknowledgment" even though the transfer succeeded.
+ */
+const ACK_LINGER_MS = 3000;
+
 function decodeEcdhPublicKey(b64: string): Uint8Array | null {
   try {
     const bytes = base64ToUint8Array(b64);
@@ -570,8 +580,16 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               // down rtc must not prevent the Promise from settling.
               try {
                 if (rtc) {
-                  rtc.send(ACK);
-                  rtc.close();
+                  const conn = rtc;
+                  conn.send(ACK);
+                  // Linger so the ACK reaches the sender; see ACK_LINGER_MS.
+                  setTimeout(() => {
+                    try {
+                      conn.close();
+                    } catch {
+                      // ignore
+                    }
+                  }, ACK_LINGER_MS);
                 }
               } catch (e) {
                 console.error('ACK/teardown error', e);
