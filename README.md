@@ -8,9 +8,9 @@ A web application for sending encrypted files and folders with PIN-based Nostr s
 
 - **100% Static - No Backend Required**: The entire app is a static site that can be hosted on any static hosting service (GitHub Pages, Netlify, Vercel, S3, etc.). No server-side code, no database, no backend infrastructure needed.
 - **Works offline**: No internet required after page load when using Manual Exchange on same local network
-- **Flexible signaling**: Nostr (default) or Manual Exchange (QR/copy-paste). Manual Exchange works across networks with internet, or on same local network without internet.
+- **Flexible signaling**: Nostr (default) or Manual Exchange (QR/copy-paste). With internet, Manual Exchange can connect across different networks when ICE finds a direct route; without internet, it can connect over the same local network.
 - **Rotating PIN pairing (Nostr)**: A short 10-character PIN (not case sensitive) that rotates every 2 minutes locates the sender and authenticates an ephemeral ECDH key exchange; content keys are never derived from the PIN
-- **File or folder transfer**: Send files or folders up to 100MB
+- **File or folder transfer**: Send a file, or a ZIP archive created from multiple files/a folder, up to 100MB
 - **End-to-end encryption**: All transfers use AES-256-GCM encryption
 - **No accounts required**: Ephemeral keypairs generated per transfer
 - **PWA Support**: Install as a Progressive Web App for offline access
@@ -25,7 +25,7 @@ Sender and receiver should use the same app version for transfers.
 ### Sending Files or Folders
 
 1. Select the "Files" or "Folder" tab
-2. Drag and drop files or click to select a file/folder (max 100MB total)
+2. Drag and drop files or click to select a file/folder. A single file can be up to 100MB; for multiple files or a folder, the generated ZIP archive must be no larger than 100MB
 3. Choose Auto Exchange mode or Manual Exchange mode
 4. For Auto Exchange, click "Start Auto Exchange" and share the displayed 10-character PIN with the receiver. The PIN rotates every 2 minutes; a recently rotated code keeps working for a few more minutes
 5. For Manual Exchange, click "Start Manual Exchange" and exchange the QR/copy-paste signaling payloads with the receiver
@@ -88,9 +88,9 @@ All signaling methods share the same **data-channel transfer protocol**: P2P tra
 
 **Signaling Methods** (sender chooses):
 - **Nostr** (default): Requires internet. Decentralized relay signaling. Devices can be on different networks.
-- **Manual Exchange**: No internet required. Exchange signaling via QR scan or copy/paste (camera optional). With internet, works across different networks. Without internet, devices must be on same local network.
+- **Manual Exchange**: No internet required. Exchange signaling via QR scan or copy/paste (camera optional). With internet, STUN assists direct candidate discovery and the devices can connect across different networks when a direct ICE route exists. Without internet, devices must be able to reach each other directly, normally on the same local network.
 
-**Data Transfer**: WebRTC P2P only. If a direct P2P connection cannot be established, the transfer does not complete — there is no automatic in-app fallback. When this happens, the UI suggests transferring offline via animated QR codes with [Secure QR Transfer](https://qrsecure.kuvi.app/transfer), a separate tool for side-by-side devices.
+**Data Transfer**: WebRTC P2P only. STUN may help the peers discover a direct route, but TURN relaying is not supported. If a direct P2P connection cannot be established, the transfer does not complete — there is no automatic in-app fallback. When this happens, the UI suggests transferring offline via animated QR codes with [Secure QR Transfer](https://qrsecure.kuvi.app/transfer), a separate tool for side-by-side devices.
 
 See [Architecture](./docs/ARCHITECTURE.md) for detailed transfer flows and encryption specifics.
 
@@ -107,4 +107,4 @@ Receivers choose the matching receive mode:
 
 ## License
 
-MIT
+[MIT](./LICENSE)

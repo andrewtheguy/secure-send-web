@@ -77,7 +77,7 @@ later over WebRTC by per-chunk AES-GCM authentication.
 1. Take in the receiver's answer by **either** method — scan the response QR with the in-app
    scanner, or paste the copied response text
 2. The P2P connection establishes and the file transfers directly
-3. Both sides show "Transfer Complete" when done
+3. Both sides show that the transfer completed when done
 
 ## Tips
 
@@ -88,8 +88,10 @@ later over WebRTC by per-chunk AES-GCM authentication.
   the **Paste** tab on the receiving side. If the clipboard is blocked, use **Show text to copy
   manually** to select the text by hand
 - **Single QR**: Very small offers may produce just one QR code — the flow still works the same way
-- **Same network required**: Without internet, both devices must be on the same Wi-Fi or local
-  network. With internet, STUN enables connections across different networks
+- **A direct route is required**: Without internet, both devices normally need to be on the same
+  Wi-Fi or local network. With internet, STUN can help discover direct routes across different
+  networks, but restrictive NAT or firewall rules can still prevent a connection. TURN relaying
+  is not supported
 - **Deployment path**: Host at domain root (for example `https://example.com`). Subpath
   deployments (for example `https://example.com/my-app`) can break scanned QR links
 

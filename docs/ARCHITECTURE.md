@@ -9,7 +9,7 @@ Secure Send is a browser-based encrypted file and folder transfer application. I
 1. **WebRTC-Only File Transfer**: File bytes are transferred only over a direct WebRTC data channel. Nostr and Manual Exchange are signaling methods only; neither carries file content and there is no non-WebRTC transfer path in the app.
 2. **Single Data-Channel Transfer Path**: `src/lib/p2p-transfer.ts` is the only implementation of file transfer once signaling has opened a WebRTC data channel. Both signaling methods converge here before any file bytes are sent.
 3. **Application-Layer Chunk Encryption**: File content is encrypted at the application layer using AES-256-GCM in 128KB chunks regardless of WebRTC DTLS transport encryption.
-4. **Memory-Efficient Receive Path**: Receivers preallocate the expected output buffer from authenticated signaling metadata, then decrypt, authenticate, and write each chunk directly to its indexed position as it arrives.
+4. **Memory-Efficient Receive Path**: Receivers validate the advertised size, preallocate the expected output buffer, then decrypt, authenticate, and write each chunk directly to its indexed position as it arrives. Nostr cryptographically authenticates its metadata; Manual Exchange relies on the authenticity of the user-controlled QR/clipboard exchange path.
 5. **Pluggable Signaling, Fixed Transfer**: Nostr and QR/clipboard flows only exchange setup material: metadata, keys, SDP, and ICE candidates. The encrypted chunk framing, `DONE:<chunkCount>` terminator, and data-channel `ACK` are identical after signaling completes.
 6. **PIN Locates and Authenticates, ECDH Encrypts (Nostr mode)**: A short rotating PIN (10 Crockford base32 characters, not case sensitive, fresh every 2 minutes) locates the sender's rendezvous event and seals a mutual claim/confirm challenge-response. Content and signaling keys are derived from an ephemeral P-256 ECDH exchange that the challenge-response authenticates — never from the PIN itself.
 
@@ -20,7 +20,7 @@ By default, Nostr is used for signaling. Manual Exchange is available as an alte
 | Feature | Nostr (Default) | Manual Exchange (No Signaling Server) |
 |---------|-----------------|---------------------------------------|
 | Signaling Server | Decentralized relays | None (QR or copy/paste) |
-| STUN/TURN | Yes (Google + Cloudflare STUN; optional TURN) | Yes (same WebRTC config) |
+| ICE servers | STUN only (Google + Cloudflare); no TURN | STUN only (same WebRTC config); no TURN |
 | Reliability | P2P only | P2P only |
 | Privacy | Better (no central server) | No signaling server; QR/clipboard payload is only obfuscated |
 | Complexity | More complex | Manual exchange (QR or copy/paste) |
@@ -115,12 +115,12 @@ sequenceDiagram
 - Sender needs a camera OR clipboard to receive the answer back
 
 **Network Requirements:**
-- **With internet**: Works across different networks (STUN server enables NAT traversal)
+- **With internet**: Can work across different networks when ICE finds a direct route; STUN assists discovery but does not relay traffic
 - **Without internet**: Devices must be on same local network (WiFi, LAN, etc.)
 - **Not air-gapped**: Requires some network connectivity between devices
 
 **How it works:**
-- With internet: STUN server (stun.l.google.com) enables connections across different networks via NAT traversal
+- With internet: Google and Cloudflare STUN servers help discover direct ICE candidates. Restrictive NAT or firewall rules can still prevent a connection because TURN relaying is not supported.
 - Without internet: WebRTC discovers local ICE candidates directly, connection establishes via local IP addresses
 
 **QR Code Format:**
@@ -255,7 +255,7 @@ The display component focuses on secure and clear communication:
 - **Fingerprint**: Shows the current PIN's fingerprint for human comparison with the receiver.
 
 **Key Parameters:**
-- `MAX_MESSAGE_SIZE`: 100MB (maximum file size)
+- `MAX_MESSAGE_SIZE`: 100MB (maximum transferred file or generated ZIP archive size)
 - `ENCRYPTION_CHUNK_SIZE`: 128KB (application-level encryption chunk size for all methods)
 - `PBKDF2_ITERATIONS`: 600,000
 - `PIN_ROTATION_MS`: 2 minutes (fresh PIN + rendezvous event cadence)
@@ -287,7 +287,7 @@ Uses Nostr protocol for decentralized signaling between sender and receiver.
 
 ### Manual Exchange Signaling (`src/lib/manual-signaling.ts`)
 
-Signaling method using QR codes or copy/paste for WebRTC offer/answer exchange. Camera is optional; signaling data can be exchanged via clipboard. **Network requirements:** With internet, works across different networks via STUN. Without internet, devices must be on same local network (not air-gapped - requires network connectivity).
+Signaling method using QR codes or copy/paste for WebRTC offer/answer exchange. Camera is optional; signaling data can be exchanged via clipboard. **Network requirements:** With internet, STUN can help devices on different networks discover a direct ICE route, but success is not guaranteed. Without internet, devices must be able to reach each other directly, normally on the same local network (not air-gapped). TURN relaying is not supported.
 
 **How it works:**
 - Sender generates WebRTC offer with ICE candidates
@@ -350,9 +350,9 @@ A 2-hour sliding window (current bucket + 1 previous bucket) is used to find the
 
 -   **Session Validity**: A parsed payload is still rejected once `Date.now() - createdAt > TRANSFER_EXPIRATION_MS`.
 -   **Parseability Window**: A payload may remain parseable for roughly 1-2 hours depending on bucket boundaries, but parseability does not imply transfer validity.
--   **Clock Drift Tolerance**: The window provides inherent tolerance for clock drift (+/- 1 hour).
--   **Boundary Transitions**: When the hour rolls over, the previous bucket is dropped, and the new hour becomes the current bucket.
--   **Out-of-Sync Clocks**: If the sender and receiver clocks differ by more than the window's tolerance (e.g., >1 hour fast or slow), de-obfuscation will fail.
+-   **Clock Relationship**: The receiver accepts payloads encoded in its current hour bucket or the immediately previous bucket. This tolerates a sender clock that falls into the receiver's previous bucket, but it is not symmetric: a sender in the receiver's next/future bucket cannot be decoded.
+-   **Boundary Transitions**: When the hour rolls over, the old current bucket becomes the accepted previous bucket and the older bucket is dropped.
+-   **Out-of-Sync Clocks**: De-obfuscation fails when the sender encodes into a bucket ahead of the receiver or older than the receiver's immediately previous bucket.
 
 > [!NOTE]
 > The obfuscation's goal is simply to avoid casual inspection. It should not be treated as encryption, and expiry is not cryptographic erasure of a captured QR/clipboard payload.
@@ -388,7 +388,7 @@ A 2-hour sliding window (current bucket + 1 previous bucket) is used to find the
 - Receiver scans any QR code with phone camera → app opens at `/r` route with first chunk → scans remaining codes in-app
 - Copy/paste fallback for environments without camera
 - No internet required when devices are on same local network
-- With internet: works across different networks via STUN (stun.l.google.com) for NAT traversal
+- With internet: STUN can assist direct candidate discovery across different networks; a restrictive NAT/firewall can still make the connection fail
 - Not air-gapped: requires network connectivity between devices (either local network or internet)
 - URL QR codes are generated from URL text with auto-selected QR encoding; answer QR uses binary mode (8-bit byte)
 - Uses the bundled QR WASM packages for generation and scanning
@@ -404,7 +404,7 @@ Handles direct peer-to-peer connections using WebRTC data channels.
 
 **Features:**
 - ICE candidate queuing for reliable connection establishment
-- STUN servers for NAT traversal (`stun.l.google.com`, `stun.cloudflare.com`) with optional TURN via env vars
+- Google and Cloudflare STUN servers for direct ICE candidate discovery; TURN relay candidates are never configured
 - 128KB encrypted chunk messages with backpressure (WebRTC handles fragmentation)
 - Backpressure support (waits for buffer to drain before sending more data)
 - Connection state monitoring
@@ -418,7 +418,7 @@ Handles direct peer-to-peer connections using WebRTC data channels.
 4. Publish confirm under the same auth key; derive ECDH session keys
 5. Attempt P2P connection (30s timeout for connection only)
 6. If P2P connects: transfer via data channel
-7. If P2P connection fails: transfer fails — no automatic fallback; a `P2PConnectionError` is surfaced so the UI can suggest the offline-QR app ([src/lib/errors.ts](src/lib/errors.ts))
+7. If P2P connection fails: transfer fails — no TURN or automatic transfer fallback; a `P2PConnectionError` is surfaced so the UI can suggest the offline-QR app ([src/lib/errors.ts](../src/lib/errors.ts))
 8. Wait for the receiver's data-channel `ACK` after `DONE:<chunkCount>`
 
 **`use-nostr-receive.ts`** - Receiver logic (Nostr):
@@ -510,7 +510,7 @@ All P2P transfers (Nostr, Manual Exchange) encrypt content in 128KB chunks using
 - **Receiver side (all P2P modes)**: a single output buffer is preallocated from the expected file size. As each chunk arrives, the receiver parses its index, decrypts and authenticates it, and writes the plaintext directly to its position (`index * 128KB`) in the buffer — no intermediate encrypted-chunk storage.
 - **Completion**: the sender finishes with `DONE:<totalChunks>`. The receiver verifies the advertised chunk count, received index set, and total decrypted byte count before sending `ACK` on the data channel.
 
-**No whole-file checksum:** File-content integrity relies solely on per-chunk AES-GCM authentication (auth tag + authenticated chunk index) together with the completeness checks above and the final `ACK`. There is deliberately **no digest/hash computed over the assembled file** — neither sender nor receiver ever hashes the whole file, and no metadata/manifest carries a file digest. This keeps the transfer self-validating chunk-by-chunk, which is what allows the receive path to stay streamable and low-memory (and lets future direct-to-disk writes drop each chunk after decrypt) without a final pass that would force the whole file back into memory.
+**No whole-file checksum:** File-content integrity relies solely on per-chunk AES-GCM authentication (auth tag + authenticated chunk index) together with the completeness checks above and the final `ACK`. There is deliberately **no digest/hash computed over the assembled file** — neither sender nor receiver hashes the whole file, and no metadata/manifest carries a file digest. This avoids an additional integrity value and verification pass. An incremental digest could be added without materializing the whole file, but it is not part of this protocol and would be redundant with the protocol's authenticated-chunk and completeness checks.
 
 **Encrypted Chunk Format:**
 ```
@@ -543,7 +543,7 @@ Both receive modes reject extra, duplicate, out-of-range, malformed, and oversiz
 
 | Limit | Value | Rationale |
 |-------|-------|-----------|
-| Max file size | 100MB | Memory constraints |
+| Max transferred file/archive size | 100MB | Memory constraints; multiple files and folders are packaged first, so the generated ZIP must fit this limit |
 | Encryption chunk size | 128KB | Balance of encryption overhead and streaming efficiency |
 | PIN length | 10 chars (9 data + check digit, ~45 bits) | Easy to type/read aloud; the 2-minute rotation, 6-minute validity, first-claim lockout, and ECDH content keys carry the security the old long PIN used to |
 
@@ -614,4 +614,4 @@ PIN rotation and the NIP-40 `expiration` tag are **liveness controls, not crypto
 
 ## Crypto Parameters
 
-Key tunables like `PBKDF2_ITERATIONS` and `ENCRYPTION_CHUNK_SIZE` live in [src/lib/crypto/constants.ts](src/lib/crypto/constants.ts) for quick lookup.
+Key tunables like `PBKDF2_ITERATIONS` and `ENCRYPTION_CHUNK_SIZE` live in [src/lib/crypto/constants.ts](../src/lib/crypto/constants.ts) for quick lookup.
