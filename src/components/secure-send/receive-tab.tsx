@@ -334,14 +334,12 @@ export function ReceiveTab() {
                     PIN Fingerprint: {pinFingerprint}
                   </div>
                   <p>
-                    - It should match the fingerprint under the PIN currently
-                    shown on the sender's screen.
+                    - The sender sees the same fingerprint while this PIN is on
+                    their screen — compare them to confirm you typed it
+                    correctly.
                   </p>
                   <p>
-                    - After you enter the correct PIN the app locks it into a
-                    key that cannot be read back out; this fingerprint is the
-                    one-way checksum you can compare to confirm both sides
-                    derived the same secret, and it cannot be reversed to
+                    - For human comparison only; it cannot be reversed to
                     recover the PIN or decrypt any data.
                   </p>
                 </div>

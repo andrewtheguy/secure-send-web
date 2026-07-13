@@ -10,12 +10,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  formatPin,
-  PIN_ACTIVE_GENERATIONS,
-  PIN_ROTATION_MS,
-  PIN_WAIT_TIMEOUT_MS,
-} from '@/lib/crypto';
+import { formatPin, PIN_ROTATION_MS, PIN_WAIT_TIMEOUT_MS } from '@/lib/crypto';
 
 interface PinDisplayProps {
   /** The currently active PIN; rotates every PIN_ROTATION_MS. */
@@ -35,6 +30,9 @@ export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
     Math.ceil(PIN_WAIT_TIMEOUT_MS / 1000),
   );
   const [rotationPercentage, setRotationPercentage] = useState(100);
+  const [rotationSecondsLeft, setRotationSecondsLeft] = useState(
+    Math.ceil(PIN_ROTATION_MS / 1000),
+  );
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -77,6 +75,7 @@ export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
 
       setTimeRemaining(Math.ceil(remainingMs / 1000));
       setRotationPercentage((rotationRemainingMs / PIN_ROTATION_MS) * 100);
+      setRotationSecondsLeft(Math.ceil(rotationRemainingMs / 1000));
 
       if (remainingMs <= 0) {
         onExpireRef.current();
@@ -142,9 +141,9 @@ export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
   // Mask PIN with bullet characters (dashes stay visible)
   const maskedPin = formattedPin.replace(/[^-]/g, '•');
 
-  const graceMinutes = Math.round(
-    ((PIN_ACTIVE_GENERATIONS - 1) * PIN_ROTATION_MS) / 60000,
-  );
+  const rotationCountdown = `${Math.floor(rotationSecondsLeft / 60)}:${String(
+    rotationSecondsLeft % 60,
+  ).padStart(2, '0')}`;
 
   return (
     <div className="flex flex-col gap-4 p-6 rounded-lg bg-muted/50 border">
@@ -169,9 +168,8 @@ export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
           />
         </div>
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <RefreshCw className="h-3 w-3" />A new PIN appears every{' '}
-          {Math.round(PIN_ROTATION_MS / 60000)} minutes; a code shown in the
-          last {graceMinutes} minutes still works.
+          <RefreshCw className="h-3 w-3" />
+          New PIN in <span className="font-mono">{rotationCountdown}</span>
         </p>
       </div>
 
@@ -234,12 +232,13 @@ export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
             PIN Fingerprint: {fingerprint}
           </div>
           <p>
-            - It should match the receiver&apos;s PIN fingerprint if they
-            entered the PIN currently shown here.
+            - The receiver sees the same fingerprint after entering this PIN —
+            compare them to confirm they typed it correctly. It changes whenever
+            the PIN rotates.
           </p>
           <p>
-            - This fingerprint is a one-way checksum for human comparison only;
-            it cannot be reversed to recover the PIN or decrypt any data.
+            - For human comparison only; it cannot be reversed to recover the
+            PIN or decrypt any data.
           </p>
         </div>
       )}
