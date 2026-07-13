@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ENCRYPTION_CHUNK_SIZE, encryptChunk } from './crypto';
 import { createDataChannelReceiver } from './p2p-transfer';
-import { createReceiveSink } from './receive-sink';
+import { createReceiveSink } from './scratch-sink';
 
 async function makeKey(): Promise<CryptoKey> {
   return crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [

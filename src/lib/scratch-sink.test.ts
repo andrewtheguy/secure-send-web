@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createReceiveSink } from './receive-sink';
+import { createAppendSink, createReceiveSink } from './scratch-sink';
 
-// Node has no OPFS, so createReceiveSink exercises the memory fallback here;
-// the OPFS sink shares the same contract and is covered by the same
-// assertions when run in a browser.
+// Node has no OPFS, so these exercise the memory fallbacks; the OPFS sinks
+// share the same contract and are covered by the same assertions when run in
+// a browser.
 describe('createReceiveSink (memory fallback)', () => {
   it('falls back to the memory sink without OPFS', async () => {
     const sink = await createReceiveSink(16);
@@ -47,5 +47,40 @@ describe('createReceiveSink (memory fallback)', () => {
     const sink = await createReceiveSink(4);
     await sink.discard();
     await expect(sink.discard()).resolves.toBeUndefined();
+  });
+});
+
+describe('createAppendSink (memory fallback)', () => {
+  it('falls back to the memory sink without OPFS', async () => {
+    const sink = await createAppendSink();
+    expect(sink.kind).toBe('memory');
+  });
+
+  it('concatenates appended chunks into the payload', async () => {
+    const sink = await createAppendSink();
+    await sink.append(new Uint8Array([1, 2, 3]));
+    await sink.append(new Uint8Array([4, 5]));
+    const blob = await sink.finish();
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(
+      new Uint8Array([1, 2, 3, 4, 5]),
+    );
+  });
+
+  it('does not retain a reference to the caller buffer', async () => {
+    const sink = await createAppendSink();
+    const chunk = new Uint8Array([9, 9]);
+    await sink.append(chunk);
+    chunk.fill(0);
+    const blob = await sink.finish();
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(
+      new Uint8Array([9, 9]),
+    );
+  });
+
+  it('rejects appends and finish after discard', async () => {
+    const sink = await createAppendSink();
+    await sink.discard();
+    await expect(sink.append(new Uint8Array([1]))).rejects.toThrow('discarded');
+    await expect(sink.finish()).rejects.toThrow('discarded');
   });
 });

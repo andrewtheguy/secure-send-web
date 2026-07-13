@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useSend } from '@/contexts/send-context';
-import { MAX_ARCHIVE_SIZE, MAX_MESSAGE_SIZE } from '@/lib/crypto';
+import { MAX_MESSAGE_SIZE } from '@/lib/crypto';
 import { formatFileSize } from '@/lib/file-utils';
 import {
   getFolderName,
@@ -49,13 +49,8 @@ export function SendTab() {
 
   const filesTotalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0);
   const folderTotalSize = folderFiles ? getTotalSize(folderFiles) : 0;
-  // A single file streams end to end, so it gets the full transfer cap;
-  // multiple files (and folders) are zipped in memory first and stay capped
-  // at the archive limit.
-  const filesLimit =
-    selectedFiles.length > 1 ? MAX_ARCHIVE_SIZE : MAX_MESSAGE_SIZE;
-  const isFilesOverLimit = filesTotalSize > filesLimit;
-  const isFolderOverLimit = folderTotalSize > MAX_ARCHIVE_SIZE;
+  const isFilesOverLimit = filesTotalSize > MAX_MESSAGE_SIZE;
+  const isFolderOverLimit = folderTotalSize > MAX_MESSAGE_SIZE;
 
   const canSendFiles = selectedFiles.length > 0 && !isFilesOverLimit;
   const canSendFolder =
@@ -228,8 +223,7 @@ export function SendTab() {
                   Drop files here or click to select
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Max size: {formatFileSize(MAX_MESSAGE_SIZE)} for a single
-                  file, {formatFileSize(MAX_ARCHIVE_SIZE)} total for multiple
+                  Max size: {formatFileSize(MAX_MESSAGE_SIZE)}
                 </p>
               </div>
             </button>
@@ -243,7 +237,7 @@ export function SendTab() {
           />
           {isFilesOverLimit && (
             <p className="text-xs text-destructive">
-              Total size exceeds {formatFileSize(filesLimit)} limit
+              Total size exceeds {formatFileSize(MAX_MESSAGE_SIZE)} limit
             </p>
           )}
         </div>
@@ -304,7 +298,7 @@ export function SendTab() {
                   <p className="font-medium">Click to select a folder</p>
                   <p className="text-sm text-muted-foreground">
                     Will be compressed to ZIP &bull; Max:{' '}
-                    {formatFileSize(MAX_ARCHIVE_SIZE)}
+                    {formatFileSize(MAX_MESSAGE_SIZE)}
                   </p>
                 </div>
               </>
@@ -320,7 +314,7 @@ export function SendTab() {
           />
           {isFolderOverLimit && (
             <p className="text-xs text-destructive">
-              Total size exceeds {formatFileSize(MAX_ARCHIVE_SIZE)} limit
+              Total size exceeds {formatFileSize(MAX_MESSAGE_SIZE)} limit
             </p>
           )}
         </div>

@@ -30,7 +30,7 @@ import {
   parseChunkMessage,
 } from '@/lib/crypto';
 import { P2PConnectionError } from '@/lib/errors';
-import type { ReceiveSink } from '@/lib/receive-sink';
+import type { ReceiveSink } from '@/lib/scratch-sink';
 import type { WebRTCConnection } from '@/lib/webrtc';
 
 /** Control-message tokens exchanged over the data channel. */

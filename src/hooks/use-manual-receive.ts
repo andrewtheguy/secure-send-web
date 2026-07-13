@@ -15,7 +15,7 @@ import {
 } from '@/lib/manual-signaling';
 import type { TransferState } from '@/lib/nostr';
 import { ACK, createDataChannelReceiver } from '@/lib/p2p-transfer';
-import { createReceiveSink, type ReceiveSink } from '@/lib/receive-sink';
+import { createReceiveSink, type ReceiveSink } from '@/lib/scratch-sink';
 import type { ReceivedContent } from '@/lib/types';
 import { WebRTCConnection } from '@/lib/webrtc';
 import { getWebRTCConfig } from '@/lib/webrtc-config';

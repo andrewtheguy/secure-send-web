@@ -4,11 +4,11 @@ import { BrowserRouter } from 'react-router-dom';
 import './index.css';
 import { PwaUpdatePrompt } from '@/components/pwa-update-prompt';
 import { ThemeProvider } from '@/components/theme-provider';
-import { sweepReceiveScratch } from '@/lib/receive-sink';
+import { sweepTransferScratch } from '@/lib/scratch-sink';
 import App from './App.tsx';
 
 // Remove receive-scratch plaintext a crashed or closed session left in OPFS.
-void sweepReceiveScratch();
+void sweepTransferScratch();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
