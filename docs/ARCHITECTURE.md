@@ -548,7 +548,7 @@ Both receive modes reject extra, duplicate, out-of-range, malformed, and oversiz
 
 | Limit | Value | Rationale |
 |-------|-------|-----------|
-| Max transferred payload size | 2GB (`MAX_MESSAGE_SIZE`) | Bounded by the 2-byte chunk-index range (65,536 × 128KB = 8GB protocol ceiling) and disk quota, not RAM: multi-file/folder sends are zipped chunk by chunk into OPFS scratch (fflate streaming `Zip`/`ZipDeflate`), the sender encrypts Blob slices on demand, and the receiver writes decrypted chunks to OPFS scratch. OPFS (`FileSystemFileHandle.createWritable`: Chrome/Edge 86+, Firefox 111+, Safari 26+) is required — sink creation fails with a clear user-facing error on older browsers |
+| Max transferred payload size | 2GB (`MAX_MESSAGE_SIZE`) | Bounded by the 2-byte chunk-index range (65,536 × 128KB = 8GB protocol ceiling) and disk quota, not RAM: multi-file/folder sends are zipped chunk by chunk into OPFS scratch (fflate streaming `Zip`/`ZipDeflate`), the sender encrypts Blob slices on demand, and the receiver writes decrypted chunks to OPFS scratch. OPFS (`FileSystemFileHandle.createWritable`, secure contexts only) is required and feature-detected at runtime — sink creation fails with a clear user-facing error where unsupported. Ship dates vary by engine (Chromium 86, Firefox 111, Safari/iOS only 26 — later than the general OPFS feature, which Safari had from 16.4), so detection, not a version list, is the contract |
 | Encryption chunk size | 128KB | Balance of encryption overhead and streaming efficiency |
 | PIN length | 10 chars (9 data + check digit, ~45 bits) | Easy to type/read aloud; the 2-minute rotation, 6-minute validity, first-claim lockout, and ECDH content keys carry the security the old long PIN used to |
 

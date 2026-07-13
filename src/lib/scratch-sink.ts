@@ -9,9 +9,11 @@
  *   output while a multi-file/folder send is packaged, so archiving needs
  *   O(chunk) memory and the send streams from disk.
  *
- * OPFS (`FileSystemFileHandle.createWritable`) is required — every current
- * major browser ships it (Chrome/Edge 86+, Firefox 111+, Safari 26+). Sink
- * creation rejects with a user-facing error on anything older.
+ * OPFS (`FileSystemFileHandle.createWritable`, secure contexts only) is
+ * required. Every current major browser ships it, but `createWritable`
+ * arrived later than the rest of OPFS on some engines (Safari/iOS only in
+ * 26), so support is feature-detected and sink creation rejects with a
+ * user-facing error where it is missing.
  *
  * Privacy note: a scratch file holds plaintext on disk for the lifetime of
  * the sink. Every path that abandons a transfer must call `discard()`, and
