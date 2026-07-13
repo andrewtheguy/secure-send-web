@@ -19,9 +19,19 @@ interface PinDisplayProps {
   fingerprint: string | null;
   /** Called when the wait backstop (PIN_WAIT_TIMEOUT_MS) elapses. */
   onExpire: () => void;
+  /**
+   * Mints and publishes a fresh PIN immediately, invalidating previously
+   * shown PINs. The button is hidden when not provided.
+   */
+  onRefresh?: () => Promise<void> | void;
 }
 
-export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
+export function PinDisplay({
+  pin,
+  fingerprint,
+  onExpire,
+  onRefresh,
+}: PinDisplayProps) {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState(false);
   const [isMasked, setIsMasked] = useState(false);
@@ -138,6 +148,20 @@ export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
     setIsMasked((prev) => !prev);
   }, []);
 
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    if (!onRefresh || refreshing) return;
+    setRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      if (mountedRef.current) {
+        setRefreshing(false);
+      }
+    }
+  }, [onRefresh, refreshing]);
+
   // Mask PIN with bullet characters (dashes stay visible)
   const maskedPin = formattedPin.replace(/[^-]/g, '•');
 
@@ -167,10 +191,25 @@ export function PinDisplay({ pin, fingerprint, onExpire }: PinDisplayProps) {
             style={{ width: `${rotationPercentage}%` }}
           />
         </div>
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <RefreshCw className="h-3 w-3" />
-          New PIN in <span className="font-mono">{rotationCountdown}</span>
-        </p>
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <RefreshCw
+              className={`h-3 w-3 ${refreshing ? 'animate-spin' : ''}`}
+            />
+            New PIN in <span className="font-mono">{rotationCountdown}</span>
+          </span>
+          {onRefresh && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-auto px-2 py-1 text-xs"
+              onClick={handleRefresh}
+              disabled={refreshing}
+            >
+              New PIN now
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Action buttons */}

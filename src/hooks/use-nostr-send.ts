@@ -84,6 +84,12 @@ export interface UseNostrSendReturn {
   pinFingerprint: string | null;
   send: (content: File) => Promise<void>;
   cancel: () => void;
+  /**
+   * Mint and publish a fresh PIN immediately, invalidating every previously
+   * shown PIN, without redoing file read / key generation / relay connection.
+   * No-op unless a transfer is waiting for a receiver.
+   */
+  refreshPin: () => Promise<void>;
 }
 
 export function useNostrSend(): UseNostrSendReturn {
@@ -94,10 +100,17 @@ export function useNostrSend(): UseNostrSendReturn {
   const clientRef = useRef<NostrClient | null>(null);
   const cancelledRef = useRef(false);
   const sendingRef = useRef(false);
+  // Set while a transfer is waiting for a receiver; null otherwise.
+  const refreshPinRef = useRef<(() => Promise<void>) | null>(null);
+
+  const refreshPin = useCallback(async () => {
+    await refreshPinRef.current?.();
+  }, []);
 
   const cancel = useCallback(() => {
     cancelledRef.current = true;
     sendingRef.current = false;
+    refreshPinRef.current = null;
     if (clientRef.current) {
       clientRef.current.close();
       clientRef.current = null;
@@ -187,10 +200,14 @@ export function useNostrSend(): UseNostrSendReturn {
       });
 
       // Rotate the PIN until a receiver proves knowledge of one of the
-      // retained generations, then lock the transfer to that receiver.
+      // retained generations, then lock the transfer to that receiver. A
+      // manual refresh bumps the epoch, so an in-flight rotation publish from
+      // before the reset can neither register its generation nor be displayed.
       const generations: PinGeneration[] = [];
+      let pinEpoch = 0;
 
       const publishRendezvous = async () => {
+        const epoch = pinEpoch;
         const newPin = generatePin();
         const root = await importPinRoot(newPin);
         const [hint, authKey, rendezvousKey, fingerprint] = await Promise.all([
@@ -225,7 +242,7 @@ export function useNostrSend(): UseNostrSendReturn {
           hint,
         );
 
-        if (cancelledRef.current) return;
+        if (cancelledRef.current || epoch !== pinEpoch) return;
 
         // Register the generation before publishing so a fast claim can never
         // race ahead of the retained-keys list.
@@ -236,7 +253,7 @@ export function useNostrSend(): UseNostrSendReturn {
 
         await client.publish(event);
 
-        if (!cancelledRef.current) {
+        if (!cancelledRef.current && epoch === pinEpoch) {
           setPin(newPin);
           setPinFingerprint(formatPinHint(fingerprint));
         }
@@ -258,6 +275,7 @@ export function useNostrSend(): UseNostrSendReturn {
           cancelPoll = null;
           timeout = null;
           subId = null;
+          refreshPinRef.current = null;
         };
 
         timeout = setTimeout(() => {
@@ -350,6 +368,36 @@ export function useNostrSend(): UseNostrSendReturn {
           },
         );
 
+        const scheduleRotation = () => {
+          if (rotationInterval) clearInterval(rotationInterval);
+          rotationInterval = setInterval(() => {
+            if (settled || cancelledRef.current) return;
+            void publishRendezvous().catch((err) => {
+              console.error('Failed to publish rendezvous rotation:', err);
+            });
+          }, PIN_ROTATION_MS);
+        };
+
+        // On-demand PIN reset: drop every retained generation so previously
+        // shown PINs stop authenticating, restart the rotation cadence, and
+        // publish a fresh rendezvous — reusing the transfer's file bytes,
+        // keys, and relay connections.
+        let refreshInFlight = false;
+        refreshPinRef.current = async () => {
+          if (settled || cancelledRef.current || refreshInFlight) return;
+          refreshInFlight = true;
+          try {
+            pinEpoch += 1;
+            generations.length = 0;
+            scheduleRotation();
+            await publishRendezvous();
+          } catch (err) {
+            console.error('Failed to publish refreshed PIN:', err);
+          } finally {
+            refreshInFlight = false;
+          }
+        };
+
         // First PIN generation, then rotate.
         void publishRendezvous().catch((err) => {
           if (settled) return;
@@ -357,12 +405,7 @@ export function useNostrSend(): UseNostrSendReturn {
           cleanup();
           reject(err instanceof Error ? err : new Error('Publish failed'));
         });
-        rotationInterval = setInterval(() => {
-          if (settled || cancelledRef.current) return;
-          void publishRendezvous().catch((err) => {
-            console.error('Failed to publish rendezvous rotation:', err);
-          });
-        }, PIN_ROTATION_MS);
+        scheduleRotation();
       });
 
       if (cancelledRef.current) return;
@@ -636,7 +679,7 @@ export function useNostrSend(): UseNostrSendReturn {
 
   // Memoize return object to prevent unnecessary re-renders in consumers
   return useMemo(
-    () => ({ state, pin, pinFingerprint, send, cancel }),
-    [state, pin, pinFingerprint, send, cancel],
+    () => ({ state, pin, pinFingerprint, send, cancel, refreshPin }),
+    [state, pin, pinFingerprint, send, cancel, refreshPin],
   );
 }

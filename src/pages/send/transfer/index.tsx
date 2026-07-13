@@ -76,6 +76,8 @@ export function SendTransferPage() {
   const pin = activeHook.type === 'online' ? activeHook.hook.pin : null;
   const pinFingerprint =
     activeHook.type === 'online' ? activeHook.hook.pinFingerprint : null;
+  const refreshPin =
+    activeHook.type === 'online' ? activeHook.hook.refreshPin : undefined;
 
   // Offline-specific properties (type-safe access via discriminated union)
   const manualState =
@@ -362,6 +364,7 @@ export function SendTransferPage() {
                     pin={pin}
                     fingerprint={pinFingerprint}
                     onExpire={handleCancel}
+                    onRefresh={refreshPin}
                   />
                 ) : undefined
               }
