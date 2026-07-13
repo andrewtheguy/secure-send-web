@@ -10,8 +10,8 @@ export const supportsFolderSelection =
 
 export interface CompressedArchive {
   /**
-   * The generated ZIP. Disk-backed (OPFS scratch) when supported, so neither
-   * archiving nor sending materializes it in memory.
+   * The generated ZIP, backed by an OPFS scratch file, so neither archiving
+   * nor sending materializes it in memory.
    */
   file: File;
   /** Release the scratch storage backing `file`; it is unreadable afterwards. */
@@ -23,8 +23,8 @@ export interface CompressedArchive {
  * Works with both folder selection (webkitdirectory) and multi-file selection.
  *
  * Each input file is read as a stream and deflated chunk by chunk into an
- * append sink (OPFS scratch file where supported), so peak memory stays
- * O(chunk) regardless of archive size.
+ * OPFS-backed append sink, so peak memory stays O(chunk) regardless of
+ * archive size.
  *
  * @param files - Selected files; `webkitRelativePath` (when set) becomes the
  *   entry path, preserving folder structure

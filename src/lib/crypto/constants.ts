@@ -62,9 +62,8 @@ export const ENCRYPTION_CHUNK_SIZE = 128 * 1024; // 128KB
 // stage streams — multi-file/folder sends are zipped chunk by chunk into
 // OPFS scratch, the sender encrypts 128KB Blob slices on demand, and the
 // receiver writes decrypted chunks to OPFS scratch — so the bound comes from
-// the 2-byte chunk-index range and disk quota, not RAM. Browsers without
-// OPFS fall back to in-memory buffers and may fail near the top of this
-// range.
+// the 2-byte chunk-index range and disk quota, not RAM. OPFS is required;
+// browsers without it cannot transfer at all.
 export const MAX_MESSAGE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
 
 // PIN hint length.

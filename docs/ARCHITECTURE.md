@@ -9,7 +9,7 @@ Secure Send is a browser-based encrypted file and folder transfer application. I
 1. **WebRTC-Only File Transfer**: File bytes are transferred only over a direct WebRTC data channel. Nostr and Manual Exchange are signaling methods only; neither carries file content and there is no non-WebRTC transfer path in the app.
 2. **Single Data-Channel Transfer Path**: `src/lib/p2p-transfer.ts` is the only implementation of file transfer once signaling has opened a WebRTC data channel. Both signaling methods converge here before any file bytes are sent.
 3. **Application-Layer Chunk Encryption**: File content is encrypted at the application layer using AES-256-GCM in 128KB chunks regardless of WebRTC DTLS transport encryption.
-4. **Memory-Efficient Receive Path**: Receivers validate the advertised size, preallocate the expected output buffer, then decrypt, authenticate, and write each chunk directly to its indexed position as it arrives. Nostr cryptographically authenticates its metadata; Manual Exchange relies on the authenticity of the user-controlled QR/clipboard exchange path.
+4. **Memory-Efficient Receive Path**: Receivers validate the advertised size, preallocate an OPFS scratch file of that size, then decrypt, authenticate, and write each chunk directly to its indexed position on disk as it arrives. Nostr cryptographically authenticates its metadata; Manual Exchange relies on the authenticity of the user-controlled QR/clipboard exchange path.
 5. **Pluggable Signaling, Fixed Transfer**: Nostr and QR/clipboard flows only exchange setup material: metadata, keys, SDP, and ICE candidates. The encrypted chunk framing, `DONE:<chunkCount>` terminator, and data-channel `ACK` are identical after signaling completes.
 6. **PIN Locates and Authenticates, ECDH Encrypts (Nostr mode)**: A short rotating PIN (10 Crockford base32 characters, not case sensitive, fresh every 2 minutes) locates the sender's rendezvous event and seals a mutual claim/confirm challenge-response. Content and signaling keys are derived from an ephemeral P-256 ECDH exchange that the challenge-response authenticates — never from the PIN itself.
 
@@ -452,7 +452,7 @@ Handles direct peer-to-peer connections using WebRTC data channels.
 5. Obfuscate answer payload: JSON → deflate → obfuscate → single binary QR code
 6. Display QR code and base64 copy button
 7. Wait for WebRTC connection to establish
-8. Receive encrypted chunks, decrypt/authenticate each chunk as it arrives, and write it to the receive sink (an OPFS scratch file where supported, a preallocated in-memory buffer otherwise)
+8. Receive encrypted chunks, decrypt/authenticate each chunk as it arrives, and write it to the OPFS-backed receive sink
 9. After `DONE:<chunkCount>` validates, send data-channel `ACK`
 10. Present content
 
@@ -508,12 +508,12 @@ In Nostr mode, the entire rendezvous payload is encrypted with the PIN-derived `
 All P2P transfers (Nostr, Manual Exchange) encrypt content in 128KB chunks using identical logic:
 
 - **Sender side**: the file is walked in 128KB `Blob.slice` reads, so only one chunk is materialized in memory at a time (a picked `File` is read lazily from disk). Each slice is encrypted with the transfer key and its own chunk index, then sent over the data channel in order. The index is carried in the chunk and bound into the encryption as authenticated data.
-- **Receiver side (all P2P modes)**: decrypted chunks are written at their byte position (`index * 128KB`) to a receive sink — an OPFS scratch file where the browser supports `FileSystemFileHandle.createWritable`, or a preallocated in-memory buffer as fallback — with no intermediate encrypted-chunk storage. Each chunk self-authenticates on decrypt, so it is handed to storage and dropped immediately; the final payload is a Blob backed by the sink (disk-backed under OPFS), and the download streams from it without materializing the file in memory.
+- **Receiver side (all P2P modes)**: decrypted chunks are written at their byte position (`index * 128KB`) to an OPFS scratch file, with no intermediate encrypted-chunk storage. Each chunk self-authenticates on decrypt, so it is handed to disk and dropped immediately; the final payload is a disk-backed Blob, and the download streams from it without materializing the file in memory.
 - **Completion**: the sender finishes with `DONE:<totalChunks>`. The receiver verifies the advertised chunk count, received index set, and total decrypted byte count before sending `ACK` on the data channel.
 
-**OPFS scratch lifecycle (privacy):** on OPFS-capable browsers, plaintext transiently touches browser-managed disk in `transfer-scratch` files inside the origin-private file system — the receiver's decrypted payload from the first chunk until the transfer is reset, and the sender's generated ZIP archive from packaging until the transfer page is left. Every abandonment path (cancel mid-transfer, transfer error, reset, starting a new receive, leaving the send flow) discards its scratch file, and a boot-time sweep plus a pre-transfer sweep remove files that crashed or closed sessions left behind, so leftovers never outlive the next visit.
+**OPFS scratch lifecycle (privacy):** plaintext transiently touches browser-managed disk in `transfer-scratch` files inside the origin-private file system — the receiver's decrypted payload from the first chunk until the transfer is reset, and the sender's generated ZIP archive from packaging until the transfer page is left. Every abandonment path (cancel mid-transfer, transfer error, reset, starting a new receive, leaving the send flow) discards its scratch file, and a boot-time sweep plus a pre-transfer sweep remove files that crashed or closed sessions left behind, so leftovers never outlive the next visit.
 
-**Streamed archive creation:** multi-file and folder sends are packaged with fflate's streaming `Zip`/`ZipDeflate`: each input file is read as a stream and deflated chunk by chunk into an OPFS-backed append sink (in-memory accumulation as fallback), so archiving needs O(chunk) memory. The resulting disk-backed ZIP then goes through the same streaming send pipeline as a directly selected file.
+**Streamed archive creation:** multi-file and folder sends are packaged with fflate's streaming `Zip`/`ZipDeflate`: each input file is read as a stream and deflated chunk by chunk into an OPFS-backed append sink, so archiving needs O(chunk) memory. The resulting disk-backed ZIP then goes through the same streaming send pipeline as a directly selected file.
 
 **No whole-file checksum:** File-content integrity relies solely on per-chunk AES-GCM authentication (auth tag + authenticated chunk index) together with the completeness checks above and the final `ACK`. There is deliberately **no digest/hash computed over the assembled file** — neither sender nor receiver hashes the whole file, and no metadata/manifest carries a file digest. This avoids an additional integrity value and verification pass. An incremental digest could be added without materializing the whole file, but it is not part of this protocol and would be redundant with the protocol's authenticated-chunk and completeness checks.
 
@@ -527,7 +527,7 @@ The 2-byte chunk index is also passed to AES-GCM as additional authenticated dat
 **Benefits:**
 - **Defense in depth**: AES-GCM on top of WebRTC DTLS
 - **Streaming decryption in all P2P modes**: Each chunk is decrypted as it arrives
-- **Memory efficiency**: both ends need O(chunk) memory on OPFS-capable receivers — the sender reads lazy Blob slices, the receiver streams decrypted chunks to disk
+- **Memory efficiency**: both ends need O(chunk) memory — the sender reads lazy Blob slices, the receiver streams decrypted chunks to disk
 - **Out-of-order handling**: Chunks can arrive in any order and be placed correctly
 
 ```mermaid
@@ -548,7 +548,7 @@ Both receive modes reject extra, duplicate, out-of-range, malformed, and oversiz
 
 | Limit | Value | Rationale |
 |-------|-------|-----------|
-| Max transferred payload size | 2GB (`MAX_MESSAGE_SIZE`) | Bounded by the 2-byte chunk-index range (65,536 × 128KB = 8GB protocol ceiling) and disk quota, not RAM: multi-file/folder sends are zipped chunk by chunk into OPFS scratch (fflate streaming `Zip`/`ZipDeflate`), the sender encrypts Blob slices on demand, and the receiver writes decrypted chunks to OPFS scratch. Browsers without OPFS fall back to in-memory buffers and may fail to allocate near the cap |
+| Max transferred payload size | 2GB (`MAX_MESSAGE_SIZE`) | Bounded by the 2-byte chunk-index range (65,536 × 128KB = 8GB protocol ceiling) and disk quota, not RAM: multi-file/folder sends are zipped chunk by chunk into OPFS scratch (fflate streaming `Zip`/`ZipDeflate`), the sender encrypts Blob slices on demand, and the receiver writes decrypted chunks to OPFS scratch. OPFS (`FileSystemFileHandle.createWritable`: Chrome/Edge 86+, Firefox 111+, Safari 26+) is required — sink creation fails with a clear user-facing error on older browsers |
 | Encryption chunk size | 128KB | Balance of encryption overhead and streaming efficiency |
 | PIN length | 10 chars (9 data + check digit, ~45 bits) | Easy to type/read aloud; the 2-minute rotation, 6-minute validity, first-claim lockout, and ECDH content keys carry the security the old long PIN used to |
 

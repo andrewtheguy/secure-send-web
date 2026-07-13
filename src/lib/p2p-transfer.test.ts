@@ -1,7 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { installOpfsMock, type OpfsMock } from '../test/opfs-mock';
 import { ENCRYPTION_CHUNK_SIZE, encryptChunk } from './crypto';
 import { createDataChannelReceiver } from './p2p-transfer';
 import { createReceiveSink } from './scratch-sink';
+
+let opfs: OpfsMock;
+
+beforeAll(() => {
+  opfs = installOpfsMock();
+});
+
+afterAll(() => {
+  opfs.uninstall();
+});
 
 async function makeKey(): Promise<CryptoKey> {
   return crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [

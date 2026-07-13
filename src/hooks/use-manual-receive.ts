@@ -264,8 +264,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       const iceCandidates: RTCIceCandidate[] = [];
       let answerSDP: RTCSessionDescriptionInit | null = null;
 
-      // Decrypted chunks land here as they arrive: OPFS scratch where
-      // supported, an in-memory buffer otherwise.
+      // Decrypted chunks land in OPFS scratch as they arrive.
       const sink = await createReceiveSink(totalBytes);
       sinkRef.current = sink;
 

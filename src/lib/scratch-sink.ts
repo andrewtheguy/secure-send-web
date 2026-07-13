@@ -1,6 +1,5 @@
 /**
- * OPFS-backed scratch storage for in-flight transfers, with in-memory
- * fallbacks for browsers without `FileSystemFileHandle.createWritable`.
+ * OPFS-backed scratch storage for in-flight transfers.
  *
  * Two sink shapes are built on the same scratch machinery:
  * - `ReceiveSink`: positional writes into a preallocated file. Decrypted
@@ -10,6 +9,10 @@
  *   output while a multi-file/folder send is packaged, so archiving needs
  *   O(chunk) memory and the send streams from disk.
  *
+ * OPFS (`FileSystemFileHandle.createWritable`) is required — every current
+ * major browser ships it (Chrome/Edge 86+, Firefox 111+, Safari 26+). Sink
+ * creation rejects with a user-facing error on anything older.
+ *
  * Privacy note: a scratch file holds plaintext on disk for the lifetime of
  * the sink. Every path that abandons a transfer must call `discard()`, and
  * `sweepTransferScratch` removes files that crashed or closed sessions left
@@ -17,14 +20,11 @@
  */
 
 export interface ReceiveSink {
-  /** 'opfs' when chunks go to disk, 'memory' for the in-RAM fallback. */
-  readonly kind: 'opfs' | 'memory';
   /** Write plaintext bytes at a byte offset. Rejects on storage failure. */
   write(position: number, bytes: Uint8Array): Promise<void>;
   /**
    * Flush everything and seal the payload. The returned Blob is disk-backed
-   * for the OPFS sink and stays readable until `discard()`. No writes are
-   * accepted afterwards.
+   * and stays readable until `discard()`. No writes are accepted afterwards.
    */
   finish(): Promise<Blob>;
   /**
@@ -37,8 +37,6 @@ export interface ReceiveSink {
 
 /** Sequential variant of `ReceiveSink` for output of unknown final size. */
 export interface AppendSink {
-  /** 'opfs' when bytes go to disk, 'memory' for the in-RAM fallback. */
-  readonly kind: 'opfs' | 'memory';
   /** Append bytes at the end of the payload. Rejects on storage failure. */
   append(bytes: Uint8Array): Promise<void>;
   /** Same contract as `ReceiveSink.finish`. */
@@ -64,6 +62,14 @@ function opfsSupported(): boolean {
     typeof FileSystemFileHandle !== 'undefined' &&
     'createWritable' in FileSystemFileHandle.prototype
   );
+}
+
+function requireOpfs(): void {
+  if (!opfsSupported()) {
+    throw new Error(
+      'This browser cannot store transfers on disk (no OPFS support). Update to a current version of Chrome, Edge, Firefox, or Safari.',
+    );
+  }
 }
 
 async function openScratchDir(): Promise<FileSystemDirectoryHandle> {
@@ -148,7 +154,15 @@ function scratchLifecycle(scratch: ScratchFile, enqueue: OpQueue) {
   };
 }
 
-async function createOpfsReceiveSink(totalBytes: number): Promise<ReceiveSink> {
+/**
+ * Create the positional sink for a transfer of `totalBytes` plaintext bytes.
+ * Rejects when OPFS is unsupported or fails (e.g. over quota).
+ */
+export async function createReceiveSink(
+  totalBytes: number,
+): Promise<ReceiveSink> {
+  requireOpfs();
+  void sweepTransferScratch();
   const scratch = await createScratchFile();
   try {
     // Size the file up front so an over-quota transfer fails before any data flows.
@@ -160,7 +174,6 @@ async function createOpfsReceiveSink(totalBytes: number): Promise<ReceiveSink> {
   }
   const enqueue = createOpQueue();
   return {
-    kind: 'opfs',
     write(position, bytes) {
       return enqueue(() =>
         scratch.writable.write({
@@ -174,11 +187,16 @@ async function createOpfsReceiveSink(totalBytes: number): Promise<ReceiveSink> {
   };
 }
 
-async function createOpfsAppendSink(): Promise<AppendSink> {
+/**
+ * Create the sequential sink for output of unknown final size. Rejects when
+ * OPFS is unsupported or fails.
+ */
+export async function createAppendSink(): Promise<AppendSink> {
+  requireOpfs();
+  void sweepTransferScratch();
   const scratch = await createScratchFile();
   const enqueue = createOpQueue();
   return {
-    kind: 'opfs',
     append(bytes) {
       // Copy before queueing: the write may run after the producer has moved
       // on, and the sink must not depend on the caller's buffer staying put.
@@ -187,91 +205,4 @@ async function createOpfsAppendSink(): Promise<AppendSink> {
     },
     ...scratchLifecycle(scratch, enqueue),
   };
-}
-
-function createMemoryReceiveSink(totalBytes: number): ReceiveSink {
-  let buffer: Uint8Array | null = new Uint8Array(totalBytes);
-  return {
-    kind: 'memory',
-    write(position, bytes) {
-      if (!buffer) return Promise.reject(new Error('Scratch sink discarded'));
-      buffer.set(bytes, position);
-      return Promise.resolve();
-    },
-    finish() {
-      if (!buffer) return Promise.reject(new Error('Scratch sink discarded'));
-      const blob = new Blob([buffer as BlobPart]);
-      buffer = null;
-      return Promise.resolve(blob);
-    },
-    discard() {
-      buffer = null;
-      return Promise.resolve();
-    },
-  };
-}
-
-function createMemoryAppendSink(): AppendSink {
-  let chunks: Uint8Array[] | null = [];
-  return {
-    kind: 'memory',
-    append(bytes) {
-      if (!chunks) return Promise.reject(new Error('Scratch sink discarded'));
-      // Copy for the same reason as the OPFS append sink.
-      chunks.push(bytes.slice());
-      return Promise.resolve();
-    },
-    finish() {
-      if (!chunks) return Promise.reject(new Error('Scratch sink discarded'));
-      const blob = new Blob(chunks as BlobPart[]);
-      chunks = null;
-      return Promise.resolve(blob);
-    },
-    discard() {
-      chunks = null;
-      return Promise.resolve();
-    },
-  };
-}
-
-/**
- * Create the best available positional sink for a transfer of `totalBytes`
- * plaintext bytes. Prefers OPFS scratch storage; falls back to a preallocated
- * in-memory buffer when OPFS is unsupported or fails (e.g. over quota).
- */
-export async function createReceiveSink(
-  totalBytes: number,
-): Promise<ReceiveSink> {
-  if (opfsSupported()) {
-    void sweepTransferScratch();
-    try {
-      return await createOpfsReceiveSink(totalBytes);
-    } catch (error) {
-      console.warn(
-        'OPFS scratch unavailable; falling back to in-memory receive buffer',
-        error,
-      );
-    }
-  }
-  return createMemoryReceiveSink(totalBytes);
-}
-
-/**
- * Create the best available sequential sink for output of unknown final size.
- * Prefers OPFS scratch storage; falls back to accumulating chunks in memory
- * when OPFS is unsupported or fails.
- */
-export async function createAppendSink(): Promise<AppendSink> {
-  if (opfsSupported()) {
-    void sweepTransferScratch();
-    try {
-      return await createOpfsAppendSink();
-    } catch (error) {
-      console.warn(
-        'OPFS scratch unavailable; falling back to in-memory archive buffer',
-        error,
-      );
-    }
-  }
-  return createMemoryAppendSink();
 }

@@ -1,8 +1,8 @@
 export interface ReceivedFile {
   contentType: 'file';
   /**
-   * Received plaintext. Disk-backed (OPFS scratch) when the browser supports
-   * it, so reading/downloading streams from disk; in-memory Blob otherwise.
+   * Received plaintext, backed by an OPFS scratch file so reading/downloading
+   * streams from disk.
    */
   data: Blob;
   fileName: string;

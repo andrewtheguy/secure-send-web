@@ -10,7 +10,7 @@ A web application for sending encrypted files and folders with PIN-based Nostr s
 - **Works offline**: No internet required after page load when using Manual Exchange on same local network
 - **Flexible signaling**: Nostr (default) or Manual Exchange (QR/copy-paste). With internet, Manual Exchange can connect across different networks when ICE finds a direct route; without internet, it can connect over the same local network.
 - **Rotating PIN pairing (Nostr)**: A short 10-character PIN (not case sensitive) that rotates every 2 minutes locates the sender and authenticates an ephemeral ECDH key exchange; content keys are never derived from the PIN
-- **File or folder transfer**: Send a file, or a ZIP archive created from multiple files/a folder, up to 2GB — every stage streams (archiving, sending, receiving), using OPFS scratch storage on disk where the browser supports it
+- **File or folder transfer**: Send a file, or a ZIP archive created from multiple files/a folder, up to 2GB — every stage streams (archiving, sending, receiving) through on-disk OPFS scratch storage, so transfers are not memory-bound. Requires a browser with OPFS support: Chrome/Edge 86+, Firefox 111+, Safari 26+
 - **End-to-end encryption**: All transfers use AES-256-GCM encryption
 - **No accounts required**: Ephemeral keypairs generated per transfer
 - **PWA Support**: Install as a Progressive Web App for offline access

@@ -484,8 +484,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           totalRelays: DEFAULT_RELAYS.length,
         });
 
-        // Decrypted chunks land here as they arrive: OPFS scratch where
-        // supported, an in-memory buffer otherwise.
+        // Decrypted chunks land in OPFS scratch as they arrive.
         const sink = await createReceiveSink(resolvedFileSize);
         sinkRef.current = sink;
 

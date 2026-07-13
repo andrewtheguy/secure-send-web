@@ -16,7 +16,7 @@
  *
  * Neither side materializes the whole file: the sender encrypts
  * `ENCRYPTION_CHUNK_SIZE` Blob slices on demand, and the receiver writes each
- * decrypted chunk to a `ReceiveSink` (OPFS-backed where supported) at the
+ * decrypted chunk to an OPFS-backed `ReceiveSink` at the
  * chunk's byte offset.
  */
 

@@ -1,6 +1,17 @@
 import { unzipSync } from 'fflate';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { installOpfsMock, type OpfsMock } from '../test/opfs-mock';
 import { compressFilesToZip } from './folder-utils';
+
+let opfs: OpfsMock;
+
+beforeAll(() => {
+  opfs = installOpfsMock();
+});
+
+afterAll(() => {
+  opfs.uninstall();
+});
 
 async function unzipArchive(file: File): Promise<Record<string, Uint8Array>> {
   return unzipSync(new Uint8Array(await file.arrayBuffer()));
