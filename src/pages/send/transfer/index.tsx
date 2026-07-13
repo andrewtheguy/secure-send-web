@@ -18,7 +18,12 @@ import {
   useManualSend,
 } from '@/hooks/use-manual-send';
 import { type UseNostrSendReturn, useNostrSend } from '@/hooks/use-nostr-send';
-import { compressFilesToZip, getFolderName } from '@/lib/folder-utils';
+import {
+  archiveTimestamp,
+  type CompressedArchive,
+  compressFilesToZip,
+  getFolderName,
+} from '@/lib/folder-utils';
 import { testRelayAvailability } from '@/lib/nostr';
 
 type TransferStep =
@@ -35,15 +40,6 @@ type ActiveHook =
   | { type: 'online'; hook: UseNostrSendReturn }
   | { type: 'offline'; hook: UseManualSendReturn };
 
-// Helper to build FileList from array of Files
-function buildFileListFromFiles(files: File[]): FileList {
-  const dt = new DataTransfer();
-  for (const file of files) {
-    dt.items.add(file);
-  }
-  return dt.files;
-}
-
 export function SendTransferPage() {
   const navigate = useNavigate();
   const { config, setConfig, clearConfig } = useSend();
@@ -57,6 +53,23 @@ export function SendTransferPage() {
   const manualHook = useManualSend();
 
   const startedRef = useRef(false);
+
+  // Scratch-backed ZIP for multi-file/folder sends. Discarded when a fresh
+  // archive is prepared and when the page unmounts; single-file sends never
+  // set it.
+  const archiveRef = useRef<CompressedArchive | null>(null);
+  const discardArchive = useCallback(() => {
+    const archive = archiveRef.current;
+    archiveRef.current = null;
+    if (archive) void archive.discard();
+  }, []);
+
+  // Release the archive's scratch storage when leaving the page.
+  useEffect(() => {
+    return () => {
+      discardArchive();
+    };
+  }, [discardArchive]);
 
   // Determine which hook to use based on config with discriminated union
   const isOnline = config?.methodChoice === 'online';
@@ -135,14 +148,19 @@ export function SendTransferPage() {
           // Multiple files or folder, compress
           if (cancelled) return;
           setStep('compressing');
-          const archiveName = config.folderFiles
+          const archiveBase = config.folderFiles
             ? getFolderName(config.folderFiles)
             : 'files';
-          const fileList =
-            config.folderFiles ?? buildFileListFromFiles(config.selectedFiles);
-          const zipFile = await compressFilesToZip(fileList, archiveName);
-          if (cancelled) return;
-          setCompressedFile(zipFile);
+          const archiveName = `${archiveBase}_${archiveTimestamp()}`;
+          // Drop any stale archive from a previous prepare pass.
+          discardArchive();
+          const archive = await compressFilesToZip(files, archiveName);
+          if (cancelled) {
+            void archive.discard();
+            return;
+          }
+          archiveRef.current = archive;
+          setCompressedFile(archive.file);
           setStep('ready');
         }
       } catch (err) {
@@ -159,7 +177,7 @@ export function SendTransferPage() {
     return () => {
       cancelled = true;
     };
-  }, [config]);
+  }, [config, discardArchive]);
 
   // Start transfer when file is ready
   useEffect(() => {

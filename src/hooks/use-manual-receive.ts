@@ -7,6 +7,7 @@ import {
   TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto';
 import { P2PConnectionError } from '@/lib/errors';
+import { formatFileSize } from '@/lib/file-utils';
 import {
   generateMutualAnswerBinary,
   parseMutualPayload,
@@ -14,6 +15,7 @@ import {
 } from '@/lib/manual-signaling';
 import type { TransferState } from '@/lib/nostr';
 import { ACK, createDataChannelReceiver } from '@/lib/p2p-transfer';
+import { createReceiveSink, type ReceiveSink } from '@/lib/scratch-sink';
 import type { ReceivedContent } from '@/lib/types';
 import { WebRTCConnection } from '@/lib/webrtc';
 import { getWebRTCConfig } from '@/lib/webrtc-config';
@@ -72,6 +74,10 @@ export function useManualReceive(): UseManualReceiveReturn {
   const rtcRef = useRef<WebRTCConnection | null>(null);
   const cancelledRef = useRef(false);
   const receivingRef = useRef(false);
+  // Storage backing the in-flight or completed transfer. Discarded whenever
+  // the payload it backs is abandoned; kept after completion because
+  // receivedContent.data reads from it until reset.
+  const sinkRef = useRef<ReceiveSink | null>(null);
 
   // Resolve function for offer submission
   const offerResolverRef = useRef<((payload: SignalingPayload) => void) | null>(
@@ -79,7 +85,16 @@ export function useManualReceive(): UseManualReceiveReturn {
   );
   const offerRejectRef = useRef<((error: Error) => void) | null>(null);
 
+  const discardSink = useCallback(() => {
+    const sink = sinkRef.current;
+    sinkRef.current = null;
+    if (sink) void sink.discard();
+  }, []);
+
   const cancel = useCallback(() => {
+    // Only an in-flight transfer's storage is abandoned by cancel; a completed
+    // payload stays readable until reset.
+    if (receivingRef.current) discardSink();
     cancelledRef.current = true;
     receivingRef.current = false;
     offerResolverRef.current = null;
@@ -89,12 +104,13 @@ export function useManualReceive(): UseManualReceiveReturn {
       rtcRef.current = null;
     }
     setState({ status: 'idle' });
-  }, []);
+  }, [discardSink]);
 
   const reset = useCallback(() => {
     cancel();
+    discardSink();
     setReceivedContent(null);
-  }, [cancel]);
+  }, [cancel, discardSink]);
 
   const submitOffer = useCallback(async (offerData: Uint8Array) => {
     if (!offerResolverRef.current) return;
@@ -123,6 +139,8 @@ export function useManualReceive(): UseManualReceiveReturn {
     receivingRef.current = true;
     cancelledRef.current = false;
     setReceivedContent(null);
+    // The previous transfer's payload (if any) is gone from the UI now.
+    discardSink();
 
     // Start the receive flow
     void doReceive();
@@ -214,7 +232,7 @@ export function useManualReceive(): UseManualReceiveReturn {
       if (totalBytes > MAX_MESSAGE_SIZE) {
         setState({
           status: 'error',
-          message: `Transfer rejected: Size (${Math.round(totalBytes / 1024 / 1024)}MB) exceeds limit (${MAX_MESSAGE_SIZE / 1024 / 1024}MB)`,
+          message: `Transfer rejected: Size (${formatFileSize(totalBytes)}) exceeds limit (${formatFileSize(MAX_MESSAGE_SIZE)})`,
         });
         return;
       }
@@ -246,10 +264,15 @@ export function useManualReceive(): UseManualReceiveReturn {
       const iceCandidates: RTCIceCandidate[] = [];
       let answerSDP: RTCSessionDescriptionInit | null = null;
 
-      // Streaming receiver: decrypts each chunk into a single preallocated
-      // buffer as it arrives and resolves once DONE arrives and all chunks
-      // authenticate.
-      const receiver = createDataChannelReceiver(key, totalBytes!, {
+      // Decrypted chunks land in OPFS scratch as they arrive.
+      const sink = await createReceiveSink(totalBytes);
+      sinkRef.current = sink;
+
+      if (cancelledRef.current) return;
+
+      // Streaming receiver: decrypts each chunk into the sink as it arrives
+      // and resolves once DONE arrives and all chunks authenticate.
+      const receiver = createDataChannelReceiver(key, totalBytes!, sink, {
         onProgress: (current, total) =>
           setState((s) => ({ ...s, progress: { current, total } })),
       });
@@ -399,10 +422,11 @@ export function useManualReceive(): UseManualReceiveReturn {
       });
 
       // Wait for the streaming receiver to finish, racing cancellation. The
-      // receiver decrypts, authenticates and reassembles as chunks arrive and
-      // resolves with the exact-size plaintext. A stalled stream is aborted by
-      // the receiver's own idle watchdog (see createDataChannelReceiver).
-      const receivedData = await new Promise<Uint8Array>((resolve, reject) => {
+      // receiver decrypts, authenticates and writes chunks to the sink as they
+      // arrive and resolves with the sealed payload. A stalled stream is
+      // aborted by the receiver's own idle watchdog (see
+      // createDataChannelReceiver).
+      const receivedData = await new Promise<Blob>((resolve, reject) => {
         const checkInterval = setInterval(() => {
           if (cancelledRef.current) {
             clearInterval(checkInterval);
@@ -446,6 +470,8 @@ export function useManualReceive(): UseManualReceiveReturn {
         },
       });
     } catch (error) {
+      // Nothing downloadable survives a failed transfer; drop its storage.
+      discardSink();
       if (!cancelledRef.current) {
         setState((prevState) => ({
           ...prevState,

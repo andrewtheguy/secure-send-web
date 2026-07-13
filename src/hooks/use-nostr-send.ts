@@ -22,7 +22,7 @@ import {
   PIN_WAIT_TIMEOUT_MS,
 } from '@/lib/crypto';
 import { P2PConnectionError } from '@/lib/errors';
-import { readFileAsBytes } from '@/lib/file-utils';
+import { formatFileSize } from '@/lib/file-utils';
 import {
   base64ToUint8Array,
   type ClaimPayload,
@@ -156,17 +156,13 @@ export function useNostrSend(): UseNostrSendReturn {
       }
 
       if (fileSize > MAX_MESSAGE_SIZE) {
-        const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024;
         setState({
           status: 'error',
-          message: `File exceeds ${limitMB}MB limit`,
+          message: `File exceeds ${formatFileSize(MAX_MESSAGE_SIZE)} limit`,
         });
         sendingRef.current = false;
         return;
       }
-
-      setState({ status: 'connecting', message: 'Reading file...' });
-      const contentBytes = await readFileAsBytes(content);
 
       // Per-transfer credentials: public salt (HKDF input for the ECDH session
       // keys), ephemeral Nostr identity, and the ephemeral ECDH key pair whose
@@ -533,7 +529,7 @@ export function useNostrSend(): UseNostrSendReturn {
               setState((prevState) => ({
                 status: 'transferring',
                 message: 'Sending via P2P...',
-                progress: { current: 0, total: contentBytes.length },
+                progress: { current: 0, total: content.size },
                 contentType,
                 fileMetadata: { fileName, fileSize, mimeType },
                 currentRelays: prevState.currentRelays,
@@ -547,7 +543,7 @@ export function useNostrSend(): UseNostrSendReturn {
                 await sendFileOverDataChannel(
                   rtc,
                   sessionKeys.content,
-                  contentBytes,
+                  content,
                   {
                     onProgress: (current, total) =>
                       setState((s) => ({

@@ -8,7 +8,7 @@ import {
   TRANSFER_EXPIRATION_MS,
 } from '@/lib/crypto';
 import { P2PConnectionError } from '@/lib/errors';
-import { readFileAsBytes } from '@/lib/file-utils';
+import { formatFileSize } from '@/lib/file-utils';
 import {
   generateMutualOfferBinary,
   parseMutualPayload,
@@ -91,14 +91,6 @@ export function useManualSend(): UseManualSendReturn {
   const ecdhPrivateKeyRef = useRef<CryptoKey | null>(null);
   const saltRef = useRef<Uint8Array | null>(null);
 
-  // Store data needed for answer processing
-  const pendingTransferRef = useRef<{
-    contentBytes: Uint8Array;
-    fileName: string;
-    fileSize: number;
-    mimeType: string;
-  } | null>(null);
-
   // Resolve function for answer submission
   const answerResolverRef = useRef<
     ((payload: SignalingPayload) => void) | null
@@ -118,7 +110,6 @@ export function useManualSend(): UseManualSendReturn {
     clearExpirationTimeout();
     answerResolverRef.current = null;
     answerRejectRef.current = null;
-    pendingTransferRef.current = null;
     ecdhPrivateKeyRef.current = null;
     saltRef.current = null;
     if (rtcRef.current) {
@@ -193,17 +184,13 @@ export function useManualSend(): UseManualSendReturn {
         }
 
         if (fileSize > MAX_MESSAGE_SIZE) {
-          const limitMB = MAX_MESSAGE_SIZE / 1024 / 1024;
           setState({
             status: 'error',
-            message: `File exceeds ${limitMB}MB limit`,
+            message: `File exceeds ${formatFileSize(MAX_MESSAGE_SIZE)} limit`,
           });
           sendingRef.current = false;
           return;
         }
-
-        setState({ status: 'generating_offer', message: 'Reading file...' });
-        const contentBytes = await readFileAsBytes(content);
 
         // Generate ECDH keypair and salt
         setState({ status: 'generating_offer', message: 'Generating keys...' });
@@ -224,7 +211,6 @@ export function useManualSend(): UseManualSendReturn {
             });
             sendingRef.current = false;
             answerResolverRef.current = null;
-            pendingTransferRef.current = null;
             ecdhPrivateKeyRef.current = null;
             saltRef.current = null;
             if (rtcRef.current) {
@@ -235,14 +221,6 @@ export function useManualSend(): UseManualSendReturn {
         }, TRANSFER_EXPIRATION_MS);
 
         if (cancelledRef.current) return;
-
-        // Store for later use when answer is received
-        pendingTransferRef.current = {
-          contentBytes,
-          fileName,
-          fileSize,
-          mimeType,
-        };
 
         // Create WebRTC connection and offer
         setState({
@@ -307,7 +285,7 @@ export function useManualSend(): UseManualSendReturn {
           iceCandidates,
           {
             createdAt: sessionStartTime,
-            totalBytes: contentBytes.length,
+            totalBytes: content.size,
             fileName,
             fileSize,
             mimeType,
@@ -441,13 +419,13 @@ export function useManualSend(): UseManualSendReturn {
         setState({
           status: 'transferring',
           message: 'Sending via P2P...',
-          progress: { current: 0, total: contentBytes.length },
+          progress: { current: 0, total: content.size },
           contentType: 'file',
           fileMetadata: { fileName, fileSize, mimeType },
         });
 
         // Send data in encrypted chunks and wait for the receiver's ACK.
-        await sendFileOverDataChannel(rtc, key, contentBytes, {
+        await sendFileOverDataChannel(rtc, key, content, {
           onProgress: (current, total) =>
             setState({
               status: 'transferring',
@@ -477,7 +455,6 @@ export function useManualSend(): UseManualSendReturn {
         sendingRef.current = false;
         answerResolverRef.current = null;
         answerRejectRef.current = null;
-        pendingTransferRef.current = null;
         ecdhPrivateKeyRef.current = null;
         saltRef.current = null;
         if (rtcRef.current) {

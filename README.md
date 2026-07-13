@@ -10,10 +10,19 @@ A web application for sending encrypted files and folders with PIN-based Nostr s
 - **Works offline**: No internet required after page load when using Manual Exchange on same local network
 - **Flexible signaling**: Nostr (default) or Manual Exchange (QR/copy-paste). With internet, Manual Exchange can connect across different networks when ICE finds a direct route; without internet, it can connect over the same local network.
 - **Rotating PIN pairing (Nostr)**: A short 10-character PIN (not case sensitive) that rotates every 2 minutes locates the sender and authenticates an ephemeral ECDH key exchange; content keys are never derived from the PIN
-- **File or folder transfer**: Send a file, or a ZIP archive created from multiple files/a folder, up to 100MB
+- **File or folder transfer**: Send a file, or a ZIP archive created from multiple files/a folder, up to 2GB — every stage streams (archiving, sending, receiving) through on-disk OPFS scratch storage, so transfers are not memory-bound. See [Browser Requirements](#browser-requirements)
 - **End-to-end encryption**: All transfers use AES-256-GCM encryption
 - **No accounts required**: Ephemeral keypairs generated per transfer
 - **PWA Support**: Install as a Progressive Web App for offline access
+
+## Browser Requirements
+
+Transfers stage in-flight data in the origin-private file system (OPFS), which requires:
+
+- **A secure context**: the app must be served over HTTPS (or `localhost`) — OPFS and the Web Crypto API are unavailable otherwise
+- **`FileSystemFileHandle.createWritable`**: available in Chromium browsers since 86, Firefox since 111 (desktop and Android), Samsung Internet since 21, and Safari/iOS since 26 — see the [support matrix](https://caniuse.com/mdn-api_filesystemfilehandle_createwritable). Note this is a stricter requirement than the general OPFS feature (Baseline since March 2023): Safari had OPFS from 16.4 but only gained `createWritable`, the part this app needs, in 26
+
+Support is feature-detected at runtime; on an unsupported browser, starting a transfer fails with a clear error rather than degrading.
 
 ## Version Compatibility
 
@@ -25,7 +34,7 @@ Sender and receiver should use the same app version for transfers.
 ### Sending Files or Folders
 
 1. Select the "Files" or "Folder" tab
-2. Drag and drop files or click to select a file/folder. A single file can be up to 100MB; for multiple files or a folder, the generated ZIP archive must be no larger than 100MB
+2. Drag and drop files or click to select a file/folder. A single file, or the combined input for multiple files or a folder (zipped before sending), can be up to 2GB
 3. Choose Auto Exchange mode or Manual Exchange mode
 4. For Auto Exchange, click "Start Auto Exchange" and share the displayed 10-character PIN with the receiver. The PIN rotates every 2 minutes; a countdown under the PIN shows when the next one appears, and "New PIN now" replaces it immediately (older PINs stop working)
 5. For Manual Exchange, click "Start Manual Exchange" and exchange the QR/copy-paste signaling payloads with the receiver

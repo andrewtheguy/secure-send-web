@@ -1,6 +1,10 @@
 export interface ReceivedFile {
   contentType: 'file';
-  data: Uint8Array;
+  /**
+   * Received plaintext, backed by an OPFS scratch file so reading/downloading
+   * streams from disk.
+   */
+  data: Blob;
   fileName: string;
   fileSize: number;
   mimeType: string;

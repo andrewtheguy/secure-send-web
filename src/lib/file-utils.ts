@@ -1,28 +1,15 @@
 /**
- * Read a File object as Uint8Array
- */
-export function readFileAsBytes(file: File): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const buffer = e.target?.result as ArrayBuffer;
-      resolve(new Uint8Array(buffer));
-    };
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-/**
- * Trigger a file download in the browser
+ * Trigger a file download in the browser. `data` may be disk-backed (an OPFS
+ * file); the browser streams it to the download without materializing it.
  */
 export function downloadFile(
-  data: Uint8Array,
+  data: Blob,
   fileName: string,
   mimeType: string,
 ): void {
-  // Blob constructor accepts Uint8Array directly and respects the view's byte range
-  const blob = new Blob([data as BlobPart], { type: mimeType });
+  // slice() with a type override is a zero-copy way to relabel the Blob.
+  const blob =
+    data.type === mimeType ? data : data.slice(0, data.size, mimeType);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -30,22 +17,9 @@ export function downloadFile(
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-/**
- * Trigger a text file download in the browser (UTF-8 encoded)
- * @param content - The text content to download (encoded as UTF-8)
- * @param fileName - The name of the file to download
- * @param mimeType - The MIME type of the file
- */
-export function downloadTextFile(
-  content: string,
-  fileName: string,
-  mimeType: string,
-): void {
-  const bytes = new TextEncoder().encode(content);
-  downloadFile(bytes, fileName, mimeType);
+  // Deferred revoke: revoking synchronously can abort a still-starting
+  // download of a large disk-backed Blob in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
 /**

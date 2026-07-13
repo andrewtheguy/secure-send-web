@@ -58,8 +58,13 @@ export const SALT_LENGTH = 16;
 // WebRTC data channel has ~256KB message limit, so 128KB + encryption overhead stays safe
 export const ENCRYPTION_CHUNK_SIZE = 128 * 1024; // 128KB
 
-// Max message size (100MB - transferred directly P2P over WebRTC)
-export const MAX_MESSAGE_SIZE = 100 * 1024 * 1024; // 100MB
+// Max size of a transferred payload (file or generated ZIP archive). Every
+// stage streams — multi-file/folder sends are zipped chunk by chunk into
+// OPFS scratch, the sender encrypts 128KB Blob slices on demand, and the
+// receiver writes decrypted chunks to OPFS scratch — so the bound comes from
+// the 2-byte chunk-index range and disk quota, not RAM. OPFS is required;
+// browsers without it cannot transfer at all.
+export const MAX_MESSAGE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
 
 // PIN hint length.
 // 16 hex chars = 64 bits. The hint is the Nostr `#h` filter tag. 64 bits is

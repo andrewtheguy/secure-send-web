@@ -18,7 +18,7 @@ const VALUE_PROPS = [
 const COMMON_DETAILS = [
   { label: 'Content encryption:', value: 'AES-256-GCM' },
   { label: 'File transport:', value: 'Direct peer-to-peer over WebRTC' },
-  { label: 'Max size:', value: '100 MB per transferred file or ZIP archive' },
+  { label: 'Max size:', value: '2 GB per transferred file or ZIP archive' },
 ] as const;
 
 // Specific to Auto Exchange mode.
