@@ -74,6 +74,8 @@ export function SendTransferPage() {
 
   // Online-specific properties (type-safe access)
   const pin = activeHook.type === 'online' ? activeHook.hook.pin : null;
+  const pinFingerprint =
+    activeHook.type === 'online' ? activeHook.hook.pinFingerprint : null;
 
   // Offline-specific properties (type-safe access via discriminated union)
   const manualState =
@@ -356,7 +358,11 @@ export function SendTransferPage() {
               state={state}
               betweenProgressAndChunks={
                 pin && state.status === 'waiting_for_receiver' ? (
-                  <PinDisplay pin={pin} onExpire={handleCancel} />
+                  <PinDisplay
+                    pin={pin}
+                    fingerprint={pinFingerprint}
+                    onExpire={handleCancel}
+                  />
                 ) : undefined
               }
             />

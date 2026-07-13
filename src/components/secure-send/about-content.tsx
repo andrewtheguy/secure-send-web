@@ -24,15 +24,22 @@ const COMMON_DETAILS = [
 // Specific to Auto Exchange mode.
 const PIN_DETAILS = [
   {
-    label: 'Key derivation:',
-    value: 'PBKDF2-SHA256 (600,000 iterations)',
+    label: 'Key exchange:',
+    value: 'ECDH, authenticated by a PIN-sealed handshake',
   },
   {
     label: 'PIN format:',
-    value: '12 characters with built-in checksum for typo detection',
+    value:
+      '10 characters (not case sensitive) with built-in checksum for typo detection',
   },
-  { label: 'Sender PIN window:', value: '5 minutes before display expires' },
-  { label: 'Transfer TTL:', value: '1 hour protocol validity' },
+  {
+    label: 'PIN rotation:',
+    value: 'Fresh PIN every 60 seconds; each stays valid for 3 minutes',
+  },
+  {
+    label: 'Sender wait window:',
+    value: '5 minutes before the transfer expires',
+  },
   { label: 'Signaling:', value: 'Relay signaling' },
 ] as const;
 
@@ -181,9 +188,9 @@ export function AboutContent() {
                 </li>
                 <li>
                   PIN is shared out-of-band (chat, voice, etc.), then receiver
-                  enters it to derive the decryption key locally — the PIN is
-                  the means that matches the two sides, not a separate
-                  transport.
+                  enters it to find and authenticate the sender — the actual
+                  decryption key comes from an ephemeral key exchange between
+                  the two devices, never from the PIN itself.
                 </li>
                 <li>
                   Relay servers coordinate signaling only; they do not get

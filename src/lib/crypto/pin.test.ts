@@ -1,97 +1,137 @@
 import { describe, expect, test } from 'vitest';
 import {
+  PIN_CHARSET,
   PIN_FINGERPRINT_LENGTH,
   PIN_HINT_LENGTH,
   PIN_LENGTH,
 } from './constants';
-import { importPinKey } from './kdf';
 import {
-  computePinFingerprint,
-  computePinHint,
-  computePinHintFromKey,
+  computePinFingerprintFromRoot,
+  computePinHintFromRoot,
+  derivePinAuthKey,
+  derivePinRendezvousKey,
+  formatPin,
   generatePin,
+  importPinRoot,
   isValidPin,
-  isValidPinWord,
-  pinToWords,
-  wordsToPin,
+  normalizePinInput,
 } from './pin';
 
 describe('PIN Utilities', () => {
-  test('generatePin produces a valid PIN', () => {
+  test('generatePin produces a valid PIN from the Crockford charset', () => {
     const pin = generatePin();
     expect(pin).toHaveLength(PIN_LENGTH);
+    expect([...pin].every((char) => PIN_CHARSET.includes(char))).toBe(true);
     expect(isValidPin(pin)).toBe(true);
   });
 
-  test('computePinHint should return PIN_HINT_LENGTH hex characters', async () => {
-    const pin = 'A/B:C;D(E)F';
-    const hint = await computePinHint(pin);
-    expect(hint).toMatch(new RegExp(`^[0-9a-f]{${PIN_HINT_LENGTH}}$`));
-
-    // Same PIN should give same hint
-    const hint2 = await computePinHint(pin);
-    expect(hint2).toBe(hint);
-
-    // Different PIN should (most likely) give different hint
-    const hint3 = await computePinHint('differentpin');
-    expect(hint3).not.toBe(hint);
-  });
-
-  test('previous time bucket (look-back) yields a different valid hint', async () => {
-    const pin = 'A/B:C;D(E)F';
-    const current = await computePinHint(pin, 0);
-    const previous = await computePinHint(pin, 1);
-    expect(previous).toMatch(new RegExp(`^[0-9a-f]{${PIN_HINT_LENGTH}}$`));
-    // A different time bucket changes the salt, so the hint differs
-    expect(previous).not.toBe(current);
-  });
-
-  test('fingerprint is deterministic and domain-separated from the wire hint', async () => {
-    const pin = 'A/B:C;D(E)F';
-    const fp = await computePinFingerprint(pin);
-    expect(fp).toMatch(new RegExp(`^[A-Z2-7]{${PIN_FINGERPRINT_LENGTH}}$`));
-    // Stable across calls (no time bucket in the salt)
-    expect(await computePinFingerprint(pin)).toBe(fp);
-    // Different salt than any time-bucketed wire hint
-    expect(fp).not.toBe(await computePinHint(pin, 0));
-    expect(fp).not.toBe(await computePinHint(pin, 1));
-  });
-
-  test('computePinHintFromKey matches computePinHint for the same PIN and bucket', async () => {
-    const pin = 'A/B:C;D(E)F';
-    const keyMaterial = await importPinKey(pin);
-    for (const offset of [0, 1]) {
-      const fromKey = await computePinHintFromKey(keyMaterial, offset);
-      const fromPin = await computePinHint(pin, offset);
-      expect(fromKey).toBe(fromPin);
+  test('checksum detects any single-character substitution', () => {
+    const pin = generatePin();
+    for (let i = 0; i < PIN_LENGTH - 1; i++) {
+      const original = pin[i];
+      const replacement =
+        PIN_CHARSET[(PIN_CHARSET.indexOf(original) + 1) % PIN_CHARSET.length];
+      const mutated = pin.slice(0, i) + replacement + pin.slice(i + 1);
+      expect(isValidPin(mutated)).toBe(false);
     }
   });
-});
 
-describe('PIN Word Mapping', () => {
-  test('pinToWords should result in 7 words', () => {
-    const pin = 'A/B:C;D(E)F'; // 11 chars + 1 for checksum
-    const words = pinToWords(pin);
-    expect(words.length).toBe(7);
-    expect(words.every((w) => w.length > 0)).toBe(true);
+  test('checksum detects typical adjacent transpositions', () => {
+    // Deterministic example: distinct adjacent data chars whose alphabet
+    // positions do not differ by 16 (the only undetected distance).
+    const data = '012345678';
+    const pin = data + computeChecksumForTest(data);
+    expect(isValidPin(pin)).toBe(true);
+    const swapped = `10${pin.slice(2)}`;
+    expect(isValidPin(swapped)).toBe(false);
   });
 
-  test('wordsToPin should be the inverse of pinToWords', () => {
-    // Let's use a real PIN
+  test('normalizePinInput uppercases, maps look-alikes, strips separators', () => {
+    expect(normalizePinInput('ab cd-e')).toBe('ABCDE');
+    expect(normalizePinInput('oO')).toBe('00');
+    expect(normalizePinInput('iIlL')).toBe('1111');
+    // Invalid characters are preserved for the caller to detect
+    expect(normalizePinInput('u!')).toBe('U!');
+  });
+
+  test('formatPin groups symmetrically', () => {
+    expect(formatPin('ABCDE12345')).toBe('ABCDE-12345');
+  });
+
+  test('importPinRoot returns a non-extractable HKDF key', async () => {
+    const root = await importPinRoot(generatePin());
+    expect(root.extractable).toBe(false);
+    expect(root.algorithm.name).toBe('HKDF');
+  });
+
+  test('hint is deterministic per bucket and differs across buckets and PINs', async () => {
     const pin = generatePin();
-    const words = pinToWords(pin);
-    const recoveredPin = wordsToPin(words);
-    expect(recoveredPin).toBe(pin);
+    const root = await importPinRoot(pin);
+
+    const current = await computePinHintFromRoot(root, 0);
+    expect(current).toMatch(new RegExp(`^[0-9a-f]{${PIN_HINT_LENGTH}}$`));
+    expect(await computePinHintFromRoot(root, 0)).toBe(current);
+
+    const previous = await computePinHintFromRoot(root, 1);
+    expect(previous).toMatch(new RegExp(`^[0-9a-f]{${PIN_HINT_LENGTH}}$`));
+    expect(previous).not.toBe(current);
+
+    const otherRoot = await importPinRoot(generatePin());
+    expect(await computePinHintFromRoot(otherRoot, 0)).not.toBe(current);
   });
 
-  test('isValidPinWord should work correctly', () => {
-    expect(isValidPinWord('abandon')).toBe(true);
-    expect(isValidPinWord('ABANDON')).toBe(true);
-    expect(isValidPinWord('invalidword')).toBe(false);
-    expect(isValidPinWord('')).toBe(false);
-    expect(isValidPinWord('a')).toBe(false);
-    expect(isValidPinWord('abandon1')).toBe(false);
-    expect(isValidPinWord('abandon!')).toBe(false);
-    expect(isValidPinWord('   ')).toBe(false);
+  test('fingerprint is stable and domain-separated from the hint', async () => {
+    const root = await importPinRoot(generatePin());
+    const fp = await computePinFingerprintFromRoot(root);
+    expect(fp).toMatch(new RegExp(`^[A-Z2-7]{${PIN_FINGERPRINT_LENGTH}}$`));
+    expect(await computePinFingerprintFromRoot(root)).toBe(fp);
+    expect(fp).not.toBe(await computePinHintFromRoot(root, 0));
+  });
+
+  test('auth and rendezvous keys are distinct non-extractable AES keys', async () => {
+    const root = await importPinRoot(generatePin());
+    const authKey = await derivePinAuthKey(root);
+    const rendezvousKey = await derivePinRendezvousKey(root);
+
+    for (const key of [authKey, rendezvousKey]) {
+      expect(key.extractable).toBe(false);
+      expect(key.algorithm.name).toBe('AES-GCM');
+    }
+
+    // Domain separation: a payload sealed with one key must not open with the other
+    const plaintext = new TextEncoder().encode('payload');
+    const { encrypt, decrypt } = await import('./aes-gcm');
+    const sealed = await encrypt(authKey, plaintext);
+    await expect(decrypt(rendezvousKey, sealed)).rejects.toThrow();
+  });
+
+  test('two peers derive identical values from the same PIN', async () => {
+    const pin = generatePin();
+    const senderRoot = await importPinRoot(pin);
+    const receiverRoot = await importPinRoot(pin);
+
+    expect(await computePinHintFromRoot(receiverRoot, 0)).toBe(
+      await computePinHintFromRoot(senderRoot, 0),
+    );
+    expect(await computePinFingerprintFromRoot(receiverRoot)).toBe(
+      await computePinFingerprintFromRoot(senderRoot),
+    );
+
+    const { encrypt, decrypt } = await import('./aes-gcm');
+    const sealed = await encrypt(
+      await derivePinAuthKey(senderRoot),
+      new TextEncoder().encode('proof'),
+    );
+    const opened = await decrypt(await derivePinAuthKey(receiverRoot), sealed);
+    expect(new TextDecoder().decode(opened)).toBe('proof');
   });
 });
+
+/** Mirror of the internal position-weighted checksum, for test vectors. */
+function computeChecksumForTest(data: string): string {
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) {
+    sum += PIN_CHARSET.indexOf(data[i]) * (2 * i + 1);
+  }
+  return PIN_CHARSET[sum % PIN_CHARSET.length];
+}

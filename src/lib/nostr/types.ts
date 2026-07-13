@@ -1,8 +1,6 @@
-import type { NostrTransferKeys } from '../crypto/kdf';
-
 // Event kinds (matching wormhole-rs)
 export const EVENT_KIND_DATA_TRANSFER = 24242;
-export const EVENT_KIND_PIN_EXCHANGE = 24243;
+export const EVENT_KIND_RENDEZVOUS = 24243;
 
 // Content types
 export type ContentType = 'file';
@@ -62,38 +60,60 @@ export interface TransferStateOther extends TransferStateBase {
 // Discriminated union: TypeScript narrows to TransferStateError when status === 'error'
 export type TransferState = TransferStateError | TransferStateOther;
 
-// PIN Exchange payload (encrypted in the event)
-export interface PinExchangePayload {
+/**
+ * Rendezvous payload (encrypted with the PIN-derived rendezvous key inside the
+ * kind-24243 event). Republished with a fresh PIN, hint, and nonce on every
+ * rotation; transferId, senderPubkey, and the sender's ECDH public key stay
+ * stable for the transfer's lifetime.
+ */
+export interface RendezvousPayload {
+  type: 'rendezvous';
   contentType: ContentType;
   transferId: string;
+  /** Nostr pubkey of the sender; must equal the rendezvous event author. */
   senderPubkey: string;
+  /** Sender's ephemeral ECDH public key (base64, 65-byte uncompressed P-256). */
+  ecdhPublicKey: string;
+  /** Sender handshake nonce (base64), fresh per rotation; echoed in the claim. */
+  nonce: string;
   // Sender's preferred relays for signaling
   relays?: string[];
-  // For file
   fileName?: string;
   fileSize?: number;
   mimeType?: string;
 }
 
-// ACK payload
-export interface AckData {
+/**
+ * Claim payload (receiver -> sender), sealed with the PIN-derived auth key.
+ * Decrypting proves the receiver knows the PIN; the echoed sender nonce and
+ * ECDH key bind the proof to this rotation generation and rule out a
+ * man-in-the-middle substituting either side's ECDH key.
+ */
+export interface ClaimPayload {
+  type: 'claim';
   transferId: string;
-  seq: number; // Current flow emits 0 for receiver ready; completion is data-channel ACK.
+  /** Echo of the rendezvous nonce for the PIN generation the receiver used. */
+  senderNonce: string;
+  /** Fresh receiver handshake nonce (base64); echoed back in the confirm. */
+  receiverNonce: string;
+  /** Receiver's ephemeral ECDH public key (base64, 65-byte uncompressed P-256). */
+  receiverEcdhPublicKey: string;
+  /** Echo of the sender's ECDH public key the receiver will run ECDH against. */
+  senderEcdhPublicKey: string;
 }
 
 /**
- * Transfer metadata for Auto Exchange mode.
- * @property hint - Time-bucketed Nostr event-filtering tag: a one-way PBKDF2-SHA256
- *   derivation of the PIN truncated to 16 hex chars (see computePinHint)
+ * Confirm payload (sender -> receiver), sealed with the same PIN-derived auth
+ * key that verified the claim. Tells the receiver its claim won the transfer
+ * and confirms the sender accepted exactly the receiver's ECDH key.
  */
-export interface TransferMetadata {
-  pin: string;
-  hint: string;
-  salt: Uint8Array;
-  keys: NostrTransferKeys;
+export interface ConfirmPayload {
+  type: 'confirm';
   transferId: string;
-  secretKey: Uint8Array;
-  publicKey: string;
+  senderNonce: string;
+  receiverNonce: string;
+  /** Echo of the receiver ECDH public key the sender locked the transfer to. */
+  receiverEcdhPublicKey: string;
 }
 
 // Re-export shared received-content types

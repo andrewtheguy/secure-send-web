@@ -1,28 +1,41 @@
 import type { Event } from 'nostr-tools';
 import { useCallback, useRef, useState } from 'react';
 import {
-  computePinHintFromKey,
+  computePinHintFromRoot,
   decrypt,
-  deriveNostrTransferKeysFromPinKey,
+  deriveNostrSessionKeys,
+  derivePinAuthKey,
+  derivePinRendezvousKey,
+  deriveSharedSecretKey,
   encrypt,
+  generateECDHKeyPair,
   MAX_MESSAGE_SIZE,
-  type NostrTransferKeys,
-  TRANSFER_EXPIRATION_MS,
+  type NostrSessionKeys,
+  PIN_HINT_LOOKBACK_BUCKETS,
+  PIN_TTL_MS,
 } from '@/lib/crypto';
 import { P2PConnectionError } from '@/lib/errors';
 import {
-  createAuthenticatedAckEvent,
+  base64ToUint8Array,
+  type ClaimPayload,
+  type ConfirmPayload,
+  createHandshakeEvent,
   createNostrClient,
   createSignalingEvent,
   DEFAULT_RELAYS,
   EVENT_KIND_DATA_TRANSFER,
-  EVENT_KIND_PIN_EXCHANGE,
+  EVENT_KIND_RENDEZVOUS,
   generateEphemeralKeys,
+  generateHandshakeNonce,
   type NostrClient,
-  type PinExchangePayload,
-  parsePinExchangeEvent,
+  openHandshakePayload,
+  parseHandshakeEvent,
+  parseRendezvousEvent,
   parseSignalingEvent,
+  type RendezvousPayload,
+  sealHandshakePayload,
   type TransferState,
+  uint8ArrayToBase64,
 } from '@/lib/nostr';
 import { ACK, createDataChannelReceiver } from '@/lib/p2p-transfer';
 import type { PinKeyMaterial, ReceivedContent } from '@/lib/types';
@@ -30,11 +43,28 @@ import { WebRTCConnection } from '@/lib/webrtc';
 import { getWebRTCConfig } from '@/lib/webrtc-config';
 
 /**
- * Time to establish the WebRTC data channel after the ready ACK is published.
+ * Time to establish the WebRTC data channel after the handshake completes.
  * Bounds the pre-open phase, which the per-transfer stall watchdog does not
  * cover (it only arms once the channel opens). Mirrors the sender's timeout.
  */
 const P2P_CONNECTION_TIMEOUT_MS = 30000;
+
+/**
+ * Time to wait for the sender's confirm after publishing the claim. The
+ * sender confirms immediately upon verifying a claim, so a missing confirm
+ * means the sender is gone or the transfer was claimed by someone else.
+ */
+const CONFIRM_TIMEOUT_MS = 30000;
+
+function decodeEcdhPublicKey(b64: string): Uint8Array | null {
+  try {
+    const bytes = base64ToUint8Array(b64);
+    if (bytes.length !== 65 || bytes[0] !== 0x04) return null;
+    return bytes;
+  } catch {
+    return null;
+  }
+}
 
 export interface UseNostrReceiveReturn {
   state: TransferState;
@@ -76,9 +106,6 @@ export function useNostrReceive(): UseNostrReceiveReturn {
     setReceivedContent(null);
 
     try {
-      let keys: NostrTransferKeys | null = null;
-
-      // Auto Exchange mode: use provided material
       if (!pinMaterial.key || !pinMaterial.fingerprint) {
         setState({
           status: 'error',
@@ -87,20 +114,25 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         receivingRef.current = false;
         return;
       }
+
       setState({
         status: 'connecting',
-        message: 'Deriving encryption keys...',
+        message: 'Deriving lookup keys...',
       });
 
-      // The PIN hint is salted with the current time bucket, so the sender's hint is
-      // tied to the bucket it published in. Derive both the current and previous bucket
-      // hints and query for either, so a transfer created just before a bucket rollover
-      // is still found (one look-back covers the whole non-expired window, since the
-      // bucket width equals the transfer lifetime). Mirrors the QR signaling parser,
-      // which de-obfuscates against the current and previous time bucket.
-      const [hintCurrent, hintPrev] = await Promise.all([
-        computePinHintFromKey(pinMaterial.key, 0),
-        computePinHintFromKey(pinMaterial.key, 1),
+      // The published hint is scoped to the rotation bucket the sender
+      // published in. Derive every bucket a still-honored PIN can sit in
+      // (rendezvous events are accepted up to PIN_TTL_MS old, so up to
+      // PIN_HINT_LOOKBACK_BUCKETS back) and query for any of them.
+      const root = pinMaterial.key;
+      const [hints, rendezvousKey, authKey] = await Promise.all([
+        Promise.all(
+          Array.from({ length: PIN_HINT_LOOKBACK_BUCKETS + 1 }, (_, offset) =>
+            computePinHintFromRoot(root, offset),
+          ),
+        ),
+        derivePinRendezvousKey(root),
+        derivePinAuthKey(root),
       ]);
 
       if (cancelledRef.current) return;
@@ -112,14 +144,13 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
       if (cancelledRef.current) return;
 
-      // Search for exchange event
+      // Search for the rendezvous event
       setState({ status: 'receiving', message: 'Searching for sender...' });
 
-      // Query for events matching the current or previous time-bucket hint
       const events = await client.query([
         {
-          kinds: [EVENT_KIND_PIN_EXCHANGE],
-          '#h': [hintCurrent, hintPrev],
+          kinds: [EVENT_KIND_RENDEZVOUS],
+          '#h': hints,
           limit: 10,
         },
       ]);
@@ -129,105 +160,91 @@ export function useNostrReceive(): UseNostrReceiveReturn {
       if (events.length === 0) {
         setState({
           status: 'error',
-          message: 'No transfer found for this PIN',
+          message:
+            'No transfer found for this PIN. It may have rotated — check the code currently shown on the sender.',
         });
         return;
       }
 
-      // Try to decrypt each event
-      let payload: PinExchangePayload | null = null;
+      // Try to decrypt each candidate
+      let payload: RendezvousPayload | null = null;
       let transferId: string | null = null;
       let senderPubkey: string | null = null;
+      let senderEcdhPublicKey: Uint8Array | null = null;
+      let salt: Uint8Array | null = null;
       let sawExpiredCandidate = false;
-      let sawNonExpiredCandidate = false;
-      let selectedCreatedAtSec: number | null = null;
-      let matchedHint: string = hintCurrent;
 
       const sortedEvents = [...events].sort(
         (a, b) => (b.created_at || 0) - (a.created_at || 0),
       );
 
       for (const event of sortedEvents) {
-        // Enforce TTL
-        if (!event.created_at) {
+        // A rendezvous event is only claimable while the sender still honors
+        // its PIN generation.
+        if (
+          !event.created_at ||
+          Date.now() - event.created_at * 1000 > PIN_TTL_MS
+        ) {
           sawExpiredCandidate = true;
           continue;
         }
-        const eventAgeMs = Date.now() - event.created_at * 1000;
-        if (eventAgeMs > TRANSFER_EXPIRATION_MS) {
-          sawExpiredCandidate = true;
-          continue;
-        }
-        sawNonExpiredCandidate = true;
 
-        // Auto Exchange mode
-        const parsed = parsePinExchangeEvent(event);
+        const parsed = parseRendezvousEvent(event);
         if (!parsed) continue;
 
+        let candidate: RendezvousPayload;
         try {
-          const derivedKeys = await deriveNostrTransferKeysFromPinKey(
-            pinMaterial.key,
-            parsed.salt,
-          );
           const decrypted = await decrypt(
-            derivedKeys.metadata,
+            rendezvousKey,
             parsed.encryptedPayload,
           );
-          const decoder = new TextDecoder();
-          const payloadStr = decoder.decode(decrypted);
-          payload = JSON.parse(payloadStr) as PinExchangePayload;
-
-          transferId = parsed.transferId;
-          senderPubkey = event.pubkey;
-          keys = derivedKeys;
-          selectedCreatedAtSec = event.created_at || null;
-          // Echo back the exact hint the sender published (current or previous bucket)
-          matchedHint = parsed.hint;
-          break;
+          candidate = JSON.parse(
+            new TextDecoder().decode(decrypted),
+          ) as RendezvousPayload;
         } catch {
-          // Silently ignore decryption failures and continue trying other candidates.
-          // A failure here just means this event wasn't encrypted with our PIN key
-          // (wrong/stale event sharing the same hint), not a real error.
+          // Not sealed with our PIN (stale event sharing the hint tag); try
+          // the next candidate.
+          continue;
         }
-      }
 
-      if (!payload || !keys) {
-        if (!sawNonExpiredCandidate && sawExpiredCandidate) {
-          setState({
-            status: 'error',
-            message: 'Transfer expired. Ask sender to start a new transfer.',
-          });
-          return;
+        // Bind the authenticated payload to the plaintext routing data: the
+        // payload must name the event's own author and transfer id, so a
+        // copied ciphertext republished under another identity is rejected.
+        const ecdhBytes =
+          typeof candidate.ecdhPublicKey === 'string'
+            ? decodeEcdhPublicKey(candidate.ecdhPublicKey)
+            : null;
+        if (
+          candidate.type !== 'rendezvous' ||
+          candidate.transferId !== parsed.transferId ||
+          candidate.senderPubkey !== event.pubkey ||
+          typeof candidate.nonce !== 'string' ||
+          !candidate.nonce ||
+          !ecdhBytes
+        ) {
+          continue;
         }
-        setState({
-          status: 'error',
-          message: 'Could not decrypt transfer. Wrong PIN?',
-        });
-        return;
-      }
 
-      if (!transferId || !senderPubkey) {
-        if (!sawNonExpiredCandidate && sawExpiredCandidate) {
-          setState({
-            status: 'error',
-            message: 'Transfer expired. Ask sender to start a new transfer.',
-          });
-          return;
-        }
-        setState({
-          status: 'error',
-          message: 'Could not decrypt transfer. Wrong PIN?',
-        });
-        return;
+        payload = candidate;
+        transferId = parsed.transferId;
+        senderPubkey = event.pubkey;
+        senderEcdhPublicKey = ecdhBytes;
+        salt = parsed.salt;
+        break;
       }
 
       if (
-        !selectedCreatedAtSec ||
-        Date.now() - selectedCreatedAtSec * 1000 > TRANSFER_EXPIRATION_MS
+        !payload ||
+        !transferId ||
+        !senderPubkey ||
+        !senderEcdhPublicKey ||
+        !salt
       ) {
         setState({
           status: 'error',
-          message: 'Transfer expired. Ask sender to generate a new PIN.',
+          message: sawExpiredCandidate
+            ? 'This PIN has expired. Enter the code currently shown on the sender.'
+            : 'Could not decrypt transfer. Wrong PIN?',
         });
         return;
       }
@@ -256,21 +273,178 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         return;
       }
 
-      // Generate receiver keypair only after the decrypted metadata is accepted.
-      const { secretKey } = generateEphemeralKeys();
+      // Claim the transfer: prove PIN knowledge and bind our ephemeral ECDH
+      // key (and the sender's) into the sealed payload.
+      const { secretKey, publicKey } = generateEphemeralKeys();
+      const ecdh = await generateECDHKeyPair();
+      const receiverEcdhPublicKeyB64 = uint8ArrayToBase64(ecdh.publicKeyBytes);
+      const receiverNonce = generateHandshakeNonce();
 
-      // Send ready ACK (seq=0), authenticated with the PIN-derived signals key.
-      const readyAck = await createAuthenticatedAckEvent(
+      const claimPayload: ClaimPayload = {
+        type: 'claim',
+        transferId,
+        senderNonce: payload.nonce,
+        receiverNonce,
+        receiverEcdhPublicKey: receiverEcdhPublicKeyB64,
+        senderEcdhPublicKey: payload.ecdhPublicKey,
+      };
+      const claimEvent = createHandshakeEvent(
         secretKey,
         senderPubkey,
         transferId,
-        0,
-        keys.signals,
-        matchedHint,
+        'claim',
+        await sealHandshakePayload(authKey, claimPayload),
       );
-      await client.publish(readyAck);
+
+      setState({
+        status: 'connecting',
+        message: 'Waiting for sender confirmation...',
+      });
+
+      // Subscribe for the confirm before publishing the claim so the response
+      // cannot slip past us, then verify it under the same PIN auth key.
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        let timeout: ReturnType<typeof setTimeout> | null = null;
+        let cancelPoll: ReturnType<typeof setInterval> | null = null;
+        let queryPoll: ReturnType<typeof setInterval> | null = null;
+        let subId: string | null = null;
+
+        const cleanup = () => {
+          if (timeout) clearTimeout(timeout);
+          if (cancelPoll) clearInterval(cancelPoll);
+          if (queryPoll) clearInterval(queryPoll);
+          if (subId) client.unsubscribe(subId);
+          timeout = null;
+          cancelPoll = null;
+          queryPoll = null;
+          subId = null;
+        };
+
+        timeout = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(
+            new Error(
+              'Sender did not confirm. The transfer may have been claimed by another device, or the sender went offline.',
+            ),
+          );
+        }, CONFIRM_TIMEOUT_MS);
+
+        cancelPoll = setInterval(() => {
+          if (cancelledRef.current && !settled) {
+            settled = true;
+            cleanup();
+            reject(new Error('Cancelled'));
+          }
+        }, 250);
+
+        const processedEventIds = new Set<string>();
+
+        const processEvent = (event: Event) => {
+          if (settled || cancelledRef.current) return;
+          if (processedEventIds.has(event.id)) return;
+          processedEventIds.add(event.id);
+
+          const handshake = parseHandshakeEvent(event);
+          if (
+            !handshake ||
+            handshake.type !== 'confirm' ||
+            handshake.transferId !== transferId ||
+            event.pubkey !== senderPubkey
+          ) {
+            return;
+          }
+
+          void (async () => {
+            let opened: unknown;
+            try {
+              opened = await openHandshakePayload(
+                authKey,
+                handshake.sealedPayload,
+              );
+            } catch {
+              return; // Not sealed with our PIN
+            }
+
+            const p = opened as Partial<ConfirmPayload>;
+            if (
+              p.type !== 'confirm' ||
+              p.transferId !== transferId ||
+              p.senderNonce !== payload.nonce ||
+              p.receiverNonce !== receiverNonce ||
+              p.receiverEcdhPublicKey !== receiverEcdhPublicKeyB64
+            ) {
+              return;
+            }
+
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve();
+          })();
+        };
+
+        subId = client.subscribe(
+          [
+            {
+              kinds: [EVENT_KIND_DATA_TRANSFER],
+              '#t': [transferId],
+              '#p': [publicKey],
+              authors: [senderPubkey],
+            },
+          ],
+          processEvent,
+        );
+
+        const publishAndPoll = async () => {
+          await client.publish(claimEvent);
+          // Backstop for relays that processed the publish before the
+          // subscription: poll for an already-stored confirm.
+          queryPoll = setInterval(() => {
+            if (settled || cancelledRef.current) return;
+            void (async () => {
+              try {
+                const existing = await client.query([
+                  {
+                    kinds: [EVENT_KIND_DATA_TRANSFER],
+                    '#t': [transferId],
+                    '#p': [publicKey],
+                    authors: [senderPubkey],
+                    limit: 10,
+                  },
+                ]);
+                for (const event of existing) {
+                  processEvent(event);
+                }
+              } catch (err) {
+                console.error('Failed to query for confirm event:', err);
+              }
+            })();
+          }, 3000);
+        };
+
+        void publishAndPoll().catch((err) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(err instanceof Error ? err : new Error('Publish failed'));
+        });
+      });
 
       if (cancelledRef.current) return;
+
+      // Session keys come from the ephemeral ECDH exchange the PIN just
+      // authenticated — the PIN derives no content or signaling keys.
+      const sharedSecret = await deriveSharedSecretKey(
+        ecdh.privateKey,
+        senderEcdhPublicKey,
+      );
+      const sessionKeys: NostrSessionKeys = await deriveNostrSessionKeys(
+        sharedSecret,
+        salt,
+      );
 
       setState({
         status: 'receiving',
@@ -296,7 +470,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           // buffer as it arrives. Nostr is not involved past signaling; the
           // data-channel ACK below confirms completion.
           const receiver = createDataChannelReceiver(
-            keys!.p2pContent,
+            sessionKeys.content,
             resolvedFileSize,
             {
               onProgress: (current, total) =>
@@ -397,13 +571,13 @@ export function useNostrReceive(): UseNostrReceiveReturn {
                 const signalPayload = { type: 'signal', signal };
                 const signalJson = JSON.stringify(signalPayload);
                 const encryptedSignal = await encrypt(
-                  keys!.signals,
+                  sessionKeys.signals,
                   new TextEncoder().encode(signalJson),
                 );
                 const event = createSignalingEvent(
                   secretKey,
-                  senderPubkey!,
-                  transferId!,
+                  senderPubkey,
+                  transferId,
                   encryptedSignal,
                 );
                 await client.publish(event);
@@ -439,7 +613,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             if (signalData && signalData.transferId === transferId) {
               try {
                 const decrypted = await decrypt(
-                  keys!.signals,
+                  sessionKeys.signals,
                   signalData.encryptedSignal,
                 );
                 const signalPayload = JSON.parse(
@@ -459,8 +633,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
             [
               {
                 kinds: [EVENT_KIND_DATA_TRANSFER],
-                '#t': [transferId!],
-                authors: [senderPubkey!],
+                '#t': [transferId],
+                authors: [senderPubkey],
               },
             ],
             processEvent,
@@ -473,8 +647,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
               const existingEvents = await client.query([
                 {
                   kinds: [EVENT_KIND_DATA_TRANSFER],
-                  '#t': [transferId!],
-                  authors: [senderPubkey!],
+                  '#t': [transferId],
+                  authors: [senderPubkey],
                   limit: 50,
                 },
               ]);

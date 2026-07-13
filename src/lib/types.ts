@@ -9,12 +9,13 @@ export interface ReceivedFile {
 export type ReceivedContent = ReceivedFile;
 
 /**
- * Key material derived from PIN authentication.
- * @property key - Non-extractable PBKDF2 key material imported from the PIN. Used to
- *   derive the labeled Nostr AES keys and the time-bucketed Nostr hint (see computePinHint).
- *   The receiver re-derives the current and previous bucket wire hints from this at query time,
- *   then derives metadata/signals/p2p-content keys after reading the transfer salt.
- * @property fingerprint - Stable, time-independent PIN fingerprint (see computePinFingerprint),
+ * Key material derived from an entered PIN.
+ * @property key - Non-extractable HKDF PIN root (see importPinRoot): the full
+ *   PBKDF2 stretch of the PIN, from which the receiver derives the per-bucket
+ *   rendezvous hints, the rendezvous payload key, and the claim/confirm auth
+ *   key. It derives no content-encryption keys — those come from the ephemeral
+ *   ECDH exchange the PIN authenticates.
+ * @property fingerprint - Stable PIN fingerprint (see computePinFingerprintFromRoot),
  *   shown for human visual comparison only; never sent across the wire.
  */
 export interface PinKeyMaterial {
