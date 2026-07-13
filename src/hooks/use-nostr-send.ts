@@ -1,7 +1,7 @@
 import type { Event } from 'nostr-tools';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  computePinFingerprintFromRoot,
+  computePinFingerprint,
   computePinHintFromRoot,
   decrypt,
   deriveNostrSessionKeys,
@@ -210,7 +210,7 @@ export function useNostrSend(): UseNostrSendReturn {
           computePinHintFromRoot(root),
           derivePinAuthKey(root),
           derivePinRendezvousKey(root),
-          computePinFingerprintFromRoot(root),
+          computePinFingerprint(newPin),
         ]);
         const nonce = generateHandshakeNonce();
 
