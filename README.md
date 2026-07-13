@@ -27,7 +27,7 @@ Sender and receiver should use the same app version for transfers.
 1. Select the "Files" or "Folder" tab
 2. Drag and drop files or click to select a file/folder. A single file can be up to 100MB; for multiple files or a folder, the generated ZIP archive must be no larger than 100MB
 3. Choose Auto Exchange mode or Manual Exchange mode
-4. For Auto Exchange, click "Start Auto Exchange" and share the displayed 10-character PIN with the receiver. The PIN rotates every 2 minutes; a recently rotated code keeps working for a few more minutes
+4. For Auto Exchange, click "Start Auto Exchange" and share the displayed 10-character PIN with the receiver. The PIN rotates every 2 minutes; a countdown under the PIN shows when the next one appears
 5. For Manual Exchange, click "Start Manual Exchange" and exchange the QR/copy-paste signaling payloads with the receiver
 
 ### Receiving

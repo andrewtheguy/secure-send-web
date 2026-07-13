@@ -249,7 +249,7 @@ The input component is designed for fast, error-proof manual entry:
 
 #### `PinDisplay` (Sender Side)
 The display component focuses on secure and clear communication:
-- **Rotation Countdown**: A progress bar under the PIN shows the time until the next 2-minute rotation replaces it, plus a note that recently rotated codes still work.
+- **Rotation Countdown**: A progress bar and an m:ss countdown under the PIN show the time until the next 2-minute rotation replaces it. The multi-generation grace window is deliberately not surfaced in the UI — it is backend behavior (`PIN_ACTIVE_GENERATIONS`), and mentioning it confused users.
 - **Masking**: Automatically masks the PIN after the first copy operation to prevent shoulder surfing.
 - **Quiet Backstop**: A muted footnote notes when waiting stops automatically (30 minutes); it is deliberately unobtrusive because rotation, not this window, is the security-relevant timer.
 - **Fingerprint**: Shows the current PIN's fingerprint for human comparison with the receiver.
