@@ -51,9 +51,7 @@ export function SendTransferLayout() {
                 Secure Send
               </CardTitle>
               <CardDescription>
-                Transferring{' '}
-                {config.selectedFiles.length || config.folderFiles?.length || 0}{' '}
-                file(s)
+                Transferring {config.selectedFiles.length} file(s)
               </CardDescription>
             </div>
           </div>

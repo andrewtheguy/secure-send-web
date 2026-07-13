@@ -145,25 +145,18 @@ export function archiveTimestamp(date: Date = new Date()): string {
 }
 
 /**
- * Extract folder name from FileList (for folder selection)
+ * Base name for the ZIP of a mixed selection: the folder name when every file
+ * came from the same selected folder (webkitRelativePath is
+ * "folderName/subfolder/file.txt"), otherwise 'files'.
  */
-export function getFolderName(files: FileList): string {
-  if (files.length === 0) return 'archive';
-  // webkitRelativePath is "folderName/subfolder/file.txt"
-  const firstPath = files[0].webkitRelativePath;
-  if (firstPath) {
-    return firstPath.split('/')[0];
+export function getArchiveBaseName(files: readonly File[]): string {
+  if (files.length === 0) return 'files';
+  const topFolder = files[0].webkitRelativePath.split('/')[0];
+  if (
+    topFolder &&
+    files.every((f) => f.webkitRelativePath.split('/')[0] === topFolder)
+  ) {
+    return topFolder;
   }
-  return 'archive';
-}
-
-/**
- * Calculate total size of all files
- */
-export function getTotalSize(files: FileList): number {
-  let total = 0;
-  for (let i = 0; i < files.length; i++) {
-    total += files[i].size;
-  }
-  return total;
+  return 'files';
 }

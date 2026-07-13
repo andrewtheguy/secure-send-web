@@ -11,9 +11,9 @@ import {
 export type MethodChoice = 'online' | 'offline';
 
 interface SendConfig {
-  // Files
+  // Files (loose files and folder selections mixed; folder entries carry
+  // webkitRelativePath so archive structure is preserved)
   selectedFiles: File[];
-  folderFiles: FileList | null;
 
   // Configuration
   methodChoice: MethodChoice;
@@ -58,16 +58,10 @@ export function SendProvider({ children }: SendProviderProps) {
     const hasConfig = config !== null;
 
     const totalFileSize = config
-      ? config.folderFiles
-        ? Array.from(config.folderFiles).reduce((sum, f) => sum + f.size, 0)
-        : config.selectedFiles.reduce((sum, f) => sum + f.size, 0)
+      ? config.selectedFiles.reduce((sum, f) => sum + f.size, 0)
       : 0;
 
-    const fileCount = config
-      ? config.folderFiles
-        ? config.folderFiles.length
-        : config.selectedFiles.length
-      : 0;
+    const fileCount = config ? config.selectedFiles.length : 0;
 
     return {
       config,

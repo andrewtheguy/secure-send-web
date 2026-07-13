@@ -9,21 +9,15 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useSend } from '@/contexts/send-context';
 import { MAX_MESSAGE_SIZE } from '@/lib/crypto';
 import { formatFileSize } from '@/lib/file-utils';
-import {
-  getFolderName,
-  getTotalSize,
-  supportsFolderSelection,
-} from '@/lib/folder-utils';
+import { supportsFolderSelection } from '@/lib/folder-utils';
 
-type ContentMode = 'file' | 'folder';
 type MethodChoice = 'online' | 'offline';
 
 // Extend input element to include webkitdirectory attribute
@@ -34,28 +28,72 @@ declare module 'react' {
   }
 }
 
+// Files picked via folder selection carry a webkitRelativePath whose first
+// segment is the selected folder; loose files have an empty path.
+function topFolderOf(file: File): string {
+  return file.webkitRelativePath ? file.webkitRelativePath.split('/')[0] : '';
+}
+
+function selectionKey(file: File): string {
+  return `${file.webkitRelativePath || file.name}-${file.size}`;
+}
+
+type DisplayEntry =
+  | { kind: 'file'; file: File }
+  | { kind: 'folder'; name: string; fileCount: number; size: number };
+
 export function SendTab() {
   const navigate = useNavigate();
   const { setConfig } = useSend();
 
-  const [mode, setMode] = useState<ContentMode>('file');
   const [methodChoice, setMethodChoice] = useState<MethodChoice>('online');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [folderFiles, setFolderFiles] = useState<FileList | null>(null); // Keep FileList for folder to preserve paths
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
 
-  const filesTotalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0);
-  const folderTotalSize = folderFiles ? getTotalSize(folderFiles) : 0;
-  const isFilesOverLimit = filesTotalSize > MAX_MESSAGE_SIZE;
-  const isFolderOverLimit = folderTotalSize > MAX_MESSAGE_SIZE;
+  const totalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0);
+  const isOverLimit = totalSize > MAX_MESSAGE_SIZE;
+  const canSend = selectedFiles.length > 0 && !isOverLimit;
+  // Anything beyond a single loose file is zipped; folder selections always
+  // zip so their structure is preserved.
+  const willZip =
+    selectedFiles.length > 1 ||
+    (selectedFiles.length === 1 && !!selectedFiles[0].webkitRelativePath);
 
-  const canSendFiles = selectedFiles.length > 0 && !isFilesOverLimit;
-  const canSendFolder =
-    folderFiles && folderFiles.length > 0 && !isFolderOverLimit;
-  const canSend = mode === 'file' ? canSendFiles : canSendFolder;
+  // Collapse folder selections into one row per top-level folder; loose files
+  // stay individual rows. Order follows first appearance in the selection.
+  const displayEntries = useMemo<DisplayEntry[]>(() => {
+    const entries: DisplayEntry[] = [];
+    const folderIndex = new Map<string, number>();
+    for (const file of selectedFiles) {
+      const folder = topFolderOf(file);
+      if (!folder) {
+        entries.push({ kind: 'file', file });
+        continue;
+      }
+      const index = folderIndex.get(folder);
+      if (index === undefined) {
+        folderIndex.set(folder, entries.length);
+        entries.push({
+          kind: 'folder',
+          name: folder,
+          fileCount: 1,
+          size: file.size,
+        });
+      } else {
+        const entry = entries[index] as Extract<
+          DisplayEntry,
+          { kind: 'folder' }
+        >;
+        entry.fileCount++;
+        entry.size += file.size;
+      }
+    }
+    return entries;
+  }, [selectedFiles]);
+
   const pinModeDescription =
     'Most reliable option. Sets up the connection automatically through relays using a short PIN you share; the same end-to-end encrypted transfer, without the manual handoff.';
   const pinModeHowItWorksDescription =
@@ -69,7 +107,6 @@ export function SendTab() {
     // Set context with all the configuration
     setConfig({
       selectedFiles,
-      folderFiles,
       methodChoice,
     });
     // Navigate to transfer page
@@ -78,19 +115,23 @@ export function SendTab() {
 
   const addFiles = useCallback((files: File[]) => {
     if (files.length > 0) {
-      // Add to existing files, avoiding duplicates by name+size
+      // Add to existing files, avoiding duplicates by path+size
       setSelectedFiles((prev) => {
-        const existingKeys = new Set(prev.map((f) => `${f.name}-${f.size}`));
+        const existingKeys = new Set(prev.map(selectionKey));
         const uniqueNew = files.filter(
-          (f) => !existingKeys.has(`${f.name}-${f.size}`),
+          (f) => !existingKeys.has(selectionKey(f)),
         );
         return [...prev, ...uniqueNew];
       });
     }
   }, []);
 
-  const removeFile = useCallback((index: number) => {
-    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+  const removeFile = useCallback((file: File) => {
+    setSelectedFiles((prev) => prev.filter((f) => f !== file));
+  }, []);
+
+  const removeFolder = useCallback((folder: string) => {
+    setSelectedFiles((prev) => prev.filter((f) => topFolderOf(f) !== folder));
   }, []);
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -102,9 +143,10 @@ export function SendTab() {
   };
 
   const handleFolderInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setFolderFiles(e.target.files);
-    }
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    addFiles(files);
+    // Reset input so the same folder can be added again if removed
+    if (folderInputRef.current) folderInputRef.current.value = '';
   };
 
   const handleDrop = useCallback(
@@ -143,66 +185,90 @@ export function SendTab() {
 
   return (
     <div className="space-y-4 pt-4">
-      {supportsFolderSelection && (
-        <Tabs value={mode} onValueChange={(v) => setMode(v as ContentMode)}>
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="file" className="flex items-center gap-2">
-              <FileUp className="h-4 w-4" />
-              Files
-            </TabsTrigger>
-            <TabsTrigger value="folder" className="flex items-center gap-2">
-              <FolderUp className="h-4 w-4" />
-              Folder
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-      )}
-
-      {mode === 'file' && (
-        <div className="space-y-2">
-          {selectedFiles.length > 0 ? (
-            <div className="space-y-2">
-              {/* File list */}
-              <div className="max-h-[160px] overflow-y-auto space-y-1 border rounded-lg p-2">
-                {selectedFiles.map((file, index) => (
+      <div className="space-y-2">
+        {selectedFiles.length > 0 ? (
+          <div className="space-y-2">
+            {/* Selection list: loose files and folders mixed */}
+            <div className="max-h-[160px] overflow-y-auto space-y-1 border rounded-lg p-2">
+              {displayEntries.map((entry) =>
+                entry.kind === 'file' ? (
                   <div
-                    key={`${file.name}-${file.size}-${file.lastModified}`}
+                    key={selectionKey(entry.file)}
                     className="flex items-center gap-2 py-1 px-2 rounded hover:bg-muted/50 group"
                   >
                     <FileUp className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    <span className="flex-1 truncate text-sm">{file.name}</span>
+                    <span className="flex-1 truncate text-sm">
+                      {entry.file.name}
+                    </span>
                     <span className="text-xs text-muted-foreground flex-shrink-0">
-                      {formatFileSize(file.size)}
+                      {formatFileSize(entry.file.size)}
                     </span>
                     <Button
                       variant="ghost"
                       size="sm"
                       className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={() => removeFile(index)}
+                      onClick={() => removeFile(entry.file)}
                     >
                       <X className="h-3 w-3" />
                     </Button>
                   </div>
-                ))}
-              </div>
-              {/* Summary and add more */}
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">
-                  {selectedFiles.length} file
-                  {selectedFiles.length !== 1 ? 's' : ''} •{' '}
-                  {formatFileSize(filesTotalSize)}
-                  {selectedFiles.length > 1 && ' • Will compress to ZIP'}
-                </span>
+                ) : (
+                  <div
+                    key={`folder-${entry.name}`}
+                    className="flex items-center gap-2 py-1 px-2 rounded hover:bg-muted/50 group"
+                  >
+                    <FolderUp className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <span className="flex-1 truncate text-sm">
+                      {entry.name}
+                    </span>
+                    <span className="text-xs text-muted-foreground flex-shrink-0">
+                      {entry.fileCount} file{entry.fileCount !== 1 ? 's' : ''}{' '}
+                      &bull; {formatFileSize(entry.size)}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => removeFolder(entry.name)}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ),
+              )}
+            </div>
+            {/* Summary and add more */}
+            <div className="flex items-center justify-between gap-2 text-sm">
+              <span className="text-muted-foreground">
+                {selectedFiles.length} file
+                {selectedFiles.length !== 1 ? 's' : ''} •{' '}
+                {formatFileSize(totalSize)}
+                {willZip && ' • Will compress to ZIP'}
+              </span>
+              <div className="flex gap-2 flex-shrink-0">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  Add more
+                  <FileUp className="h-3.5 w-3.5 mr-1" />
+                  Add files
                 </Button>
+                {supportsFolderSelection && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => folderInputRef.current?.click()}
+                  >
+                    <FolderUp className="h-3.5 w-3.5 mr-1" />
+                    Add folder
+                  </Button>
+                )}
               </div>
             </div>
-          ) : (
+          </div>
+        ) : (
+          <div className="space-y-2">
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -223,102 +289,44 @@ export function SendTab() {
                   Drop files here or click to select
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Max size: {formatFileSize(MAX_MESSAGE_SIZE)}
+                  Multiple files compress to ZIP &bull; Max size:{' '}
+                  {formatFileSize(MAX_MESSAGE_SIZE)}
                 </p>
               </div>
             </button>
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            onChange={handleFileInputChange}
-            className="hidden"
-          />
-          {isFilesOverLimit && (
-            <p className="text-xs text-destructive">
-              Total size exceeds {formatFileSize(MAX_MESSAGE_SIZE)} limit
-            </p>
-          )}
-        </div>
-      )}
-
-      {mode === 'folder' && (
-        <div className="space-y-2">
-          {/* biome-ignore lint/a11y/useSemanticElements: cannot use <button> because the "Remove" Button is nested inside when folderFiles is set */}
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => folderInputRef.current?.click()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                folderInputRef.current?.click();
-              }
-            }}
-            className={`
-                  min-h-[200px] border-2 border-dashed rounded-lg
-                  flex flex-col items-center justify-center gap-3
-                  cursor-pointer transition-colors
-                  border-muted-foreground/25 hover:border-muted-foreground/50
-                  ${folderFiles ? 'bg-muted/50' : ''}
-                `}
-          >
-            {folderFiles ? (
-              <>
-                <FolderUp className="h-10 w-10 text-muted-foreground" />
-                <div className="text-center">
-                  <p className="font-medium truncate max-w-[250px]">
-                    {getFolderName(folderFiles)}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {folderFiles.length} file
-                    {folderFiles.length !== 1 ? 's' : ''} &bull;{' '}
-                    {formatFileSize(folderTotalSize)}
-                  </p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setFolderFiles(null);
-                    if (folderInputRef.current)
-                      folderInputRef.current.value = '';
-                  }}
-                >
-                  <X className="h-4 w-4 mr-1" />
-                  Remove
-                </Button>
-              </>
-            ) : (
-              <>
-                <FolderUp className="h-10 w-10 text-muted-foreground" />
-                <div className="text-center">
-                  <p className="font-medium">Click to select a folder</p>
-                  <p className="text-sm text-muted-foreground">
-                    Will be compressed to ZIP &bull; Max:{' '}
-                    {formatFileSize(MAX_MESSAGE_SIZE)}
-                  </p>
-                </div>
-              </>
+            {supportsFolderSelection && (
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => folderInputRef.current?.click()}
+              >
+                <FolderUp className="h-4 w-4 mr-2" />
+                Select a folder
+              </Button>
             )}
           </div>
-          <input
-            ref={folderInputRef}
-            type="file"
-            onChange={handleFolderInputChange}
-            className="hidden"
-            webkitdirectory=""
-            directory=""
-          />
-          {isFolderOverLimit && (
-            <p className="text-xs text-destructive">
-              Total size exceeds {formatFileSize(MAX_MESSAGE_SIZE)} limit
-            </p>
-          )}
-        </div>
-      )}
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          onChange={handleFileInputChange}
+          className="hidden"
+        />
+        <input
+          ref={folderInputRef}
+          type="file"
+          onChange={handleFolderInputChange}
+          className="hidden"
+          webkitdirectory=""
+          directory=""
+        />
+        {isOverLimit && (
+          <p className="text-xs text-destructive">
+            Total size exceeds {formatFileSize(MAX_MESSAGE_SIZE)} limit
+          </p>
+        )}
+      </div>
 
       {/* Transfer mode selector */}
       <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
