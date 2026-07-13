@@ -1,5 +1,7 @@
 /**
- * OPFS-backed scratch storage for in-flight transfers.
+ * Scratch storage for in-flight transfers, dispatched on payload size:
+ * payloads at or below `MEMORY_SINK_MAX_BYTES` are buffered in memory,
+ * larger payloads stream through OPFS-backed scratch files.
  *
  * Two sink shapes are built on the same scratch machinery:
  * - `ReceiveSink`: positional writes into a preallocated file. Decrypted
@@ -10,10 +12,10 @@
  *   O(chunk) memory and the send streams from disk.
  *
  * OPFS (`FileSystemFileHandle.createWritable`, secure contexts only) is
- * required. Every current major browser ships it, but `createWritable`
- * arrived later than the rest of OPFS on some engines (Safari/iOS only in
- * 26), so support is feature-detected and sink creation rejects with a
- * user-facing error where it is missing.
+ * required for over-threshold payloads. Every current major browser ships
+ * it, but `createWritable` arrived later than the rest of OPFS on some
+ * engines (Safari/iOS only in 26), so support is feature-detected and sink
+ * creation rejects with a user-facing error where it is missing.
  *
  * Privacy note: a scratch file holds plaintext on disk for the lifetime of
  * the sink. Every path that abandons a transfer must call `discard()`, and
@@ -21,18 +23,21 @@
  * behind.
  */
 
+import { MEMORY_SINK_MAX_BYTES } from './crypto/constants';
+
 export interface ReceiveSink {
   /** Write plaintext bytes at a byte offset. Rejects on storage failure. */
   write(position: number, bytes: Uint8Array): Promise<void>;
   /**
-   * Flush everything and seal the payload. The returned Blob is disk-backed
-   * and stays readable until `discard()`. No writes are accepted afterwards.
+   * Flush everything and seal the payload. The returned Blob stays readable
+   * until `discard()`. No writes are accepted afterwards.
    */
   finish(): Promise<Blob>;
   /**
    * Release all storage backing this sink, including a finished payload's
-   * scratch file (any Blob from `finish()` becomes unreadable). Safe to call
-   * at any point and more than once.
+   * scratch file (a disk-backed Blob from `finish()` becomes unreadable; a
+   * memory-backed one is immutable and stays readable). Safe to call at any
+   * point and more than once.
    */
   discard(): Promise<void>;
 }
@@ -69,7 +74,7 @@ function opfsSupported(): boolean {
 function requireOpfs(): void {
   if (!opfsSupported()) {
     throw new Error(
-      'This browser cannot store transfers on disk (no OPFS support). Update to a current version of Chrome, Edge, Firefox, or Safari.',
+      'This browser cannot store transfers over 100MB on disk (no OPFS support). Update to a current version of Chrome, Edge, Firefox, or Safari.',
     );
   }
 }
@@ -156,13 +161,60 @@ function scratchLifecycle(scratch: ScratchFile, enqueue: OpQueue) {
   };
 }
 
+function createMemoryReceiveSink(totalBytes: number): ReceiveSink {
+  let buffer: Uint8Array | null = new Uint8Array(totalBytes);
+  return {
+    write(position, bytes) {
+      if (!buffer) return Promise.reject(new Error('Scratch sink discarded'));
+      buffer.set(bytes, position);
+      return Promise.resolve();
+    },
+    finish() {
+      if (!buffer) return Promise.reject(new Error('Scratch sink discarded'));
+      const blob = new Blob([buffer as BlobPart]);
+      buffer = null;
+      return Promise.resolve(blob);
+    },
+    discard() {
+      buffer = null;
+      return Promise.resolve();
+    },
+  };
+}
+
+function createMemoryAppendSink(): AppendSink {
+  let chunks: Uint8Array[] | null = [];
+  return {
+    append(bytes) {
+      if (!chunks) return Promise.reject(new Error('Scratch sink discarded'));
+      chunks.push(bytes.slice());
+      return Promise.resolve();
+    },
+    finish() {
+      if (!chunks) return Promise.reject(new Error('Scratch sink discarded'));
+      const blob = new Blob(chunks as BlobPart[]);
+      chunks = null;
+      return Promise.resolve(blob);
+    },
+    discard() {
+      chunks = null;
+      return Promise.resolve();
+    },
+  };
+}
+
 /**
  * Create the positional sink for a transfer of `totalBytes` plaintext bytes.
- * Rejects when OPFS is unsupported or fails (e.g. over quota).
+ * At or below `MEMORY_SINK_MAX_BYTES` the payload is buffered in memory;
+ * above it the sink is OPFS-backed and rejects when OPFS is unsupported or
+ * fails (e.g. over quota).
  */
 export async function createReceiveSink(
   totalBytes: number,
 ): Promise<ReceiveSink> {
+  if (totalBytes <= MEMORY_SINK_MAX_BYTES) {
+    return createMemoryReceiveSink(totalBytes);
+  }
   requireOpfs();
   void sweepTransferScratch();
   const scratch = await createScratchFile();
@@ -190,10 +242,20 @@ export async function createReceiveSink(
 }
 
 /**
- * Create the sequential sink for output of unknown final size. Rejects when
- * OPFS is unsupported or fails.
+ * Create the sequential sink for output of unknown final size.
+ * `expectedInputBytes` (the total size of the data being packaged) is a
+ * heuristic for the output size, used only to pick the backend: at or below
+ * `MEMORY_SINK_MAX_BYTES` output is buffered in memory, above it the sink is
+ * OPFS-backed and rejects when OPFS is unsupported or fails. It is not a
+ * limit — a memory sink accepts output that exceeds the estimate, which for
+ * ZIP archiving stays close enough to the input total to keep memory safe.
  */
-export async function createAppendSink(): Promise<AppendSink> {
+export async function createAppendSink(
+  expectedInputBytes: number,
+): Promise<AppendSink> {
+  if (expectedInputBytes <= MEMORY_SINK_MAX_BYTES) {
+    return createMemoryAppendSink();
+  }
   requireOpfs();
   void sweepTransferScratch();
   const scratch = await createScratchFile();

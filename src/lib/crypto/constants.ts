@@ -60,11 +60,16 @@ export const ENCRYPTION_CHUNK_SIZE = 128 * 1024; // 128KB
 
 // Max size of a transferred payload (file or generated ZIP archive). Every
 // stage streams — multi-file/folder sends are zipped chunk by chunk into
-// OPFS scratch, the sender encrypts 128KB Blob slices on demand, and the
-// receiver writes decrypted chunks to OPFS scratch — so the bound comes from
-// the 2-byte chunk-index range and disk quota, not RAM. OPFS is required;
-// browsers without it cannot transfer at all.
+// scratch storage, the sender encrypts 128KB Blob slices on demand, and the
+// receiver writes decrypted chunks to scratch storage — so the bound comes
+// from the 2-byte chunk-index range and disk quota, not RAM. Payloads over
+// MEMORY_SINK_MAX_BYTES require OPFS; browsers without it cannot transfer
+// them.
 export const MAX_MESSAGE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
+
+// Payloads at or below this size are buffered in memory during transfer;
+// larger payloads require OPFS scratch storage.
+export const MEMORY_SINK_MAX_BYTES = 100 * 1024 * 1024; // 100MB
 
 // PIN hint length.
 // 16 hex chars = 64 bits. The hint is the Nostr `#h` filter tag. 64 bits is

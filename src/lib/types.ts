@@ -1,8 +1,8 @@
 export interface ReceivedFile {
   contentType: 'file';
   /**
-   * Received plaintext, backed by an OPFS scratch file so reading/downloading
-   * streams from disk.
+   * Received plaintext — in memory for payloads of 100MB or less, backed by
+   * an OPFS scratch file above that so reading/downloading streams from disk.
    */
   data: Blob;
   fileName: string;

@@ -16,8 +16,8 @@
  *
  * Neither side materializes the whole file: the sender encrypts
  * `ENCRYPTION_CHUNK_SIZE` Blob slices on demand, and the receiver writes each
- * decrypted chunk to an OPFS-backed `ReceiveSink` at the
- * chunk's byte offset.
+ * decrypted chunk to a `ReceiveSink` (in memory for payloads of 100MB or
+ * less, OPFS-backed above) at the chunk's byte offset.
  */
 
 import {
@@ -96,8 +96,8 @@ export interface DataChannelReceiver {
   /** Feed every data-channel message here. */
   onMessage: (data: string | ArrayBuffer) => void;
   /**
-   * Resolves with the sealed plaintext payload from the sink (disk-backed for
-   * an OPFS sink), or rejects on any error.
+   * Resolves with the sealed plaintext payload from the sink (disk-backed
+   * for an OPFS-backed sink), or rejects on any error.
    */
   done: Promise<Blob>;
   /**

@@ -10,8 +10,10 @@ export const supportsFolderSelection =
 
 export interface CompressedArchive {
   /**
-   * The generated ZIP, backed by an OPFS scratch file, so neither archiving
-   * nor sending materializes it in memory.
+   * The generated ZIP. When the selected files total more than
+   * `MEMORY_SINK_MAX_BYTES` it is backed by an OPFS scratch file, so neither
+   * archiving nor sending materializes it in memory; smaller selections are
+   * buffered in memory.
    */
   file: File;
   /** Release the scratch storage backing `file`; it is unreadable afterwards. */
@@ -23,8 +25,8 @@ export interface CompressedArchive {
  * Works with both folder selection (webkitdirectory) and multi-file selection.
  *
  * Each input file is read as a stream and deflated chunk by chunk into an
- * OPFS-backed append sink, so peak memory stays O(chunk) regardless of
- * archive size.
+ * append sink (OPFS-backed for selections over 100MB), so peak memory for
+ * large archives stays O(chunk).
  *
  * @param files - Selected files; `webkitRelativePath` (when set) becomes the
  *   entry path, preserving folder structure
@@ -34,7 +36,13 @@ export async function compressFilesToZip(
   files: readonly File[],
   archiveName: string,
 ): Promise<CompressedArchive> {
-  const sink = await createAppendSink();
+  // The input total is a heuristic stand-in for the unknown archive size, not
+  // a cap on it: deflate output exceeds incompressible input only marginally,
+  // so a selection at or below the memory-sink threshold cannot produce an
+  // archive large enough to cause memory pressure, and the memory sink accepts
+  // whatever the archive ends up being.
+  const totalInputBytes = files.reduce((total, file) => total + file.size, 0);
+  const sink = await createAppendSink(totalInputBytes);
   try {
     await streamZipToSink(files, sink);
     const payload = await sink.finish();
