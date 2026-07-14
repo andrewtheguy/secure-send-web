@@ -55,7 +55,7 @@ flowchart TD
 
     Channel --> Transfer[Unified transfer layer<br/>src/lib/p2p-transfer.ts]
     Transfer --> Chunks[128KB AES-GCM chunks<br/>authenticated chunk index]
-    Chunks --> Done[DONE:&lt;chunkCount&gt;]
+    Chunks --> Done[DONE:&lt;chunkCount&gt;:&lt;byteCount&gt;]
     Done --> Verify[Receiver verifies count, indexes,<br/>sizes, and authentication tags]
     Verify --> Ack[Data-channel ACK]
 ```
