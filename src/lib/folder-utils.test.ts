@@ -72,9 +72,46 @@ describe('createZipTransferSource', () => {
 
     expect(firstOutput.done).toBe(false);
     expect(firstOutput.value?.length).toBeGreaterThan(0);
-    expect(secondReadStarted).toBe(true);
+    expect(secondReadStarted).toBe(false);
     provideSecond();
     await reader.cancel();
+  });
+
+  it('keeps entry output intact when the consumer is backpressured', async () => {
+    const expected: Record<string, Uint8Array> = {};
+    const files = Array.from({ length: 80 }, (_, index) => {
+      // Small, highly compressible entries exercise the final-output path that
+      // runs immediately before the next entry is added.
+      const data = new Uint8Array(4096 + (index % 17) * 37).fill(index & 0xff);
+      const name = `small-${index}.bin`;
+      expected[name] = data;
+      return new File([data as BlobPart], name);
+    });
+
+    const reader = createZipTransferSource(files, 'many-small-files')
+      .stream()
+      .getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      size += value.length;
+      // Keep the writer backpressured across fflate callback turns.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const archive = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      archive.set(chunk, offset);
+      offset += chunk.length;
+    }
+    const entries = unzipSync(archive);
+    for (const [name, data] of Object.entries(expected)) {
+      expect(entries[name]).toEqual(data);
+    }
   });
 
   it('uses webkitRelativePath as the entry path when present', async () => {

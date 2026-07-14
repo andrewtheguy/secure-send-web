@@ -77,9 +77,12 @@ async function writeZip(
         reject(err);
         return;
       }
+      // fflate owns callback buffers and may reuse them as soon as this
+      // callback returns. Take ownership synchronously, before a backpressured
+      // writer gets a chance to delay the actual write.
+      const ownedChunk = chunk.slice();
       pending = pending
-        // Do not retain a buffer owned by fflate after its callback returns.
-        .then(() => writer.write(chunk.slice()))
+        .then(() => writer.write(ownedChunk))
         .catch((appendError: unknown) => {
           if (failure) return;
           failure =
@@ -111,6 +114,10 @@ async function writeZip(
             const { done, value } = await reader.read();
             if (done) {
               entry.push(new Uint8Array(0), true);
+              // Finalizing an entry can emit several chunks. Drain all of them
+              // before adding the next entry so backpressure also applies at
+              // file boundaries.
+              await pending;
               break;
             }
             entry.push(value);
