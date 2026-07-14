@@ -66,9 +66,9 @@ export const SALT_LENGTH = 16;
 export const ENCRYPTION_CHUNK_SIZE = 128 * 1024; // 128KB
 
 // Max size of a transferred payload (file or generated ZIP archive). Every
-// stage streams — multi-file/folder sends are zipped chunk by chunk into
-// scratch storage, the sender encrypts 128KB Blob slices on demand, and the
-// receiver writes decrypted chunks to scratch storage — so the bound comes
+// stage streams — multi-file/folder sends are zipped directly into the data
+// channel, the sender encrypts lazy 128KB source chunks, and the receiver
+// writes decrypted chunks to scratch storage — so the bound comes
 // from the 2-byte chunk-index range and disk quota, not RAM. Payloads over
 // MEMORY_SINK_MAX_BYTES require OPFS; browsers without it cannot transfer
 // them.

@@ -7,9 +7,8 @@
  * - `ReceiveSink`: positional writes into a preallocated file. Decrypted
  *   chunks land at their byte offset while a transfer is received, so
  *   receiving needs O(chunk) memory and the download streams from disk.
- * - `AppendSink`: sequential writes. The streaming ZIP writer appends archive
- *   output while a multi-file/folder send is packaged, so archiving needs
- *   O(chunk) memory and the send streams from disk.
+ * - `AppendSink`: sequential writes for received payloads whose final size was
+ *   unknown during signaling (streamed ZIPs).
  *
  * OPFS (`FileSystemFileHandle.createWritable`, secure contexts only) is
  * required for over-threshold payloads. Every current major browser ships
@@ -243,12 +242,12 @@ export async function createReceiveSink(
 
 /**
  * Create the sequential sink for output of unknown final size.
- * `expectedInputBytes` (the total size of the data being packaged) is a
- * heuristic for the output size, used only to pick the backend: at or below
+ * `expectedInputBytes` is a heuristic for the output size, used only to pick
+ * the backend: at or below
  * `MEMORY_SINK_MAX_BYTES` output is buffered in memory, above it the sink is
  * OPFS-backed and rejects when OPFS is unsupported or fails. It is not a
- * limit — a memory sink accepts output that exceeds the estimate, which for
- * ZIP archiving stays close enough to the input total to keep memory safe.
+ * limit — a memory sink accepts output that exceeds the estimate. Untrusted or
+ * genuinely uncertain sizes should use `createAdaptiveAppendSink` instead.
  */
 export async function createAppendSink(
   expectedInputBytes: number,
@@ -268,5 +267,80 @@ export async function createAppendSink(
       return enqueue(() => scratch.writable.write(data as BufferSource));
     },
     ...scratchLifecycle(scratch, enqueue),
+  };
+}
+
+/**
+ * Create an append sink that can safely receive a payload whose final size is
+ * unknown. It starts in memory when the estimate fits, then migrates all
+ * accumulated chunks to OPFS before crossing `MEMORY_SINK_MAX_BYTES`.
+ *
+ * Unlike `createAppendSink`, the estimate is never trusted as a backend
+ * decision for the lifetime of the sink. This matters on the receiving side,
+ * where metadata came from the peer and compressed ZIP output can differ from
+ * its input-size estimate.
+ */
+export async function createAdaptiveAppendSink(
+  estimatedBytes: number,
+): Promise<AppendSink> {
+  if (estimatedBytes > MEMORY_SINK_MAX_BYTES) {
+    return createAppendSink(estimatedBytes);
+  }
+
+  let chunks: Uint8Array[] | null = [];
+  let accumulatedBytes = 0;
+  let diskSink: AppendSink | null = null;
+  let finished = false;
+  let discardRequested = false;
+  const enqueue = createOpQueue();
+
+  const ensureWritable = () => {
+    if (discardRequested) throw new Error('Scratch sink discarded');
+    if (finished) throw new Error('Scratch sink already finished');
+  };
+
+  return {
+    append(bytes) {
+      if (discardRequested) {
+        return Promise.reject(new Error('Scratch sink discarded'));
+      }
+      const data = bytes.slice();
+      return enqueue(async () => {
+        ensureWritable();
+        const nextSize = accumulatedBytes + data.length;
+        if (!diskSink && nextSize > MEMORY_SINK_MAX_BYTES) {
+          // Passing an over-threshold estimate selects OPFS immediately.
+          diskSink = await createAppendSink(MEMORY_SINK_MAX_BYTES + 1);
+          for (const chunk of chunks ?? []) await diskSink.append(chunk);
+          chunks = null;
+        }
+
+        if (diskSink) await diskSink.append(data);
+        else chunks?.push(data);
+        accumulatedBytes = nextSize;
+      });
+    },
+    finish() {
+      if (discardRequested) {
+        return Promise.reject(new Error('Scratch sink discarded'));
+      }
+      return enqueue(async () => {
+        ensureWritable();
+        finished = true;
+        if (diskSink) return diskSink.finish();
+        const payload = new Blob((chunks ?? []) as BlobPart[]);
+        chunks = null;
+        return payload;
+      });
+    },
+    discard() {
+      if (discardRequested) return Promise.resolve();
+      discardRequested = true;
+      return enqueue(async () => {
+        chunks = null;
+        if (diskSink) await diskSink.discard();
+        diskSink = null;
+      });
+    },
   };
 }

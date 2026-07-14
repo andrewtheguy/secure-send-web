@@ -10,19 +10,19 @@ A web application for sending encrypted files and folders with PIN-based Nostr s
 - **Works offline**: No internet required after page load when using Manual Exchange on same local network
 - **Flexible signaling**: Nostr (default) or Manual Exchange (QR/copy-paste). With internet, Manual Exchange can connect across different networks when ICE finds a direct route; without internet, it can connect over the same local network.
 - **Rotating PIN pairing (Nostr)**: A short 10-character PIN (not case sensitive) that rotates every 2 minutes locates the sender and authenticates an ephemeral ECDH key exchange; content keys are never derived from the PIN
-- **File or folder transfer**: Send a file, or a ZIP archive created from multiple files/a folder, up to 2GB — transfers are not memory-bound: the sender reads the selected file lazily in slices (no scratch storage), selections totaling over 100MB are zipped through on-disk OPFS scratch storage, and receivers stream payloads over 100MB to OPFS scratch; payloads of 100MB or less are buffered in memory and never touch disk. See [Browser Requirements](#browser-requirements)
+- **File or folder transfer**: Send a file, or a ZIP archive created from multiple files/a folder, up to 2GB — the sender reads selected files lazily and streams generated ZIP bytes directly into the encrypted WebRTC transfer without scratch storage; receivers keep payloads up to 100MB in memory and spill larger payloads to OPFS. See [Browser Requirements](#browser-requirements)
 - **End-to-end encryption**: All transfers use AES-256-GCM encryption
 - **No accounts required**: Ephemeral keypairs generated per transfer
 - **PWA Support**: Install as a Progressive Web App for offline access
 
 ## Browser Requirements
 
-Two stages hold in-flight data in the origin-private file system (OPFS): receiving a payload over 100MB, and packaging a multi-file/folder selection totaling over 100MB into a ZIP before sending. Directly sending a selected file reads it lazily from the picker and never needs OPFS. OPFS requires:
+Receiving a payload over 100MB uses the origin-private file system (OPFS). Senders never need OPFS: direct files are read lazily from the picker, and multi-file/folder ZIP output is compressed and sent on the fly. OPFS requires:
 
 - **A secure context**: the app must be served over HTTPS (or `localhost`) — OPFS and the Web Crypto API are unavailable otherwise
 - **`FileSystemFileHandle.createWritable`**: available in Chromium browsers since 86, Firefox since 111 (desktop and Android), Samsung Internet since 21, and Safari/iOS since 26 — see the [support matrix](https://caniuse.com/mdn-api_filesystemfilehandle_createwritable). Note this is a stricter requirement than the general OPFS feature (Baseline since March 2023): Safari had OPFS from 16.4 but only gained `createWritable`, the part this app needs, in 26
 
-Support is feature-detected at runtime; on an unsupported browser, the over-100MB stages above fail with a clear error rather than degrading. Payloads of 100MB or less are buffered in memory and do not need OPFS (a secure context is still required for the Web Crypto API).
+Support is feature-detected at runtime; on an unsupported browser, receiving a payload that crosses 100MB fails with a clear error rather than degrading. Payloads of 100MB or less are buffered in memory and do not need OPFS (a secure context is still required for the Web Crypto API).
 
 ## Version Compatibility
 
@@ -34,7 +34,7 @@ Sender and receiver should use the same app version for transfers.
 ### Sending Files or Folders
 
 1. Select the "Files" or "Folder" tab
-2. Drag and drop files or click to select a file/folder. A single file, or the combined input for multiple files or a folder (zipped before sending), can be up to 2GB
+2. Drag and drop files or click to select a file/folder. A single file, or the combined input for multiple files or a folder (zipped while sending), can be up to 2GB
 3. Choose Auto Exchange mode or Manual Exchange mode
 4. For Auto Exchange, click "Start Auto Exchange" and share the displayed 10-character PIN with the receiver. The PIN rotates every 2 minutes; a countdown under the PIN shows when the next one appears, and "New PIN now" replaces it immediately (older PINs stop working)
 5. For Manual Exchange, click "Start Manual Exchange" and exchange the QR/copy-paste signaling payloads with the receiver
@@ -93,7 +93,7 @@ If the app is served from a subpath, scanned Multi-QR links will point to the do
 
 ## Transport Layer
 
-All signaling methods share the same **data-channel transfer protocol**: P2P transfers encrypt content in 128KB AES-256-GCM chunks before transmission, with the chunk index authenticated as AES-GCM additional data. The sender then sends `DONE:<chunkCount>`, and the receiver replies with `ACK` on the WebRTC data channel only after every chunk has authenticated and reassembled. Integrity is enforced per chunk by AES-GCM authentication — there is no separate whole-file checksum, so nothing needs to re-read the assembled file to verify it.
+All signaling methods share the same **data-channel transfer protocol**: P2P transfers encrypt content in 128KB AES-256-GCM chunks before transmission, with the chunk index authenticated as AES-GCM additional data. The sender then sends `DONE:<chunkCount>:<byteCount>`, and the receiver replies with `ACK` on the WebRTC data channel only after every chunk has authenticated and reassembled to that final length. Integrity is enforced per chunk by AES-GCM authentication — there is no separate whole-file checksum, so nothing needs to re-read the assembled file to verify it.
 
 **Signaling Methods** (sender chooses):
 - **Nostr** (default): Requires internet. Decentralized relay signaling. Devices can be on different networks.

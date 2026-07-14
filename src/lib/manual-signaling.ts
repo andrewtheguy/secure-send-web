@@ -59,8 +59,8 @@ export interface SignalingPayload {
   // Offer-only fields:
   fileName?: string;
   fileSize?: number;
+  fileSizeExact?: boolean;
   mimeType?: string;
-  totalBytes?: number;
   salt?: number[]; // Salt for content encryption key derivation (from ECDH shared secret)
 }
 
@@ -136,10 +136,10 @@ export function generateMutualOfferBinary(
   candidates: RTCIceCandidate[],
   metadata: {
     createdAt: number;
-    totalBytes: number;
-    fileName?: string;
-    fileSize?: number;
-    mimeType?: string;
+    fileName: string;
+    fileSize: number;
+    fileSizeExact: boolean;
+    mimeType: string;
     publicKey: Uint8Array; // ECDH public key (65 bytes)
     salt: Uint8Array; // Salt for AES key derivation
   },
@@ -149,9 +149,9 @@ export function generateMutualOfferBinary(
     sdp: offer.sdp || '',
     candidates: candidates.map((c) => c.candidate),
     createdAt: metadata.createdAt,
-    totalBytes: metadata.totalBytes,
     fileName: metadata.fileName,
     fileSize: metadata.fileSize,
+    fileSizeExact: metadata.fileSizeExact,
     mimeType: metadata.mimeType,
     publicKey: Array.from(metadata.publicKey),
     salt: Array.from(metadata.salt),

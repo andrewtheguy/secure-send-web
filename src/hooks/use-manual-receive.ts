@@ -15,7 +15,12 @@ import {
 } from '@/lib/manual-signaling';
 import type { TransferState } from '@/lib/nostr';
 import { ACK, createDataChannelReceiver } from '@/lib/p2p-transfer';
-import { createReceiveSink, type ReceiveSink } from '@/lib/scratch-sink';
+import {
+  type AppendSink,
+  createAdaptiveAppendSink,
+  createReceiveSink,
+  type ReceiveSink,
+} from '@/lib/scratch-sink';
 import type { ReceivedContent } from '@/lib/types';
 import { WebRTCConnection } from '@/lib/webrtc';
 import { getWebRTCConfig } from '@/lib/webrtc-config';
@@ -77,7 +82,7 @@ export function useManualReceive(): UseManualReceiveReturn {
   // Storage backing the in-flight or completed transfer. Discarded whenever
   // the payload it backs is abandoned; kept after completion because
   // receivedContent.data reads from it until reset.
-  const sinkRef = useRef<ReceiveSink | null>(null);
+  const sinkRef = useRef<ReceiveSink | AppendSink | null>(null);
 
   // Resolve function for offer submission
   const offerResolverRef = useRef<((payload: SignalingPayload) => void) | null>(
@@ -193,9 +198,9 @@ export function useManualReceive(): UseManualReceiveReturn {
 
       // Extract metadata from offer
       const {
-        totalBytes,
         fileName,
         fileSize,
+        fileSizeExact,
         mimeType,
         salt: saltArray,
         publicKey: senderPublicKeyArray,
@@ -217,9 +222,7 @@ export function useManualReceive(): UseManualReceiveReturn {
         typeof fileSize !== 'number' ||
         !Number.isFinite(fileSize) ||
         fileSize < 0 ||
-        typeof totalBytes !== 'number' ||
-        !Number.isFinite(totalBytes) ||
-        totalBytes < 0
+        typeof fileSizeExact !== 'boolean'
       ) {
         setState({
           status: 'error',
@@ -229,10 +232,10 @@ export function useManualReceive(): UseManualReceiveReturn {
       }
 
       // Security check: Enforce MAX_MESSAGE_SIZE
-      if (totalBytes > MAX_MESSAGE_SIZE) {
+      if (fileSize > MAX_MESSAGE_SIZE) {
         setState({
           status: 'error',
-          message: `Transfer rejected: Size (${formatFileSize(totalBytes)}) exceeds limit (${formatFileSize(MAX_MESSAGE_SIZE)})`,
+          message: `Transfer rejected: Size (${formatFileSize(fileSize)}) exceeds limit (${formatFileSize(MAX_MESSAGE_SIZE)})`,
         });
         return;
       }
@@ -265,17 +268,25 @@ export function useManualReceive(): UseManualReceiveReturn {
       let answerSDP: RTCSessionDescriptionInit | null = null;
 
       // Decrypted chunks land in the receive sink as they arrive.
-      const sink = await createReceiveSink(totalBytes);
+      const sink = fileSizeExact
+        ? await createReceiveSink(fileSize)
+        : await createAdaptiveAppendSink(fileSize);
       sinkRef.current = sink;
 
       if (cancelledRef.current) return;
 
       // Streaming receiver: decrypts each chunk into the sink as it arrives
       // and resolves once DONE arrives and all chunks authenticate.
-      const receiver = createDataChannelReceiver(key, totalBytes!, sink, {
-        onProgress: (current, total) =>
-          setState((s) => ({ ...s, progress: { current, total } })),
-      });
+      const receiver = createDataChannelReceiver(
+        key,
+        fileSizeExact ? fileSize : null,
+        sink,
+        {
+          estimatedBytes: fileSize,
+          onProgress: (current, total) =>
+            setState((s) => ({ ...s, progress: { current, total } })),
+        },
+      );
       let dataChannelResolver: (() => void) | null = null;
       let answerSDPResolver: (() => void) | null = null;
 
@@ -418,7 +429,7 @@ export function useManualReceive(): UseManualReceiveReturn {
           mimeType: mimeType!,
         },
         useWebRTC: true,
-        progress: { current: 0, total: totalBytes! },
+        progress: { current: 0, total: fileSize! },
       });
 
       // Wait for the streaming receiver to finish, racing cancellation. The
@@ -456,7 +467,7 @@ export function useManualReceive(): UseManualReceiveReturn {
         contentType: 'file',
         data: receivedData,
         fileName: fileName!,
-        fileSize: fileSize!,
+        fileSize: receivedData.size,
         mimeType: mimeType!,
       });
       setState({
@@ -465,7 +476,7 @@ export function useManualReceive(): UseManualReceiveReturn {
         contentType: 'file',
         fileMetadata: {
           fileName: fileName!,
-          fileSize: fileSize!,
+          fileSize: receivedData.size,
           mimeType: mimeType!,
         },
       });

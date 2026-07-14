@@ -78,9 +78,11 @@ export interface RendezvousPayload {
   nonce: string;
   // Sender's preferred relays for signaling
   relays?: string[];
-  fileName?: string;
-  fileSize?: number;
-  mimeType?: string;
+  fileName: string;
+  fileSize: number;
+  /** False when fileSize is an input-size estimate for a streamed ZIP. */
+  fileSizeExact: boolean;
+  mimeType: string;
 }
 
 /**

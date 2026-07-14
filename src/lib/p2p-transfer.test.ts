@@ -1,8 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { installOpfsMock, type OpfsMock } from '../test/opfs-mock';
 import { ENCRYPTION_CHUNK_SIZE, encryptChunk } from './crypto';
-import { createDataChannelReceiver } from './p2p-transfer';
-import { createReceiveSink } from './scratch-sink';
+import {
+  ACK,
+  createDataChannelReceiver,
+  sendFileOverDataChannel,
+} from './p2p-transfer';
+import { createAdaptiveAppendSink, createReceiveSink } from './scratch-sink';
+import type { TransferSource } from './transfer-source';
+import type { WebRTCConnection } from './webrtc';
 
 let opfs: OpfsMock;
 
@@ -43,6 +49,68 @@ async function encryptAll(
   return messages;
 }
 
+describe('sendFileOverDataChannel', () => {
+  it('sends a full chunk before an unknown-size source has finished producing', async () => {
+    const key = await makeKey();
+    let releaseRemainder!: () => void;
+    let remainderReleased = false;
+    const remainderReady = new Promise<void>((resolve) => {
+      releaseRemainder = () => {
+        remainderReleased = true;
+        resolve();
+      };
+    });
+    const source: TransferSource = {
+      name: 'stream.zip',
+      type: 'application/zip',
+      size: null,
+      estimatedSize: ENCRYPTION_CHUNK_SIZE + 3,
+      stream: () =>
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array(ENCRYPTION_CHUNK_SIZE));
+          },
+          async pull(controller) {
+            await remainderReady;
+            controller.enqueue(new Uint8Array([1, 2, 3]));
+            controller.close();
+          },
+        }),
+    };
+
+    const channel = Object.assign(new EventTarget(), {
+      readyState: 'open' as RTCDataChannelState,
+    }) as unknown as RTCDataChannel;
+    let firstChunkSent!: () => void;
+    const firstChunk = new Promise<void>((resolve) => {
+      firstChunkSent = resolve;
+    });
+    const controls: string[] = [];
+    const rtc = {
+      async sendWithBackpressure() {
+        firstChunkSent();
+      },
+      send(data: string) {
+        controls.push(data);
+        queueMicrotask(() => {
+          channel.dispatchEvent(new MessageEvent('message', { data: ACK }));
+        });
+      },
+      getDataChannel() {
+        return channel;
+      },
+    } as unknown as WebRTCConnection;
+
+    const sending = sendFileOverDataChannel(rtc, key, source);
+    await firstChunk;
+    expect(remainderReleased).toBe(false);
+    releaseRemainder();
+
+    await expect(sending).resolves.toBe(ENCRYPTION_CHUNK_SIZE + 3);
+    expect(controls).toEqual([`DONE:2:${ENCRYPTION_CHUNK_SIZE + 3}`]);
+  });
+});
+
 describe('createDataChannelReceiver', () => {
   it('decrypts out-of-order chunks into the sink and resolves the payload', async () => {
     const key = await makeKey();
@@ -60,7 +128,7 @@ describe('createDataChannelReceiver', () => {
     // Deliver the second chunk first: positional sink writes must reassemble.
     receiver.onMessage(messages[1]);
     receiver.onMessage(messages[0]);
-    receiver.onMessage(`DONE:${messages.length}`);
+    receiver.onMessage(`DONE:${messages.length}:${totalBytes}`);
 
     const blob = await receiver.done;
     expect(blob.size).toBe(totalBytes);
@@ -73,7 +141,7 @@ describe('createDataChannelReceiver', () => {
     const sink = await createReceiveSink(0);
     const receiver = createDataChannelReceiver(key, 0, sink);
     receiver.start();
-    receiver.onMessage('DONE:0');
+    receiver.onMessage('DONE:0:0');
     const blob = await receiver.done;
     expect(blob.size).toBe(0);
   });
@@ -107,7 +175,7 @@ describe('createDataChannelReceiver', () => {
     await expect(receiver.done).rejects.toThrow();
   });
 
-  it('rejects a DONE count that disagrees with the advertised size', async () => {
+  it('rejects a DONE count that disagrees with received chunks', async () => {
     const key = await makeKey();
     const plaintext = makePlaintext(100);
     const [message] = await encryptAll(key, plaintext);
@@ -116,9 +184,29 @@ describe('createDataChannelReceiver', () => {
     const receiver = createDataChannelReceiver(key, 100, sink);
     receiver.start();
     receiver.onMessage(message);
-    receiver.onMessage('DONE:2');
+    receiver.onMessage('DONE:2:100');
 
     await expect(receiver.done).rejects.toThrow('Invalid DONE message');
+  });
+
+  it('appends an unknown-size streamed payload and trusts only the final byte count', async () => {
+    const key = await makeKey();
+    const totalBytes = ENCRYPTION_CHUNK_SIZE + 1234;
+    const plaintext = makePlaintext(totalBytes);
+    const messages = await encryptAll(key, plaintext);
+    const sink = await createAdaptiveAppendSink(totalBytes);
+    const receiver = createDataChannelReceiver(key, null, sink, {
+      estimatedBytes: totalBytes,
+    });
+    receiver.start();
+
+    for (const message of messages) receiver.onMessage(message);
+    receiver.onMessage(`DONE:${messages.length}:${totalBytes}`);
+
+    const blob = await receiver.done;
+    expect(blob.size).toBe(totalBytes);
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(plaintext);
+    await sink.discard();
   });
 
   it('aborts an idle transfer via the stall watchdog', async () => {

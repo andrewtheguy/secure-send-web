@@ -39,7 +39,12 @@ import {
   uint8ArrayToBase64,
 } from '@/lib/nostr';
 import { ACK, createDataChannelReceiver } from '@/lib/p2p-transfer';
-import { createReceiveSink, type ReceiveSink } from '@/lib/scratch-sink';
+import {
+  type AppendSink,
+  createAdaptiveAppendSink,
+  createReceiveSink,
+  type ReceiveSink,
+} from '@/lib/scratch-sink';
 import type { PinKeyMaterial, ReceivedContent } from '@/lib/types';
 import { WebRTCConnection } from '@/lib/webrtc';
 import { getWebRTCConfig } from '@/lib/webrtc-config';
@@ -97,7 +102,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
   // Storage backing the in-flight or completed transfer. Discarded whenever
   // the payload it backs is abandoned; kept after completion because
   // receivedContent.data reads from it until reset.
-  const sinkRef = useRef<ReceiveSink | null>(null);
+  const sinkRef = useRef<ReceiveSink | AppendSink | null>(null);
 
   const discardSink = useCallback(() => {
     const sink = sinkRef.current;
@@ -284,7 +289,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         if (
           payload.fileSize == null ||
           !Number.isFinite(payload.fileSize) ||
-          payload.fileSize < 0
+          payload.fileSize < 0 ||
+          typeof payload.fileSizeExact !== 'boolean'
         ) {
           setState({
             status: 'error',
@@ -295,6 +301,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
 
         const resolvedFileName = payload.fileName || 'unknown';
         const resolvedFileSize = payload.fileSize;
+        const resolvedFileSizeExact = payload.fileSizeExact;
         const resolvedMimeType = payload.mimeType || 'application/octet-stream';
 
         if (resolvedFileSize > MAX_MESSAGE_SIZE) {
@@ -495,7 +502,9 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         });
 
         // Decrypted chunks land in the receive sink as they arrive.
-        const sink = await createReceiveSink(resolvedFileSize);
+        const sink = resolvedFileSizeExact
+          ? await createReceiveSink(resolvedFileSize)
+          : await createAdaptiveAppendSink(resolvedFileSize);
         sinkRef.current = sink;
 
         if (cancelledRef.current) return;
@@ -510,9 +519,10 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           // ACK below confirms completion.
           const receiver = createDataChannelReceiver(
             sessionKeys.content,
-            resolvedFileSize,
+            resolvedFileSizeExact ? resolvedFileSize : null,
             sink,
             {
+              estimatedBytes: resolvedFileSize,
               onProgress: (current, total) =>
                 setState((s) => ({
                   ...s,
@@ -725,7 +735,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           contentType: 'file',
           data: contentData,
           fileName: resolvedFileName,
-          fileSize: resolvedFileSize,
+          fileSize: contentData.size,
           mimeType: resolvedMimeType,
         });
 
@@ -735,7 +745,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           contentType: 'file',
           fileMetadata: {
             fileName: resolvedFileName,
-            fileSize: resolvedFileSize,
+            fileSize: contentData.size,
             mimeType: resolvedMimeType,
           },
           currentRelays: prevState.currentRelays,

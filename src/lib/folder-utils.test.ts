@@ -1,23 +1,29 @@
 import { unzipSync } from 'fflate';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { installOpfsMock, type OpfsMock } from '../test/opfs-mock';
-import { archiveTimestamp, compressFilesToZip } from './folder-utils';
+import { describe, expect, it } from 'vitest';
+import { archiveTimestamp, createZipTransferSource } from './folder-utils';
 
-let opfs: OpfsMock;
-
-beforeAll(() => {
-  opfs = installOpfsMock();
-});
-
-afterAll(() => {
-  opfs.uninstall();
-});
-
-async function unzipArchive(file: File): Promise<Record<string, Uint8Array>> {
-  return unzipSync(new Uint8Array(await file.arrayBuffer()));
+async function readAll(
+  stream: ReadableStream<Uint8Array>,
+): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  const reader = stream.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    size += value.length;
+  }
+  const result = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return result;
 }
 
-describe('compressFilesToZip', () => {
+describe('createZipTransferSource', () => {
   it('streams files into a valid ZIP that round-trips', async () => {
     // Large enough to span multiple stream chunks.
     const big = new Uint8Array(300 * 1024);
@@ -27,16 +33,48 @@ describe('compressFilesToZip', () => {
       new File([big as BlobPart], 'big.bin'),
     ];
 
-    const archive = await compressFilesToZip(files, 'bundle');
-    expect(archive.file.name).toBe('bundle.zip');
-    expect(archive.file.type).toBe('application/zip');
+    const source = createZipTransferSource(files, 'bundle');
+    expect(source.name).toBe('bundle.zip');
+    expect(source.type).toBe('application/zip');
+    expect(source.size).toBeNull();
+    expect(source.estimatedSize).toBe(11 + big.length);
 
-    const entries = await unzipArchive(archive.file);
+    const entries = unzipSync(await readAll(source.stream()));
     expect(Object.keys(entries).sort()).toEqual(['big.bin', 'hello.txt']);
     expect(new TextDecoder().decode(entries['hello.txt'])).toBe('hello world');
     expect(entries['big.bin']).toEqual(big);
+  });
 
-    await archive.discard();
+  it('emits ZIP bytes before later file data is available', async () => {
+    const first = new File(['first'], 'first.txt');
+    const second = new File(['second'], 'second.txt');
+    let provideSecond!: () => void;
+    const secondCanBeRead = new Promise<void>((resolve) => {
+      provideSecond = resolve;
+    });
+    let secondReadStarted = false;
+    Object.defineProperty(second, 'stream', {
+      value: () =>
+        new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            secondReadStarted = true;
+            await secondCanBeRead;
+            controller.enqueue(new TextEncoder().encode('second'));
+            controller.close();
+          },
+        }),
+    });
+
+    const reader = createZipTransferSource([first, second], 'bundle')
+      .stream()
+      .getReader();
+    const firstOutput = await reader.read();
+
+    expect(firstOutput.done).toBe(false);
+    expect(firstOutput.value?.length).toBeGreaterThan(0);
+    expect(secondReadStarted).toBe(true);
+    provideSecond();
+    await reader.cancel();
   });
 
   it('uses webkitRelativePath as the entry path when present', async () => {
@@ -45,19 +83,15 @@ describe('compressFilesToZip', () => {
       value: 'folder/sub/a.txt',
     });
 
-    const archive = await compressFilesToZip([file], 'folder');
-    const entries = await unzipArchive(archive.file);
+    const source = createZipTransferSource([file], 'folder');
+    const entries = unzipSync(await readAll(source.stream()));
     expect(Object.keys(entries)).toEqual(['folder/sub/a.txt']);
-
-    await archive.discard();
   });
 
   it('produces a valid empty archive for no files', async () => {
-    const archive = await compressFilesToZip([], 'empty');
-    const entries = await unzipArchive(archive.file);
+    const source = createZipTransferSource([], 'empty');
+    const entries = unzipSync(await readAll(source.stream()));
     expect(Object.keys(entries)).toEqual([]);
-
-    await archive.discard();
   });
 });
 
