@@ -10,14 +10,14 @@
  *   - Binary chunk messages, each produced by `encryptChunk`:
  *       [2-byte chunk index (big-endian)][12-byte nonce][ciphertext][16-byte tag]
  *     The chunk index is also the AES-GCM additional authenticated data.
- *   - A trailing control string `DONE:<totalChunks>`.
+ *   - A trailing control string `DONE:<totalChunks>:<totalBytes>`.
  *   - The receiver replies with the control string `ACK` once every chunk has
  *     authenticated and been written to its sink.
  *
- * Neither side materializes the whole file: the sender encrypts
- * `ENCRYPTION_CHUNK_SIZE` Blob slices on demand, and the receiver writes each
- * decrypted chunk to a `ReceiveSink` (in memory for payloads of 100MB or
- * less, OPFS-backed above) at the chunk's byte offset.
+ * Neither side materializes the whole file: the sender coalesces a lazy
+ * `TransferSource` into `ENCRYPTION_CHUNK_SIZE` pieces, and the receiver writes
+ * each decrypted chunk to scratch storage. Sources with unknown output size
+ * (streamed ZIPs) are appended in order and finalized from the DONE byte count.
  */
 
 import {
@@ -27,10 +27,12 @@ import {
   ENCRYPTED_CHUNK_OVERHEAD,
   ENCRYPTION_CHUNK_SIZE,
   encryptChunk,
+  MAX_MESSAGE_SIZE,
   parseChunkMessage,
 } from '@/lib/crypto';
 import { P2PConnectionError } from '@/lib/errors';
-import type { ReceiveSink } from '@/lib/scratch-sink';
+import type { AppendSink, ReceiveSink } from '@/lib/scratch-sink';
+import type { TransferSource } from '@/lib/transfer-source';
 import type { WebRTCConnection } from '@/lib/webrtc';
 
 /** Control-message tokens exchanged over the data channel. */
@@ -85,7 +87,7 @@ function paceProgress(
   let lastEmit = -Infinity;
   return (current, total) => {
     const now = performance.now();
-    if (current < total && now - lastEmit < PROGRESS_MIN_INTERVAL_MS) return;
+    if (current !== total && now - lastEmit < PROGRESS_MIN_INTERVAL_MS) return;
     lastEmit = now;
     onProgress(current, total);
   };
@@ -107,6 +109,8 @@ export interface SendOptions {
 export interface ReceiverOptions {
   /** Called after each chunk with cumulative decrypted bytes and the total. */
   onProgress?: (current: number, total: number) => void;
+  /** Progress hint used only when the payload's final size is not yet known. */
+  estimatedBytes?: number;
   /**
    * Idle window in ms: once `start()` is called, the transfer aborts if no
    * data-channel message arrives within this span. Every message resets it.
@@ -136,35 +140,36 @@ export interface DataChannelReceiver {
 }
 
 /**
- * Encrypt `content` in `ENCRYPTION_CHUNK_SIZE` chunks and stream them over
- * the data channel, followed by a `DONE:<n>` control message.
+ * Read a lazy payload, coalesce it into `ENCRYPTION_CHUNK_SIZE` chunks, and
+ * encrypt/send each chunk immediately. ZIP sources therefore start sending
+ * before their later entries have even been read.
  */
 export async function sendFileOverDataChannel(
   rtc: WebRTCConnection,
   key: CryptoKey,
-  content: Blob,
+  source: TransferSource,
   opts: SendOptions = {},
-): Promise<void> {
+): Promise<number> {
   const { isCancelled } = opts;
   const reportProgress = paceProgress(opts.onProgress);
   const stallTimeoutMs = resolveStallTimeoutMs(opts.stallTimeoutMs);
-  const total = content.size;
-  const totalChunks = Math.ceil(total / ENCRYPTION_CHUNK_SIZE);
-  if (totalChunks > MAX_CHUNKS) {
-    throw new Error('File too large for the transfer chunk-index range');
-  }
-
+  const progressTotal = source.size ?? source.estimatedSize;
+  const reader = source.stream().getReader();
+  const plainChunk = new Uint8Array(ENCRYPTION_CHUNK_SIZE);
+  let plainChunkLength = 0;
+  let totalBytes = 0;
   let chunkIndex = 0;
-  for (let i = 0; i < total; i += ENCRYPTION_CHUNK_SIZE) {
-    if (isCancelled?.()) throw new Error('Cancelled');
 
-    const end = Math.min(i + ENCRYPTION_CHUNK_SIZE, total);
-    // Blob.slice reads lazily from the underlying storage (disk for a picked
-    // File), so only one chunk is materialized in memory at a time.
-    const plainChunk = new Uint8Array(
-      await content.slice(i, end).arrayBuffer(),
-    );
-    const encryptedChunk = await encryptChunk(key, plainChunk, chunkIndex);
+  const sendChunk = async (chunk: Uint8Array) => {
+    if (isCancelled?.()) throw new Error('Cancelled');
+    if (chunkIndex >= MAX_CHUNKS) {
+      throw new Error('File too large for the transfer chunk-index range');
+    }
+    if (totalBytes + chunk.length > MAX_MESSAGE_SIZE) {
+      throw new Error('Generated payload exceeds the transfer size limit');
+    }
+
+    const encryptedChunk = await encryptChunk(key, chunk, chunkIndex);
     // A single chunk that cannot be handed off within the idle window means the
     // receiver has stopped draining the channel; abort rather than block here.
     await withStallTimeout(
@@ -173,13 +178,57 @@ export async function sendFileOverDataChannel(
       `Transfer stalled: receiver stopped accepting data within ${Math.round(stallTimeoutMs / 1000)}s`,
     );
     chunkIndex++;
+    totalBytes += chunk.length;
+    reportProgress(totalBytes, progressTotal);
+  };
 
-    reportProgress(end, total);
+  let completed = false;
+  try {
+    while (true) {
+      if (isCancelled?.()) throw new Error('Cancelled');
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      let offset = 0;
+      while (offset < value.length) {
+        const copied = Math.min(
+          ENCRYPTION_CHUNK_SIZE - plainChunkLength,
+          value.length - offset,
+        );
+        plainChunk.set(
+          value.subarray(offset, offset + copied),
+          plainChunkLength,
+        );
+        plainChunkLength += copied;
+        offset += copied;
+        if (plainChunkLength === ENCRYPTION_CHUNK_SIZE) {
+          await sendChunk(plainChunk);
+          plainChunkLength = 0;
+        }
+      }
+    }
+
+    if (plainChunkLength > 0) {
+      await sendChunk(plainChunk.slice(0, plainChunkLength));
+    }
+    if (source.size !== null && totalBytes !== source.size) {
+      throw new Error(
+        `Transfer source size changed: expected ${source.size} bytes, got ${totalBytes}`,
+      );
+    }
+    completed = true;
+  } finally {
+    if (!completed) await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 
-  rtc.send(`${DONE_PREFIX}${totalChunks}`);
+  // The byte count authenticates the final length for sources whose streamed
+  // output was not known during signaling.
+  rtc.send(`${DONE_PREFIX}${chunkIndex}:${totalBytes}`);
+  reportProgress(totalBytes, totalBytes);
 
   await waitForAckMessage(rtc);
+  return totalBytes;
 }
 
 /**
@@ -267,41 +316,65 @@ function waitForAckMessage(rtc: WebRTCConnection): Promise<void> {
   });
 }
 
+type DataChannelSink = ReceiveSink | AppendSink;
+
+function isAppendSink(sink: DataChannelSink): sink is AppendSink {
+  return 'append' in sink;
+}
+
 /**
- * Create a streaming receiver for a transfer of a known `totalBytes`.
+ * Create a streaming receiver. `totalBytes` is null when the sender is
+ * producing a ZIP whose final streamed length is not known during signaling.
  *
- * Decrypts each chunk as it arrives and writes it to `sink` at the chunk's
- * byte offset (size is known up front from signaling), so peak memory is
- * bounded by in-flight chunks, not the file. Feed every data-channel message
- * to `onMessage`; `done` resolves with the sink's sealed payload once
- * `DONE:<n>` arrives and all chunks authenticate. The caller owns the sink's
- * lifecycle and must discard it if the transfer fails or is abandoned.
+ * Exact-size payloads retain positional writes and may arrive out of order.
+ * Unknown-size payloads use the data channel's reliable ordering and append to
+ * an adaptive sink. In both modes DONE supplies a final authenticated chunk
+ * count and byte count before the sink is sealed.
  */
 export function createDataChannelReceiver(
   key: CryptoKey,
-  totalBytes: number,
-  sink: ReceiveSink,
+  totalBytes: number | null,
+  sink: DataChannelSink,
   opts: ReceiverOptions = {},
 ): DataChannelReceiver {
   const reportProgress = paceProgress(opts.onProgress);
   const stallTimeoutMs = resolveStallTimeoutMs(opts.stallTimeoutMs);
+  const sizeKnown = totalBytes !== null;
+  const progressTotal = sizeKnown ? totalBytes : (opts.estimatedBytes ?? 0);
 
-  // Validate the untrusted advertised size before allocating or processing.
-  if (!Number.isInteger(totalBytes) || totalBytes < 0) {
+  if (
+    totalBytes !== null &&
+    (!Number.isInteger(totalBytes) ||
+      totalBytes < 0 ||
+      totalBytes > MAX_MESSAGE_SIZE)
+  ) {
     throw new Error('Invalid transfer size');
   }
-  const expectedChunks = Math.ceil(totalBytes / ENCRYPTION_CHUNK_SIZE);
-  if (expectedChunks > MAX_CHUNKS) {
+  if (sizeKnown && isAppendSink(sink)) {
+    throw new Error('Exact-size transfers require a positional receive sink');
+  }
+  if (!sizeKnown && !isAppendSink(sink)) {
+    throw new Error('Unknown-size transfers require an append sink');
+  }
+
+  const expectedChunks = sizeKnown
+    ? Math.ceil(totalBytes / ENCRYPTION_CHUNK_SIZE)
+    : null;
+  if (expectedChunks !== null && expectedChunks > MAX_CHUNKS) {
     throw new Error('Transfer size exceeds the supported chunk-index range');
   }
 
-  const expectedEncryptedBytes =
-    totalBytes + expectedChunks * ENCRYPTED_CHUNK_OVERHEAD;
+  const expectedEncryptedBytes = sizeKnown
+    ? totalBytes + expectedChunks! * ENCRYPTED_CHUNK_OVERHEAD
+    : null;
 
   const receivedIndices = new Set<number>();
   const pending = new Set<Promise<void>>();
   let receivedEncryptedBytes = 0;
+  let claimedPlaintextBytes = 0;
   let totalDecryptedBytes = 0;
+  let previousUnknownChunkLength: number | null = null;
+  let appendChain = Promise.resolve();
   let settled = false;
 
   let stallTimer: ReturnType<typeof setTimeout> | null = null;
@@ -348,77 +421,134 @@ export function createDataChannelReceiver(
 
   const handleChunk = (data: ArrayBuffer) => {
     const messageLength = data.byteLength;
-    // Register the decrypt promise synchronously so an in-order DONE always
-    // observes it in `pending`.
-    const promise = (async () => {
-      const { chunkIndex, encryptedData } = parseChunkMessage(data);
+    let chunkIndex: number;
+    let encryptedData: Uint8Array;
+    let expectedPlaintextLength: number;
+    let writePosition: number | null = null;
 
+    try {
+      ({ chunkIndex, encryptedData } = parseChunkMessage(data));
       if (receivedIndices.has(chunkIndex)) {
         throw new Error(`Duplicate chunk index: ${chunkIndex}`);
       }
-      if (chunkIndex >= expectedChunks) {
-        throw new Error(`Chunk index out of range: ${chunkIndex}`);
+
+      if (sizeKnown) {
+        if (chunkIndex >= expectedChunks!) {
+          throw new Error(`Chunk index out of range: ${chunkIndex}`);
+        }
+        writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE;
+        expectedPlaintextLength =
+          chunkIndex === expectedChunks! - 1
+            ? totalBytes - writePosition
+            : ENCRYPTION_CHUNK_SIZE;
+        const expectedEncryptedLength =
+          expectedPlaintextLength + AES_NONCE_LENGTH + AES_TAG_LENGTH;
+        if (encryptedData.length !== expectedEncryptedLength) {
+          throw new Error(
+            `Invalid encrypted chunk ${chunkIndex} length: expected ${expectedEncryptedLength}, got ${encryptedData.length}`,
+          );
+        }
+        receivedEncryptedBytes += messageLength;
+        if (receivedEncryptedBytes > expectedEncryptedBytes!) {
+          throw new Error('Transfer exceeds advertised size');
+        }
+      } else {
+        // RTCDataChannel is reliable and ordered by default. Requiring that
+        // order lets the receiver append without holding or seeking chunks.
+        if (chunkIndex !== receivedIndices.size || chunkIndex >= MAX_CHUNKS) {
+          throw new Error(`Unexpected streamed chunk index: ${chunkIndex}`);
+        }
+        expectedPlaintextLength =
+          encryptedData.length - AES_NONCE_LENGTH - AES_TAG_LENGTH;
+        if (
+          expectedPlaintextLength <= 0 ||
+          expectedPlaintextLength > ENCRYPTION_CHUNK_SIZE
+        ) {
+          throw new Error(`Invalid streamed chunk ${chunkIndex} length`);
+        }
+        if (
+          previousUnknownChunkLength !== null &&
+          previousUnknownChunkLength !== ENCRYPTION_CHUNK_SIZE
+        ) {
+          throw new Error('Only the final streamed chunk may be short');
+        }
+        if (
+          claimedPlaintextBytes + expectedPlaintextLength >
+          MAX_MESSAGE_SIZE
+        ) {
+          throw new Error('Transfer exceeds the supported size limit');
+        }
+        previousUnknownChunkLength = expectedPlaintextLength;
+        claimedPlaintextBytes += expectedPlaintextLength;
       }
 
-      const writePosition = chunkIndex * ENCRYPTION_CHUNK_SIZE;
-      const expectedPlaintextLength =
-        chunkIndex === expectedChunks - 1
-          ? totalBytes - writePosition
-          : ENCRYPTION_CHUNK_SIZE;
-      const expectedEncryptedLength =
-        expectedPlaintextLength + AES_NONCE_LENGTH + AES_TAG_LENGTH;
-      if (encryptedData.length !== expectedEncryptedLength) {
-        throw new Error(
-          `Invalid encrypted chunk ${chunkIndex} length: expected ${expectedEncryptedLength}, got ${encryptedData.length}`,
-        );
-      }
-
-      receivedEncryptedBytes += messageLength;
-      if (receivedEncryptedBytes > expectedEncryptedBytes) {
-        throw new Error('Transfer exceeds advertised size');
-      }
-
-      // Claim the index now, before the async decrypt, so a duplicate arriving
-      // while decryptChunk is still pending is rejected by the check above.
+      // Claim the index before decrypting so duplicates and an in-order DONE
+      // cannot race the asynchronous crypto operation.
       receivedIndices.add(chunkIndex);
+    } catch (error) {
+      fail(error instanceof Error ? error : new Error('Invalid data chunk'));
+      return;
+    }
 
+    const processChunk = async () => {
       const decryptedChunk = await decryptChunk(key, encryptedData, chunkIndex);
-      // The flow may have ended (completed, failed or disposed) while this
-      // decrypt was in flight; skip all side effects, including onProgress.
       if (settled) return;
       if (decryptedChunk.length !== expectedPlaintextLength) {
         throw new Error(
           `Invalid chunk ${chunkIndex} length: expected ${expectedPlaintextLength}, got ${decryptedChunk.length}`,
         );
       }
-      if (writePosition + decryptedChunk.length > totalBytes) {
-        throw new Error(`Chunk ${chunkIndex} exceeds expected file size`);
-      }
 
-      // The chunk self-authenticated on decrypt, so it is safe to hand off to
-      // storage and drop immediately.
-      await sink.write(writePosition, decryptedChunk);
+      if (sizeKnown) {
+        if (writePosition! + decryptedChunk.length > totalBytes) {
+          throw new Error(`Chunk ${chunkIndex} exceeds expected file size`);
+        }
+        await (sink as ReceiveSink).write(writePosition!, decryptedChunk);
+      } else {
+        await (sink as AppendSink).append(decryptedChunk);
+      }
       if (settled) return;
       totalDecryptedBytes += decryptedChunk.length;
 
-      reportProgress(totalDecryptedBytes, totalBytes);
-    })().catch(fail);
+      reportProgress(totalDecryptedBytes, progressTotal);
+    };
+
+    // Appends must follow wire order even if Web Crypto resolves operations at
+    // different times. Exact-size positional writes remain parallel.
+    let work: Promise<void>;
+    if (sizeKnown) {
+      work = processChunk();
+    } else {
+      appendChain = appendChain.then(processChunk);
+      work = appendChain;
+    }
+    const promise = work.catch((error: unknown) => {
+      fail(
+        error instanceof Error ? error : new Error('Failed to receive chunk'),
+      );
+    });
 
     pending.add(promise);
     void promise.finally(() => pending.delete(promise));
   };
 
-  const handleDone = async (count: number) => {
-    if (!Number.isInteger(count) || count < 0) {
-      fail(new Error('Invalid DONE message: missing chunk count'));
-      return;
-    }
-    if (count !== expectedChunks) {
+  const handleDone = async (count: number, finalBytes: number) => {
+    if (count !== receivedIndices.size) {
       fail(
         new Error(
-          `Invalid DONE message: expected ${expectedChunks} chunks, got ${count}`,
+          `Invalid DONE message: received ${receivedIndices.size} chunks, got ${count}`,
         ),
       );
+      return;
+    }
+    if (sizeKnown && (count !== expectedChunks || finalBytes !== totalBytes)) {
+      fail(
+        new Error('Invalid DONE message: final size does not match metadata'),
+      );
+      return;
+    }
+    if (!sizeKnown && finalBytes !== claimedPlaintextBytes) {
+      fail(new Error('Invalid DONE message: final size does not match chunks'));
       return;
     }
 
@@ -427,13 +557,10 @@ export function createDataChannelReceiver(
     }
     if (settled) return;
 
-    if (
-      receivedIndices.size !== expectedChunks ||
-      totalDecryptedBytes !== totalBytes
-    ) {
+    if (receivedIndices.size !== count || totalDecryptedBytes !== finalBytes) {
       fail(
         new Error(
-          `Incomplete transfer: got ${totalDecryptedBytes} bytes, expected ${totalBytes}`,
+          `Incomplete transfer: got ${totalDecryptedBytes} bytes, expected ${finalBytes}`,
         ),
       );
       return;
@@ -455,6 +582,7 @@ export function createDataChannelReceiver(
 
     settled = true;
     clearStallTimer();
+    reportProgress(finalBytes, finalBytes);
     resolveDone(payload);
   };
 
@@ -466,20 +594,25 @@ export function createDataChannelReceiver(
 
     if (typeof data === 'string') {
       if (data.startsWith(DONE_PREFIX)) {
-        const countStr = data.slice(DONE_PREFIX.length);
-        // Only accept a pure-digit count; parseInt would silently accept
-        // trailing junk (e.g. "5x") and truncate to a valid-looking number.
-        if (!/^\d+$/.test(countStr)) {
-          fail(new Error('Invalid DONE message: non-numeric chunk count'));
+        const match = /^DONE:(\d+):(\d+)$/.exec(data);
+        if (!match) {
+          fail(new Error('Invalid DONE message'));
           return;
         }
-        void handleDone(parseInt(countStr, 10));
-      } else if (data === 'DONE') {
-        fail(
-          new Error(
-            'Unsupported sender: missing chunk count. Ask sender to update and retry.',
-          ),
-        );
+        const count = Number(match[1]);
+        const finalBytes = Number(match[2]);
+        if (
+          !Number.isSafeInteger(count) ||
+          count < 0 ||
+          count > MAX_CHUNKS ||
+          !Number.isSafeInteger(finalBytes) ||
+          finalBytes < 0 ||
+          finalBytes > MAX_MESSAGE_SIZE
+        ) {
+          fail(new Error('Invalid DONE message values'));
+          return;
+        }
+        void handleDone(count, finalBytes);
       }
       return;
     }

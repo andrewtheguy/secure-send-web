@@ -10,7 +10,7 @@ Secure Send is a browser-based encrypted file and folder transfer application. I
 2. **Single Data-Channel Transfer Path**: `src/lib/p2p-transfer.ts` is the only implementation of file transfer once signaling has opened a WebRTC data channel. Both signaling methods converge here before any file bytes are sent.
 3. **Application-Layer Chunk Encryption**: File content is encrypted at the application layer using AES-256-GCM in 128KB chunks regardless of WebRTC DTLS transport encryption.
 4. **Memory-Efficient Receive Path**: Receivers validate the advertised size, preallocate a scratch sink of that size (an in-memory buffer for payloads of 100MB or less, an OPFS scratch file above that), then decrypt, authenticate, and write each chunk directly to its indexed position as it arrives. Nostr cryptographically authenticates its metadata; Manual Exchange relies on the authenticity of the user-controlled QR/clipboard exchange path.
-5. **Pluggable Signaling, Fixed Transfer**: Nostr and QR/clipboard flows only exchange setup material: metadata, keys, SDP, and ICE candidates. The encrypted chunk framing, `DONE:<chunkCount>` terminator, and data-channel `ACK` are identical after signaling completes.
+5. **Pluggable Signaling, Fixed Transfer**: Nostr and QR/clipboard flows only exchange setup material: metadata, keys, SDP, and ICE candidates. The encrypted chunk framing, `DONE:<chunkCount>:<byteCount>` terminator, and data-channel `ACK` are identical after signaling completes.
 6. **PIN Locates and Authenticates, ECDH Encrypts (Nostr mode)**: A short rotating PIN (10 Crockford base32 characters, not case sensitive, fresh every 2 minutes) locates the sender's rendezvous event and seals a mutual claim/confirm challenge-response. Content and signaling keys are derived from an ephemeral P-256 ECDH exchange that the challenge-response authenticates — never from the PIN itself.
 
 ## Signaling Methods
@@ -55,12 +55,12 @@ flowchart TD
 
     Channel --> Transfer[Unified transfer layer<br/>src/lib/p2p-transfer.ts]
     Transfer --> Chunks[128KB AES-GCM chunks<br/>authenticated chunk index]
-    Chunks --> Done[DONE:&lt;chunkCount&gt;]
+    Chunks --> Done[DONE:&lt;chunkCount&gt;:&lt;byteCount&gt;]
     Done --> Verify[Receiver verifies count, indexes,<br/>sizes, and authentication tags]
     Verify --> Ack[Data-channel ACK]
 ```
 
-Both modes derive the opaque `CryptoKey` from an ephemeral ECDH exchange — the difference is only how that exchange is authenticated: Nostr authenticates it in-band with the PIN-sealed claim/confirm handshake, Manual Exchange relies on the user-controlled QR/clipboard path. `src/lib/p2p-transfer.ts` receives that key plus an open data channel and then runs the same chunk encryption, validation, `DONE:<chunkCount>` terminator, and final `ACK` flow for every signaling method.
+Both modes derive the opaque `CryptoKey` from an ephemeral ECDH exchange — the difference is only how that exchange is authenticated: Nostr authenticates it in-band with the PIN-sealed claim/confirm handshake, Manual Exchange relies on the user-controlled QR/clipboard path. `src/lib/p2p-transfer.ts` receives that key plus an open data channel and then runs the same chunk encryption, validation, `DONE:<chunkCount>:<byteCount>` terminator, and final `ACK` flow for every signaling method.
 
 ### Signaling Setup Diagrams
 
@@ -183,17 +183,17 @@ sequenceDiagram
 
 Once signaling establishes an open WebRTC data channel, both Nostr and Manual Exchange use one shared file-transfer protocol:
 
-1. Sender reads the selected file/archive bytes and walks them in `ENCRYPTION_CHUNK_SIZE` (`128KB`) slices.
+1. Sender reads a lazy transfer source and coalesces its output into `ENCRYPTION_CHUNK_SIZE` (`128KB`) chunks. For multi-file/folder sends, this source emits ZIP bytes while fflate is still reading and packaging entries.
 2. Each slice is encrypted with `encryptChunk`, producing `[chunk_index_be_u16][nonce_12][ciphertext][tag_16]`.
 3. Sender sends encrypted chunks with WebRTC backpressure enabled (`bufferedAmountLowThreshold` defaults to 1MB).
-4. Sender sends the control string `DONE:<totalChunks>`.
-5. Receiver waits for all pending decryptions, validates the `DONE` count, verifies that every expected index arrived exactly once, and checks the total plaintext byte count.
+4. Sender sends the control string `DONE:<totalChunks>:<totalBytes>`.
+5. Receiver waits for all pending decryptions, validates both `DONE` values, verifies that every expected index arrived exactly once, and checks the total plaintext byte count. The final byte count seals streamed ZIPs whose final size was unknown during signaling.
 6. Receiver sends the control string `ACK` on the same data channel.
 7. Sender waits up to `ACK_TIMEOUT_MS` (`30s`) for `ACK`; timeout is a transfer failure.
 
 Both sides run an idle/stall watchdog (`STALL_TIMEOUT_MS`, `60s`) over the active transfer instead of any overall wall-clock deadline. On the sender each chunk hand-off (`sendWithBackpressure`) must complete within the window, so a receiver that stops draining the channel aborts the send. On the receiver the window resets on every incoming data-channel message (armed once the channel opens via `start()`), so a sender that goes quiet mid-stream aborts the receive. Either side timing out rejects with `P2PConnectionError`, which the UI treats as a connection failure.
 
-The receiver rejects duplicate indexes, out-of-range indexes, malformed chunk lengths, transfers exceeding the advertised size, and legacy `DONE` without a chunk count.
+The receiver rejects duplicate indexes, out-of-range indexes, malformed chunk lengths, transfers exceeding the application limit, and malformed final counts.
 
 ### PIN Architecture
 
@@ -420,7 +420,7 @@ Handles direct peer-to-peer connections using WebRTC data channels.
 5. Attempt P2P connection (30s timeout for connection only)
 6. If P2P connects: transfer via data channel
 7. If P2P connection fails: transfer fails — no TURN or automatic transfer fallback; a `P2PConnectionError` is surfaced so the UI can suggest the offline-QR app ([src/lib/errors.ts](../src/lib/errors.ts))
-8. Wait for the receiver's data-channel `ACK` after `DONE:<chunkCount>`
+8. Wait for the receiver's data-channel `ACK` after `DONE:<chunkCount>:<byteCount>`
 
 **`use-nostr-receive.ts`** - Receiver logic (Nostr):
 1. Stretch the entered PIN into its root key; derive look-back hints and locate a fresh (≤6 min old, the `PIN_TTL_MS` validity window) rendezvous event
@@ -453,7 +453,7 @@ Handles direct peer-to-peer connections using WebRTC data channels.
 6. Display QR code and base64 copy button
 7. Wait for WebRTC connection to establish
 8. Receive encrypted chunks, decrypt/authenticate each chunk as it arrives, and write it to the receive sink (in memory ≤100MB, OPFS above)
-9. After `DONE:<chunkCount>` validates, send data-channel `ACK`
+9. After `DONE:<chunkCount>:<byteCount>` validates, send data-channel `ACK`
 10. Present content
 
 **`use-chunk-collector.ts`** - Multi-QR chunk collection (used by `/r` receive page):
@@ -507,13 +507,13 @@ In Nostr mode, the entire rendezvous payload is encrypted with the PIN-derived `
 
 All P2P transfers (Nostr, Manual Exchange) encrypt content in 128KB chunks using identical logic:
 
-- **Sender side**: the file is walked in 128KB `Blob.slice` reads, so only one chunk is materialized in memory at a time (a picked `File` is read lazily from disk). Each slice is encrypted with the transfer key and its own chunk index, then sent over the data channel in order. The index is carried in the chunk and bound into the encryption as authenticated data.
-- **Receiver side (all P2P modes)**: decrypted chunks are written at their byte position (`index * 128KB`) to the receive sink — an in-memory buffer for payloads of 100MB or less, an OPFS scratch file above that — with no intermediate encrypted-chunk storage. Each chunk self-authenticates on decrypt, so it is handed to the sink and dropped immediately; for over-100MB payloads the final Blob is disk-backed and the download streams from it without materializing the file in memory.
-- **Completion**: the sender finishes with `DONE:<totalChunks>`. The receiver verifies the advertised chunk count, received index set, and total decrypted byte count before sending `ACK` on the data channel.
+- **Sender side**: a lazy source is coalesced into 128KB chunks, so only bounded in-flight data is materialized. A picked `File` streams from the browser; a multi-file/folder source feeds fflate output directly into the same chunker. Each chunk is encrypted with the transfer key and its own authenticated index, then sent in order.
+- **Receiver side (all P2P modes)**: exact-size files use positional writes. ZIPs with an unknown compressed size append in reliable data-channel order to an adaptive sink, which starts in memory and migrates to OPFS before crossing 100MB. There is no intermediate encrypted-chunk storage; each authenticated chunk is written and dropped immediately.
+- **Completion**: the sender finishes with `DONE:<totalChunks>:<totalBytes>`. The receiver verifies the chunk count, received index set, and final decrypted byte count before sending `ACK` on the data channel.
 
-**OPFS scratch lifecycle (privacy):** for payloads over 100MB, plaintext transiently touches browser-managed disk in `transfer-scratch` files inside the origin-private file system — the receiver's decrypted payload from the first chunk until the transfer is reset, and the sender's generated ZIP archive from packaging until the transfer page is left. Payloads of 100MB or less stay in memory and never touch disk. Every abandonment path (cancel mid-transfer, transfer error, reset, starting a new receive, leaving the send flow) discards its scratch file, and a boot-time sweep plus a pre-transfer sweep remove files that crashed or closed sessions left behind, so leftovers never outlive the next visit.
+**OPFS scratch lifecycle (privacy):** for received payloads over 100MB, plaintext transiently touches browser-managed disk in `transfer-scratch` files until the transfer is reset. Senders do not create scratch files. Payloads of 100MB or less stay in memory and never touch disk. Every receiver abandonment path (cancel mid-transfer, transfer error, reset, starting a new receive) discards its scratch file, and a boot-time sweep plus a pre-transfer sweep remove files that crashed or closed sessions left behind, so leftovers never outlive the next visit.
 
-**Streamed archive creation:** multi-file and folder sends are packaged with fflate's streaming `Zip`/`ZipDeflate`: each input file is read as a stream and deflated chunk by chunk into an append sink — in memory when the selected files total 100MB or less, OPFS-backed above that, so archiving large selections needs O(chunk) memory. The resulting ZIP then goes through the same streaming send pipeline as a directly selected file.
+**Streamed archive creation:** multi-file and folder sends are packaged with fflate's streaming `Zip`/`ZipPassThrough`. Each input file is stored chunk by chunk in a backpressured `TransformStream`; generated ZIP bytes flow immediately into encryption and WebRTC. Store mode avoids fflate's intermittent streaming-deflate CRC corruption while preserving ZIP's per-entry CRC-32 checksums and bounded memory use. The sender never assembles the ZIP in memory or OPFS, and later entries need not be read before earlier archive bytes are sent.
 
 **No whole-file checksum:** File-content integrity relies solely on per-chunk AES-GCM authentication (auth tag + authenticated chunk index) together with the completeness checks above and the final `ACK`. There is deliberately **no digest/hash computed over the assembled file** — neither sender nor receiver hashes the whole file, and no metadata/manifest carries a file digest. This avoids an additional integrity value and verification pass. An incremental digest could be added without materializing the whole file, but it is not part of this protocol and would be redundant with the protocol's authenticated-chunk and completeness checks.
 
@@ -527,8 +527,8 @@ The 2-byte chunk index is also passed to AES-GCM as additional authenticated dat
 **Benefits:**
 - **Defense in depth**: AES-GCM on top of WebRTC DTLS
 - **Streaming decryption in all P2P modes**: Each chunk is decrypted as it arrives
-- **Memory efficiency**: for payloads over 100MB both ends need O(chunk) memory — the sender reads lazy Blob slices, the receiver streams decrypted chunks to disk; smaller payloads are buffered in memory
-- **Out-of-order handling**: Chunks can arrive in any order and be placed correctly
+- **Memory efficiency**: the sender always needs only bounded chunk buffers, including while generating ZIPs; the receiver streams payloads over 100MB to disk and buffers smaller payloads in memory
+- **Order handling**: exact-size files support positional out-of-order writes; unknown-size ZIP streams require the data channel's reliable default ordering so they can append without seeking
 
 ```mermaid
 flowchart TD
@@ -548,7 +548,7 @@ Both receive modes reject extra, duplicate, out-of-range, malformed, and oversiz
 
 | Limit | Value | Rationale |
 |-------|-------|-----------|
-| Max transferred payload size | 2GB (`MAX_MESSAGE_SIZE`) | Bounded by the 2-byte chunk-index range (65,536 × 128KB = 8GB protocol ceiling) and disk quota, not RAM: multi-file/folder sends over 100MB are zipped chunk by chunk into OPFS scratch (fflate streaming `Zip`/`ZipDeflate`), the sender encrypts Blob slices on demand, and the receiver writes decrypted chunks to OPFS scratch. Payloads at or below 100MB (`MEMORY_SINK_MAX_BYTES`) are buffered in memory instead. OPFS (`FileSystemFileHandle.createWritable`, secure contexts only) is required for over-100MB payloads and feature-detected at runtime — sink creation fails with a clear user-facing error where unsupported. Ship dates vary by engine (Chromium 86, Firefox 111, Safari/iOS only 26 — later than the general OPFS feature, which Safari had from 16.4), so detection, not a version list, is the contract |
+| Max transferred payload size | 2GB (`MAX_MESSAGE_SIZE`) | Bounded by the application limit and disk quota, not RAM: multi-file/folder sends are zipped directly into the encrypted data channel, and the receiver writes decrypted chunks to an adaptive memory/OPFS sink. Payloads at or below 100MB (`MEMORY_SINK_MAX_BYTES`) are buffered in memory; larger received payloads require OPFS. `FileSystemFileHandle.createWritable` is feature-detected at runtime, so unsupported receivers fail with a clear error only if the payload crosses the threshold. |
 | Encryption chunk size | 128KB | Balance of encryption overhead and streaming efficiency |
 | PIN length | 10 chars (9 data + check digit, ~45 bits) | Easy to type/read aloud; the 2-minute rotation, 6-minute validity, first-claim lockout, and ECDH content keys carry the security the old long PIN used to |
 
@@ -560,7 +560,7 @@ Both receive modes reject extra, duplicate, out-of-range, malformed, and oversiz
 | Manual P2P connection | 120 seconds | Time to establish WebRTC connection after the answer is scanned/pasted |
 | ICE gathering | 5 seconds | Bounded wait while preparing Manual offer/answer QR payloads |
 | Nostr P2P offer retry | 5 seconds | Interval to retry WebRTC offer if no answer event has been processed |
-| Data-channel ACK wait | 30 seconds | Sender wait after `DONE:<chunkCount>` for receiver `ACK` |
+| Data-channel ACK wait | 30 seconds | Sender wait after `DONE:<chunkCount>:<byteCount>` for receiver `ACK` |
 | P2P transfer stall | 60 seconds | Idle/stall window (`STALL_TIMEOUT_MS`) applied to both sides of an active transfer. The receiver arms it via the watchdog's `start()` when the data channel opens (not only after the first chunk arrives); the sender applies it per chunk hand-off. It resets on each chunk sent / message received, so a steadily-progressing transfer of any size never trips it; a peer that goes quiet aborts after this span. There is no overall transfer deadline. |
 | PIN rotation | 2 minutes | Fresh PIN + rendezvous event cadence (`PIN_ROTATION_MS`) |
 | PIN validity | 6 minutes | How long any single PIN is honored (`PIN_TTL_MS` = 3 generations); also the rendezvous NIP-40 expiry and the receiver's rendezvous freshness bound |
@@ -589,7 +589,7 @@ Secure Send enforces hard session TTLs. Expired requests MUST NOT establish a se
 
 **No Backward Compatibility**
 - Requests/payloads missing TTL fields are rejected (treated as invalid).
-- Shared P2P data-channel completion requires `DONE:<chunkCount>` followed by receiver `ACK`; legacy `DONE` without chunk count is unsupported.
+- Shared P2P data-channel completion requires `DONE:<chunkCount>:<byteCount>` followed by receiver `ACK`.
 - Multi-QR offer links require `/r#...` (raw hash payload, no `d=` prefix) and first-chunk CRC32 metadata; older URL or chunk formats are rejected.
 
 ## Leaked-PIN Exposure (Including After Expiry)

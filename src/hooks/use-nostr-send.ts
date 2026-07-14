@@ -46,6 +46,7 @@ import {
   uint8ArrayToBase64,
 } from '@/lib/nostr';
 import { sendFileOverDataChannel } from '@/lib/p2p-transfer';
+import type { TransferSource } from '@/lib/transfer-source';
 import { WebRTCConnection } from '@/lib/webrtc';
 import { getWebRTCConfig } from '@/lib/webrtc-config';
 
@@ -82,7 +83,7 @@ export interface UseNostrSendReturn {
   pin: string | null;
   /** Fingerprint of the currently displayed PIN, formatted for display. */
   pinFingerprint: string | null;
-  send: (content: File) => Promise<void>;
+  send: (content: TransferSource) => Promise<void>;
   cancel: () => void;
   /**
    * Mint and publish a fresh PIN immediately, invalidating every previously
@@ -120,7 +121,7 @@ export function useNostrSend(): UseNostrSendReturn {
     setState({ status: 'idle' });
   }, []);
 
-  const send = useCallback(async (content: File) => {
+  const send = useCallback(async (content: TransferSource) => {
     // Guard against concurrent invocations
     if (sendingRef.current) return;
     sendingRef.current = true;
@@ -140,22 +141,31 @@ export function useNostrSend(): UseNostrSendReturn {
       }
 
       const fileName = sanitizedFileName;
-      const fileSize = content.size;
+      const fileSize = content.size ?? content.estimatedSize;
+      const fileSizeExact = content.size !== null;
       const mimeType = content.type || 'application/octet-stream';
 
-      if (typeof fileSize !== 'number' || !Number.isFinite(fileSize)) {
+      if (
+        !Number.isFinite(fileSize) ||
+        fileSize < 0 ||
+        !Number.isFinite(content.estimatedSize) ||
+        content.estimatedSize < 0
+      ) {
         setState({ status: 'error', message: 'Invalid file size' });
         sendingRef.current = false;
         return;
       }
 
-      if (fileSize <= 0) {
+      if (fileSizeExact && fileSize <= 0) {
         setState({ status: 'error', message: 'File is empty' });
         sendingRef.current = false;
         return;
       }
 
-      if (fileSize > MAX_MESSAGE_SIZE) {
+      if (
+        fileSize > MAX_MESSAGE_SIZE ||
+        content.estimatedSize > MAX_MESSAGE_SIZE
+      ) {
         setState({
           status: 'error',
           message: `File exceeds ${formatFileSize(MAX_MESSAGE_SIZE)} limit`,
@@ -224,6 +234,7 @@ export function useNostrSend(): UseNostrSendReturn {
           relays: [...DEFAULT_RELAYS],
           fileName,
           fileSize,
+          fileSizeExact,
           mimeType,
         };
         const encryptedPayload = await encrypt(
@@ -529,7 +540,7 @@ export function useNostrSend(): UseNostrSendReturn {
               setState((prevState) => ({
                 status: 'transferring',
                 message: 'Sending via P2P...',
-                progress: { current: 0, total: content.size },
+                progress: { current: 0, total: fileSize },
                 contentType,
                 fileMetadata: { fileName, fileSize, mimeType },
                 currentRelays: prevState.currentRelays,

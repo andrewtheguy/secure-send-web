@@ -20,15 +20,17 @@ import {
 import { type UseNostrSendReturn, useNostrSend } from '@/hooks/use-nostr-send';
 import {
   archiveTimestamp,
-  type CompressedArchive,
-  compressFilesToZip,
+  createZipTransferSource,
   getArchiveBaseName,
 } from '@/lib/folder-utils';
 import { testRelayAvailability } from '@/lib/nostr';
+import {
+  createFileTransferSource,
+  type TransferSource,
+} from '@/lib/transfer-source';
 
 type TransferStep =
   | 'checking'
-  | 'compressing'
   | 'ready'
   | 'active'
   | 'complete'
@@ -45,7 +47,9 @@ export function SendTransferPage() {
   const { config, setConfig, clearConfig } = useSend();
 
   const [step, setStep] = useState<TransferStep>('checking');
-  const [compressedFile, setCompressedFile] = useState<File | null>(null);
+  const [transferSource, setTransferSource] = useState<TransferSource | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   // Hooks for transfer
@@ -53,23 +57,6 @@ export function SendTransferPage() {
   const manualHook = useManualSend();
 
   const startedRef = useRef(false);
-
-  // Scratch-backed ZIP for multi-file/folder sends. Discarded when a fresh
-  // archive is prepared and when the page unmounts; single-file sends never
-  // set it.
-  const archiveRef = useRef<CompressedArchive | null>(null);
-  const discardArchive = useCallback(() => {
-    const archive = archiveRef.current;
-    archiveRef.current = null;
-    if (archive) void archive.discard();
-  }, []);
-
-  // Release the archive's scratch storage when leaving the page.
-  useEffect(() => {
-    return () => {
-      discardArchive();
-    };
-  }, [discardArchive]);
 
   // Determine which hook to use based on config with discriminated union
   const isOnline = config?.methodChoice === 'online';
@@ -106,7 +93,7 @@ export function SendTransferPage() {
     }
   }, [config, navigate]);
 
-  // Prepare file (compress if needed)
+  // Prepare the direct file or lazy ZIP source
   useEffect(() => {
     if (!config || startedRef.current) return;
 
@@ -138,25 +125,17 @@ export function SendTransferPage() {
         }
 
         if (files.length === 1 && !files[0].webkitRelativePath) {
-          // Single loose file, no compression needed
+          // A single loose file does not need ZIP packaging.
           if (cancelled) return;
-          setCompressedFile(files[0]);
+          setTransferSource(createFileTransferSource(files[0]));
           setStep('ready');
         } else {
           // Multiple files, or a folder selection whose structure must be
-          // preserved: compress
+          // preserved: create a lazy ZIP source. Packaging starts only once
+          // the data channel is ready and its output is sent immediately.
           if (cancelled) return;
-          setStep('compressing');
           const archiveName = `${getArchiveBaseName(files)}_${archiveTimestamp()}`;
-          // Drop any stale archive from a previous prepare pass.
-          discardArchive();
-          const archive = await compressFilesToZip(files, archiveName);
-          if (cancelled) {
-            void archive.discard();
-            return;
-          }
-          archiveRef.current = archive;
-          setCompressedFile(archive.file);
+          setTransferSource(createZipTransferSource(files, archiveName));
           setStep('ready');
         }
       } catch (err) {
@@ -173,19 +152,19 @@ export function SendTransferPage() {
     return () => {
       cancelled = true;
     };
-  }, [config, discardArchive]);
+  }, [config]);
 
   // Start transfer when file is ready
   useEffect(() => {
-    if (step !== 'ready' || !compressedFile || !config || startedRef.current)
+    if (step !== 'ready' || !transferSource || !config || startedRef.current)
       return;
 
     startedRef.current = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Intentional: sync step state when starting transfer
     setStep('active');
 
-    void activeHook.hook.send(compressedFile);
-  }, [step, compressedFile, config, activeHook]);
+    void activeHook.hook.send(transferSource);
+  }, [step, transferSource, config, activeHook]);
 
   // Track completion - sync local step with hook state
   // Only apply state changes when transfer is active to avoid race conditions
@@ -258,14 +237,6 @@ export function SendTransferPage() {
         <div className="flex flex-col items-center gap-4 py-8">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
           <p className="text-muted-foreground">Checking connection...</p>
-        </div>
-      )}
-
-      {/* Compressing files */}
-      {step === 'compressing' && (
-        <div className="flex flex-col items-center gap-4 py-8">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="text-muted-foreground">Compressing files...</p>
         </div>
       )}
 

@@ -30,9 +30,9 @@ describe('Manual Signaling Utils', () => {
   it('should generate and parse mutual offer binary correctly', async () => {
     const metadata = {
       createdAt: Date.now(),
-      totalBytes: 1024,
       fileName: 'test.txt',
       fileSize: 1024,
+      fileSizeExact: true,
       mimeType: 'text/plain',
       publicKey: mockPublicKey,
       salt: mockSalt,
@@ -79,10 +79,12 @@ describe('Manual Signaling Utils', () => {
   it('should obfuscate data (output should not contain cleartext JSON)', async () => {
     const metadata = {
       createdAt: Date.now(),
-      totalBytes: 100,
       publicKey: mockPublicKey,
       salt: mockSalt,
       fileName: 'secret-file-name.txt',
+      fileSize: 100,
+      fileSizeExact: true,
+      mimeType: 'text/plain',
     };
 
     const binary = await generateMutualOfferBinary(mockOffer, [], metadata);
