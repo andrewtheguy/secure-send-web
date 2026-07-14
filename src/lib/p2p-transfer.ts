@@ -222,8 +222,8 @@ export async function sendFileOverDataChannel(
     reader.releaseLock();
   }
 
-  // The byte count authenticates the final length for sources whose compressed
-  // output was not knowable during signaling.
+  // The byte count authenticates the final length for sources whose streamed
+  // output was not known during signaling.
   rtc.send(`${DONE_PREFIX}${chunkIndex}:${totalBytes}`);
   reportProgress(totalBytes, totalBytes);
 
@@ -324,7 +324,7 @@ function isAppendSink(sink: DataChannelSink): sink is AppendSink {
 
 /**
  * Create a streaming receiver. `totalBytes` is null when the sender is
- * producing a ZIP whose final compressed length is not known during signaling.
+ * producing a ZIP whose final streamed length is not known during signaling.
  *
  * Exact-size payloads retain positional writes and may arrive out of order.
  * Unknown-size payloads use the data channel's reliable ordering and append to

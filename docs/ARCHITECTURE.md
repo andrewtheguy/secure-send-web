@@ -183,11 +183,11 @@ sequenceDiagram
 
 Once signaling establishes an open WebRTC data channel, both Nostr and Manual Exchange use one shared file-transfer protocol:
 
-1. Sender reads a lazy transfer source and coalesces its output into `ENCRYPTION_CHUNK_SIZE` (`128KB`) chunks. For multi-file/folder sends, this source emits ZIP bytes while fflate is still reading and compressing entries.
+1. Sender reads a lazy transfer source and coalesces its output into `ENCRYPTION_CHUNK_SIZE` (`128KB`) chunks. For multi-file/folder sends, this source emits ZIP bytes while fflate is still reading and packaging entries.
 2. Each slice is encrypted with `encryptChunk`, producing `[chunk_index_be_u16][nonce_12][ciphertext][tag_16]`.
 3. Sender sends encrypted chunks with WebRTC backpressure enabled (`bufferedAmountLowThreshold` defaults to 1MB).
 4. Sender sends the control string `DONE:<totalChunks>:<totalBytes>`.
-5. Receiver waits for all pending decryptions, validates both `DONE` values, verifies that every expected index arrived exactly once, and checks the total plaintext byte count. The final byte count seals streamed ZIPs whose compressed size was unknown during signaling.
+5. Receiver waits for all pending decryptions, validates both `DONE` values, verifies that every expected index arrived exactly once, and checks the total plaintext byte count. The final byte count seals streamed ZIPs whose final size was unknown during signaling.
 6. Receiver sends the control string `ACK` on the same data channel.
 7. Sender waits up to `ACK_TIMEOUT_MS` (`30s`) for `ACK`; timeout is a transfer failure.
 
@@ -513,7 +513,7 @@ All P2P transfers (Nostr, Manual Exchange) encrypt content in 128KB chunks using
 
 **OPFS scratch lifecycle (privacy):** for received payloads over 100MB, plaintext transiently touches browser-managed disk in `transfer-scratch` files until the transfer is reset. Senders do not create scratch files. Payloads of 100MB or less stay in memory and never touch disk. Every receiver abandonment path (cancel mid-transfer, transfer error, reset, starting a new receive) discards its scratch file, and a boot-time sweep plus a pre-transfer sweep remove files that crashed or closed sessions left behind, so leftovers never outlive the next visit.
 
-**Streamed archive creation:** multi-file and folder sends are packaged with fflate's streaming `Zip`/`ZipDeflate`. Each input file is read and deflated chunk by chunk into a backpressured `TransformStream`; generated ZIP bytes flow immediately into encryption and WebRTC. The sender never assembles the ZIP in memory or OPFS, and later entries need not be read before earlier archive bytes are sent.
+**Streamed archive creation:** multi-file and folder sends are packaged with fflate's streaming `Zip`/`ZipPassThrough`. Each input file is stored chunk by chunk in a backpressured `TransformStream`; generated ZIP bytes flow immediately into encryption and WebRTC. Store mode avoids fflate's intermittent streaming-deflate CRC corruption while preserving ZIP's per-entry CRC-32 checksums and bounded memory use. The sender never assembles the ZIP in memory or OPFS, and later entries need not be read before earlier archive bytes are sent.
 
 **No whole-file checksum:** File-content integrity relies solely on per-chunk AES-GCM authentication (auth tag + authenticated chunk index) together with the completeness checks above and the final `ACK`. There is deliberately **no digest/hash computed over the assembled file** — neither sender nor receiver hashes the whole file, and no metadata/manifest carries a file digest. This avoids an additional integrity value and verification pass. An incremental digest could be added without materializing the whole file, but it is not part of this protocol and would be redundant with the protocol's authenticated-chunk and completeness checks.
 

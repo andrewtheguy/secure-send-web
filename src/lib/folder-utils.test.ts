@@ -2,6 +2,94 @@ import { unzipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { archiveTimestamp, createZipTransferSource } from './folder-utils';
 
+interface CentralEntry {
+  crc: number;
+  method: number;
+  compressedSize: number;
+  uncompressedSize: number;
+  localOffset: number;
+}
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function readCentralEntries(archive: Uint8Array): Map<string, CentralEntry> {
+  const view = new DataView(
+    archive.buffer,
+    archive.byteOffset,
+    archive.byteLength,
+  );
+  let eocdOffset = archive.length - 22;
+  while (eocdOffset >= 0 && view.getUint32(eocdOffset, true) !== 0x06054b50) {
+    eocdOffset--;
+  }
+  if (eocdOffset < 0) throw new Error('ZIP end record not found');
+
+  const entryCount = view.getUint16(eocdOffset + 10, true);
+  let offset = view.getUint32(eocdOffset + 16, true);
+  const entries = new Map<string, CentralEntry>();
+  for (let index = 0; index < entryCount; index++) {
+    if (view.getUint32(offset, true) !== 0x02014b50) {
+      throw new Error('Invalid ZIP central directory');
+    }
+    const nameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const name = new TextDecoder().decode(
+      archive.subarray(offset + 46, offset + 46 + nameLength),
+    );
+    entries.set(name, {
+      method: view.getUint16(offset + 10, true),
+      crc: view.getUint32(offset + 16, true),
+      compressedSize: view.getUint32(offset + 20, true),
+      uncompressedSize: view.getUint32(offset + 24, true),
+      localOffset: view.getUint32(offset + 42, true),
+    });
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
+function expectStoredEntriesWithValidCrc(
+  archive: Uint8Array,
+  expected: Record<string, Uint8Array>,
+): void {
+  const view = new DataView(
+    archive.buffer,
+    archive.byteOffset,
+    archive.byteLength,
+  );
+  const centralEntries = readCentralEntries(archive);
+  expect(centralEntries.size).toBe(Object.keys(expected).length);
+
+  for (const [name, bytes] of Object.entries(expected)) {
+    const entry = centralEntries.get(name);
+    expect(entry, `missing central entry for ${name}`).toBeDefined();
+    expect(entry?.method, `compression method for ${name}`).toBe(0);
+    expect(entry?.compressedSize).toBe(bytes.length);
+    expect(entry?.uncompressedSize).toBe(bytes.length);
+    expect(entry?.crc, `central CRC for ${name}`).toBe(crc32(bytes));
+
+    const localOffset = entry!.localOffset;
+    expect(view.getUint32(localOffset, true)).toBe(0x04034b50);
+    const nameLength = view.getUint16(localOffset + 26, true);
+    const extraLength = view.getUint16(localOffset + 28, true);
+    const dataOffset = localOffset + 30 + nameLength + extraLength;
+    expect(
+      archive.subarray(dataOffset, dataOffset + entry!.compressedSize),
+      `stored bytes for ${name}`,
+    ).toEqual(bytes);
+  }
+}
+
 async function readAll(
   stream: ReadableStream<Uint8Array>,
 ): Promise<Uint8Array> {
@@ -112,6 +200,7 @@ describe('createZipTransferSource', () => {
     for (const [name, data] of Object.entries(expected)) {
       expect(entries[name]).toEqual(data);
     }
+    expectStoredEntriesWithValidCrc(archive, expected);
   });
 
   it('uses webkitRelativePath as the entry path when present', async () => {

@@ -277,7 +277,7 @@ export async function createAppendSink(
  *
  * Unlike `createAppendSink`, the estimate is never trusted as a backend
  * decision for the lifetime of the sink. This matters on the receiving side,
- * where metadata came from the peer and compressed ZIP output can differ from
+ * where metadata came from the peer and streamed ZIP output can differ from
  * its input-size estimate.
  */
 export async function createAdaptiveAppendSink(

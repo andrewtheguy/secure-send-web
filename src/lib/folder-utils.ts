@@ -1,4 +1,4 @@
-import { Zip, ZipDeflate } from 'fflate';
+import { Zip, ZipPassThrough } from 'fflate';
 import type { TransferSource } from './transfer-source';
 
 /**
@@ -28,8 +28,8 @@ export function createZipTransferSource(
   return {
     name: `${archiveName}.zip`,
     type: 'application/zip',
-    // Deflate output length is not known until fflate emits the central
-    // directory. The input total remains useful as a progress/storage hint.
+    // The archive is deliberately exposed as a streamed, unknown-size source;
+    // the input total remains useful as a progress/storage hint.
     size: null,
     estimatedSize: totalInputBytes,
     stream: () => createZipStream(files),
@@ -102,7 +102,12 @@ async function writeZip(
       for (const file of files) {
         // webkitRelativePath is set for folder selection, empty for multi-file
         const path = file.webkitRelativePath || file.name;
-        const entry = new ZipDeflate(path);
+        // fflate's streaming deflate path can intermittently emit data whose
+        // CRC does not match the entry bytes. Store entries without deflate so
+        // the bytes used for the ZIP CRC are exactly the bytes written. This
+        // preserves bounded-memory, on-the-fly archive generation and produces
+        // archives that strict readers such as macOS Archive Utility accept.
+        const entry = new ZipPassThrough(path);
         entry.mtime = file.lastModified;
         zip.add(entry);
 

@@ -93,7 +93,7 @@ export function SendTransferPage() {
     }
   }, [config, navigate]);
 
-  // Prepare file (compress if needed)
+  // Prepare the direct file or lazy ZIP source
   useEffect(() => {
     if (!config || startedRef.current) return;
 
@@ -125,13 +125,13 @@ export function SendTransferPage() {
         }
 
         if (files.length === 1 && !files[0].webkitRelativePath) {
-          // Single loose file, no compression needed
+          // A single loose file does not need ZIP packaging.
           if (cancelled) return;
           setTransferSource(createFileTransferSource(files[0]));
           setStep('ready');
         } else {
           // Multiple files, or a folder selection whose structure must be
-          // preserved: create a lazy ZIP source. Compression starts only once
+          // preserved: create a lazy ZIP source. Packaging starts only once
           // the data channel is ready and its output is sent immediately.
           if (cancelled) return;
           const archiveName = `${getArchiveBaseName(files)}_${archiveTimestamp()}`;
