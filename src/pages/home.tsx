@@ -141,13 +141,13 @@ export function HomePage() {
             <Button asChild size="lg" className="gap-2">
               <Link to="/send">
                 <Send className="h-4 w-4" />
-                Send a file
+                Send files
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className="gap-2">
               <Link to="/receive">
                 <Download className="h-4 w-4" />
-                Receive a file
+                Receive files
               </Link>
             </Button>
           </div>

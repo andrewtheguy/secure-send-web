@@ -27,7 +27,7 @@ export function NotFoundPage() {
               <Link to="/">Go home</Link>
             </Button>
             <Button asChild variant="outline">
-              <Link to="/send">Send a file</Link>
+              <Link to="/send">Send files</Link>
             </Button>
           </div>
         </div>
