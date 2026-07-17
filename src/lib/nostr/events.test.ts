@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { PIN_ACTIVE_BUCKETS, PIN_ROTATION_MS } from '../crypto/constants';
+import { getPinBucket } from '../crypto/pin';
 import {
   createHandshakeEvent,
   createRendezvousEvent,
@@ -23,12 +25,14 @@ describe('Nostr events', () => {
     const encryptedPayload = new Uint8Array([1, 2, 3, 4]);
     const salt = crypto.getRandomValues(new Uint8Array(16));
 
+    const pinBucket = getPinBucket();
     const event = createRendezvousEvent(
       secretKey,
       encryptedPayload,
       salt,
       'transfer-id',
       'hint',
+      pinBucket,
     );
 
     const parsed = parseRendezvousEvent(event);
@@ -40,7 +44,9 @@ describe('Nostr events', () => {
 
     // NIP-40 expiration tag is present and in the future
     const expiration = event.tags.find((t) => t[0] === 'expiration')?.[1];
-    expect(Number(expiration)).toBeGreaterThan(Math.floor(Date.now() / 1000));
+    expect(Number(expiration)).toBe(
+      ((pinBucket + PIN_ACTIVE_BUCKETS) * PIN_ROTATION_MS) / 1000,
+    );
   });
 
   it('seals and opens handshake payloads with the auth key', async () => {

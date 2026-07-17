@@ -12,7 +12,9 @@ import {
   derivePinRendezvousKey,
   formatPin,
   generatePin,
+  getPinBucket,
   importPinRoot,
+  isPinBucketActive,
   isValidPin,
   normalizePinInput,
 } from './pin';
@@ -68,16 +70,27 @@ describe('PIN Utilities', () => {
     const pin = generatePin();
     const root = await importPinRoot(pin);
 
-    const current = await computePinHintFromRoot(root, 0);
+    const currentBucket = getPinBucket();
+    const current = await computePinHintFromRoot(root, currentBucket);
     expect(current).toMatch(new RegExp(`^[0-9a-f]{${PIN_HINT_LENGTH}}$`));
-    expect(await computePinHintFromRoot(root, 0)).toBe(current);
+    expect(await computePinHintFromRoot(root, currentBucket)).toBe(current);
 
-    const previous = await computePinHintFromRoot(root, 1);
+    const previous = await computePinHintFromRoot(root, currentBucket - 1);
     expect(previous).toMatch(new RegExp(`^[0-9a-f]{${PIN_HINT_LENGTH}}$`));
     expect(previous).not.toBe(current);
 
     const otherRoot = await importPinRoot(generatePin());
-    expect(await computePinHintFromRoot(otherRoot, 0)).not.toBe(current);
+    expect(await computePinHintFromRoot(otherRoot, currentBucket)).not.toBe(
+      current,
+    );
+  });
+
+  test('only the current and previous PIN buckets are active', () => {
+    const now = 10 * 120_000 + 1;
+    expect(isPinBucketActive(10, now)).toBe(true);
+    expect(isPinBucketActive(9, now)).toBe(true);
+    expect(isPinBucketActive(8, now)).toBe(false);
+    expect(isPinBucketActive(11, now)).toBe(false);
   });
 
   test('fingerprint is stable and domain-separated from the hint', async () => {
@@ -86,7 +99,7 @@ describe('PIN Utilities', () => {
     expect(fp).toMatch(new RegExp(`^[0-9a-f]{${PIN_FINGERPRINT_LENGTH}}$`));
     expect(await computePinFingerprint(pin)).toBe(fp);
     const root = await importPinRoot(pin);
-    expect(fp).not.toBe(await computePinHintFromRoot(root, 0));
+    expect(fp).not.toBe(await computePinHintFromRoot(root, getPinBucket()));
   });
 
   test('fingerprint matches the cross-implementation vector', async () => {
@@ -118,8 +131,9 @@ describe('PIN Utilities', () => {
     const senderRoot = await importPinRoot(pin);
     const receiverRoot = await importPinRoot(pin);
 
-    expect(await computePinHintFromRoot(receiverRoot, 0)).toBe(
-      await computePinHintFromRoot(senderRoot, 0),
+    const bucket = getPinBucket();
+    expect(await computePinHintFromRoot(receiverRoot, bucket)).toBe(
+      await computePinHintFromRoot(senderRoot, bucket),
     );
     const { encrypt, decrypt } = await import('./aes-gcm');
     const sealed = await encrypt(

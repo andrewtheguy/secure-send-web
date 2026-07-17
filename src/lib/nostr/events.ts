@@ -5,7 +5,7 @@ import {
   getPublicKey,
 } from 'nostr-tools';
 import { decrypt, encrypt } from '../crypto/aes-gcm';
-import { PIN_TTL_MS } from '../crypto/constants';
+import { PIN_ACTIVE_BUCKETS, PIN_ROTATION_MS } from '../crypto/constants';
 import { EVENT_KIND_DATA_TRANSFER, EVENT_KIND_RENDEZVOUS } from './types';
 
 /**
@@ -40,9 +40,8 @@ export function generateHandshakeNonce(): string {
  * off the PBKDF2 PIN root (see computePinHintFromRoot)
  *
  * TTL behavior:
- * - The 'expiration' tag is set PIN_TTL_MS ahead (NIP-40): a rendezvous event
- *   is only claimable while its PIN generation is still honored by the sender,
- *   so relays are asked to drop it as soon as that window closes
+ * - The 'expiration' tag is the end of the PIN's immediately following bucket
+ *   (NIP-40), matching the sender's current-or-previous acceptance rule
  * - The sender stops publishing (and stops honoring retained PIN generations)
  *   once a claim is verified
  * - The receiver refuses rendezvous events older than PIN_TTL_MS
@@ -53,9 +52,12 @@ export function createRendezvousEvent(
   salt: Uint8Array,
   transferId: string,
   hint: string,
+  pinBucket: number,
 ): Event {
   // Soft TTL: relays may auto-delete after this timestamp (NIP-40)
-  const expiration = Math.floor((Date.now() + PIN_TTL_MS) / 1000);
+  const expiration = Math.floor(
+    ((pinBucket + PIN_ACTIVE_BUCKETS) * PIN_ROTATION_MS) / 1000,
+  );
 
   const event = finalizeEvent(
     {

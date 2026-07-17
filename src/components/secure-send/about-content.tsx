@@ -34,7 +34,8 @@ const PIN_DETAILS = [
   },
   {
     label: 'PIN rotation:',
-    value: 'Fresh PIN every 2 minutes; each stays valid for 6 minutes',
+    value:
+      'Fresh PIN every 2 minutes; only the current and previous time buckets work',
   },
   {
     label: 'Sender wait window:',
