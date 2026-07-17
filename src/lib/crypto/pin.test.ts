@@ -1,9 +1,13 @@
 import { describe, expect, test } from 'vitest';
 import {
+  PIN_ACTIVE_GENERATIONS,
   PIN_CHARSET,
   PIN_FINGERPRINT_LENGTH,
   PIN_HINT_LENGTH,
+  PIN_HINT_LOOKBACK_BUCKETS,
   PIN_LENGTH,
+  PIN_ROTATION_MS,
+  PIN_TTL_MS,
 } from './constants';
 import {
   computePinFingerprint,
@@ -18,6 +22,12 @@ import {
 } from './pin';
 
 describe('PIN Utilities', () => {
+  test('rotation retains two generations and searches two buckets', () => {
+    expect(PIN_ACTIVE_GENERATIONS).toBe(2);
+    expect(PIN_TTL_MS).toBe(PIN_ROTATION_MS * 2);
+    expect(PIN_HINT_LOOKBACK_BUCKETS).toBe(1);
+  });
+
   test('generatePin produces a valid PIN from the Crockford charset', () => {
     const pin = generatePin();
     expect(pin).toHaveLength(PIN_LENGTH);

@@ -155,9 +155,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         });
 
         // The published hint is scoped to the rotation bucket the sender
-        // published in. Derive every bucket a still-honored PIN can sit in
-        // (rendezvous events are accepted up to PIN_TTL_MS old, so up to
-        // PIN_HINT_LOOKBACK_BUCKETS back) and query for any of them.
+        // published in. Search only the current and immediately previous
+        // buckets; older rendezvous hints are outside the accepted window.
         const root = pinMaterial.key;
         const [hints, rendezvousKey, authKey] = await Promise.all([
           Promise.all(

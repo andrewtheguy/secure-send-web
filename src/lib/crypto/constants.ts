@@ -15,16 +15,13 @@ export const PIN_CHARSET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 // single PIN: it bounds rendezvous-event freshness on the receiver and is the
 // NIP-40 expiration the sender attaches so relays can drop stale events.
 export const PIN_ROTATION_MS = 120_000;
-export const PIN_ACTIVE_GENERATIONS = 3;
+export const PIN_ACTIVE_GENERATIONS = 2;
 export const PIN_TTL_MS = PIN_ROTATION_MS * PIN_ACTIVE_GENERATIONS;
 
-// How many earlier rotation buckets the receiver derives hints for when
-// locating the rendezvous event. A rendezvous event is accepted up to
-// PIN_TTL_MS old; since hint buckets are PIN_ROTATION_MS wide and publication
-// is not aligned to bucket boundaries, an event of age exactly PIN_TTL_MS can
-// sit PIN_ACTIVE_GENERATIONS buckets back, so the look-back must equal
-// PIN_ACTIVE_GENERATIONS to provably cover the whole non-expired window.
-export const PIN_HINT_LOOKBACK_BUCKETS = PIN_ACTIVE_GENERATIONS;
+// The receiver searches exactly two rotation buckets: the current bucket and
+// the immediately previous bucket. Older rendezvous hints are not queried,
+// even if an event has not yet reached its relay expiration time.
+export const PIN_HINT_LOOKBACK_BUCKETS = 1;
 
 // PBKDF2 parameters for the PIN root derivation (browser-native alternative to
 // a memory-hard KDF). The PIN no longer derives any content-encryption keys —
