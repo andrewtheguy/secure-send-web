@@ -14,10 +14,11 @@ import {
   generatePin,
   generateSalt,
   generateTransferId,
+  getPinBucket,
   importPinRoot,
+  isPinBucketActive,
   MAX_MESSAGE_SIZE,
   type NostrSessionKeys,
-  PIN_ACTIVE_GENERATIONS,
   PIN_ROTATION_MS,
   PIN_WAIT_TIMEOUT_MS,
 } from '@/lib/crypto';
@@ -51,13 +52,14 @@ import { WebRTCConnection } from '@/lib/webrtc';
 import { getWebRTCConfig } from '@/lib/webrtc-config';
 
 /**
- * One rotation generation of the displayed PIN. The sender retains the
- * PIN_ACTIVE_GENERATIONS most recent so a PIN read just before a rotation
- * still authenticates the receiver's claim.
+ * One rotation generation of the displayed PIN. Its absolute bucket lets the
+ * sender reject it as soon as it is older than the immediately previous
+ * bucket, regardless of timer delays or how many generations are retained.
  */
 interface PinGeneration {
   authKey: CryptoKey;
   nonce: string;
+  bucket: number;
 }
 
 /** A verified receiver claim: the transfer is locked to this peer. */
@@ -216,8 +218,9 @@ export function useNostrSend(): UseNostrSendReturn {
         const epoch = pinEpoch;
         const newPin = generatePin();
         const root = await importPinRoot(newPin);
+        const bucket = getPinBucket();
         const [hint, authKey, rendezvousKey, fingerprint] = await Promise.all([
-          computePinHintFromRoot(root),
+          computePinHintFromRoot(root, bucket),
           derivePinAuthKey(root),
           derivePinRendezvousKey(root),
           computePinFingerprint(newPin),
@@ -247,16 +250,18 @@ export function useNostrSend(): UseNostrSendReturn {
           salt,
           transferId,
           hint,
+          bucket,
         );
 
         if (cancelledRef.current || epoch !== pinEpoch) return;
 
         // Register the generation before publishing so a fast claim can never
         // race ahead of the retained-keys list.
-        generations.unshift({ authKey, nonce });
-        if (generations.length > PIN_ACTIVE_GENERATIONS) {
-          generations.length = PIN_ACTIVE_GENERATIONS;
-        }
+        generations.unshift({ authKey, nonce, bucket });
+        const activeGenerations = generations.filter((generation) =>
+          isPinBucketActive(generation.bucket),
+        );
+        generations.splice(0, generations.length, ...activeGenerations);
 
         await client.publish(event);
 
@@ -327,9 +332,11 @@ export function useNostrSend(): UseNostrSendReturn {
             }
 
             void (async () => {
-              // Try every retained PIN generation; a claim sealed with a
-              // rotated-but-still-honored PIN must not be rejected.
-              for (const generation of [...generations]) {
+              // A retained key has no authority outside the sender's current
+              // and immediately previous wall-clock buckets.
+              for (const generation of generations.filter((candidate) =>
+                isPinBucketActive(candidate.bucket),
+              )) {
                 let opened: unknown;
                 try {
                   opened = await openHandshakePayload(
@@ -355,7 +362,8 @@ export function useNostrSend(): UseNostrSendReturn {
                   typeof p.receiverNonce !== 'string' ||
                   !p.receiverNonce ||
                   p.senderEcdhPublicKey !== ecdhPublicKeyB64 ||
-                  !receiverEcdhPublicKey
+                  !receiverEcdhPublicKey ||
+                  !isPinBucketActive(generation.bucket)
                 ) {
                   return;
                 }

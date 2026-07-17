@@ -9,6 +9,7 @@ import {
   deriveSharedSecretKey,
   encrypt,
   generateECDHKeyPair,
+  getPinBucket,
   MAX_MESSAGE_SIZE,
   type NostrSessionKeys,
   PIN_HINT_LOOKBACK_BUCKETS,
@@ -154,15 +155,14 @@ export function useNostrReceive(): UseNostrReceiveReturn {
           message: 'Deriving lookup keys...',
         });
 
-        // The published hint is scoped to the rotation bucket the sender
-        // published in. Derive every bucket a still-honored PIN can sit in
-        // (rendezvous events are accepted up to PIN_TTL_MS old, so up to
-        // PIN_HINT_LOOKBACK_BUCKETS back) and query for any of them.
+        // Mirror the sender's acceptance rule by deriving the receiver's
+        // current and immediately previous rotation buckets.
         const root = pinMaterial.key;
+        const currentBucket = getPinBucket();
         const [hints, rendezvousKey, authKey] = await Promise.all([
           Promise.all(
             Array.from({ length: PIN_HINT_LOOKBACK_BUCKETS + 1 }, (_, offset) =>
-              computePinHintFromRoot(root, offset),
+              computePinHintFromRoot(root, currentBucket - offset),
             ),
           ),
           derivePinRendezvousKey(root),

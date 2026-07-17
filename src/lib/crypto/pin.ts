@@ -194,12 +194,17 @@ async function deriveRootAesKey(
 }
 
 /**
- * The rotation bucket used to scope the published rendezvous hint.
- * `bucketOffset` counts buckets backwards from the current one: 0 = the current
- * bucket, 1 = the previous bucket, etc.
+ * The wall-clock rotation bucket used to scope rendezvous hints and PIN
+ * acceptance.
  */
-function pinBucket(bucketOffset: number): number {
-  return Math.floor(Date.now() / PIN_ROTATION_MS) - bucketOffset;
+export function getPinBucket(now = Date.now()): number {
+  return Math.floor(now / PIN_ROTATION_MS);
+}
+
+/** Whether a published PIN bucket is current or immediately previous. */
+export function isPinBucketActive(bucket: number, now = Date.now()): boolean {
+  const currentBucket = getPinBucket(now);
+  return bucket === currentBucket || bucket === currentBucket - 1;
 }
 
 /**
@@ -209,16 +214,16 @@ function pinBucket(bucketOffset: number): number {
  * bucket means the published tag is never a stable cross-transfer correlator
  * and pins down which rotation generation an event belongs to.
  *
- * The receiver derives offsets 0..PIN_HINT_LOOKBACK_BUCKETS to cover the whole
- * window in which a rendezvous event is still accepted (see constants.ts).
+ * Callers pass the absolute bucket explicitly so the hint and the sender's
+ * recorded acceptance bucket cannot disagree across a boundary.
  */
 export async function computePinHintFromRoot(
   root: CryptoKey,
-  bucketOffset = 0,
+  bucket: number,
 ): Promise<string> {
   const bytes = await deriveRootBytes(
     root,
-    `hint:${pinBucket(bucketOffset)}`,
+    `hint:${bucket}`,
     Math.ceil(PIN_HINT_LENGTH / 2),
   );
   return Array.from(bytes)
