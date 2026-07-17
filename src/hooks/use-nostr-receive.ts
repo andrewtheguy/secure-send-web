@@ -1,7 +1,6 @@
 import type { Event } from 'nostr-tools';
 import { useCallback, useRef, useState } from 'react';
 import {
-  computePinHintFromRoot,
   decrypt,
   deriveNostrSessionKeys,
   derivePinAuthKey,
@@ -11,7 +10,6 @@ import {
   generateECDHKeyPair,
   MAX_MESSAGE_SIZE,
   type NostrSessionKeys,
-  PIN_HINT_LOOKBACK_BUCKETS,
   PIN_TTL_MS,
 } from '@/lib/crypto';
 import { P2PConnectionError } from '@/lib/errors';
@@ -22,10 +20,10 @@ import {
   type ConfirmPayload,
   createHandshakeEvent,
   createNostrClient,
+  createRendezvousLookupFilter,
   createSignalingEvent,
   DEFAULT_RELAYS,
   EVENT_KIND_DATA_TRANSFER,
-  EVENT_KIND_RENDEZVOUS,
   generateEphemeralKeys,
   generateHandshakeNonce,
   type NostrClient,
@@ -158,12 +156,8 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         // published in. Search only the current and immediately previous
         // buckets; older rendezvous hints are outside the accepted window.
         const root = pinMaterial.key;
-        const [hints, rendezvousKey, authKey] = await Promise.all([
-          Promise.all(
-            Array.from({ length: PIN_HINT_LOOKBACK_BUCKETS + 1 }, (_, offset) =>
-              computePinHintFromRoot(root, offset),
-            ),
-          ),
+        const [lookupFilter, rendezvousKey, authKey] = await Promise.all([
+          createRendezvousLookupFilter(root),
           derivePinRendezvousKey(root),
           derivePinAuthKey(root),
         ]);
@@ -180,13 +174,7 @@ export function useNostrReceive(): UseNostrReceiveReturn {
         // Search for the rendezvous event
         setState({ status: 'receiving', message: 'Searching for sender...' });
 
-        const events = await client.query([
-          {
-            kinds: [EVENT_KIND_RENDEZVOUS],
-            '#h': hints,
-            limit: 10,
-          },
-        ]);
+        const events = await client.query([lookupFilter]);
 
         if (cancelledRef.current) return;
 

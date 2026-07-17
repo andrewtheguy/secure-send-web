@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import { createRendezvousLookupFilter, EVENT_KIND_RENDEZVOUS } from '../nostr';
 import {
   PIN_ACTIVE_GENERATIONS,
   PIN_CHARSET,
@@ -22,10 +23,30 @@ import {
 } from './pin';
 
 describe('PIN Utilities', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   test('rotation retains two generations and searches two buckets', () => {
     expect(PIN_ACTIVE_GENERATIONS).toBe(2);
     expect(PIN_TTL_MS).toBe(PIN_ROTATION_MS * 2);
     expect(PIN_HINT_LOOKBACK_BUCKETS).toBe(1);
+  });
+
+  test('receiver lookup filter searches current and previous rotation hints', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(PIN_ROTATION_MS * 42 + 1_000);
+    const root = await importPinRoot(generatePin());
+
+    const filter = await createRendezvousLookupFilter(root);
+
+    expect(filter).toEqual({
+      kinds: [EVENT_KIND_RENDEZVOUS],
+      '#h': [
+        await computePinHintFromRoot(root, 0),
+        await computePinHintFromRoot(root, 1),
+      ],
+      limit: 10,
+    });
   });
 
   test('generatePin produces a valid PIN from the Crockford charset', () => {
