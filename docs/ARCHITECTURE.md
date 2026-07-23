@@ -200,7 +200,7 @@ The receiver rejects duplicate indexes, out-of-range indexes, malformed chunk le
 The Nostr-mode PIN is a short-lived pairing code, not an encryption root. It has exactly two jobs — *locate* the sender's rendezvous event and *authenticate* the ephemeral ECDH exchange — and it expires minutes after it is shown. Content confidentiality never rests on it.
 
 #### Format
-- **Length**: 10 characters, displayed and entered as two symmetric 5-char groups (`XXXXX-XXXXX`).
+- **Length**: 10 characters, displayed as two symmetric 5-char groups (`XXXXX-XXXXX`).
 - **Charset**: Crockford base32 (`0-9` + uppercase letters excluding `I`, `L`, `O`, `U`). Entry is case-insensitive; look-alikes are canonicalized as you type (`O→0`, `I/L→1`) by `normalizePinInput`.
 - **Entropy**: 9 random data characters = 45 bits; the 10th character is a checksum.
 - **Rotation**: the sender mints a fresh PIN and publishes a new rendezvous event every `PIN_ROTATION_MS` (2 minutes). When verifying a claim, it honors only PINs minted in its current or immediately previous bucket (`PIN_ACTIVE_BUCKETS` = 2), so a PIN is usable for roughly 2–4 minutes and is dead at the end of its second bucket.
@@ -241,10 +241,10 @@ Both sides then derive the session keys from `ECDH(shared secret)` via HKDF with
 
 #### `PinInput` (Receiver Side)
 The input component is designed for fast, error-proof manual entry:
-- **Two 5-Char Groups**: Entry mirrors the displayed `XXXXX-XXXXX` grouping; focus auto-advances when the first group fills and Backspace on an empty second group returns to the first.
+- **Single Native Input**: Entry uses one 10-character text field so cursor movement, selection, insertion, deletion, and replacement retain normal browser behavior. A small, non-interactive dash at the text midpoint mirrors the displayed `XXXXX-XXXXX` grouping without becoming part of the value.
 - **Normalization As You Type**: Lowercase is uppercased and Crockford look-alikes are mapped (`O→0`, `I/L→1`); characters outside the charset flash an error and are dropped.
 - **Instant Checksum Feedback**: A complete-but-mistyped code is flagged the moment the 10th character lands.
-- **Robust Pasting**: A pasted code is normalized (dashes/spaces stripped) and distributed across both groups.
+- **Robust Pasting**: Pasted codes are normalized (dashes/spaces stripped) and inserted at the current selection like normal textbox content.
 - **No Plaintext Retention**: Once valid, the PIN is immediately stretched into its non-extractable root key and fingerprint (`importPinRoot`), the inputs are masked, and the plaintext is cleared.
 
 #### `PinDisplay` (Sender Side)
