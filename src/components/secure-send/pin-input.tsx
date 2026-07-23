@@ -19,6 +19,7 @@ import {
 } from '@/lib/crypto';
 
 const GROUP_COUNT = PIN_LENGTH / PIN_GROUP_LENGTH;
+const MASK_CHAR = '*';
 
 export interface PinChangePayload {
   key: CryptoKey | null;
@@ -37,32 +38,65 @@ export interface PinInputRef {
 }
 
 /**
- * PIN entry as two symmetric 5-character groups (XXXXX-XXXXX).
- * Input is case-insensitive; Crockford look-alikes (O, I, L) are mapped as you
- * type, focus auto-advances between groups, and the trailing check digit
- * rejects a mistyped code the moment the last character lands.
+ * Normalize one group's raw input, tracking how many normalized characters
+ * fall before the caret. Separators and the mask character are dropped
+ * silently; anything else outside the PIN charset is dropped and flagged.
+ */
+function normalizeGroupInput(
+  raw: string,
+  caret: number,
+): { value: string; caret: number; invalid: boolean } {
+  let value = '';
+  let caretOut = 0;
+  let invalid = false;
+  for (let i = 0; i < raw.length; i++) {
+    const normalized = normalizePinInput(raw[i]);
+    let kept = '';
+    if (normalized) {
+      if (PIN_CHARSET.includes(normalized)) {
+        kept = normalized;
+      } else if (normalized !== MASK_CHAR) {
+        invalid = true;
+      }
+    }
+    value += kept;
+    if (i < caret) caretOut += kept.length;
+  }
+  return { value, caret: caretOut, invalid };
+}
+
+/**
+ * PIN entry as two symmetric 5-character groups (XXXXX-XXXXX), backed by a
+ * single controlled `pin` string so mid-string edits behave like a normal
+ * text field: the caret stays where you type, deletions pull later characters
+ * left across the group boundary, and insertions push them right.
+ *
+ * Input is case-insensitive; Crockford look-alikes (O, I, L) are mapped as
+ * you type and the trailing check digit rejects a mistyped code the moment
+ * the last character lands. A complete, valid PIN is immediately stretched
+ * into a non-extractable CryptoKey and the inputs switch to a masked display;
+ * editing after that restarts entry.
  */
 export const PinInput = forwardRef<PinInputRef, PinInputProps>(
   ({ onPinChange, disabled }, ref) => {
+    const [pin, setPin] = useState('');
     const [error, setError] = useState<string | null>(null);
-    const [displayLength, setDisplayLength] = useState(0);
-    const [isValid, setIsValid] = useState(false);
     const [isSecured, setIsSecured] = useState(false);
 
-    // The PIN plaintext lives only in DOM input values and this ref (cleared
-    // as soon as the PIN is locked into key material), never in React state.
     const inputRefs = useRef<(HTMLInputElement | null)[]>(
       Array(GROUP_COUNT).fill(null),
     );
-    const pinRef = useRef('');
     const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const mountedRef = useRef(true);
+    // Bumped on every edit so an in-flight key derivation from a superseded
+    // PIN value is discarded instead of clobbering the newer input.
+    const generationRef = useRef(0);
     const securedKeyRef = useRef<CryptoKey | null>(null);
     const securedFingerprintRef = useRef<string | null>(null);
 
-    const clearSecuredData = useCallback(() => {
-      securedKeyRef.current = null;
-      securedFingerprintRef.current = null;
+    useEffect(() => {
+      return () => {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      };
     }, []);
 
     const emitChange = useCallback(
@@ -78,183 +112,144 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
     );
 
     const clearAll = useCallback(() => {
-      clearSecuredData();
-      pinRef.current = '';
-      setIsValid(false);
+      generationRef.current++;
+      securedKeyRef.current = null;
+      securedFingerprintRef.current = null;
+      setPin('');
       setIsSecured(false);
-      setDisplayLength(0);
       setError(null);
-      for (const input of inputRefs.current) {
-        if (input) input.value = '';
-      }
       emitChange(false, 0);
-    }, [clearSecuredData, emitChange]);
+    }, [emitChange]);
 
     useImperativeHandle(ref, () => ({ clear: clearAll }));
-
-    useEffect(() => {
-      mountedRef.current = true;
-      return () => {
-        mountedRef.current = false;
-        if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      };
-    }, []);
 
     const flashError = useCallback((message: string) => {
       setError(message);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      timeoutRef.current = setTimeout(() => {
-        if (mountedRef.current) setError(null);
-      }, 1500);
+      timeoutRef.current = setTimeout(() => setError(null), 1500);
     }, []);
 
     const securePin = useCallback(
-      async (pin: string) => {
-        if (!isValidPin(pin)) return;
-
+      async (candidate: string) => {
+        const generation = generationRef.current;
         try {
           const [root, fingerprint] = await Promise.all([
-            importPinRoot(pin),
-            computePinFingerprint(pin),
+            importPinRoot(candidate),
+            computePinFingerprint(candidate),
           ]);
+          if (generationRef.current !== generation) return;
 
           securedKeyRef.current = root;
           securedFingerprintRef.current = fingerprint;
-
-          // Clear plaintext traces; show masked placeholders so users see the
-          // input was captured without revealing the PIN.
-          pinRef.current = '';
-          for (const input of inputRefs.current) {
-            if (input) input.value = '*'.repeat(PIN_GROUP_LENGTH);
-          }
-
+          setPin('');
           setIsSecured(true);
-          setIsValid(true);
-          setDisplayLength(PIN_LENGTH);
           setError(null);
-
           emitChange(true, PIN_LENGTH);
         } catch (err) {
+          if (generationRef.current !== generation) return;
           console.error('Failed to secure PIN', err);
-          clearSecuredData();
-          emitChange(false, 0);
+          securedKeyRef.current = null;
+          securedFingerprintRef.current = null;
+          emitChange(false, candidate.length);
           setError('Failed to secure PIN');
         }
       },
-      [clearSecuredData, emitChange],
+      [emitChange],
     );
 
-    // Distribute a full normalized value across the group inputs and update
-    // validity/secured state.
-    const applyPin = useCallback(
-      (combined: string, focusIndex?: number) => {
-        const value = combined.slice(0, PIN_LENGTH);
-        for (let i = 0; i < GROUP_COUNT; i++) {
-          const input = inputRefs.current[i];
-          if (input) {
-            input.value = value.slice(
-              i * PIN_GROUP_LENGTH,
-              (i + 1) * PIN_GROUP_LENGTH,
-            );
-          }
+    /**
+     * Commit a new PIN value and caret position (global, 0..PIN_LENGTH).
+     * The DOM is synced here as well as via the controlled render: when
+     * normalization rejects a keystroke the state may not change at all, so
+     * React bails out of re-rendering and the raw character would otherwise
+     * stay visible.
+     */
+    const commitPin = (value: string, caret: number) => {
+      generationRef.current++;
+      securedKeyRef.current = null;
+      securedFingerprintRef.current = null;
+      setIsSecured(false);
+      setPin(value);
+
+      for (let i = 0; i < GROUP_COUNT; i++) {
+        const input = inputRefs.current[i];
+        if (input) {
+          input.value = value.slice(
+            i * PIN_GROUP_LENGTH,
+            (i + 1) * PIN_GROUP_LENGTH,
+          );
         }
+      }
 
-        pinRef.current = value;
-        setIsSecured(false);
-        setDisplayLength(value.length);
+      const clamped = Math.min(caret, value.length);
+      const focusIndex = Math.min(
+        Math.floor(clamped / PIN_GROUP_LENGTH),
+        GROUP_COUNT - 1,
+      );
+      const focusInput = inputRefs.current[focusIndex];
+      if (focusInput) {
+        const localCaret = clamped - focusIndex * PIN_GROUP_LENGTH;
+        focusInput.focus();
+        focusInput.setSelectionRange(localCaret, localCaret);
+      }
 
-        if (focusIndex !== undefined) {
-          inputRefs.current[focusIndex]?.focus();
-        }
-
-        if (value.length === PIN_LENGTH && isValidPin(value)) {
-          setIsValid(true);
-          void securePin(value);
-        } else {
-          setIsValid(false);
-          clearSecuredData();
-          emitChange(false, value.length);
-        }
-      },
-      [clearSecuredData, emitChange, securePin],
-    );
-
-    const readCombined = () =>
-      inputRefs.current
-        .map((input) => input?.value ?? '')
-        .join('')
-        .slice(0, PIN_LENGTH);
+      if (value.length === PIN_LENGTH && isValidPin(value)) {
+        void securePin(value);
+      } else {
+        emitChange(false, value.length);
+      }
+    };
 
     const handleGroupChange = (
       index: number,
       e: React.ChangeEvent<HTMLInputElement>,
     ) => {
-      // Any edit after the PIN was secured restarts entry from scratch.
-      if (isSecured) {
-        clearSecuredData();
-        setIsSecured(false);
-      }
+      const input = e.target;
+      const rawCaret = input.selectionStart ?? input.value.length;
+      const {
+        value: groupValue,
+        caret: groupCaret,
+        invalid,
+      } = normalizeGroupInput(input.value, rawCaret);
+      if (invalid) flashError('Invalid character');
 
-      const normalized = normalizePinInput(e.target.value);
-      const filtered = [...normalized]
-        .filter((char) => PIN_CHARSET.includes(char))
-        .join('');
-      if (filtered.length !== normalized.length && normalized.length > 0) {
-        flashError('Invalid character');
-      }
-
-      const input = inputRefs.current[index];
-      if (input) input.value = filtered.slice(0, PIN_GROUP_LENGTH);
-
-      // Auto-advance once this group is full; overflow spills into the next.
-      const overflow = filtered.slice(PIN_GROUP_LENGTH);
-      if (index < GROUP_COUNT - 1 && overflow) {
-        const next = inputRefs.current[index + 1];
-        if (next)
-          next.value = (overflow + next.value).slice(0, PIN_GROUP_LENGTH);
-      }
-      const focusIndex =
-        index < GROUP_COUNT - 1 &&
-        (inputRefs.current[index]?.value.length ?? 0) === PIN_GROUP_LENGTH
-          ? index + 1
-          : undefined;
-
-      applyPin(readCombined(), focusIndex);
+      // Any edit after the PIN was secured restarts entry from whatever
+      // real characters were just typed over the mask.
+      const before = isSecured ? '' : pin.slice(0, index * PIN_GROUP_LENGTH);
+      const after = isSecured ? '' : pin.slice((index + 1) * PIN_GROUP_LENGTH);
+      const combined = (before + groupValue + after).slice(0, PIN_LENGTH);
+      commitPin(combined, before.length + groupCaret);
     };
 
     const handleKeyDown = (
       index: number,
       e: React.KeyboardEvent<HTMLInputElement>,
     ) => {
-      if (
-        e.key === 'Backspace' &&
-        index > 0 &&
-        (inputRefs.current[index]?.value ?? '') === ''
-      ) {
-        inputRefs.current[index - 1]?.focus();
+      // Backspace at the start of a group deletes across the group boundary.
+      if (e.key !== 'Backspace' || index === 0) return;
+      const input = e.currentTarget;
+      if (input.selectionStart !== 0 || input.selectionEnd !== 0) return;
+      e.preventDefault();
+
+      if (isSecured) {
+        commitPin('', 0);
+        return;
       }
+      const caret = index * PIN_GROUP_LENGTH - 1;
+      commitPin(pin.slice(0, caret) + pin.slice(caret + 1), caret);
     };
 
     const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
-      const normalized = normalizePinInput(e.clipboardData.getData('text'));
-      const filtered = [...normalized]
-        .filter((char) => PIN_CHARSET.includes(char))
-        .join('');
-      if (!filtered) return;
-
       e.preventDefault();
-      if (isSecured) {
-        clearSecuredData();
-        setIsSecured(false);
-      }
-      const focusIndex = Math.min(
-        Math.floor(filtered.length / PIN_GROUP_LENGTH),
-        GROUP_COUNT - 1,
-      );
-      applyPin(filtered, focusIndex);
+      const { value } = normalizeGroupInput(e.clipboardData.getData('text'), 0);
+      if (!value) return;
+      const combined = value.slice(0, PIN_LENGTH);
+      commitPin(combined, combined.length);
     };
 
+    const displayLength = isSecured ? PIN_LENGTH : pin.length;
     const isComplete = displayLength === PIN_LENGTH;
+    const isValid = isSecured || (isComplete && isValidPin(pin));
     const hasChecksumError = isComplete && !isValid;
 
     return (
@@ -274,6 +269,14 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
                 }}
                 type="text"
                 inputMode="text"
+                value={
+                  isSecured
+                    ? MASK_CHAR.repeat(PIN_GROUP_LENGTH)
+                    : pin.slice(
+                        i * PIN_GROUP_LENGTH,
+                        (i + 1) * PIN_GROUP_LENGTH,
+                      )
+                }
                 onChange={(e) => handleGroupChange(i, e)}
                 onKeyDown={(e) => handleKeyDown(i, e)}
                 onPaste={handlePaste}
@@ -286,7 +289,6 @@ export const PinInput = forwardRef<PinInputRef, PinInputProps>(
                       ? 'border-green-500'
                       : ''
                 }`}
-                maxLength={PIN_GROUP_LENGTH}
                 autoComplete="off"
                 autoCapitalize="characters"
                 spellCheck={false}
